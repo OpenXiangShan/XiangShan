@@ -9,7 +9,6 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, Resolve, XSBundle}
 import utility._
-import utility.PopCount
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -78,11 +77,7 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.valid := i2fFuOut.valid && i2fFuOut.bits.toFpRf.get.valid
     x.bits := i2fFuOut.bits.toFpRf.get.bits
   }
-  io.cross.F2IDataOut.foreach { x =>
-    val f2iFuOut = exus.filter(exu => exu.exuParams.hasf2iFu).head.io.out
-    x.valid := f2iFuOut.valid && f2iFuOut.bits.toIntRf.get.valid
-    x.bits := f2iFuOut.bits.toIntRf.get.bits
-  }
+  io.cross.busyTableI2F.foreach(_ := 0.U)
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
   }
@@ -95,9 +90,6 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     XSPerfAccumulate(s"brh_fire_${i}_cnt", PopCount(brhFireSeq) === i.U)
   }
   val criticalErrors = exus.filter(_.exuParams.needCriticalErrors).flatMap(exu => exu.getCriticalErrors)
-  for (((name, error), _) <- criticalErrors.zipWithIndex) {
-    XSError(error, s"critical error: $name \n")
-  }
   generateCriticalErrors()
 }
 

@@ -1,0 +1,218 @@
+# This workflow is for quick performance test, splitted from EMU Test workflow for parallelization
+# For more comprehensive performance regression, use Performance Regression Trigger
+name: EMU Performance Test
+
+on:
+  push:
+    branches: [ kunminghu-v3 ]
+  pull_request:
+    branches: [ kunminghu-v3 ]
+
+env:
+  # Set common environment variables for all jobs
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
+  CKPT_JSON: /nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json
+  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json
+  CKPT_JSON_SPEC17: /nfs/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json
+  # random checkpoints number, per CKPT_JSON
+  FUZZ_NUM: 5
+  # filtering/sorting checkpoints based on ETA, to avoid long-running jobs
+  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile/data
+  ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
+
+jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
+  build:
+    name: EMU - Performance - Build
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on:
+      - node # Run on node servers for the moment, as gsim is having performance issue on open servers
+      - builder
+    outputs:
+      cluster: ${{ steps.save.outputs.cluster }}
+      selected: ${{ steps.select.outputs.SELECTED }}
+    timeout-minutes: 180
+    continue-on-error: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator gsim \
+            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: Save artifact
+        id: save
+        # Maybe we can use upload-artifact here
+        # but ~100MB is too large and we don't have good enough internet on self-hosted runner
+        # so we just copy the binary to a shared directory
+        run: |
+          cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          if [[ $(hostname) == *.bosccluster.com ]]; then
+            echo "cluster=node" >> ${GITHUB_OUTPUT}
+          else
+            echo "cluster=open" >> ${GITHUB_OUTPUT}
+          fi
+      - name: Select checkpoint
+        id: select
+        run: |
+          SELECTED=$(python3 ${GITHUB_WORKSPACE}/.github/workflows/ckpt_select.py \
+            --seed ${{ github.run_number }} \
+            --profile "${PROFILE_PATH}" \
+            --eta-threshold "${ETA_THRESHOLD}" \
+            --weighted ":${CKPT_JSON}" \
+            --weighted "legacy-:${CKPT_JSON_LEGACY}" \
+            --random "fuzz-:${FUZZ_NUM}:${CKPT_JSON}" \
+            --random "fuzz-legacy-:${FUZZ_NUM}:${CKPT_JSON_LEGACY}" \
+            --random "fuzz-spec17-:${FUZZ_NUM}:${CKPT_JSON_SPEC17}" \
+            --random "fuzz-xscc-:${FUZZ_NUM}:${CKPT_JSON_XSCC}" \
+          )
+          echo "${SELECTED}" | jq .
+          echo "SELECTED=${SELECTED}" >> "$GITHUB_OUTPUT"
+
+  run:
+    name: EMU - Performance - Run ${{ matrix.prefix }}${{ matrix.name }}
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.build.outputs.selected) }}
+      fail-fast: false
+      max-parallel: 16
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run SPEC06 Test - ${{ matrix.prefix }}${{ matrix.name }}
+        id: run
+        shell: bash
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            "${{ matrix.path }}" \
+            2> stderr.log | tee stdout.log
+          IPC_FILE="${PERF_HOME}/ipc-${{ matrix.prefix }}${{ matrix.name }}_${{ matrix.point }}"
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${IPC_FILE}"
+          echo "IPC: $(cat "${IPC_FILE}")"
+      - name: Print stderr and Archive log
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
+        run: |
+          # if run step failed, do not sort
+          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+            cat stderr.log
+          else
+            mv stderr.log stderr.log.raw
+            cat stderr.log.raw | sort | tee stderr.log
+          fi
+          tar -czvf "${PERF_HOME}/${{ matrix.prefix }}${{ matrix.name }}_${{ matrix.point }}.tar.gz" stdout.log stderr.log
+
+  upload:
+    name: EMU - Performance - Upload
+    needs:
+      - build # needed to get the cluster info
+      - run
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder/runner to access NFS
+      - runner
+    steps:
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipc-reports
+          path: ${{ env.PERF_HOME }}/ipc-*
+
+  dispatch-summary:
+    name: EMU - Performance - Dispatch Summary
+    permissions:
+      actions: write
+    needs: upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch emu-performance-summary workflow
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
+          COMMENT_ID: ""
+        run: |
+          dispatch_ts=$(date -u +%s)
+          gh api repos/${GITHUB_REPOSITORY}/actions/workflows/emu-performance-summary.yml/dispatches \
+            -f ref="${DISPATCH_REF}" \
+            -f inputs[HEAD_SHA]="${HEAD_SHA}" \
+            -f inputs[BASE_SHA]="${BASE_SHA}" \
+            -f inputs[PR]="${PR}" \
+            -f inputs[COMMENT_ID]="${COMMENT_ID}"
+
+          summary_url=""
+          for _ in {1..20}; do
+            summary_url=$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow "EMU Performance Summary" \
+              --event workflow_dispatch \
+              --branch "${DISPATCH_REF}" \
+              --limit 20 \
+              --json url,createdAt \
+              | jq -r --argjson ts "${dispatch_ts}" '[.[] | select((.createdAt | fromdateiso8601) >= $ts)] | first | .url // empty')
+            if [ -n "${summary_url}" ]; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [ -n "${summary_url}" ]; then
+            echo "Summary workflow dispatched: ${summary_url}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Summary workflow dispatched, but run URL not found yet. Please check workflow list manually." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Skip dispatch for fork PR
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+        run: |
+          echo "Fork PR detected, skip summary workflow dispatch because GITHUB_TOKEN cannot dispatch workflows in pull_request from fork." >> $GITHUB_STEP_SUMMARY

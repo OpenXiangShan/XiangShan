@@ -10,7 +10,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.regfile.PregParams
 import utility._
-import utility.PopCount
+import xiangshan.XSCoreParamsKey
 import xiangshan.backend.rob.RobPtr
 import yunsuan.vector.LZD
 
@@ -22,18 +22,21 @@ case class RFRdArbParams(
 
   def genInputBundle: MixedVec3[DecoupledIO[RFArbiterBundle]] = {
     val pregWidth = pregParams.addrWidth
-    SeqUtils.mapToMixedVec3(this.inRdCfgs, (rd: RdConfig) => DecoupledIO(new RFArbiterBundle(rd, pregWidth)))
+    val numBank   = pregParams.numBank
+    SeqUtils.mapToMixedVec3(this.inRdCfgs, (rd: RdConfig) => DecoupledIO(new RFArbiterBundle(rd, pregWidth, numBank)))
   }
 
   def portMax: Int = inRdCfgs.flatten.flatten.map(_.port).max
 }
 
-class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int)(implicit p: Parameters) extends Bundle {
+class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int, numBank: Int = 1)(implicit p: Parameters) extends Bundle {
+  val bankValidVec = Option.when(numBank > 1)(Vec(numBank, Bool()))
   val addr       = UInt(pregWidth.W)
   val robIdx     = new RobPtr
+  val chanelIdx  = UInt(log2Up(p(XSCoreParamsKey).RenameWidth).W)
   val issueValid = Bool()
 
-  def this(rdCfg_ : RdConfig, pregWidth_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_)
+  def this(rdCfg_ : RdConfig, pregWidth_ : Int, numBank_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_,  numBank_)
 
   def this(pregWidth_ :Int)(implicit p: Parameters) = this(None, pregWidth_)
 }
@@ -54,6 +57,7 @@ class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Modu
     val validVec = io.in.map(_.valid)
     val validVecReg = RegNext(VecInit(io.in.map(x => x.valid)), VecInit.tabulate(n)(i => false.B))
     val robIdxVecReg = RegNext(VecInit(io.in.map(x => x.bits.robIdx)))
+    val chanelIdxVecReg = RegNext(VecInit(io.in.map(x => x.bits.chanelIdx)))
     val priorityVecReg = RegInit(VecInit((0 until n).map(i => (1 << i).U(n.W))))
     val mergePriority = validVec.zip(priorityVecReg).map(x => Mux(x._1, x._2, 0.U)).reduce(_ | _)
     val lzdMergePriority = LZD(Reverse(mergePriority))
@@ -62,8 +66,12 @@ class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Modu
       // count valid and older than other num
       val otherValidVec = validVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
       val otherRobIdxVec = robIdxVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
+      val otherChanelIdxVec = chanelIdxVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
       val indexLowerInvalidVec = validVecReg.zipWithIndex.filter(_._2 < i).map(!_._1)
-      val olderThanOtherNum = PopCount(otherRobIdxVec.map(x => robIdxVecReg(i) < x).zip(otherValidVec).map(x => x._1 || !x._2))
+      val olderThanOtherNum = PopCount(otherRobIdxVec.zip(otherChanelIdxVec).map {
+        case (thatRobidx, thatChanelIdx) =>
+          robIdxVecReg(i).isBeforeWithChannel(thatRobidx, chanelIdxVecReg(i), thatChanelIdx)
+      }.zip(otherValidVec).map(x => x._1 || !x._2))
       val otherValidNum = PopCount(otherValidVec)
       dontTouch(olderThanOtherNum)
       dontTouch(otherValidNum)
@@ -204,8 +212,11 @@ abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Para
     if (arbiters.nonEmpty) {
       arbiters.get.zipWithIndex.map{ case (arbiter, i) => {
           arbiter.io.in.zip(inGroup(portIdx)).zipWithIndex.foreach { case ((arbiterIn, ioIn), idx) =>
-            arbiterIn.valid := ioIn.valid && (ioIn.bits.addr.head(bankAddrWidth) === i.U)
-            arbiterIn.bits := ioIn.bits
+            arbiterIn.valid := (if(params.pregParams.numBank == 1) ioIn.valid else ioIn.bits.bankValidVec.get(i))
+            arbiterIn.bits.addr := pregParams.bankAddr(ioIn.bits.addr)
+            arbiterIn.bits.robIdx := ioIn.bits.robIdx
+            arbiterIn.bits.chanelIdx := ioIn.bits.chanelIdx
+            arbiterIn.bits.issueValid := ioIn.bits.issueValid
             ioIn.ready := arbiters.get.map(x => x.io.in(idx).ready).reduce(_ && _)
           }
         }
@@ -274,7 +285,7 @@ class V0RFReadArbiter(
   backendParams: BackendParams
 )(implicit
   p: Parameters
-) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[V0RD], backendParams.v0PregParams)) {
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getV0RdCfgs, backendParams.v0PregParams)) {
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(V0Data()).max
 }
 

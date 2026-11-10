@@ -32,7 +32,7 @@ import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
+import xscache.chi.{CHIAsyncBridgeSink, CHIDataCheckKey, CHIPoisonKey, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.annotate
@@ -70,7 +70,10 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    2. SoC initialize reset during Power on/off flow
    */
   val cpuReset = reset.asBool || !soc_rst_n
-  val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(io.dft_reset))
+  private val cpuResetGen = withClockAndReset(clock, cpuReset.asAsyncReset)(Module(new ResetGen))
+  cpuResetGen.dft := io.dft_reset.getOrElse(0.U.asTypeOf(new DFTResetSignals))
+  val cpuReset_sync = cpuResetGen.o_reset
+  val cpuReset_raw_sync = cpuResetGen.o_raw_reset
 }
 
 trait HasAsyncClockImp { this: BaseXSSocImp =>
@@ -111,7 +114,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
       AsyncResetSynchronizerShiftReg(core.io.l2_flush_done.getOrElse(false.B), 3, 0)
     }
     val isWFI = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg(core.io.cpu_halt, 3, 0)
+      AsyncResetSynchronizerShiftReg(core.io.cpu_wfi, 3, 0)
     }
     val exitco = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !sync_chi_syscoack),3, 0)}
@@ -180,23 +183,26 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool)
+    val cpuClockEn = !wfiGateClock && !(cpuReset_raw_sync.asBool)
 
     dontTouch(wfiGateClock)
     dontTouch(pwrdownGateClock)
     dontTouch(cpuClockEn)
 
-    ClockGate(false.B, cpuClockEn, clock)
+    val te = io.dft.map(_.cgen).getOrElse(false.B)
+    ClockGate(te, cpuClockEn, clock)
   }
 }
 
 trait HasXSTile { this: BaseXSSoc =>
 
   // xstile
-  val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
+  val core_with_l2 = LazyModule(new XSTileWrap()(XSCachedParametersOptional(p(CachedParameterKey), p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
-  })))
+    case CHIDataCheckKey if isZhuJiang => "none"
+    case CHIPoisonKey if isZhuJiang => false
+  }))))
   // interrupts
   val clintIntNode = Option.when(!UsePrivateClint)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
@@ -229,11 +235,12 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 
   val tileio = IO(new Bundle {
     val hartId = Input(UInt(p(MaxHartIdBits).W))
-    val riscv_halt = Output(Bool())
+    val riscv_wfi = Output(Bool())
     val riscv_critical_error = Output(Bool())
     val hartResetReq = Input(Bool())
     val hartIsInReset = Output(Bool())
     val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
+    val riscv_rst_mtvec = Option.when(socParams.tiles.head.enableResetMtvec)(Input(UInt(socParams.soc.PAddrBits.W)))
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
   }).suggestName("io")
 
@@ -241,11 +248,12 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
 
-  tileio.riscv_halt := core_with_l2.module.io.cpu_halt
+  tileio.riscv_wfi := core_with_l2.module.io.cpu_wfi
   tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
   core_with_l2.module.io.hartResetReq := tileio.hartResetReq
   tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
+  core_with_l2.module.io.reset_mtvec.foreach(_ := tileio.riscv_rst_mtvec.get)
   core_with_l2.module.io.hartId := tileio.hartId
   core_with_l2.module.io.nodeID.get := tileio.nodeID
 
@@ -263,19 +271,20 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   this: BaseXSSocImp with HasAsyncClockImp =>
 
+  require(socParams.isOpenLLC, "XSNoCTop currently supports only LLC=OpenLLC")
+
   val io_chi = IO(new PortIO)
 
-  require(socParams.enableCHI)
 
   socParams.EnableCHIAsyncBridge match {
     case Some(param) =>
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
         val time_sink = Module(new CHIAsyncBridgeSink(param))
-        time_sink.io.async <> core_with_l2.module.io.chi
+        time_sink.io.async <> core_with_l2.module.io.chi.get
         io_chi <> time_sink.io.deq
       }
     case None =>
-      io_chi <> core_with_l2.module.io.chi
+      io_chi <> core_with_l2.module.io.chi.get
   }
 }
 
@@ -413,41 +422,39 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
   }
 }
 
-trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
-  InModuleBody {
-    val io = new Bundle {
-      val traceCoreInterface = IO(new Bundle {
-        val fromEncoder = Input(new Bundle {
-          val enable = Bool()
-          val stall  = Bool()
-        })
-        val toEncoder   = Output(new Bundle {
-          val cause     = UInt(TraceCauseWidth.W)
-          val tval      = UInt(TraceTvalWidth.W)
-          val priv      = UInt(TracePrivWidth.W)
-          val mstatus   = UInt(TraceStatusWidth.W)
-          val valid     = UInt(TraceGrpNum.W)
-          val iaddr     = UInt((TraceGrpNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceGrpNum * TraceItypeWidth).W)
-          val iretire   = UInt((TraceGrpNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
-        })
+trait HasTraceIOImp[+L <: HasXSTile] {
+  this: BaseXSSocImp with HasXSTileImp[L] =>
+    val io_traceCoreInterface = IO(new Bundle {
+      val fromEncoder = Input(new Bundle {
+        val enable = Bool()
+        val stall  = Bool()
       })
-    }
-
+      val toEncoder   = Output(new Bundle {
+        val cause     = UInt(socParams.TraceCauseWidth.W)
+        val tval      = UInt(socParams.TraceTvalWidth.W)
+        val priv      = UInt(socParams.TracePrivWidth.W)
+        val mstatus   = UInt(socParams.TraceStatusWidth.W)
+        val valid     = UInt(socParams.TraceGrpNum.W)
+        val iaddr     = UInt((socParams.TraceGrpNum * socParams.TraceIaddrWidth).W)
+        val itype     = UInt((socParams.TraceGrpNum * socParams.TraceItypeWidth).W)
+        val iretire   = UInt((socParams.TraceGrpNum * socParams.TraceIretireWidthCompressed).W)
+        val ilastsize = UInt((socParams.TraceGrpNum * socParams.TraceIlastsizeWidth).W)
+      })
+    })
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
-    traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
-    io.traceCoreInterface.toEncoder.priv := traceInterface.toEncoder.priv
-    io.traceCoreInterface.toEncoder.cause := traceInterface.toEncoder.trap.cause
-    io.traceCoreInterface.toEncoder.tval := traceInterface.toEncoder.trap.tval
-    io.traceCoreInterface.toEncoder.mstatus := traceInterface.toEncoder.mstatus
-    io.traceCoreInterface.toEncoder.valid := VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt
-    io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
-    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
-    io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
-    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
-  }
+    withClockAndReset(core_with_l2.module.clock, cpuReset_sync){
+      traceInterface.fromEncoder := RegNext(io_traceCoreInterface.fromEncoder)
+      io_traceCoreInterface.toEncoder.priv := RegEnable(traceInterface.toEncoder.priv, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.cause := RegEnable(traceInterface.toEncoder.trap.cause, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.tval := RegEnable(traceInterface.toEncoder.trap.tval, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.mstatus := RegNext(traceInterface.toEncoder.mstatus)
+      io_traceCoreInterface.toEncoder.valid := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.iaddr, gp.valid))).asUInt
+      io_traceCoreInterface.toEncoder.itype := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.iretire := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.ilastsize, gp.valid))).asUInt
+    }
 }
 
 trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp
@@ -471,7 +478,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   with HasXSTile
   with HasSeperatedBusOpt
   with HasIMSIC
-  with HasTraceIO
 {
   override lazy val desiredName: String = "XSTop"
 
@@ -483,6 +489,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasClintTimeImp[XSNoCTop]
     with HasIMSICImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
+    with HasTraceIOImp[XSNoCTop]
   {
     /* work in SoC clock domain by default in XSTop scope */
     childClock := soc_clock
@@ -500,7 +507,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 class XSNoCDiffTop(implicit p: Parameters) extends XSNoCTop
 {
   class XSNoCDiffTopImp(wrapper: XSNoCTop) extends XSNoCTopImp(wrapper) with HasDiffTestInterfaces {
-    override def cpuName: Option[String] = Some("XiangShan")
+    override def cpuName: Option[String] = Some("XIANGSHAN_KMHV3")
     override protected def implicitClock: Clock = clock
     override protected def implicitReset: Reset = reset
 

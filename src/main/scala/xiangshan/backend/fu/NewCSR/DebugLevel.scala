@@ -32,34 +32,40 @@ trait DebugLevel { self: NewCSR =>
   })
     .setAddr(CSRs.tselect)
 
-  val tdata1 = Module(new CSRModule("Tdata1") with HasTdataSink {
+  val tdata1 = Module(new CSRModule("Tdata1", new Tdata1Bundle) with HasTdataSink {
     regOut := tdataRead.tdata1
   })
     .setAddr(CSRs.tdata1)
 
-  val tdata2 = Module(new CSRModule("Tdata2") with HasTdataSink {
+  val tdata2 = Module(new CSRModule("Tdata2", new Tdata2Bundle) with HasTdataSink {
     regOut := tdataRead.tdata2
   })
     .setAddr(CSRs.tdata2)
 
+  val tdata3 = Module(new CSRModule("Tdata3", new Tdata3Bundle) with HasTdataSink {
+    regOut := tdataRead.tdata3
+  })
+    .setAddr(CSRs.tdata3)
+
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle {
       when(wen){
-        reg := wdata.writeTdata1(canWriteDmode, chainable).asUInt
+        reg := wdata.writeTdata1(canWriteDmode, chainable, dmodeNextTrigger).asUInt
       }
     })
   )
   val tdata2RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata2", new Tdata2Bundle))
   )
+  val tdata3RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata3", new Tdata3Bundle))
+  )
 
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
-    when(nmip){
-      reg.NMIP := nmip
-    }
+    regOut.NMIP := nmip
   })
     .setAddr(CSRs.dcsr)
 
@@ -75,6 +81,7 @@ trait DebugLevel { self: NewCSR =>
   val debugCSRMods = Seq(
     tdata1,
     tdata2,
+    tdata3,
     tselect,
     tinfo,
     dcsr,
@@ -99,11 +106,16 @@ trait DebugLevel { self: NewCSR =>
     tdata2RegVec.zipWithIndex.map{case (mod, idx) => (tselect.rdata === idx.U) -> mod.rdata}
   )
 
+  private val tdata3Rdata = Mux1H(
+    tdata3RegVec.zipWithIndex.map{case (mod, idx) => (tselect.rdata === idx.U) -> mod.rdata}
+  )
+
   debugCSRMods.foreach { mod =>
     mod match {
       case m: HasTdataSink =>
         m.tdataRead.tdata1 := tdata1Rdata
         m.tdataRead.tdata2 := tdata2Rdata
+        m.tdataRead.tdata3 := tdata3Rdata
       case _ =>
     }
   }
@@ -114,6 +126,8 @@ trait DebugLevel { self: NewCSR =>
 class TselectBundle(triggerNum: Int) extends CSRBundle{
   override val len: Int = log2Up(triggerNum)
   val ALL = WARL(len - 1, 0, wNoEffectWhen(WriteTselect)).withReset(0.U)
+    .withDescription("Selects the active trigger slot for tdata CSR accesses.")
+    .withWarlConstraint(s"Legal write values are 0 to ${triggerNum - 1}; larger values leave the current selection unchanged.")
   def WriteTselect(wdata: UInt) = {
     wdata >= triggerNum.U
   }
@@ -122,8 +136,11 @@ class TselectBundle(triggerNum: Int) extends CSRBundle{
 // tdata1
 class Tdata1Bundle extends CSRBundle{
   val TYPE    = Tdata1Type(63, 60, wNoFilter).withReset(Tdata1Type.Disabled)
+    .withDescription("Trigger data format encoded in tdata1.")
   val DMODE   = RW(59).withReset(0.U)
+    .withDescription("Only debug mode can write this trigger when set.")
   val DATA    = RW(58, 0).withReset(0.U)
+    .withDescription("Trigger-format-specific payload. XiangShan uses the mcontrol6 layout.")
 
   def getTriggerAction: CSREnumType = {
     val res = Wire(new Mcontrol6)
@@ -131,7 +148,7 @@ class Tdata1Bundle extends CSRBundle{
     res.ACTION
   }
 
-  def writeTdata1(canWriteDmode: Bool, chainable: Bool): Tdata1Bundle = {
+  def writeTdata1(canWriteDmode: Bool, chainable: Bool, dmodeNextTrigger: Bool): Tdata1Bundle = {
     val res = Wire(new Tdata1Bundle)
     res := this.asUInt
     val dmode = this.DMODE.asBool && canWriteDmode
@@ -140,7 +157,8 @@ class Tdata1Bundle extends CSRBundle{
     when(this.TYPE.isLegal) {
       val mcontrol6Res = Wire(new Mcontrol6)
       mcontrol6Res := this.DATA.asUInt
-      res.DATA := mcontrol6Res.writeData(dmode, chainable).asUInt
+      val chain = chainable && !(!dmode && dmodeNextTrigger)
+      res.DATA := mcontrol6Res.writeData(dmode, chain).asUInt
     }.otherwise{
       res.DATA := 0.U
     }
@@ -152,22 +170,39 @@ class Mcontrol6 extends CSRBundle{
   override val len: Int = 59
   // xiangshan don't support match = NAPOT
   val UNCERTAIN   = RO(26).withReset(0.U)
+    .withDescription("Indicates whether address match uncertainty is reported.")
   val HIT1        = RO(25).withReset(0.U)
+    .withDescription("Upper hit indication for chained triggers.")
   val VS          = RW(24).withReset(0.U)
+    .withDescription("Enable this trigger in VS-mode.")
   val VU          = RW(23).withReset(0.U)
+    .withDescription("Enable this trigger in VU-mode.")
   val HIT0        = RO(22).withReset(0.U)
+    .withDescription("Primary hit indication for this trigger.")
   val SELECT      = RO(21).withReset(0.U)
+    .withDescription("Selects between address and data matching. XiangShan fixes this to address matching.")
   val SIZE        = RO(18, 16).withReset(0.U)
+    .withDescription("Access-size match control.")
   val ACTION      = TrigAction(15, 12, wNoFilter).withReset(TrigAction.BreakpointExp)
+    .withDescription("Action taken when the trigger fires.")
   val CHAIN       = RW(11).withReset(0.U)
+    .withDescription("Chain this trigger with the next trigger slot.")
   val MATCH       = TrigMatch(10, 7, wNoFilter).withReset(TrigMatch.EQ)
+    .withDescription("Address matching mode.")
   val M           = RW(6).withReset(0.U)
+    .withDescription("Enable this trigger in M-mode.")
   val UNCERTAINEN = RO(5).withReset(0.U)
+    .withDescription("Enable reporting of uncertain matches.")
   val S           = RW(4).withReset(0.U)
+    .withDescription("Enable this trigger in HS-mode.")
   val U           = RW(3).withReset(0.U)
+    .withDescription("Enable this trigger in HU-mode.")
   val EXECUTE     = RW(2).withReset(0.U)
+    .withDescription("Match instruction execution addresses.")
   val STORE       = RW(1).withReset(0.U)
+    .withDescription("Match store addresses.")
   val LOAD        = RW(0).withReset(0.U)
+    .withDescription("Match load addresses.")
 
   def writeData(dmode: Bool, chainable: Bool): Mcontrol6 = {
     val res = Wire(new Mcontrol6)
@@ -199,7 +234,9 @@ object Tdata1Type extends CSREnum with WARLApply {
   val Tmexttrigger = Value(7.U)
   val Disabled     = Value(15.U)
 
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Mcontrol6)
+  override protected def legalValues: Seq[EnumType] = Seq(Mcontrol6)
+  override protected def illegalValueBehavior: Option[String] =
+    Some(s"Other writes are legalized to ${Disabled.litValue}=disabled.")
 
   override def legalize(enumeration: CSREnumType): CSREnumType = {
     val res = WireInit(enumeration)
@@ -218,6 +255,9 @@ object TrigAction extends CSREnum with WARLApply {
   val TraceNotify   = Value(4.U)
 
   override def isLegal(enumeration: CSREnumType, dmode: Bool): Bool = enumeration.isOneOf(BreakpointExp) || enumeration.isOneOf(DebugMode) && dmode
+  override protected def legalValues: Seq[EnumType] = Seq(BreakpointExp, DebugMode)
+  override protected def illegalValueBehavior: Option[String] =
+    Some(s"Other values are legalized to ${BreakpointExp.litValue}.")
 
   override def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = {
     val res = WireInit(enumeration)
@@ -243,7 +283,9 @@ object TrigMatch extends CSREnum with WARLApply {
     EQ, NAPOT, GE, LT, MASK_LO, MASK_HI,
     NE, NNAPOT, NMASK_LO, NMASK_HI,
   )
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(EQ, GE, LT)
+  override protected def legalValues: Seq[EnumType] = Seq(EQ, GE, LT)
+  override protected def illegalValueBehavior: Option[String] =
+    Some(s"Other values are legalized to ${EQ.litValue}.")
 
   override def legalize(enumeration: CSREnumType): CSREnumType = {
     val res = WireInit(enumeration)
@@ -256,44 +298,76 @@ object TrigMatch extends CSREnum with WARLApply {
 
 
 // tdata2
-class Tdata2Bundle extends OneFieldBundle
+class Tdata2Bundle extends CSRBundle {
+  val ALL = RW(63, 0).withDescription("Second trigger data register.")
+}
+
+object Tdata3Sselect extends CSREnum with WARLApply {
+  val Ignore   = Value(0.U)
+  val Scontext = Value(1.U)
+  val Asid     = Value(2.U)
+
+  override protected def legalValues: Seq[EnumType] = Seq(Ignore, Scontext, Asid)
+}
+
+object Tdata3Mhselect extends CSREnum with WARLApply {
+  val Ignore           = Value(0.U)
+  val McontextSelectLo = Value(1.U)
+  val VmidSelectLo     = Value(2.U)
+  val Mcontext         = Value(4.U)
+  val McontextSelectHi = Value(5.U)
+  val VmidSelectHi     = Value(6.U)
+  override protected def legalValues: Seq[EnumType] =
+    Seq(Ignore, McontextSelectLo, VmidSelectLo, Mcontext, McontextSelectHi, VmidSelectHi)
+}
+
+class Tdata3Bundle extends CSRBundle {
+  val SSELECT   = Tdata3Sselect(1, 0, wNoFilter).withReset(Tdata3Sselect.Ignore)
+    .withDescription("Supervisor-side context selector: 0=ignore, 1=scontext, 2=asid, 3=reserved.")
+  val SVALUE    = RW(33, 2).withReset(0.U).withDescription("Data used together with sselect.")
+  val SBYTEMASK = RW(39, 36).withReset(0.U)
+    .withDescription("Per-byte ignore mask for scontext matching. Bit i masks byte i of scontext when sselect=scontext.")
+  val MHSELECT  = Tdata3Mhselect(50, 48, wNoFilter).withReset(Tdata3Mhselect.Ignore)
+    .withDescription("Machine/hypervisor-side context selector: 0=ignore, 1/5=mcontext_select, 2/6=vmid_select, 3/7=reserved, 4=mcontext.")
+  val MHVALUE   = RW(63, 51).withReset(0.U).withDescription("Data used together with mhselect.")
+}
 
 // Tinfo
 class TinfoBundle extends CSRBundle{
-  // Version isn't in version 0.13
-  val VERSION     = RO(31, 24).withReset(0.U)
-  // only support mcontrol6
+  val VERSION     = TriggerVer(31, 24).withReset(TriggerVer.Spec_1dot0)
+    .withDescription("Trigger-information format version field. XiangShan reports version 1, matching the ratified Debug Spec 1.0 trigger encoding.")
   val MCONTROL6EN = RO(6).withReset(1.U)
+    .withDescription("Indicates that the mcontrol6 trigger format is supported.")
+}
+
+object TriggerVer extends CSREnum with ROApply {
+  val Spec_2302  = Value(0.U)
+  val Spec_1dot0 = Value(1.U)
 }
 
 // Dscratch
-class DscratchBundle extends OneFieldBundle
+class DscratchBundle extends OneFieldBundle(Some("Debug scratch register."))
 
 
 class DcsrBundle extends CSRBundle {
   override val len: Int = 32
-  val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec) // Debug implementation as it described in 0.13 draft
-  val EXTCAUSE  =           RO(26, 24).withReset(0.U)
-  val CETRIG    =           RW(    19).withReset(0.U)
-  // All ebreak Privileges are RW, instead of WARL, since XiangShan support U/S/VU/VS.
-  val EBREAKVS  =           RW(    17).withReset(0.U)
-  val EBREAKVU  =           RW(    16).withReset(0.U)
-  val EBREAKM   =           RW(    15).withReset(0.U)
-  val EBREAKS   =           RW(    13).withReset(0.U)
-  val EBREAKU   =           RW(    12).withReset(0.U)
-  // STEPIE is RW, instead of WARL, since XiangShan support interrupts being enabled single stepping.
-  val STEPIE    =           RW(    11).withReset(0.U)
-  val STOPCOUNT =           RW(    10).withReset(0.U)
-  val STOPTIME  =           RW(     9).withReset(0.U)
-  val CAUSE     =    DcsrCause( 8,  6).withReset(DcsrCause.None)
-  val V         =     VirtMode(     5).withReset(VirtMode.Off)
-  // MPRVEN is RW, instead of WARL, since XiangShan support use mstatus.mprv in debug mode
-  // Whether use mstatus.mprv
-  val MPRVEN    =           RW(     4).withReset(0.U)
-  val NMIP      =           RO(     3).withReset(0.U)
-  // MPRVEN is RW, instead of WARL, since XiangShan support use mstatus.mprv in debug mode
-  val STEP      =           RW(     2).withReset(0.U)
-  val PRV       =     PrivMode( 1,  0).withReset(PrivMode.M)
+  val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec).withDescription("Debug specification version implemented by this hart.")
+  val EXTCAUSE  =           RO(26, 24).withReset(0.U).withDescription("Additional cause detail for debug entry.")
+  val CETRIG    =           RW(    19).withReset(0.U).withDescription("Trigger re-entry control for critical-error debug entry.")
+  val EBREAKVS  =           RW(    17).withReset(0.U).withDescription("Enter Debug Mode on VS-mode EBREAK.")
+  val EBREAKVU  =           RW(    16).withReset(0.U).withDescription("Enter Debug Mode on VU-mode EBREAK.")
+  val EBREAKM   =           RW(    15).withReset(0.U).withDescription("Enter Debug Mode on M-mode EBREAK.")
+  val EBREAKS   =           RW(    13).withReset(0.U).withDescription("Enter Debug Mode on HS-mode EBREAK.")
+  val EBREAKU   =           RW(    12).withReset(0.U).withDescription("Enter Debug Mode on HU-mode EBREAK.")
+  val STEPIE    =           RW(    11).withReset(0.U).withDescription("Keep interrupts enabled during single-step execution.")
+  val STOPCOUNT =           RW(    10).withReset(0.U).withDescription("Stop architectural counters while in Debug Mode.")
+  val STOPTIME  =           RW(     9).withReset(0.U).withDescription("Stop the time counter while in Debug Mode.")
+  val CAUSE     =    DcsrCause( 8,  6).withReset(DcsrCause.None).withDescription("Cause of the most recent entry into Debug Mode.")
+  val V         =     VirtMode(     5).withReset(VirtMode.Off).withDescription("Virtualization mode active before entering Debug Mode.")
+  val MPRVEN    =           RW(     4).withReset(0.U).withDescription("Allow mstatus.MPRV to apply while in Debug Mode.")
+  val NMIP      =           RO(     3).withReset(0.U).withDescription("Indicates pending non-maskable interrupt state while in Debug Mode.")
+  val STEP      =           RW(     2).withReset(0.U).withDescription("Enable single-step execution.")
+  val PRV       =     PrivMode( 1,  0).withReset(PrivMode.M).withDescription("Privilege mode active before entering Debug Mode.")
 }
 
 object DcsrDebugVer extends CSREnum with ROApply {
@@ -317,11 +391,13 @@ trait HasTdataSink { self: CSRModule[_] =>
   val tdataRead = IO(Input(new Bundle {
     val tdata1 = UInt(XLEN.W)
     val tdata2 = UInt(XLEN.W)
+    val tdata3 = UInt(XLEN.W)
   }))
 }
 trait HasTriggerBundle { self: CSRModule[_] =>
   val canWriteDmode = IO(Input(Bool()))
   val chainable = IO(Input(Bool()))
+  val dmodeNextTrigger = IO(Input(Bool()))
 }
 
 trait HasNmipBundle { self: CSRModule[_] =>
@@ -362,6 +438,12 @@ object TriggerUtil {
     !ConsecutiveOnes(chainVec, chainLen)
   }
 
+  def triggerActionMatchVec(triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], targetAction: UInt): Vec[Bool] = {
+    VecInit(triggerCanFireVec.zip(actionVec).map {
+      case (canFire, action) => canFire && (action === targetAction)
+    })
+  }
+
   /**
    * Generate Trigger action
    * @return triggerAction return
@@ -370,19 +452,45 @@ object TriggerUtil {
    * @param  triggerCanRaiseBpExp from csr
    */
   def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool): Unit = {
-    // More than one triggers can hit at the same time, but only fire one.
-    // We select the first hit trigger to fire.
-    val hasTriggerFire    = triggerCanFireVec.asUInt.orR
-    val triggerFireOH     = PriorityEncoderOH(triggerCanFireVec)
-    val triggerFireAction = PriorityMux(triggerFireOH, actionVec).asUInt
-    val actionIsBPExp     = hasTriggerFire && (triggerFireAction === TriggerAction.BreakpointExp)
-    val actionIsDmode     = hasTriggerFire && (triggerFireAction === TriggerAction.DebugMode)
-    val breakPointExp     = actionIsBPExp && triggerCanRaiseBpExp
+    val fireDebugModeVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
+    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+    val fireDebugMode = fireDebugModeVec.asUInt.orR
+    val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
 
     // todo: add more for trace
     triggerAction := MuxCase(TriggerAction.None, Seq(
+      fireDebugMode -> TriggerAction.DebugMode,
       breakPointExp -> TriggerAction.BreakpointExp,
-      actionIsDmode -> TriggerAction.DebugMode,
     ))
+  }
+
+  def textraSMatch(sselect: UInt, svalue: UInt, sbytemask: UInt, scontext: UInt, asid: UInt): Bool = {
+    val scontextWire = WireInit(0.U.asTypeOf(Vec(4, UInt(8.W))))
+    val scontextEq = (scontext.asTypeOf(scontextWire)).zip(svalue.asTypeOf(scontextWire)).zip(sbytemask.asBools).map{
+      case((scon, sval), mask) => (scon === sval || mask)
+    }.reduce(_ && _)
+
+    MuxLookup(sselect, false.B)(Seq(
+      Tdata3Sselect.Ignore.asUInt -> true.B,
+      Tdata3Sselect.Scontext.asUInt -> scontextEq,
+      Tdata3Sselect.Asid.asUInt -> (asid === svalue(ASIDLEN - 1, 0))
+    ))
+  }
+
+  def textraMhMatch(mhselect: UInt, mhvalue: UInt, mhcontext: UInt, vmid: UInt): Bool = {
+    val highSelValue = Cat(mhvalue, mhselect(2))
+    MuxLookup(mhselect, false.B)(Seq(
+      Tdata3Mhselect.Ignore.asUInt -> true.B,
+      Tdata3Mhselect.Mcontext.asUInt -> (mhcontext(12, 0) === mhvalue),
+      Tdata3Mhselect.McontextSelectLo.asUInt -> (mhcontext === highSelValue),
+      Tdata3Mhselect.McontextSelectHi.asUInt -> (mhcontext === highSelValue),
+      Tdata3Mhselect.VmidSelectLo.asUInt -> (vmid === highSelValue),
+      Tdata3Mhselect.VmidSelectHi.asUInt -> (vmid === highSelValue),
+    ))
+  }
+
+  def textraMatch(tdata3: Tdata3Bundle, scontext: UInt, asid: UInt, mhcontext: UInt, vmid: UInt): Bool = {
+    textraSMatch(tdata3.SSELECT.asUInt, tdata3.SVALUE.asUInt, tdata3.SBYTEMASK.asUInt, scontext, asid) &&
+    textraMhMatch(tdata3.MHSELECT.asUInt, tdata3.MHVALUE.asUInt, mhcontext, vmid)
   }
 }

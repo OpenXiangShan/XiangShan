@@ -4,11 +4,120 @@ on:
     # run at 15:33 UTC (23:33 UTC+8)
     - cron: '33 15 * * *'
 
+env:
+  FUZZ_NUM: 20 # per json file
+  CKPT_BASE: /nfs/share/checkpoints_profiles
+  CKPT_BASE_LEGACY: /nfs/share/checkpoints_profiles/legacy
+  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile/data
+  ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
+
 jobs:
-  performance-test:
+  run:
+    name: Run Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: kunminghu-v3
-      perf_report_dir: /nfs/home/cirunner/perf-report-nightly
-      benchmark_type: gcc12-spec06-0.3c
+      benchmark_type: spec06-rva23-novec-gcc16-0.3c
       servers: all
+
+  select:
+    name: Select random checkpoints
+    runs-on: perf
+    outputs:
+      RESULT_PATH: ${{ steps.select.outputs.RESULT_PATH }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select random checkpoints
+        id: select
+        run: |
+          # NOTE: make sure the following does not contain the default nightly 0.3c checkpoints
+          RESULT_LIST=$(python3 $GITHUB_WORKSPACE/.github/workflows/ckpt_select.py \
+            --output list \
+            --seed ${{ github.run_number }} \
+            --profile "${PROFILE_PATH}" \
+            --eta-threshold "${ETA_THRESHOLD}" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0-int.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" \
+          )
+          # copy-pasted from perf-template.yml, is there a better way to do this?
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}-DefaultConfig"
+          # save list
+          RESULT_PATH="${SPEC_DIR}/fuzz-$(date '+%y%m%d').f"
+          mkdir -p "${SPEC_DIR}"
+          echo "${RESULT_LIST}" > "${RESULT_PATH}"
+          echo "RESULT_PATH=${RESULT_PATH}" >> "$GITHUB_OUTPUT"
+          # display to log
+          echo "Selected checkpoints:"
+          cat "${RESULT_PATH}"
+
+  run-fuzz:
+    needs: select
+    name: Run Fuzz Test
+    uses: ./.github/workflows/perf-template.yml
+    with:
+      test_branch: kunminghu-v3
+      benchmark_type: custom
+      json_path: ${{ needs.select.outputs.RESULT_PATH }}
+      servers: all
+      artifact_name: fuzz-report
+
+  report:
+    name: Generate Report
+    needs: run
+    runs-on: perf
+    steps:
+      - uses: actions/checkout@v7
+      - name: Link current report
+        run: |
+          if [ ! -L "/nfs/home/cirunner/perf-report/nightly-${{ needs.run.outputs.DATE }}" ]; then
+            ln -s "${{ needs.run.outputs.SPEC_DIR }}" "/nfs/home/cirunner/perf-report/nightly-${{ needs.run.outputs.DATE }}"
+          else
+            echo "Symlink already exists"
+          fi
+      - name: Find previous commit
+        run: |
+          PREV_DIR=$(find "/nfs/home/cirunner/perf-report" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.run.outputs.DATE }}" | sort | tail -n1)
+          echo "Found previous report: $PREV_DIR"
+          PREV_DIR=$(readlink -f "$PREV_DIR" || true)
+          echo "Resolved to: $PREV_DIR"
+          echo "PREV_DIR=$PREV_DIR" >> $GITHUB_ENV
+      - name: Diff with previous result
+        run: |
+          echo "### :bar_chart: Diff with previous run" >> $GITHUB_STEP_SUMMARY
+
+          echo "NOTE: This report is not maintained."
+          echo "NOTE: Consider using https://dashboard.xiangshan.cc to view nightly diff results." >> $GITHUB_STEP_SUMMARY
+
+          CURR_SCORE_FILE="${{ needs.run.outputs.SCORE_FILE }}"
+          PREV_SCORE_FILE="$PREV_DIR/$(basename ${{ needs.run.outputs.SCORE_FILE }})"
+
+          if [ -z "${PREV_DIR}" ] || [ ! -d "${PREV_DIR}" ]; then
+            echo "${PREV_DIR} does not exist" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          if [ ! -f "${PREV_SCORE_FILE}" ]; then
+            echo "${PREV_SCORE_FILE} not found, falling back"
+            PREV_SCORE_FILE_FALLBACK="$(find "${PREV_DIR}" -type f -name "score*.txt" | head -n1)"
+            if [ -z "${PREV_SCORE_FILE_FALLBACK}" ]; then
+              echo "No previous score file found, tried:" >> $GITHUB_STEP_SUMMARY
+              echo "- ${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+              echo "- find score*.txt in ${PREV_DIR}" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            echo "${PREV_SCORE_FILE} not found, fall back to ${PREV_SCORE_FILE_FALLBACK}" >> $GITHUB_STEP_SUMMARY
+            PREV_SCORE_FILE="${PREV_SCORE_FILE_FALLBACK}"
+          fi
+
+          echo "Current: ${CURR_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+          echo "Previous: ${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+          python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "${CURR_SCORE_FILE}" "${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY

@@ -36,8 +36,6 @@ case class ICacheParameters(
     // missUnit
     NumFetchMshr:    Int = 4,
     NumPrefetchMshr: Int = 10,
-    // wayLookup
-    WayLookupSize: Int = 32,
     // ecc
     // NOTE: we call it "ecc" since it can be configured to use ecc like "secded", but by default it is parity
     // TODO: support disabling ecc completely (currently "none" will use "identity", we want to remove entire ecc logic)
@@ -118,15 +116,12 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def NumPrefetchMshr: Int = icacheParameters.NumPrefetchMshr
   def NumAllMshr:      Int = NumFetchMshr + NumPrefetchMshr
 
-  // wayLookup
-  def WayLookupSize: Int = icacheParameters.WayLookupSize
-
   // metaArray w/ parity
   def MetaEcc:       String = icacheParameters.MetaEcc
   def MetaCode:      Code   = Code.fromString(MetaEcc)
   def MetaBits:      Int    = (new ICacheMetadata).getWidth
-  def MetaEntryBits: Int    = MetaCode.width(MetaBits)
-  def MetaEccBits:   Int    = MetaEntryBits - MetaBits
+  def MetaSramWidth: Int    = MetaCode.width(MetaBits)
+  def MetaEccBits:   Int    = MetaSramWidth - MetaBits
 
   def NumInterleavedBank:     Int = icacheParameters.NumInterleavedBank
   def NumInterleavedSet:      Int = nSets / NumInterleavedBank
@@ -149,7 +144,8 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def DataSramWidth:         Int = ICacheDataBits + DataEccBits + DataPaddingBits
 
   // mainPipe
-  def EnableCorruptRefetch: Boolean = icacheParameters.EnableCorruptRefetch
+  def EnableCorruptRefetch:  Boolean = icacheParameters.EnableCorruptRefetch
+  def MaybeRvcFineShiftBits: Int     = 2
 
   // submodule enable
   def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit

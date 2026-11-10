@@ -17,13 +17,13 @@
 
 package top
 
-import utility.{SimulationModels, SimulationModelsKey, SimulationModelLoweringKey, SimulationModelComputeLoweringKey, SimulationPrimitives, SimulationPrimitivesKey}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
+import difftest.fpga.DifftestMemCtrl
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
@@ -44,11 +44,14 @@ class MemXbar(implicit p: Parameters) extends LazyModule
       aligned = true
     ))
   )))
-  
+
   val devNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "device_node",
-      id = IdRange(0, 1 << 14),
+      // IOMMU translated traffic and page-table walks are merged by an AXI
+      // crossbar before reaching this port.  Preserve its full 17-bit ID so
+      // responses can be routed back to the originating IOMMU master.
+      id = IdRange(0, 1 << 17),
       aligned = true
     ))
   )))
@@ -84,7 +87,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
   val io_memNode = InModuleBody {memNode.makeIOs()}
 
   lazy val module = new Imp
-  class Imp extends LazyModuleImp(this) 
+  class Imp extends LazyModuleImp(this)
 }
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
@@ -96,8 +99,13 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   // so that we can re-use this XiangShanSim for any generated Verilog RTL.
   dontTouch(soc.io)
 
-  if (!l_soc.module.dma.isEmpty) {
-    l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
+  l_soc.module.imsic_axi4.foreach { port =>
+    port <> WireDefault(0.U.asTypeOf(port))
+  }
+  l_soc.module.imsic_axi4s.foreach { ports =>
+    ports.foreach { port =>
+      port <> WireDefault(0.U.asTypeOf(port))
+    }
   }
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2)(p.alter((site, here, up) => {
@@ -111,15 +119,20 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
 
   val l_simAXIMem = AXI4MemorySlave(
     l_memXbar.memNode,
-    8190L * 1024 * 1024 * 1024,
+    debugOpts.SimMemSize,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
-  val simAXIMem = Module(l_simAXIMem.module) 
+  val simAXIMem = Module(l_simAXIMem.module)
 
   l_memXbar.io_cpuNode.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
   l_memXbar.io_devNode.elements.head._2 <> l_simMMIO.io_mem.elements.head._2
   l_simAXIMem.io_axi4.elements.head._2 <> l_memXbar.io_memNode.elements.head._2
+
+  val memIO = Option.when(DifftestModule.isFPGA) {
+    DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
+  }
+  override def difftestMemIO: Option[DifftestMemIO] = memIO
 
   soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
@@ -128,6 +141,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
+  soc.io.riscv_rst_mtvec.foreach{ _.foreach(_ := 0.U) }
   l_soc.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
   soc.io.traceCoreInterface.foreach(_.fromEncoder.enable := false.B)
   soc.io.traceCoreInterface.foreach(_.fromEncoder.stall  := false.B)
@@ -151,7 +165,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
-  override def cpuName: Option[String] = Some("XiangShan")
+  override def cpuName: Option[String] = Some("XIANGSHAN_KMHV3")
 
   val uart = IO(new UARTIO)
   simMMIO.io.uart <> uart
@@ -182,32 +196,11 @@ object XiangShanSim extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
-  require(!envInFPGA || config(SimulationPrimitivesKey) == "none",
-    "Simulation primitives require the simulation target")
-  require(!envInFPGA || config(SimulationModelsKey) == "hardware",
-    "Simulation behavior models require the simulation target")
-  require(!SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat") ||
-    (config(DebugOptionsKey).EnableDifftest && config(xiangshan.XSTileKey).size == 1),
-    "commit-rat requires full DiffTest and exactly one core")
-  require(!SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat") || !config(DebugOptionsKey).ResetGen,
-    "commit-rat requires a shared synchronous reset; reset-tree generation is unsupported")
-  val modelReport = Some(java.nio.file.Paths.get(
-    sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_models.json"))
-  require(config(SimulationModelLoweringKey) == "ordinary" || SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat"),
-    "grouped state lowering requires commit-rat")
-  require(config(SimulationModelComputeLoweringKey) == "ordinary" ||
-    SimulationModels.selected(config(SimulationModelsKey)).exists(_ != "commit-rat"),
-    "grouped compute lowering requires a functional model")
-  SimulationModels.withMode(config(SimulationModelsKey), modelReport, config(SimulationModelLoweringKey), config(SimulationModelComputeLoweringKey)) {
-    SimulationPrimitives.withMode(config(SimulationPrimitivesKey),
-      Some(java.nio.file.Paths.get(sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_primitives.json"))) {
-      Generator.execute(
-        firrtlOpts,
-        DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
-        firtoolOpts
-      )
-    }
-  }
+  Generator.execute(
+    firrtlOpts,
+    DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
+    firtoolOpts
+  )
 
   // tools: write cpp files
   ChiselDB.addToFileRegisters

@@ -20,20 +20,36 @@ import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 
 case class FtqParameters(
-    FtqSize:            Int = 64,
-    ResolveQueueSize:   Int = 16,
-    BpRunAheadDistance: Int = 8,
-    BpTrainStallLimit:  Int = 8,
-    CommitQueueSize:    Int = 64
+    FtqSize:           Int = 64,
+    ResolveQueueSize:  Int = 16,
+    BpTrainStallLimit: Int = 8,
+    // submodules
+    pqParameters: FtqPrefetchQueueParameters = FtqPrefetchQueueParameters()
 ) {
   // sanity check
   require(isPow2(FtqSize))
 }
 
 trait HasFtqParameters extends HasFrontendParameters {
-  def ftqParameters:      FtqParameters = frontendParameters.ftqParameters
-  def ResolveQueueSize:   Int           = ftqParameters.ResolveQueueSize
-  def BpRunAheadDistance: Int           = ftqParameters.BpRunAheadDistance
-  def BpTrainStallLimit:  Int           = ftqParameters.BpTrainStallLimit
-  def CommitQueueSize:    Int           = ftqParameters.CommitQueueSize
+  def ftqParameters: FtqParameters = frontendParameters.ftqParameters
+
+  def ResolveQueueSize:  Int = ftqParameters.ResolveQueueSize
+  def BpTrainStallLimit: Int = ftqParameters.BpTrainStallLimit
+}
+
+case class FtqPrefetchQueueParameters(
+    Size: Int = 8,
+    // when distanceBetween(pfPtr, fetchPtr), prefer 1-fdip over 2- or 1-queued
+    PreferFdipDistance: Int = 2
+) {}
+
+trait HasFtqPrefetchQueueParameters extends HasFtqParameters {
+  def pqParameters: FtqPrefetchQueueParameters = ftqParameters.pqParameters
+
+  def Size: Int = pqParameters.Size
+
+  def PreferFdipDistance: Int = pqParameters.PreferFdipDistance
+
+  def EnqueueSwNum: Int = backendParams.LduCnt // every load unit may send software prefetch.i request to pq
+  def EnqueueNum:   Int = EnqueueSwNum         // TODO: more prefetch source
 }

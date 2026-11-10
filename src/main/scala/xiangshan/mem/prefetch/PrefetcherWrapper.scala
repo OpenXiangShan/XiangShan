@@ -11,7 +11,6 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.{FuType, PMPRespBundle}
 import xiangshan.cache.mmu._
 import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle}
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem._
 import xiangshan.mem.trace._
 
@@ -35,6 +34,7 @@ trait PrefetcherParams {
 trait HasPrefetcherParams extends HasXSParameter{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
+  def DEGREE_WIDTH = 2
 
   // You can set the unified interface to N, and the invalid that you don't need can be set to 0
   val L1_PF_REG_CNT = 1
@@ -69,13 +69,13 @@ class TrainSourceIO(implicit p: Parameters) extends PrefetchBundle {
   // load: ldu + hyu
   val s1_loadFireHint = Output(Vec(LD_TRAIN_WIDTH, Bool()))
   val s2_loadFireHint = Output(Vec(LD_TRAIN_WIDTH, Bool()))
-  val s3_load = Output(Vec(LD_TRAIN_WIDTH, ValidIO(new LsPrefetchTrainBundle())))
+  val s3_load = Output(Vec(LD_TRAIN_WIDTH, ValidIO(new TrainReqBundle())))
   val s3_ptrChasing = Output(Vec(LD_TRAIN_WIDTH, Bool()))
 
   // store: stu + hyu
   val s1_storeFireHint = Output(Vec(ST_TRAIN_WIDTH, Bool()))
   val s2_storeFireHint = Output(Vec(ST_TRAIN_WIDTH, Bool()))
-  val s3_store = Output(Vec(ST_TRAIN_WIDTH, ValidIO(new LsPrefetchTrainBundle())))
+  val s3_store = Output(Vec(ST_TRAIN_WIDTH, ValidIO(new TrainReqBundle())))
 }
 
 class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
@@ -98,12 +98,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
-    val l1_pf_to_l2 = Output(new coupledL2.PrefetchRecv())
-    val l1_pf_to_l3 = Output(new huancun.PrefetchRecv())
+    val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
+    val l1_pf_to_l3 = Output(new xscache.coupledL2.PrefetchRecv())
+    val l2_fdbk_pf_ctrl = Input(new xscache.coupledL2.L2ToL1PfCtrl)
+    // TODO: l2_pf degree control internally
   })
-
-  def isLoadAccess(uop: DynInst): Bool = FuType.isLoad(uop.fuType) || FuType.isVLoad(uop.fuType)
-  def isStoreAccess(uop: DynInst): Bool = FuType.isStore(uop.fuType)
 
   val hartId = p(XSCoreParamsKey).HartId
   val l1D_pf_enable = RegNextN(io.pfCtrlFromCSR.l1D_pf_enable, 2, Some(true.B))
@@ -159,9 +158,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
   val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
   val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
+  val modeStrideBertiDefault = coreParams.modeStrideBerti // default is strideOnBertiOff
 
   private val Seq(bothOff, strideOnBertiOff, strideOffBertiOn, bothOn) = Seq(0, 1, 2, 3)
-  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOnBertiOff)
+  // strideOffBertiOn: if you enable Berti, Stride will be closed by default.
+  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = modeStrideBertiDefault)
   val strideModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOffBertiOn.U && HasBerti.B)
   val bertiModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOnBertiOff.U && HasStreamStride.B)
 
@@ -169,8 +170,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   smsOpt.foreach (pf => {
     val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
-    pf.io.enable := enableSMS && l1D_pf_enable &&
-      GatedRegNextN(io.pfCtrlFromCSR.l2_pf_recv_enable, 2, Some(false.B))
+    pf.io.enable := enableSMS && l1D_pf_enable
+    pf.io.fdbkDegree := io.l2_fdbk_pf_ctrl.smsDegree
     pf.io_agt_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_agt, 2, Some(false.B))
     pf.io_pht_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_pht, 2, Some(false.B))
     pf.io_act_threshold := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_threshold, 2, Some(12.U))
@@ -181,14 +182,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     for (i <- 0 until LD_TRAIN_WIDTH) {
       val source = io.trainSource.s3_load(i)
-      val primaryValid = source.valid && !source.bits.tlbMiss && !source.bits.is_from_hw_pf
+      val primaryValid = source.valid && !source.bits.isHwPrefetch
       pf.io.ld_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
       ) // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
-      pf.io.ld_in(i).bits.uop.pc := Mux(
+      pf.io.ld_in(i).bits.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
         s2_loadPcVec(i),
         s3_loadPcVec(i)
@@ -197,14 +198,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     for (i <- 0 until ST_TRAIN_WIDTH) {
       val source = io.trainSource.s3_store(i)
-      val primaryValid = source.valid && !source.bits.tlbMiss && !source.bits.is_from_hw_pf
+      val primaryValid = source.valid && !source.bits.isHwPrefetch
       pf.io.st_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
       ) // && isStoreAccess(source.bits.uop)
       pf.io.st_in(i).bits := source.bits
-      pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
+      pf.io.st_in(i).bits.pc := s3_storePcVec(i)
     }
 
     io.tlb_req(IdxSMS) <> pf.io.tlb_req
@@ -215,30 +216,38 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.l3_req.ready := false.B
   })
 
-  val strideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
-  strideOpt.foreach(pf => {
+  val streamStrideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
+  streamStrideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
+    val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
-    pf.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
-      GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_stride, 2, Some(false.B))
+    pf.io.enable := l1D_pf_enable
+    pf.io.fdbkDegree := 1.U
 
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
-    pf.strideEnable := strideModeEnable
+    pf.streamEnable := l1D_pf_enable && enableL1StreamPrefetcher &&
+      GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_stream_enable, 2, Some(false.B))
+    pf.strideEnable := l1D_pf_enable && enableL1StridePrefetcher && strideModeEnable &&
+      GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_stride_enable, 2, Some(false.B))
+    pf.streamFdbkDegree := io.l2_fdbk_pf_ctrl.streamDegree
+    pf.strideFdbkDegree := io.l2_fdbk_pf_ctrl.strideDegree
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
+      // for stride
       val source = io.trainSource.s3_load(i)
       pf.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromStride(source.bits.meta_prefetch)
-      ) && !source.bits.is_from_hw_pf // && isLoadAccess(source.bits.uop)
+        source.bits.miss || isFromStride(source.bits.metaSource)
+      ) && !source.bits.isHwPrefetch // && isLoadAccess(source.bits.uop)
       pf.stride_train(i).bits := source.bits
-      pf.stride_train(i).bits.uop.pc := Mux(
+      pf.stride_train(i).bits.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.is_from_hw_pf
+      // for stream
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
       // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
@@ -261,16 +270,17 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableBerti && l1D_pf_enable &&
-      GatedRegNextN(io.pfCtrlFromCSR.berti_enable, 2, Some(false.B)) &&
+      GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_berti_enable, 2, Some(false.B)) &&
       bertiModeEnable
+    pf.io.fdbkDegree := io.l2_fdbk_pf_ctrl.bertiDegree
 
     for(i <- 0 until LD_TRAIN_WIDTH){
       val source = io.trainSource.s3_load(i)
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromBerti(source.bits.meta_prefetch)
-      ) && !source.bits.is_from_hw_pf // && isLoadAccess(source.bits.uop)
+        source.bits.miss || isFromBerti(source.bits.metaSource)
+      ) && !source.bits.isHwPrefetch // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
-      pf.io.ld_in(i).bits.uop.pc := Mux(
+      pf.io.ld_in(i).bits.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
         s2_loadPcVec(i),
         s3_loadPcVec(i)
@@ -282,7 +292,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.st_in(i).bits := DontCare
       // val source = io.trainSource.s3_store(i)
       // pf.io.st_in(i).valid := source.valid && source.bits.isFirstIssue && (
-      //  source.bits.miss || isFromBerti(source.bits.meta_prefetch)
+      //  source.bits.miss || isFromBerti(source.bits.metaSource)
       // )
       // pf.io.st_in(i).bits := source.bits
       // pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
@@ -320,10 +330,12 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
-  io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l2.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+
   io.l1_pf_to_l3.addr_valid := l3_pf_req.valid
   io.l1_pf_to_l3.addr := l3_pf_req.bits.addr
-  io.l1_pf_to_l3.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l3.pf_source := l3_pf_req.bits.source
+  io.l1_pf_to_l3.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)
   l2_trace.paddr := l2_pf_req.bits.addr
@@ -334,15 +346,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2SMS", clock, reset)
   }.otherwise {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2Unknown", clock, reset)
-  }
-
-  val l3_trace = Wire(new LoadPfDbBundle)
-  l3_trace.paddr := l3_pf_req.bits.addr
-  val l3_trace_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
-  when(l3_pf_req.bits.source === MemReqSource.Prefetch2L3Stream.id.U || l3_pf_req.bits.source === MemReqSource.Prefetch2L3Stride.id.U) {
-    l3_trace_table.log(l3_trace, l3_pf_req.valid, "L3StreamStride", clock, reset)
-  }.otherwise {
-    l3_trace_table.log(l3_trace, l3_pf_req.valid, "L3Unknown", clock, reset)
   }
 
   val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)

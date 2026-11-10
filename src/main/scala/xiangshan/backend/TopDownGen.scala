@@ -16,27 +16,27 @@ class TopDownGen(implicit p: Parameters) extends XSModule
 
   val fewUopsIssued = (0 until p(XSCoreParamsKey).fewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
 
-  val stallLoad = !uopsIssued
-  val stallStore = uopsIssued && RegNext(noStoreIssued)
+  val stallLoad  = fewUopsIssued && !uopsIssued
+  val stallStore = fewUopsIssued && uopsIssued && RegNext(noStoreIssued)
 
   val stallLoadDly = RegNext(stallLoad)
   val stallStoreDly = RegNext(stallStore)
 
-  val lqEmpty = io.topDownInfo.lqEmpty
-  val sqEmpty = io.topDownInfo.sqEmpty
+  val replayAllocate = io.topDownInfo.replayAllocate
+  val sqFull  = io.topDownInfo.sqFull
+  val sbFull  = io.topDownInfo.sbFull
   val l1Miss = io.topDownInfo.l1Miss
   val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
   val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
 
-  val memStallAnyLoad = stallLoadDly && !lqEmpty
-  val memStallStore = stallStoreDly && !sqEmpty
+  val memStallAnyLoad = stallLoadDly && replayAllocate
+  val memStallStore = stallStoreDly && (sqFull || sbFull)
   val memStallL1Miss = memStallAnyLoad && l1Miss
   val memStallL2Miss = memStallL1Miss && l2Miss
   val memStallL3Miss = memStallL2Miss && l3Miss
 
-  io.topDownInfo.noUopsIssued := stallLoad
-  
   XSPerfAccumulate("exec_stall_cycle",   fewUopsIssued)
+  XSPerfAccumulate("mem_stall_anyload",  memStallAnyLoad)
   XSPerfAccumulate("mem_stall_store",    memStallStore)
   XSPerfAccumulate("mem_stall_l1miss",   memStallL1Miss)
   XSPerfAccumulate("mem_stall_l2miss",   memStallL2Miss)
@@ -44,6 +44,7 @@ class TopDownGen(implicit p: Parameters) extends XSModule
 
   val perfEvents = Seq(
     ("EXEC_STALL_CYCLE",  fewUopsIssued),
+    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
     ("MEMSTALL_STORE",    memStallStore),
     ("MEMSTALL_L1MISS",   memStallL1Miss),
     ("MEMSTALL_L2MISS",   memStallL2Miss),

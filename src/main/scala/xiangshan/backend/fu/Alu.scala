@@ -172,14 +172,13 @@ class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   io.condRes := Mux(use_zero, 0.U, io.value)
 }
 
-class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) extends XSModule {
+class AluDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val pc = Input(UInt(XLEN.W))
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
     val result = Output(UInt(XLEN.W))
   })
-  val (src1, src2, func, pc) = (io.src(0), io.src(1), io.func, io.pc)
+  val (src1, src2, func) = (io.src(0), io.src(1), io.func)
 
   val isAddw       = ALUOpType.isAddw(func)
   val isOddaddw    = ALUOpType.isOddaddw(func)
@@ -381,11 +380,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   condModule.io.isNez     := func(1)
   val condRes = condModule.io.condRes
 
-  val jmpModule = Module(new AddModule)
-  jmpModule.io.src(0) := pc
-  jmpModule.io.src(1) := src2
-  val jmpRes = jmpModule.io.add
-
   val isAdd     = ALUOpType.isAdd(func)
   val isSradd   = ALUOpType.isSradd(func)
   val isShadd   = ALUOpType.isShadd(func)
@@ -412,7 +406,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   val isRolw = ALUOpType.isRolw(func)
   val isRorw = ALUOpType.isRorw(func)
   val isZicond = ALUOpType.isZicond(func)
-  val isJmp = if (aluNeedPc) ALUOpType.isJmp(func) else false.B
 
   val aluRes = Mux1H(Seq(
     isAdd     -> add,
@@ -441,7 +434,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
     isRolw    -> SignExt(rolw, XLEN),
     isRorw    -> SignExt(rorw, XLEN),
     isZicond  -> condRes,
-    isJmp     -> jmpRes,
   ))
 
   io.result := aluRes
@@ -451,35 +443,4 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
 
   XSDebug(func === ALUOpType.lui32addw, p"[alu] func lui32w: src1=${Hexadecimal(src1)} src2=${Hexadecimal(src2)} alures=${Hexadecimal(aluRes)}\n")
   XSDebug(func === ALUOpType.lui32addw, p"[alu] func lui32w: add_src1=${Hexadecimal(addwModule.io.srcw)} add_src2=${Hexadecimal(addwModule.io.src)} addres=${Hexadecimal(addw)}\n")
-}
-
-/**
-  * Stable, pure carrier for the integer ALU behavior model.  The carrier keeps
-  * the complete ALU semantic input in one typed port so ordinary Chisel
-  * elaboration remains a legal RTL fallback while Wolvrix can replace the
-  * authenticated boundary with one host-side compute group.
-  */
-class IntAluComputeCarrier(val aluNeedPc: Boolean = false)(implicit p: Parameters) extends RawModule {
-  override def desiredName: String =
-    if (aluNeedPc) "WolvrixBehaviorComputeGroup_v1_int_alu_pc"
-    else "WolvrixBehaviorComputeGroup_v1_int_alu"
-
-  private val packedWidth = if (aluNeedPc) 201 else 137
-  val io = IO(new Bundle {
-    val in = Input(UInt(packedWidth.W)) // [pc?][func:9][src2:64][src1:64]
-    val out = Output(UInt(64.W))
-  })
-
-  // AluDataModule is combinational today, but XSModule still requires an
-  // implicit clock during construction.  A constant local clock keeps this
-  // carrier a clockless external interface; firtool removes the unused child
-  // clock/reset because no state is present in the carrier.
-  private val core = withClockAndReset(false.B.asClock, false.B) {
-    Module(new AluDataModule(aluNeedPc))
-  }
-  core.io.src(0) := io.in(63, 0)
-  core.io.src(1) := io.in(127, 64)
-  core.io.func := (if (aluNeedPc) io.in(136, 128) else io.in(136, 128))
-  core.io.pc := (if (aluNeedPc) io.in(200, 137) else 0.U)
-  io.out := core.io.result
 }

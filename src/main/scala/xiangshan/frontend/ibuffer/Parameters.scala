@@ -42,4 +42,5 @@ trait HasIBufferParameters extends HasFrontendParameters {
 
   // IBufferEnqueueWidth inherited from HasFrontendParameters
   def EnqueueWidth: Int = IBufferEnqueueWidth
+  def EnqPtrDupNum: Int = 3
 }

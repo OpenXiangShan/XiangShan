@@ -8,7 +8,7 @@ class FliTable(table: Seq[Int]) extends Module {
   val src = IO(Input(UInt(5.W)))
   val out = IO(Output(UInt(16.W)))
 
-  out := utility.decoder(src,
+  out := chisel3.util.experimental.decode.decoder(src,
     TruthTable(table.zipWithIndex.map { case(data, in) =>
       (BitPat(in.U(5.W)), BitPat(data.U(16.W)))
     },

@@ -19,16 +19,20 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import utility.SignExt
 import xiangshan._
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl, VSew, VLmul, VsetVType}
+import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VLmul, VSew, VType, Vl, VsetVType}
 
-class VsetModuleIO(implicit p: Parameters) extends XSBundle {
+class VsetModuleIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
   val in = Input(new Bundle {
     val avl   : UInt = UInt(XLEN.W)
     val vtype : VsetVType = VsetVType()
-    val func  : UInt = FuOpType()
+    val func  : UInt = Opcode()
+    val oldVt = Option.when(cfg.readOldVtype)(VType())
   })
 
   val out = Output(new Bundle {
@@ -43,8 +47,10 @@ class VsetModuleIO(implicit p: Parameters) extends XSBundle {
   })
 }
 
-class VsetModule(implicit p: Parameters) extends XSModule {
-  val io = IO(new VsetModuleIO)
+class VsetModule(cfg: FuConfig)(implicit p: Parameters) extends XSModule {
+
+
+  val io = IO(new VsetModuleIO(cfg))
 
   private val avl   = io.in.avl
   private val func  = io.in.func
@@ -53,9 +59,13 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   private val outVConfig = io.out.vconfig
 
   private val vlWidth = p(XSCoreParamsKey).vlWidth
+  private val log2VlWidth = log2Ceil(vlWidth).ensuring(_ == 3)
+  private val log2VSewWidth = log2Ceil(log2Ceil(ELEN)).ensuring(_ == 3)
 
-  private val isSetVlmax = VSETOpType.isSetVlmax(func)
-  private val isVsetivli = VSETOpType.isVsetivli(func)
+  private val uopIsSetVlmax = VSetOpcodes.vlIsVlmax(func)
+  private val uopIsSetVlNormal = VSetOpcodes.vlIsReg(func)
+  private val uopIsKeepVl = VSetOpcodes.vlIsKeep(func)
+  private val isKeepVl   = VSETOpType.isKeepVl(func)
 
   private val vlmul: UInt = vtype.vlmul
   private val vsew : UInt = vtype.vsew
@@ -72,23 +82,19 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   // vlen =  128
   private val log2Vlen = log2Up(VLEN)
-  println(s"[VsetModule] log2Vlen: $log2Vlen")
-  println(s"[VsetModule] vlWidth: $vlWidth")
 
   private val log2Vlmul = vlmul
-  // use 2 bits vsew to store vsew
-  private val log2Vsew = vsew(VSew.width - 1, 0) +& "b011".U
+
+  private val log2Vsew = (vsew.take(3) + 3.U).ensuring(_.getWidth == log2VSewWidth)
 
   // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
   // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
   // vlen = 128, lmul = 2, sew = 16
   // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
-  private val log2Vlmax: UInt = log2Vlen.U(3.W) + log2Vlmul - log2Vsew
-  private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
+  private val log2Vlmax: UInt = (log2Vlen.U(log2VlWidth.W) + SignExt(log2Vlmul, log2VlWidth) - log2Vsew).ensuring(_.getWidth == log2VlWidth)
+  private val vlmax = (1.U << log2Vlmax).take(vlWidth).asUInt
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
-
-  vl := Mux(isVsetivli, normalVL, Mux(isSetVlmax, vlmax, normalVL))
 
   private val log2Elen = log2Up(ELEN)
   private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
@@ -97,7 +103,25 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   private val lmulIllegal = VLmul.isReserved(vlmul)
   private val vtypeIllegal = vtype.reserved.orR
 
-  private val illegal = lmulIllegal | sewIllegal | vtypeIllegal | vtype.illegal
+  private val oldVt = io.in.oldVt.getOrElse(VType.init())
+
+  /* vlmul is not sign extended because overlap impossible:
+   *     | mf8 | mf4 | mf2 | m1  | m2  | m4  | m8  |
+   * e8  | 101 | 110 | 111 | 000 | 001 | 010 | 011 |
+   * e16 |  R  | 101 | 110 | 111 | 000 | 001 | 010 |
+   * e32 |  R  |  R  | 101 | 110 | 111 | 000 | 001 |
+   * e64 |  R  |  R  |  R  | 101 | 110 | 111 | 000 |
+   */
+  private val log2NewRatio = vlmul - vsew
+  private val log2OldRatio = oldVt.vlmul- oldVt.vsew
+  private val keepVlIllegal: Bool = io.in.oldVt match {
+    case Some(_) => isKeepVl && (oldVt.illegal || log2NewRatio =/= log2OldRatio)
+    case None => 0.B
+  }
+
+  private val illegal = lmulIllegal | sewIllegal | vtypeIllegal | vtype.illegal | keepVlIllegal
+
+  vl := Mux(uopIsSetVlmax, vlmax, normalVL)
 
   outVConfig.vl := Mux(illegal, 0.U, vl)
   outVConfig.vtype.illegal := illegal
@@ -106,7 +130,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
   outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
 
-  private val log2VlenDivVsew = log2Vlen.U(3.W) - log2Vsew
+  private val log2VlenDivVsew = log2Vlen.U - log2Vsew
   private val vlenDivVsew = 1.U(vlWidth.W) << log2VlenDivVsew
   io.out.vlmax := Mux(vlmax >= vlenDivVsew, vlmax, vlenDivVsew)
 

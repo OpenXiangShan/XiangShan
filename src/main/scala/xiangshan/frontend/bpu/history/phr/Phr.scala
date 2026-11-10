@@ -18,11 +18,11 @@ package xiangshan.frontend.bpu.history.phr
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.Train
 
 // PHR: Predicted History Register
 class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
@@ -31,10 +31,12 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val s1_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s2_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s3_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val phr:            Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
+    val phr:            UInt                  = Output(UInt(PhrHistoryLength.W))
     val phrMeta:        PhrMeta               = Output(new PhrMeta)
-    val train:          PhrUpdate             = Input(new PhrUpdate)       // redirect from backend
-    val commit:         Valid[BpuTrain]       = Input(Valid(new BpuTrain)) // update from commit
+    val train:          PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
+    val s1Train:        S1Train               = Input(new S1Train)
+    val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
+    val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: PhrIO = IO(new PhrIO)
@@ -42,6 +44,16 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
 
+  // s1Train, s2 override and s3 override commit to the physical PHR one
+  // cycle later. A redirect cancels any pending write; either override also
+  // cancels pending writes from s1.
+  private val pendingValid     = RegInit(false.B)
+  private val pendingTaken     = RegInit(false.B)
+  private val pendingLowBits   = RegInit(0.U(PathHashHighWidth.W))
+  private val pendingShiftBits = RegInit(0.U(Shamt.W))
+  private val pendingBits      = Cat(pendingLowBits, pendingShiftBits)
+
+  // Read PHR through the logical view, including pending-write bypass.
   private def getPhr(ptr: PhrPtr): UInt =
     (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
@@ -50,12 +62,23 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     Cat(redirectErrorPhr(PhrHistoryLength - 1, PathHashHighWidth), phrMeta.phrLowBits)
   }
 
+  private val oldPhrValue = getPhr(phrPtr)
+  private val pendingPhrValue = Mux(
+    pendingValid,
+    Mux(
+      pendingTaken,
+      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashWidth), pendingBits),
+      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashHighWidth), pendingLowBits)
+    ),
+    oldPhrValue
+  )
+
   /*
    * PHR train from redirect/s2_prediction/s3_prediction
    */
 
   private val s0_stall = io.train.s0_stall
-  private val s1_valid = io.train.s1_valid
+  private val s1_valid = io.s1Train.valid
   private val s0_fire  = io.train.stageCtrl.s0_fire
   private val s1_fire  = io.train.stageCtrl.s1_fire
   private val s2_fire  = io.train.stageCtrl.s2_fire
@@ -72,135 +95,220 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s3_foldedPhrReg =
     RegEnable(s2_foldedPhrReg, 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)), s2_fire)
 
-  private val s0_phrPtr    = WireInit(0.U.asTypeOf(new PhrPtr))
-  private val s0_phrPtrReg = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), !s0_stall)
-  private val s1_phrPtr    = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), s0_fire)
+  private val s0_phrPtr = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s1_phrPtr = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), s0_fire)
 
-  private val s0_phrValue    = getPhr(s0_phrPtr)                       // debug use it
-  private val s0_phrRegValue = getPhr(RegEnable(s0_phrPtr, !s0_stall)) // debug use it
-  private val s1_phrValue    = getPhr(s1_phrPtr)
-  private val phrValue       = getPhr(phrPtr)
+  private val phrValue      = pendingPhrValue
+  private val s1_phrLowBits = pendingPhrValue(PathHashHighWidth - 1, 0)
+  private val s1_phrMeta    = WireInit(0.U.asTypeOf(new PhrMeta))
+  s1_phrMeta.phrPtr     := s1_phrPtr
+  s1_phrMeta.phrLowBits := s1_phrLowBits
+  s1_phrMeta.predFoldedHist.foreach(_ := s1_foldedPhrReg)
+  private val s2_phrMeta = RegEnable(s1_phrMeta, 0.U.asTypeOf(new PhrMeta), s1_fire)
+  private val s3_phrMeta = RegEnable(s2_phrMeta, 0.U.asTypeOf(new PhrMeta), s2_fire)
 
+  private val s1UpdateData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val s1_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val s3_override     = WireInit(false.B)
-  private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
+  private val s2_overrideData = Wire(new PhrUpdateData)
+  private val s3_overrideData = Wire(new PhrUpdateData)
+  s2_overrideData.fromUpdateStage(io.train.s2)
+  s3_overrideData.fromUpdateStage(io.train.s3)
+  private val s2_override = s2_overrideData.valid
+  private val s3_override = s3_overrideData.valid
 
-  private val updateData   = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val updateCfiPc  = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val updateTarget = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  private val redirectPhr  = WireInit(0.U(PhrHistoryLength.W))
+  private val redirectS0PhrPtr     = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val redirectS0PhrLowBits = WireInit(0.U(PathHashHighWidth.W))
+  private val redirectS0FoldedPhr  = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val redirectUpdate       = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+  private val s2S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s2S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
+  private val s2S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+  private val s3S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s3S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
+  private val s3S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s3Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+  private val s1S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s1S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
+  private val s1S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s1Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+  private val redirectPhr          = WireInit(0.U(PhrHistoryLength.W))
+
+  // Organize the input data into the structure required for PHR updates
 
   redirectData.valid   := io.train.redirect.valid
   redirectData.taken   := io.train.redirect.bits.taken
-  redirectData.cfiPc   := io.train.redirect.bits.cfiPc
-  redirectData.target  := io.train.redirect.bits.target
+  redirectData.cfiPc   := io.train.redirect.bits.cfiPc.unGuard
+  redirectData.target  := io.train.redirect.bits.target.unGuard
   redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
-  s3_override               := io.train.s3_override
-  s3_overrideData.valid     := s3_override
-  s3_overrideData.taken     := io.train.s3_prediction.taken
-  s3_overrideData.cfiPc     := getCfiPcFromPosition(io.train.s3_startPc, io.train.s3_prediction.cfiPosition)
-  s3_overrideData.target    := io.train.s3_prediction.target
-  s3_overrideData.phrMeta   := io.train.s3_phrMeta
-  s3_overrideData.foldedPhr := s3_foldedPhrReg
+  s1UpdateData.valid              := s1_valid
+  s1UpdateData.taken              := io.s1Train.prediction.taken
+  s1UpdateData.cfiPc              := getCfiPcFromPosition(io.s1Train.startPc, io.s1Train.prediction.cfiPosition)
+  s1UpdateData.target             := io.s1Train.prediction.target.unGuard
+  s1UpdateData.phrMeta.phrPtr     := s1_phrPtr
+  s1UpdateData.phrMeta.phrLowBits := s1_phrLowBits
 
-  s1_overrideData.valid              := s1_valid
-  s1_overrideData.taken              := io.train.s1_prediction.taken
-  s1_overrideData.cfiPc              := getCfiPcFromPosition(io.train.s1_startPc, io.train.s1_prediction.cfiPosition)
-  s1_overrideData.target             := io.train.s1_prediction.target
-  s1_overrideData.foldedPhr          := s1_foldedPhrReg
-  s1_overrideData.phrMeta.phrPtr     := s1_phrPtr
-  s1_overrideData.phrMeta.phrLowBits := s1_phrValue(PathHashHighWidth - 1, 0)
+  // Compute all ShiftBits values and the high bits of the hash
+  private val redirectHashComponents = getPathHashComponents(redirectData.cfiPc, redirectData.target)
+  private val s2HashComponents       = getPathHashComponents(s2_overrideData.cfiPc, s2_overrideData.target)
+  private val s3HashComponents       = getPathHashComponents(s3_overrideData.cfiPc, s3_overrideData.target)
+  private val s1HashComponents       = getPathHashComponents(s1UpdateData.cfiPc, s1UpdateData.target)
 
-  updateData := MuxCase(
-    0.U.asTypeOf(new PhrUpdateData),
+  private val redirectShiftBits = redirectHashComponents._1
+  private val redirectHashHigh  = redirectHashComponents._2
+  private val s2ShiftBits       = s2HashComponents._1
+  private val s2HashHigh        = s2HashComponents._2
+  private val s3ShiftBits       = s3HashComponents._1
+  private val s3HashHigh        = s3HashComponents._2
+
+  // Compute all phrPtr and phrLowBits for updates
+  redirectUpdate := getUpdatePtrs(redirectData, redirectHashHigh)
+  s2Update       := getUpdatePtrs(s2_overrideData, s2HashHigh)
+  s3Update       := getUpdatePtrs(s3_overrideData, s3HashHigh)
+  s1Update       := getUpdatePtrs(s1UpdateData, s1HashComponents._2)
+  private val s1ShiftBits = s1HashComponents._1
+
+  redirectS0PhrPtr     := redirectUpdate.phrPtr
+  redirectS0PhrLowBits := redirectUpdate.phrLowBits
+  s2S0PhrPtr           := s2Update.phrPtr
+  s2S0PhrLowBits       := s2Update.phrLowBits
+  s3S0PhrPtr           := s3Update.phrPtr
+  s3S0PhrLowBits       := s3Update.phrLowBits
+  s1S0PhrPtr           := Mux(io.s1Train.prediction.taken, s1Update.phrPtr, s1_phrPtr)
+  s1S0PhrLowBits       := Mux(io.s1Train.prediction.taken, s1Update.phrLowBits, s1_phrLowBits)
+
+  phrPtr := MuxCase(
+    phrPtr,
     Seq(
-      redirectData.valid -> redirectData,
-      s3_override        -> s3_overrideData,
-      s1_valid           -> s1_overrideData
+      redirectData.valid -> redirectS0PhrPtr,
+      s3_override        -> s3S0PhrPtr,
+      s2_override        -> s2S0PhrPtr,
+      s1_valid           -> s1S0PhrPtr
+    )
+  )
+  s0_phrPtr := MuxCase(
+    phrPtr,
+    Seq(
+      redirectData.valid -> redirectS0PhrPtr,
+      s3_override        -> s3S0PhrPtr,
+      s2_override        -> s2S0PhrPtr,
+      s1_valid           -> s1S0PhrPtr
     )
   )
 
-  updateCfiPc  := updateData.cfiPc
-  updateTarget := updateData.target
+  redirectPhr := getRedirectPhr(redirectData.phrMeta)
+  redirectS0FoldedPhr := getNextFoldedPhr(
+    redirectData,
+    computeAllFoldedPhr(redirectPhr),
+    redirectPhr,
+    redirectHashHigh,
+    redirectShiftBits
+  )
 
-  /*
-   * phr := (phr<<Shamt) ^ hash
-   */
-  private val hash      = pathHash(updateCfiPc, updateTarget)
-  private val shiftBits = hash(Shamt - 1, 0)
-  private val hashHigh  = hash(PathHashWidth - 1, Shamt)
+  private val s2_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
+  private val s2_phr        = getRedirectPhr(s2_phrMeta)
+  s2_oldestBits.read(VecInit(s2_phr.asBools), s2_phrMeta.phrPtr)
+  private val s3_oldestBits =
+    RegEnable(s2_oldestBits, 0.U.asTypeOf(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo)), s2_fire)
 
-  when(updateData.valid) {
-    phrPtr    := updateData.phrMeta.phrPtr
-    s0_phrPtr := updateData.phrMeta.phrPtr
-    for (i <- 1 to PathHashHighWidth) {
-      phr((updateData.phrMeta.phrPtr + i.U).value) := updateData.phrMeta.phrLowBits(i - 1)
-    }
-    when(updateData.taken) {
-      for (i <- 0 until Shamt) {
-        phr((updateData.phrMeta.phrPtr - i.U).value) := shiftBits(Shamt - 1 - i)
+  XSError(
+    s2_fire && s2_override && s2_phrMeta.asUInt =/= io.train.s2.phrMeta.asUInt,
+    "s2_phrMeta mismatch!\n"
+  )
+  XSError(
+    s3_fire && s3_override && s3_phrMeta.asUInt =/= io.train.s3.phrMeta.asUInt,
+    "s3_phrMeta mismatch!\n"
+  )
+
+  s2S0FoldedPhr := getNextFoldedPhr(
+    s2_overrideData,
+    s2_oldestBits,
+    s2_foldedPhrReg,
+    s2HashHigh,
+    s2ShiftBits
+  )
+
+  s3S0FoldedPhr := getNextFoldedPhr(
+    s3_overrideData,
+    s3_oldestBits,
+    s3_foldedPhrReg,
+    s3HashHigh,
+    s3ShiftBits
+  )
+
+  private val s3S0FoldedPhrTest = getNextFoldedPhr(
+    s3_overrideData,
+    s3_foldedPhrReg,
+    getRedirectPhr(s3_overrideData.phrMeta),
+    s3HashHigh,
+    s3ShiftBits
+  )
+  XSError(
+    s3_fire && s3_override && s3S0FoldedPhr.asUInt =/= s3S0FoldedPhrTest.asUInt,
+    "s3 next folded PHR logic has inconsistency between two implementations!\n"
+  )
+
+  private val s1_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
+  s1_oldestBits.read(VecInit(pendingPhrValue.asBools), s1_phrPtr)
+  s1S0FoldedPhr := getNextFoldedPhr(
+    s1UpdateData,
+    s1_oldestBits,
+    s1_foldedPhrReg,
+    s1HashComponents._2,
+    s1HashComponents._1
+  )
+
+  private val redirectBits = Cat(redirectS0PhrLowBits, redirectShiftBits)
+
+  private val s1UpdateWins =
+    s1_valid && io.s1Train.prediction.taken && !redirectData.valid && !s3_override && !s2_override
+  private val s2UpdateWins = s2_override && !redirectData.valid && !s3_override
+  private val s3UpdateWins = s3_override && !redirectData.valid
+  pendingValid := s3UpdateWins || s2UpdateWins || s1UpdateWins
+  when(s3UpdateWins) {
+    pendingTaken     := s3_overrideData.taken
+    pendingLowBits   := s3S0PhrLowBits
+    pendingShiftBits := s3ShiftBits
+  }.elsewhen(s2UpdateWins) {
+    pendingTaken     := s2_overrideData.taken
+    pendingLowBits   := s2S0PhrLowBits
+    pendingShiftBits := s2ShiftBits
+  }.elsewhen(s1UpdateWins) {
+    pendingTaken     := true.B
+    pendingLowBits   := s1S0PhrLowBits
+    pendingShiftBits := s1ShiftBits
+  }
+
+  private val phrWriteValid   = redirectData.valid || pendingValid
+  private val phrWriteTaken   = Mux(redirectData.valid, redirectData.taken, pendingTaken)
+  private val phrWritePtr     = Mux(redirectData.valid, s0_phrPtr, phrPtr)
+  private val phrWriteBits    = Mux(redirectData.valid, redirectBits, pendingBits)
+  private val phrWriteLowBits = Mux(redirectData.valid, redirectS0PhrLowBits, pendingLowBits)
+  when(phrWriteValid) {
+    when(phrWriteTaken) {
+      for (i <- 0 until PathHashWidth) {
+        phr((phrWritePtr + (i + 1).U).value) := phrWriteBits(i)
       }
+    }.otherwise {
       for (i <- 1 to PathHashHighWidth) {
-        phr((updateData.phrMeta.phrPtr + i.U).value) := hashHigh(i - 1) ^ updateData.phrMeta.phrLowBits(i - 1)
+        phr((phrWritePtr + i.U).value) := phrWriteLowBits(i - 1)
       }
-      phrPtr    := updateData.phrMeta.phrPtr - Shamt.U
-      s0_phrPtr := updateData.phrMeta.phrPtr - Shamt.U
     }
-  }.otherwise {
-    s0_phrPtr := phrPtr
   }
 
   /*
-   * PHR folded history compute & maintenance
+   * PHR folded history select
    */
-  AllFoldedHistoryInfo.foreach { info =>
-    s0_foldedPhr.getHistWithInfo(info).foldedHist :=
-      computeFoldedHist(phrValue, info.FoldedLength)(info.HistoryLength)
-  }
-
-  when(redirectData.valid) {
-    redirectPhr := getRedirectPhr(redirectData.phrMeta)
-    AllFoldedHistoryInfo.foreach { info =>
-      redirectData.foldedPhr.getHistWithInfo(info).foldedHist :=
-        computeFoldedHist(redirectPhr, info.FoldedLength)(info.HistoryLength)
-    }
-    s0_foldedPhr := redirectData.foldedPhr
-    when(redirectData.taken) {
-      s0_foldedPhr := redirectData.foldedPhr.update(
-        VecInit(redirectPhr.asBools),
-        redirectData.phrMeta.phrPtr,
-        hashHigh,
-        Shamt,
-        shiftBits
-      )
-    }
-  }.elsewhen(s3_override) {
-    s0_foldedPhr := s3_foldedPhrReg
-    when(s3_overrideData.taken) {
-      s0_foldedPhr := s3_foldedPhrReg.update(
-        VecInit(getRedirectPhr(s3_overrideData.phrMeta).asBools),
-        s3_overrideData.phrMeta.phrPtr,
-        hashHigh,
-        Shamt,
-        shiftBits
-      )
-    }
-  }.elsewhen(s1_valid) {
-    s0_foldedPhr := s1_foldedPhrReg
-    when(s1_overrideData.taken) {
-      s0_foldedPhr := s1_foldedPhrReg.update(
-        VecInit(getRedirectPhr(s1_overrideData.phrMeta).asBools),
-        s1_overrideData.phrMeta.phrPtr,
-        hashHigh,
-        Shamt,
-        shiftBits
-      )
-    }
-  }.otherwise {
-    s0_foldedPhr := s0_foldedPhrReg
-  }
+  s0_foldedPhr := MuxCase(
+    s0_foldedPhrReg,
+    Seq(
+      redirectData.valid                        -> redirectS0FoldedPhr,
+      s3_override                               -> s3S0FoldedPhr,
+      s2_override                               -> s2S0FoldedPhr,
+      (s1_valid && io.s1Train.prediction.taken) -> s1S0FoldedPhr
+    )
+  )
 
   AllFoldedHistoryInfo.foreach { info =>
     histFoldedPhr.getHistWithInfo(info).foldedHist :=
@@ -218,16 +326,24 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     metaPhrFolded.getHistWithInfo(info).foldedHist :=
       computeFoldedHist(predictHist, info.FoldedLength)(info.HistoryLength)
   }
+  private val oldFoldedPhr = MuxCase(
+    s1_foldedPhrReg,
+    Seq(
+      redirectData.valid -> computeAllFoldedPhr(redirectPhr),
+      s3_override        -> s3_foldedPhrReg,
+      s2_override        -> s2_foldedPhrReg,
+      s1_valid           -> s1_foldedPhrReg
+    )
+  )
 
-  io.phrMeta.phrPtr     := s1_phrPtr
-  io.phrMeta.phrLowBits := s1_phrValue(PathHashHighWidth - 1, 0)
-  io.phrMeta.predFoldedHist.foreach(_ := s1_foldedPhrReg)
-  io.phr            := phr
+  io.phrMeta        := s1_phrMeta
+  io.phr            := phr.asUInt
   io.s0_foldedPhr   := s0_foldedPhr
   io.s1_foldedPhr   := s1_foldedPhrReg
   io.s2_foldedPhr   := s2_foldedPhrReg
   io.s3_foldedPhr   := s3_foldedPhrReg
   io.trainFoldedPhr := metaPhrFolded
+  io.oldFoldedPhr   := oldFoldedPhr
 
   // TODO: Currently unavailable，waiting for ftq commit info
   // commit time phr checker
@@ -258,7 +374,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       commitHistPtr                           := commitHistPtr - 2.U
     }
 
-    val commitHistValue        = commitHist.asUInt
     val commitTrueHist         = getCommitHist(commitHistPtr)
     val commitFDiffPredictFVec = WireInit(0.U.asTypeOf(Vec(AllFoldedHistoryInfo.size, Bool())))
     AllFoldedHistoryInfo.zipWithIndex foreach { case (info, i) =>
@@ -283,16 +398,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
     XSPerfAccumulate(f"predictFHist_diff_commitTrueFHist", predictFHist_diff_commitTrueFHist)
     XSPerfAccumulate(f"predictHist_diff_commitHist", predictHist_diff_commitHist)
-    dontTouch(commitHistValue)
-    dontTouch(commitTrueHist)
-    dontTouch(commitShiftBits)
-    dontTouch(predictHist)
-    dontTouch(commitHistPtr)
-    dontTouch(predictFHist_diff_commitTrueFHist)
-    dontTouch(predictHist_diff_commitHist)
-    dontTouch(commitFDiffPredictFVec.asUInt)
-    dontTouch(commitTakenPc)
-    dontTouch(histFolded_diff_s0Folded)
   }
 
   if (io.commit.bits.meta.phr.predFoldedHist.isDefined) {
@@ -306,14 +411,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   // TODO: remove dontTouch
-  dontTouch(s0_foldedPhr)
-  dontTouch(s1_foldedPhrReg)
-  dontTouch(s2_foldedPhrReg)
-  dontTouch(s0_phrValue)
-  dontTouch(s0_phrRegValue)
   dontTouch(phrValue)
   dontTouch(histFoldedPhr)
-  dontTouch(redirectPhr)
-  dontTouch(s0_phrPtr)
-  dontTouch(s1_phrPtr)
 }

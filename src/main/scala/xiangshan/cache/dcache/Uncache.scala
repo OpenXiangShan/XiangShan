@@ -21,13 +21,12 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import utility.PopCount
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 import xiangshan._
 import xiangshan.mem._
 import xiangshan.mem.Bundles._
-import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
+import xscache.coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
 import difftest._
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
@@ -65,9 +64,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
   val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
-
-  val resp_denied = Bool()
-  val resp_corrupt = Bool()
+  val resp_derr = Bool()
 
   /* NOTE: if it support the internal forward logic, here can uncomment */
   // val fwd_data = UInt(XLEN.W)
@@ -82,6 +79,7 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
     resp_nderr := false.B
+    resp_derr := false.B
     // fwd_data := 0.U
     // fwd_mask := 0.U
   }
@@ -102,9 +100,8 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     when(cmd === MemoryOpConstants.M_XRD) {
       data := x.data
     }
-    resp_nderr := x.denied || x.corrupt
-    resp_denied := x.denied
-    resp_corrupt := x.corrupt
+    resp_nderr := x.denied
+    resp_derr := x.corrupt && !x.denied
   }
 
   // def update(forwardData: UInt, forwardMask: UInt): Unit = {
@@ -122,14 +119,12 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     r.data := resp_fwd_data
     r.id := eid
     r.nderr := resp_nderr
-    r.denied := resp_denied
-    r.corrupt := resp_corrupt
     r.nc := nc
     r.is2lq := cmd === MemoryOpConstants.M_XRD
     r.miss := false.B
     r.replay := false.B
     r.tag_error := false.B
-    r.error := false.B
+    r.error := resp_derr
     r
   }
 }
@@ -156,7 +151,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def can2Lsq(): Bool = valid && waitReturn
   def canMerge(): Bool = valid && !inflight
   def isFwdOld(): Bool = valid && (inflight || waitReturn)
-  def isFwdNew(): Bool = valid && !inflight && !waitReturn
+  def isFwdNew(): Bool = valid && !inflight && !waitReturn && waitSame
 
   def setValid(x: Bool): Unit = { valid := x}
   def setInflight(x: Bool): Unit = { inflight := x}
@@ -181,7 +176,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val enableOutstanding = Input(Bool())
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
-  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  val forward = Vec(LoadPipelineWidth, Flipped(new UncacheForward))
   val wfi = Flipped(new WfiReqBundle)
   val busError = Output(new L1BusErrorUnitInfo())
 }
@@ -217,7 +212,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val req  = io.lsq.req
+  val req  = Wire(Decoupled(new UncacheWordReq))
   val resp = io.lsq.resp
   val mem_acquire = bus.a
   val mem_grant   = bus.d
@@ -230,10 +225,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   bus.d.ready := false.B
   bus.e.valid := false.B
   bus.e.bits  := DontCare
-  io.lsq.req.ready := req_ready
+  req.ready := req_ready
   io.lsq.resp.valid := false.B
   io.lsq.resp.bits := DontCare
-
 
   /******************************************************************
    * Data Structure
@@ -246,6 +240,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val noPending = RegInit(VecInit(Seq.fill(UncacheBufferSize)(true.B)))
 
   // drain buffer
+  val entriesEmpty = Wire(Bool())
   val empty = Wire(Bool())
   val f1_needDrain = Wire(Bool())
   val do_uarch_drain = RegInit(false.B)
@@ -256,6 +251,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   }.otherwise{
     do_uarch_drain := false.B
   }
+
+  // Flush and uarch drain stop new requests at the skid input. Requests already
+  // accepted by the skid must still reach e0 so that the uncache buffer drains.
+  val skidOccupied = skidBuffer(
+    io.lsq.req,
+    req,
+    false.B,
+    "UncacheSkidBuffer",
+    !(io.flush.valid || do_uarch_drain)
+  )
 
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
@@ -299,7 +304,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   def canMergeSecondary(eid: UInt): Bool = {
     // old entry is not inflight and senting
-    states(eid).canMerge() && !(q0_canSent && q0_canSentIdx === eid)
+    states(eid).canMerge() && !(mem_acquire.fire && q0_canSentIdx === eid)
   }
 
   /******************************************************************
@@ -360,10 +365,14 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_allocWaitSame = e0_allocWaitSameVec.reduce(_ || _)
   val e0_sid = Mux(e0_canMerge, e0_mergeIdx, e0_allocIdx)
-  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
+  // During a drain, only the request already captured by the skid buffer may
+  // enter e0. New LSQ requests are stopped at the skid input.
+  val e0_reject = (do_uarch_drain && !skidOccupied) ||
+    (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
+  req_ready := !e0_reject
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_req_valid){
+  when(e0_canMerge && e0_fire){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
@@ -372,8 +381,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       states(e0_allocIdx).setWaitSame(true.B)
     }
   }
-
-  req_ready := !e0_reject
 
   /* e1: return accept */
   io.lsq.idResp.valid := RegNext(e0_fire)
@@ -394,13 +401,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    *          because there is no guarantee that mem_aquire will be always ready.
    ******************************************************************/
 
-  val q0_canSentVec = sizeMap(i =>
-    (io.enableOutstanding || uState === s_idle) &&
-    states(i).can2Bus()
-  )
+  val q0_canSentVec = sizeMap(i => states(i).can2Bus())
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
   q0_canSentIdx := q0_res._1
-  q0_canSent := q0_res._2
+  q0_canSent := q0_res._2 && (io.enableOutstanding || uState === s_idle)
   q0_entry := entries(q0_canSentIdx)
 
   val size = PopCount(q0_entry.mask)
@@ -498,7 +502,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    * Buffer Flush
    * 1. when io.flush.valid is true: drain store queue and ubuffer
    ******************************************************************/
-  empty := !VecInit(states.map(_.isValid())).asUInt.orR
+  entriesEmpty := !VecInit(states.map(_.isValid())).asUInt.orR
+  empty := entriesEmpty && !skidOccupied
   io.flush.empty := empty
 
 
@@ -518,28 +523,34 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   f1_needDrain := f1_tagMismatchVec.asUInt.orR && !empty
 
   for ((forward, i) <- io.forward.zipWithIndex) {
-    val f0_fwdValid = forward.valid
+    val fn1_fwdValid = forward.s0Req.valid
+    val fn1_req = forward.s0Req.bits
+    val f0_fwdValid = RegNext(fn1_fwdValid)
+    val f0_req = RegEnable(fn1_req, fn1_fwdValid)
+    val f0_paddr = forward.s1Req.paddr
+    val f0_kill = forward.s1Kill
     val f1_fwdValid = RegNext(f0_fwdValid)
 
     /* f0 */
     // vaddr match
-    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
+    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, f0_req.vaddr))
     val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdOld())
     val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdNew())
     // ONLY for fast use to get better timing
     val f0_flyMaskFast = shiftMaskToHigh(
-      forward.vaddr,
+      f0_req.vaddr,
       Mux1H(f0_flyTagMatches, f0_fwdMaskCandidates)
     ).asTypeOf(Vec(VDataBytes, Bool()))
     val f0_idleMaskFast = shiftMaskToHigh(
-      forward.vaddr,
+      f0_req.vaddr,
       Mux1H(f0_idleTagMatches, f0_fwdMaskCandidates)
     ).asTypeOf(Vec(VDataBytes, Bool()))
 
     /* f1 */
     val f1_flyTagMatches = RegEnable(f0_flyTagMatches, f0_fwdValid)
     val f1_idleTagMatches = RegEnable(f0_idleTagMatches, f0_fwdValid)
-    val f1_fwdPAddr = RegEnable(forward.paddr, f0_fwdValid)
+    val f1_fwdPAddr = RegEnable(f0_paddr, f0_fwdValid)
+    val f1_kill = RegEnable(f0_kill, f0_fwdValid)
     // select
     val f1_flyMask = Mux1H(f1_flyTagMatches, f1_fwdMaskCandidates)
     val f1_flyData = Mux1H(f1_flyTagMatches, f1_fwdDataCandidates)
@@ -553,28 +564,25 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), f1_fwdPAddr))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
-    ).asUInt.orR
+    ).asUInt.orR && !f1_kill
     XSDebug(
       f1_tagMismatchVec(i),
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
       f1_ptagMatches.asUInt,
       RegEnable(f0_vtagMatches.asUInt, f0_fwdValid),
-      RegEnable(forward.vaddr, f0_fwdValid),
-      RegEnable(forward.paddr, f0_fwdValid)
+      RegEnable(f0_req.vaddr, f0_fwdValid),
+      RegEnable(f0_paddr, f0_fwdValid)
     )
     // response
-    forward.addrInvalid := false.B // addr in ubuffer is always ready
-    forward.dataInvalid := false.B // data in ubuffer is always ready
-    forward.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
+    forward.s2Resp.bits.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
     for (j <- 0 until VDataBytes) {
-      forward.forwardMaskFast(j) := f0_flyMaskFast(j) || f0_idleMaskFast(j)
-
-      forward.forwardData(j) := f1_fwdData(j)
-      forward.forwardMask(j) := false.B
+      forward.s2Resp.bits.forwardData(j) := f1_fwdData(j)
+      forward.s2Resp.bits.forwardMask(j) := false.B
       when(f1_fwdMask(j) && f1_fwdValid) {
-        forward.forwardMask(j) := true.B
+        forward.s2Resp.bits.forwardMask(j) := true.B
       }
     }
+    forward.s2Resp.valid := f1_fwdValid
 
   }
 
@@ -605,22 +613,23 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("q0_acquire", q0_canSent)
   XSPerfAccumulate("q0_acquire_store", q0_canSent && q0_isStore)
   XSPerfAccumulate("q0_acquire_load", q0_canSent && !q0_isStore)
-  XSPerfAccumulate("uncache_memBackTypeMM", io.lsq.req.fire && io.lsq.req.bits.memBackTypeMM)
-  XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
+  XSPerfAccumulate("skid_enqueue", io.lsq.req.fire)
+  XSPerfAccumulate("uncache_memBackTypeMM", e0_fire && e0_req.memBackTypeMM)
+  XSPerfAccumulate("uncache_mmio_store", e0_fire && isStore(e0_req.cmd) && !e0_req.nc)
+  XSPerfAccumulate("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc)
+  XSPerfAccumulate("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc)
+  XSPerfAccumulate("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc)
   XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && mem_acquire.fire)
-  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR)))
+  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
   val perfEvents = Seq(
-    ("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
-    ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
+    ("uncache_mmio_store", e0_fire && isStore(e0_req.cmd) && !e0_req.nc),
+    ("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc),
+    ("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc),
+    ("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc),
     ("uncache_outstanding", uState =/= s_idle && mem_acquire.fire),
-    ("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR))),
+    ("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
   )
 

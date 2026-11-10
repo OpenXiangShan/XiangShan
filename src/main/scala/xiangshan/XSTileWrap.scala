@@ -25,7 +25,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
+import xscache.chi.{AsyncPortIO, CHIAsyncBridgeSource, DecoupledPortIO, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
@@ -77,7 +77,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
       val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
-      val cpu_halt = Output(Bool())
+      val reset_mtvec  = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
+      val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
@@ -87,11 +88,14 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
+      val chi = Option.when(isOpenLLC)(EnableCHIAsyncBridge match {
         case Some(param) => new AsyncPortIO(param)
         case None => new PortIO
-      }
-      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      })
+      val decoupledCHI = Option.when(isZhuJiang)(
+        new DecoupledPortIO
+      )
+      val nodeID = Some(Input(UInt(NodeIDWidth.W)))
       val clintTime = EnableClintAsyncBridge match {
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
@@ -142,9 +146,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       tile_teemsiInfo.bits := teemsi_data_cpu
     }
     tile.module.io.reset_vector := io.reset_vector
+    tile.module.io.reset_mtvec.foreach(_ := io.reset_mtvec.get)
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
-    io.cpu_halt := tile.module.io.cpu_halt
+    io.cpu_wfi := tile.module.io.cpu_wfi
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.msiAck := tile.module.io.msiAck
     io.teemsiAck zip tile.module.io.teemsiAck foreach { case (io_teemsiAck, tile_teemsiAck) =>
@@ -152,9 +157,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     io.hartIsInReset := tile.module.io.hartIsInReset
     withClockAndReset(clock, reset_sync) {
-      tile.module.io.traceCoreInterface.fromEncoder.enable := 
+      tile.module.io.traceCoreInterface.fromEncoder.enable :=
         AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.enable, 3, 0)
-      tile.module.io.traceCoreInterface.fromEncoder.stall := 
+      tile.module.io.traceCoreInterface.fromEncoder.stall :=
         AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.stall, 3, 0)
     }
     io.traceCoreInterface.toEncoder := tile.module.io.traceCoreInterface.toEncoder
@@ -173,7 +178,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
       case Some(param) =>
-        val time_sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        val time_sink = withClockAndReset(clock, reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
         time_sink.io.async <> io.clintTime
         time_sink.io.deq.ready := true.B
         tile.module.io.clintTime.valid := time_sink.io.deq.valid
@@ -183,14 +188,18 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
-        source.io.enq <> tile.module.io.chi.get
-        io.chi <> source.io.async
-      case None =>
-        require(enableCHI)
-        io.chi <> tile.module.io.chi.get
+    if (isOpenLLC) {
+      EnableCHIAsyncBridge match {
+        case Some(param) =>
+          val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
+          source.io.enq <> tile.module.io.chi.get
+          io.chi.get <> source.io.async
+        case None =>
+          io.chi.get <> tile.module.io.chi.get
+      }
+    } else {
+      require(EnableCHIAsyncBridge.isEmpty, "LLC=ZhuJiang does not support async CHI bridge")
+      io.decoupledCHI.get <> tile.module.io.decoupledCHI.get
     }
 
     withClockAndReset(clock, reset_sync) {

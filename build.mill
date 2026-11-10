@@ -16,8 +16,8 @@
 package build
 
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
-import $ivy.`org.chipsalliance::chisel:7.3.0`
-import $ivy.`org.chipsalliance::firtool-resolver:2.0.1`
+import $ivy.`org.chipsalliance::chisel:7.13.0`
+import $ivy.`org.chipsalliance::firtool-resolver:2.1.1`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -38,9 +38,12 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance::chisel:7.3.0")
+  def ivyDeps: T[Agg[Dep]] = Agg(
+    mvn"org.chipsalliance::chisel:7.13.0",
+    mvn"com.lihaoyi::sourcecode:0.4.4",
+  )
 
-  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivy"org.chipsalliance:::chisel-plugin:7.3.0")
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(mvn"org.chipsalliance:::chisel-plugin:7.13.0")
 
   def resolveFirtoolDeps = T {
     firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
@@ -54,7 +57,7 @@ object `rocket-chip` extends ChiselModule {
   object macros extends ScalaModule {
     def scalaVersion: T[String] = defaultScalaVersion
 
-    def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
+    def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:$defaultScalaVersion")
   }
 
   object hardfloat extends ChiselModule {
@@ -72,42 +75,55 @@ object `rocket-chip` extends ChiselModule {
   def moduleDeps = Seq(macros, hardfloat, cde)
 
   def ivyDeps: T[Agg[Dep]] =
-    super.ivyDeps() ++ Agg(ivy"com.lihaoyi::mainargs:0.7.7", ivy"org.json4s::json4s-jackson:4.0.7")
+    super.ivyDeps() ++ Agg(mvn"com.lihaoyi::mainargs:0.7.7", mvn"org.json4s::json4s-jackson:4.0.7")
 }
 
 object utility extends ChiselModule {
   def moduleDeps = Seq(`rocket-chip`)
 
-  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"com.lihaoyi::sourcecode:0.4.4")
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps()
 
   object test extends SbtTests with TestModule.ScalaTest {
-    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(ivy"org.scalatest::scalatest:3.2.19")
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(mvn"org.scalatest::scalatest:3.2.19")
   }
 }
 
-object yunsuan extends ChiselModule {}
-
-object huancun extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility)
+object yunsuan extends ChiselModule {
+  def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(mvn"com.lihaoyi::sourcecode:0.4.4")
 }
 
-object coupledL2 extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility, huancun)
+object XSCache extends ChiselModule {
+  def millSourcePath = pwd / "XSCache"
+
+  def moduleDeps = Seq(`rocket-chip`, utility, openNCB, zhujiangCompat)
+
+  override def sources: T[Seq[PathRef]] = Task.Sources {
+    super.sources() ++ Seq(
+      PathRef(millSourcePath / "src" / "test" / "scala" / "ZhuJiangBridge.scala")
+    )
+  }
 }
 
 object openNCB extends ChiselModule {
-  def millSourcePath = pwd / "openLLC" / "openNCB"
+  def millSourcePath = pwd / "XSCache" / "OpenNCB"
 
   def moduleDeps = Seq(`rocket-chip`)
 }
 
-object openLLC extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility, coupledL2, openNCB)
+object zhujiangCompat extends ChiselModule {
+  def millSourcePath = pwd / "XSCache" / "ZhuJiang"
+
+  def moduleDeps = Seq(`rocket-chip`, utility, difftest)
+
+  override def sources: T[Seq[PathRef]] = Task.Sources {
+    Seq(
+      PathRef(millSourcePath / "src" / "main" / "scala"),
+      PathRef(millSourcePath / "xs-utils" / "src" / "main" / "scala")
+    )
+  }
 }
 
 object difftest extends ChiselModule {
-  def moduleDeps = Seq(utility)
-
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources: T[Seq[PathRef]] = Task.Sources {
       super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
@@ -126,7 +142,7 @@ object ChiselIOPMP extends ChiselModule {
 object macros extends ScalaModule {
   def scalaVersion: T[String] = defaultScalaVersion
 
-  def ivyDeps: T[Agg[Dep]] = Agg(ivy"org.scala-lang:scala-reflect:$defaultScalaVersion")
+  def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:$defaultScalaVersion")
 }
 
 object xiangshan extends ChiselModule {
@@ -135,9 +151,8 @@ object xiangshan extends ChiselModule {
   def moduleDeps = Seq(
     `rocket-chip`,
     difftest,
-    huancun,
-    coupledL2,
-    openLLC,
+    XSCache,
+    zhujiangCompat,
     yunsuan,
     utility,
     ChiselAIA,
@@ -156,13 +171,14 @@ object xiangshan extends ChiselModule {
   )
 
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
-    ivy"org.scalatest::scalatest:3.2.19",
-    ivy"io.circe::circe-yaml:0.16.1",
-    ivy"io.circe::circe-generic-extras:0.14.4"
+    mvn"org.scalatest::scalatest:3.2.19",
+    mvn"io.circe::circe-yaml:0.16.1",
+    mvn"io.circe::circe-generic-extras:0.14.4"
   )
 
-  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature", "-Wunused")
 
+  private def publishLocale: Locale = new Locale.Builder().setLanguage("en").build()
   private def publishVersion: T[String] = VcsVersion.vcsState().format(
     revHashDigits = 8,
     dirtyHashDigits = 0,
@@ -171,7 +187,7 @@ object xiangshan extends ChiselModule {
     tagModifier = (tag: String) =>
       "[Rr]elease.*".r.findFirstMatchIn(tag) match {
         case Some(_) => "KunminghuV3-Release-" + LocalDateTime.now().format(
-            DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en"))
+            DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(publishLocale)
           )
         case None => "KunminghuV3-dev"
       },
@@ -179,7 +195,7 @@ object xiangshan extends ChiselModule {
     untaggedSuffix = " (%s@%s) # %s".format(
       System.getProperty("user.name"),
       java.net.InetAddress.getLocalHost.getHostName,
-      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(publishLocale))
     )
   )
 

@@ -15,27 +15,31 @@
 ***************************************************************************************/
 
 import chisel3._
+import chisel3.experimental.SourceInfo
 import chisel3.util._
-import utils.NamedUInt
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.backend.BackendParams
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
+import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.vector._
 import xiangshan.backend.issue._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.decode.{Imm, ImmUnion}
+import xiangshan.backend.vector.util.BString.BinaryStringHelper
+import _root_.utils.NamedUInt
 
 package object xiangshan {
   object SrcType {
-    def imm = "b0000".U
-    def pc  = "b0000".U
-    def xp  = "b0001".U
-    def fp  = "b0010".U
-    def vp  = "b0100".U
-    def v0  = "b1000".U
-    def no  = "b0000".U // this src read no reg but cannot be Any value
+    def imm = "b0000".U(4.W)
+    def pc  = "b0000".U(4.W)
+    def xp  = "b0001".U(4.W)
+    def fp  = "b0010".U(4.W)
+    def vp  = "b0100".U(4.W)
+    def v0  = "b1000".U(4.W)
+    def no  = "b0000".U(4.W) // this source read no reg but cannot be Any value
 
     // alias
     def reg = this.xp
@@ -44,7 +48,6 @@ package object xiangshan {
 
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isReg(srcType: UInt) = srcType(0)
     def isXp(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
     def isVp(srcType: UInt) = srcType(2)
@@ -65,15 +68,8 @@ package object xiangshan {
     def isBusy(state: UInt): Bool = state === this.busy
   }
 
-  def FuOpTypeWidth = 9
-  object FuOpType {
-    def apply() = UInt(FuOpTypeWidth.W)
-    def X     = BitPat("b0_0000_0000")
+  val FuOpType: Opcode.type = Opcode
 
-    // mv/cvt ##  f/i(input) ## f/i(output) ## intr's func
-    def FMVFX     = BitPat("b1_0_1_000000") // i2f
-    def FMVXF     = BitPat("b1_1_0_000000") // f2i
-  }
   object VlduType {
     // bit encoding: | vector or scala (2bit) || mop (2bit) | lumop(5bit) |
     // only unit-stride use lumop
@@ -95,8 +91,9 @@ package object xiangshan {
     def vlse      = "b01_10_00000".U // strided
     def vloxe     = "b01_11_00000".U // index
 
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isUnitStride(fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U
+    def isWhole  (fuOpType: UInt): Bool = isUnitStride(fuOpType) && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = isUnitStride(fuOpType) && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
     def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
@@ -122,6 +119,7 @@ package object xiangshan {
     def vsse      = "b10_10_00000".U // strided
     def vsoxe     = "b10_11_00000".U // index
 
+    def isUnitStride(fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
@@ -132,10 +130,8 @@ package object xiangshan {
   object IF2VectorType {
     // use last 2 bits for vsew
     def iDup2Vec   = "b1_00".U
-    def fDup2Vec   = "b1_01".U
     def immDup2Vec = "b1_10".U
     def i2Vec      = "b0_00".U
-    def f2Vec      = "b0_01".U
     def imm2Vec    = "b0_10".U
     def needDup(bits: UInt): Bool = bits(2)
     def isImm(bits: UInt): Bool = bits(1)
@@ -146,13 +142,12 @@ package object xiangshan {
     def FMX_H_X   =  "b0_01_01".U
   }
 
-  object CommitType {
-    def NORMAL = "b00".U  // int/fp
-    def BRANCH = "b01".U  // branch
-    def LOAD   = "b10".U  // load
-    def STORE  = "b11".U  // store
+  object CommitType extends NamedUInt(2) {
+    def NORMAL = b"00"  // int/fp
+    def BRANCH = b"01"  // branch
+    def LOAD   = b"10"  // load
+    def STORE  = b"11"  // store
 
-    def apply() = UInt(2.W)
     def isLoadStore(commitType: UInt): Bool = commitType(1)
     def lsInstIsStore(commitType: UInt): Bool = commitType(0)
     def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
@@ -169,10 +164,216 @@ package object xiangshan {
     // def isException(level: UInt) = level(1) && level(0)
   }
 
-  object ExceptionVec {
+  trait SparseVecHelper[T <: Data] { this: SparseVec[T] =>
+    val length: Int
+    /**
+     * get the element at [[idx]] as Option[T]
+     * @param idx the index of element
+     * @return Some(element) if exist, None otherwise
+     */
+    def find(idx: Int): Option[T] = this.elements.get(idx.toString)
+
+    /**
+     * get the element at [[idx]], or return [[default]] if not exist
+     * @param idx the index of element
+     * @param default the default value if the element does not exist
+     * @tparam T1 the super type of T, to allow default value to be of a super type
+     * @return the element at [[idx]] if exist, [[default]] otherwise
+     */
+    def findOrElse[T1 >: T](idx: Int, default: => T1): T1 = this.elements.getOrElse(idx.toString, default)
+
+    /**
+     * find the element at [[idx]], and perform function [[f]] on it if exist, or return [[default]] otherwise
+     * @param idx the index of element
+     * @param f the function to perform on the element if exist
+     * @param default the default value if the element does not exist
+     * @tparam R the return type of function [[f]] and default value
+     * @return f(element) if exist, [[default]] otherwise
+     */
+    def getAndPerform[R](idx: Int)(f: T => R, default: R={}): R = {
+      this.find(idx) match {
+        case Some(bit) => f(bit)
+        case None => default
+      }
+    }
+
+    /**
+     * perform function [[f]] on all existing elements, or [[default]] otherwise
+     * @param f the function to perform on existing elements
+     * @param default the default value if the element does not exist
+     */
+    def foreach(f: T => Unit, default: Unit = { /* do nothing */ }): Unit = {
+      (0 until this.length).foreach { i =>
+        this.getAndPerform(i)(f, default)
+      }
+    }
+  }
+
+  // For optional bits in the exception vector
+  class ExceptSparseVec(val indices: Seq[Int]) extends SparseVec[Bool](
+    size         = ExceptSparseVec.ExceptionVecSize,
+    gen          = Bool(),
+    indices      = indices,
+    defaultValue = SparseVec.DefaultValueBehavior.UserSpecified(0.U)
+  )  with SparseVecHelper[Bool] {
+    override val length: Int = ExceptSparseVec.ExceptionVecSize
+
+    /**
+     * The apply method can get the element at [[idx]], or return [[false.B]] if not exist because exceptions will be
+     * ignored by default
+     * @param idx the index of element
+     * @return the element at [[idx]] if exist, [[false.B]] otherwise
+     */
+    def apply(idx: Int): Bool = findOrElse(idx, false.B)
+
+    // initialize all existing bits to false
+    def zeroInit(): Unit = { this.foreach(_ := false.B) }
+
+    /**
+     * Map all existing bits with function [[f]]
+     * @param f the function to map existing bits
+     * @return a new ExceptSparseVec after mapping
+     */
+    def map(f: Bool => Bool): ExceptSparseVec = {
+      val result = Wire(ExceptSparseVec(indices))
+      this.elements.foreach { case (idx, source) =>
+        result.elements(idx) := f(source)
+      }
+      result
+    }
+
+    /**
+     * Convert this SparseVec to a Vec[Bool],
+     * @param default the default value of a non-exist element ([[false.B]] as default)
+     * @return a Vec[Bool] after convertion
+     */
+    def toVec: Vec[Bool] = {
+      val result = Wire(Vec(length, Bool()))
+      (0 until length).foreach { idx => result(idx) := this(idx) }
+      result
+    }
+
+    /**
+     * Convert this SparseVec to a UInt of length bits
+     * the bit at idx 0 of the UInt corresponds to the element at idx 0 of this SparseVec
+     * @return a UInt after convertion
+     */
+    def toUInt: UInt = {
+      this.toVec.asUInt
+    }
+
+    // TODO: check whether the override of do_asUInt is done correctly
+    override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = toUInt
+
+    /**
+     * Or reduction operator
+     * @return a hardware [[Bool]] resulting from every bit of this vector or'd together
+     */
+    def orR: Bool = this.toUInt.orR
+
+    def nonEmpty: Boolean = this.indices.nonEmpty
+
+    def select(sel: Seq[Int], unsel: Seq[Int]): ExceptSparseVec = {
+      // assert if (select - unselect) is not a subset of this.indices,
+      // the result will be wrong but no error will be thrown, so better to avoid this case
+      val newIndices = sel.diff(unsel)
+      assert(newIndices.toSet.subsetOf(this.indices.toSet), "ExceptSparseVec select indices mismatch")
+
+      val result = Wire(ExceptSparseVec(newIndices))
+      newIndices.foreach(i => result(i) := this(i))
+      result
+    }
+
+    def select(sel: Seq[Int], unsel: Int): ExceptSparseVec          = select(sel, Seq(unsel))
+    def select(sel: Seq[Int]): ExceptSparseVec                      = select(sel, Seq.empty)
+    def selectByFu(cfg: FuConfig, unsel: Seq[Int]): ExceptSparseVec = select(cfg.exceptionOut, unsel)
+    def selectByFu(cfg: FuConfig, unsel: Int): ExceptSparseVec      = select(cfg.exceptionOut, unsel)
+    def selectByFu(cfg: FuConfig): ExceptSparseVec                  = select(cfg.exceptionOut)
+    def unselect(unsel: Seq[Int]): ExceptSparseVec                  = select(this.indices, unsel)
+    def unselect(unsel: Int): ExceptSparseVec                       = select(this.indices, unsel)
+
+    // drive all bits in sink by corresponding bits in source.
+    // if not exist in source, use default value false.B
+    def extendFrom(source: ExceptSparseVec): Unit = {
+      require(this.length == source.length, "ExceptSparseVec extendFrom() length mismatch")
+      require(source.indices.toSet.subsetOf(this.indices.toSet),
+        "ExceptSparseVec extendFrom(): source indices should be subset of sink indices")
+
+      this.indices.foreach { idx => this (idx) := source(idx) }
+    }
+
+    /**
+     * Bitwise OR operator, the resulting ExceptSparseVec will have bits that are the OR of corresponding bits
+     * in this and right. the result has indices of the union of this.indices and right.indices
+     * @param [[that]] the other ExceptSparseVec to OR with
+     * @return OR result
+     */
+    def |(that: ExceptSparseVec): ExceptSparseVec = {
+      ExceptSparseVec.orReduce(Seq(this, that))
+    }
+
+    /**
+     * Bitwise AND operator, the resulting ExceptSparseVec will have bits that are the AND of corresponding bits
+     * in this and right. the result has indices of the union of this.indices and right.indices
+     * @param [[that]] the other ExceptSparseVec to AND with
+     * @return AND result
+     */
+    def &(that: ExceptSparseVec): ExceptSparseVec = {
+      ExceptSparseVec.orReduce(Seq(this, that))
+    }
+  }
+
+  object ExceptSparseVec {
     val ExceptionVecSize = 24
-    def apply() = Vec(ExceptionVecSize, Bool())
-    def apply(init: Bool) = VecInit(Seq.fill(ExceptionVecSize)(init))
+
+    // Generate a 24-wide exception vector of Option[Bool], decided by whether the index is given by excpList
+    // vec(i).get is a Bool only when i in excpList, otherwise None
+    def apply(excpList: Seq[Int]): ExceptSparseVec = new ExceptSparseVec(excpList)
+    def apply(): ExceptSparseVec = new ExceptSparseVec(ExceptionNO.all)
+
+    @inline private def mergeHelper(operator: (Vec[Bool], Vec[Bool]) => Bool)(oh: Vec[Bool], seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      require(seqs.nonEmpty, "ExceptSparseVec merge/select with empty seqs")
+      require(oh.length == seqs.length, "ExceptSparseVec merge/select length mismatch")
+
+      val mergeIndices = seqs.flatMap(_.indices).distinct.sorted
+      val result = Wire(ExceptSparseVec(mergeIndices))
+
+      result.elements.foreach { case (idx, source) =>
+        val optionsAtIdx: Vec[Bool] = VecInit(seqs.map(_.elements.getOrElse(idx, false.B)))
+        source := operator(optionsAtIdx, oh)
+      }
+      result
+    }
+
+    def orReduce(seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      require(seqs.nonEmpty, "ExceptSparseVec merge with empty seqs")
+
+      val mergeIndices = seqs.flatMap(_.indices).distinct.sorted
+      val result = Wire(ExceptSparseVec(mergeIndices))
+
+      result.indices.foreach { idx =>
+        result(idx) := seqs.map(_(idx)).reduce(_ || _)
+      }
+
+      result
+    }
+
+    def mux1h(oh: Vec[Bool], seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      val selectOperator = (ors: Vec[Bool], oh: Vec[Bool]) => Mux1H(oh, ors)
+      mergeHelper(selectOperator)(oh, seqs)
+    }
+
+    def mux2(cond: Bool, seqTrue: ExceptSparseVec, seqFalse: ExceptSparseVec): ExceptSparseVec = {
+      mux1h(VecInit(cond, ~cond), Seq(seqTrue, seqFalse))
+    }
+
+    def fill(excpList: Seq[Int], value: Bool): ExceptSparseVec = {
+      val result = Wire(apply(excpList))
+      result.foreach(_ := value)
+      result
+    }
+
+    def zeros(excpList: Seq[Int]): ExceptSparseVec = fill(excpList, false.B)
   }
 
   object PMAMode {
@@ -211,212 +412,14 @@ package object xiangshan {
     }
   }
 
+  val CSROpType = Opcode.CSROpType
 
-  object CSROpType {
-    //                 | func3|
-    def jmp     = "b010_000".U
-    def wfi     = "b100_000".U
-    def wrs_nto = "b100_010".U
-    def wrs_sto = "b100_011".U
-    def wrt     = "b001_001".U
-    def set     = "b001_010".U
-    def clr     = "b001_011".U
-    def wrti    = "b001_101".U
-    def seti    = "b001_110".U
-    def clri    = "b001_111".U
+  val JumpOpType = Opcode.JumpOpType
 
-    def isSystemOp (op: UInt): Bool = op(4)
-    def isWfi      (op: UInt): Bool = op(5) && !op(1)
-    def isWrsNto   (op: UInt): Bool = op(5) && op(1, 0) === "b10".U
-    def isWrsSto   (op: UInt): Bool = op(5) && op(1, 0) === "b11".U
-    def isCsrAccess(op: UInt): Bool = op(3)
-    def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
-    def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
-    def isCSRRW    (op: UInt): Bool = op(3) && op(1, 0) === "b01".U
-    def isCSRRSorRC(op: UInt): Bool = op(3) && op(1)
+  val LinkOpType = Opcode.LinkOpType
 
-    def getCSROp(op: UInt) = op(1, 0)
-    def needImm(op: UInt) = op(2)
-
-    def getFunc3(op: UInt) = op(2, 0)
-  }
-
-  // jump
-  object JumpOpType {
-    def jal  = ALUOpType.jal
-    def jalr = ALUOpType.jalr
-    def auipc = ALUOpType.auipc
-    def jumpOpisJalr(op: UInt) = op(0)
-    def jumpOpisAuipc(op: UInt) = op(1)
-  }
-
-  object FenceOpType {
-    def fence  = "b10000".U
-    def sfence = "b10001".U
-    def fencei = "b10010".U
-    def hfence_v = "b10011".U
-    def hfence_g = "b10100".U
-    def nofence= "b00000".U
-  }
-
-  object ALUOpType {
-    // shift optype
-    def slliuw     = "b000_0000".U // slliuw: ZEXT(src1[31:0]) << shamt
-    def sll        = "b000_0001".U // sll:     src1 << src2
-
-    def bclr       = "b000_0010".U // bclr:    src1 & ~(1 << src2[5:0])
-    def bset       = "b000_0011".U // bset:    src1 | (1 << src2[5:0])
-    def binv       = "b000_0100".U // binv:    src1 ^ (1 << src2[5:0])
-
-    def srl        = "b000_0101".U // srl:     src1 >> src2
-    def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
-    def sra        = "b000_0111".U // sra:     src1 >> src2 (arithmetic)
-
-    def rol        = "b000_1001".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
-    def ror        = "b000_1011".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
-
-    // RV64 32bit optype
-    def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
-    def oddaddw    = "b001_0001".U // oddaddw:   SEXT((src1[0] + src2)[31:0])
-    def subw       = "b001_0010".U // subw:      SEXT((src1 - src2)[31:0])
-    def lui32addw  = "b001_0011".U // lui32addw: SEXT(SEXT(src2[11:0], 32) + {src2[31:12], 12'b0}, 64)
-
-    def addwbit    = "b001_0100".U // addwbit:   (src1 + src2)[0]
-    def addwbyte   = "b001_0101".U // addwbyte:  (src1 + src2)[7:0]
-    def addwzexth  = "b001_0110".U // addwzexth: ZEXT((src1  + src2)[15:0])
-    def addwsexth  = "b001_0111".U // addwsexth: SEXT((src1  + src2)[15:0])
-
-    def sllw       = "b001_1000".U // sllw:     SEXT((src1 << src2)[31:0])
-    def srlw       = "b001_1001".U // srlw:     SEXT((src1[31:0] >> src2)[31:0])
-    def sraw       = "b001_1010".U // sraw:     SEXT((src1[31:0] >> src2)[31:0])
-    def rolw       = "b001_1100".U
-    def rorw       = "b001_1101".U
-
-    // ADD-op
-    def adduw      = "b010_0000".U // adduw:  src1[31:0]  + src2
-    def oddadd     = "b010_0001".U // oddadd:  src1[0]     + src2
-    def add        = "b010_0010".U // add:     src1        + src2
-    def lui32add   = "b010_0011".U // lui32add: SEXT(src2[11:0]) + {src2[63:12], 12'b0}
-
-    def sr29add    = "b010_0100".U // sr29add: src1[63:29] + src2
-    def sr30add    = "b010_0101".U // sr30add: src1[63:30] + src2
-    def sr31add    = "b010_0110".U // sr31add: src1[63:31] + src2
-    def sr32add    = "b010_0111".U // sr32add: src1[63:32] + src2
-
-    def sh1adduw   = "b010_1000".U // sh1adduw: {src1[31:0], 1'b0} + src2
-    def sh1add     = "b010_1001".U // sh1add: {src1[62:0], 1'b0} + src2
-    def sh2adduw   = "b010_1010".U // sh2add_uw: {src1[31:0], 2'b0} + src2
-    def sh2add     = "b010_1011".U // sh2add: {src1[61:0], 2'b0} + src2
-    def sh3adduw   = "b010_1100".U // sh3add_uw: {src1[31:0], 3'b0} + src2
-    def sh3add     = "b010_1101".U // sh3add: {src1[60:0], 3'b0} + src2
-    def sh4add     = "b010_1111".U // sh4add: {src1[59:0], 4'b0} + src2
-
-    // SUB-op: src1 - src2
-    def sub        = "b011_0000".U
-    def sltu       = "b011_0001".U
-    def slt        = "b011_0010".U
-    def maxu       = "b011_0100".U
-    def minu       = "b011_0101".U
-    def max        = "b011_0110".U
-    def min        = "b011_0111".U
-
-    // Zicond
-    def czero_eqz  = "b111_0100".U
-    def czero_nez  = "b111_0110".U
-
-    // auipc/jal/jalr
-    def jal        = "b111_1000".U
-    def jalr       = "b111_1001".U
-    def auipc      = "b111_1010".U
-
-    // misc optype
-    def and        = "b100_0000".U
-    def andn       = "b100_0001".U
-    def or         = "b100_0010".U
-    def orn        = "b100_0011".U
-    def xor        = "b100_0100".U
-    def xnor       = "b100_0101".U
-    def orcb       = "b100_0110".U
-
-    def sextb      = "b100_1000".U
-    def packh      = "b100_1001".U
-    def sexth      = "b100_1010".U
-    def packw      = "b100_1011".U
-
-    def revb       = "b101_0000".U
-    def rev8       = "b101_0001".U
-    def pack       = "b101_0010".U
-    def orh48      = "b101_0011".U
-
-    def szewl1     = "b101_1000".U
-    def szewl2     = "b101_1001".U
-    def szewl3     = "b101_1010".U
-    def byte2      = "b101_1011".U
-
-    def andlsb     = "b110_0000".U
-    def andzexth   = "b110_0001".U
-    def orlsb      = "b110_0010".U
-    def orzexth    = "b110_0011".U
-    def xorlsb     = "b110_0100".U
-    def xorzexth   = "b110_0101".U
-    def orcblsb    = "b110_0110".U
-    def orcbzexth  = "b110_0111".U
-    // for xstrap
-    def xstrap     = "b111_1111".U
-
-    def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
-    def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
-
-    def isShift(func: UInt): Bool      = func(6, 4) === "b000".U
-    def isWiden(func: UInt): Bool      = func(6, 4) === "b001".U
-    def isAddOp(func: UInt): Bool      = func(6, 4) === "b010".U
-    def isCompare(func: UInt): Bool    = func(6, 4) === "b011".U
-    def isMisc(func: UInt): Bool       = func(6) & (!func(5) | !func(4))
-
-    def isAddw(func: UInt): Bool       = func(3, 0) === "b0000".U
-    def isOddaddw(func: UInt): Bool    = func(3, 0) === "b0001".U
-    def isSubw(func: UInt): Bool       = func(3, 0) === "b0010".U
-    def isLui32addw(func: UInt): Bool  = func(3, 0) === "b0011".U
-    def isAddwOrSubw(func: UInt): Bool = !func(3) && !func(2) && !func(0) || func(2)
-    def isSr29add(func: UInt): Bool    = func(1, 0) === "b00".U
-    def isSr30add(func: UInt): Bool    = func(1, 0) === "b01".U
-    def isSr31add(func: UInt): Bool    = func(1, 0) === "b10".U
-    def isSr32add(func: UInt): Bool    = func(1, 0) === "b11".U
-    def isSh1add(func: UInt): Bool     = func(2, 1) === "b00".U
-    def isSh2add(func: UInt): Bool     = func(2, 1) === "b01".U
-    def isSh3add(func: UInt): Bool     = func(2, 1) === "b10".U
-    def isSh4add(func: UInt): Bool     = func(2, 1) === "b11".U
-
-    def isAdd(func: UInt): Bool     = isAddOp(func) && func(3, 2) === "b00".U
-    def isSradd(func: UInt): Bool   = isAddOp(func) && func(3, 2) === "b01".U
-    def isShadd(func: UInt): Bool   = isAddOp(func) && func(3)
-    def isMaxMin(func: UInt): Bool  = isCompare(func) && func(2, 1) === "b11".U
-    def isMaxMinU(func: UInt): Bool = isCompare(func) && func(2, 1) === "b10".U
-    def isSlt(func: UInt): Bool     = isCompare(func) && func(2, 1) === "b01".U
-    def isSltu(func: UInt): Bool    = isCompare(func) && func(2, 0) === "b001".U
-    def isSub(func: UInt): Bool     = isCompare(func) && func(2, 0) === "b000".U
-    def isSll(func: UInt): Bool     = isShift(func) && func(3, 1) === "b000".U
-    def isBclr(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0010".U
-    def isBset(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0011".U
-    def isBinv(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0100".U
-    def isSrl(func: UInt): Bool     = isShift(func) && func(3, 0) === "b0101".U
-    def isBext(func: UInt): Bool    = isShift(func) && func(3, 0) === "b0110".U
-    def isSra(func: UInt): Bool     = isShift(func) && func(3, 0) === "b0111".U
-    def isRol(func: UInt): Bool     = isShift(func) && func(3) && !func(1)
-    def isRor(func: UInt): Bool     = isShift(func) && func(3) &&  func(1)
-    def isAddwOp(func: UInt): Bool  = isWiden(func) && (!func(3) & !func(2) & (!func(1) | func(0)) | !func(3) & func(2))
-    def isSubwOp(func: UInt): Bool  = isWiden(func) && func(3, 0) === "b0010".U
-    def isSllw(func: UInt): Bool    = isWiden(func) && func(3, 0) === "b1000".U
-    def isSrlw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b10".U && func(0)
-    def isSraw(func: UInt): Bool    = isWiden(func) && func(3, 1) === "b101".U
-    def isRolw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U && !func(0)
-    def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
-
-    def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
-    def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
-
-    def apply() = UInt(FuOpTypeWidth.W)
-  }
+  val FenceOpType = Opcode.FenceOpType
+  val ALUOpType = Opcode.ALUOpType
 
   object VSETOpType {
     val setVlmaxBit = 0
@@ -514,149 +517,7 @@ package object xiangshan {
     def isH(op: UInt) = op(0)
   }
 
-  object LSUOpType {
-    // The max length is 6 bits
-    // load pipeline
-
-    // normal load
-    // Note: bit(1, 0) are size, DO NOT CHANGE
-    // bit encoding: | load 0 | is unsigned(1bit) | size(2bit) |
-    def lb       = "b0000".U
-    def lh       = "b0001".U
-    def lw       = "b0010".U
-    def ld       = "b0011".U
-    def lbu      = "b0100".U
-    def lhu      = "b0101".U
-    def lwu      = "b0110".U
-    // hypervior load
-    // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
-    def hlvb   = "b10000".U
-    def hlvh   = "b10001".U
-    def hlvw   = "b10010".U
-    def hlvd   = "b10011".U
-    def hlvbu  = "b10100".U
-    def hlvhu  = "b10101".U
-    def hlvwu  = "b10110".U
-    def hlvxhu = "b11101".U
-    def hlvxwu = "b11110".U
-    def isHlv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
-    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
-
-    // Zicbop software prefetch
-    // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
-    def prefetch_i = "b1000".U // TODO
-    def prefetch_r = "b1001".U
-    def prefetch_w = "b1010".U
-
-    def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U) && (op(8, 7) === "b00".U)
-
-    // store pipeline
-    // normal store
-    // bit encoding: | store 00 | size(2bit) |
-    def sb       = "b0000".U
-    def sh       = "b0001".U
-    def sw       = "b0010".U
-    def sd       = "b0011".U
-
-    //hypervisor store
-    // bit encoding: |hsv 1 | store 00 | size(2bit) |
-    def hsvb = "b10000".U
-    def hsvh = "b10001".U
-    def hsvw = "b10010".U
-    def hsvd = "b10011".U
-    def isHsv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
-    // l1 cache op
-    // bit encoding: | cbo_zero 01 | size(2bit) 11 |
-    def cbo_zero  = "b0111".U
-
-    // llc op
-    // bit encoding: | prefetch 11 | suboptype(2bit) |
-    def cbo_clean = "b1100".U
-    def cbo_flush = "b1101".U
-    def cbo_inval = "b1110".U
-
-    def getCmoOpcode(op: UInt): UInt = op(1, 0)
-    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
-    def isCboAll(op: UInt): Bool = isCbo(op) || op(3,0) === cbo_zero
-    def isCboClean(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_clean)
-    def isCboFlush(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_flush)
-    def isCboInval(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_inval)
-
-    // atomics
-    // bit(1, 0) are size
-    // since atomics use a different fu type
-    // so we can safely reuse other load/store's encodings
-    // bit encoding: | optype(4bit) | size (2bit) |
-    // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
-    // therefore the MSBs are reused to identify uopIdx of AMOCAS.[WDQ]
-    def AMOFuOpWidth = 6
-    def lr_w      = "b000010".U
-    def sc_w      = "b000110".U
-    def amoswap_w = "b001010".U
-    def amoadd_w  = "b001110".U
-    def amoxor_w  = "b010010".U
-    def amoand_w  = "b010110".U
-    def amoor_w   = "b011010".U
-    def amomin_w  = "b011110".U
-    def amomax_w  = "b100010".U
-    def amominu_w = "b100110".U
-    def amomaxu_w = "b101010".U
-    def amocas_w  = "b101110".U
-
-    def lr_d      = "b000011".U
-    def sc_d      = "b000111".U
-    def amoswap_d = "b001011".U
-    def amoadd_d  = "b001111".U
-    def amoxor_d  = "b010011".U
-    def amoand_d  = "b010111".U
-    def amoor_d   = "b011011".U
-    def amomin_d  = "b011111".U
-    def amomax_d  = "b100011".U
-    def amominu_d = "b100111".U
-    def amomaxu_d = "b101011".U
-    def amocas_d  = "b101111".U
-
-    def amocas_q  = "b101100".U
-
-    def getAmocasUopIdx(opType: UInt): UInt = (opType >> this.AMOFuOpWidth).asUInt
-
-    def size(op: UInt) = op(1,0)
-
-    def sizeIs(sz: this.type => Size)(op: UInt): Bool = {
-      op(Size.width - 1, 0) === sz(this).U
-    }
-
-    sealed abstract class Size(uint: UInt) {
-      def U: UInt = this.uint
-    }
-    case object B extends Size("b00".U(Size.width.W))
-    case object H extends Size("b01".U(Size.width.W))
-    case object W extends Size("b10".U(Size.width.W))
-    case object D extends Size("b11".U(Size.width.W))
-    // Todo: Use encode b100 when expending size field to 3bits in OpType.
-    case object Q extends Size("b00".U(Size.width.W))
-    object Size {
-      val width = 2
-    }
-
-    def makeLsUop(isHlv: Bool, isHlvx: Bool, size: UInt): UInt = {
-      Cat(isHlv, isHlvx, 0.U(1.W), size)
-    }
-
-    def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
-
-    def isAllUS   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
-    def isUStride (fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
-    def isWhole   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
-    def isMasked  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
-    def isStrided (fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
-    def isIndexed (fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
-    def isLr      (fuOpType: UInt): Bool = fuOpType === lr_w || fuOpType === lr_d
-    def isSc      (fuOpType: UInt): Bool = fuOpType === sc_w || fuOpType === sc_d
-    def isAMOCASQ (fuOpType: UInt): Bool = fuOpType === amocas_q
-    def isAMOCASWD(fuOpType: UInt): Bool = fuOpType === amocas_w || fuOpType === amocas_d
-    def isAMOCAS  (fuOpType: UInt): Bool = fuOpType(5, 2) === "b1011".U
-  }
+  val LSUOpType = Opcode.LSUOpType
 
   object BKUOpType {
 
@@ -715,22 +576,20 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b0111".U
-    def IMM_S  = "b1110".U
-    def IMM_SB = "b0001".U
-    def IMM_U  = "b0010".U
-    def IMM_UJ = "b0011".U
-    def IMM_I  = "b0100".U
-    def IMM_Z  = "b0101".U
-    def INVALID_INSTR = "b0110".U
-    def IMM_B6 = "b1000".U
+    def IMM_S  = "b0001".U
+    def IMM_SB = "b0010".U
+    def IMM_U  = "b0011".U
+    def IMM_UJ = "b0100".U
+    def IMM_I  = "b0101".U
+    def IMM_Z  = "b0110".U
 
-    def IMM_OPIVIS = "b1001".U
-    def IMM_OPIVIU = "b1010".U
-    def IMM_VSETVLI   = "b1100".U
-    def IMM_VSETIVLI  = "b1101".U
-    def IMM_LUI32 = "b1011".U
-    def IMM_VRORVI = "b1111".U
+    def IMM_OPIVIS    = "b1000".U
+    def IMM_OPIVIU    = "b1001".U
+    def IMM_VSETVLI   = "b1010".U
+    def IMM_VSETIVLI  = "b1011".U
+    def IMM_VRORVI    = "b1100".U
+    def IMM_LUI32     = "b1110".U
+    def IMM_FI        = "b1111".U
 
     def X      = BitPat("b0000")
 
@@ -750,7 +609,7 @@ package object xiangshan {
         IMM_VSETIVLI.litValue  -> "VSETIVLI",
         IMM_LUI32.litValue     -> "LUI32",
         IMM_VRORVI.litValue    -> "VRORVI",
-        INVALID_INSTR.litValue -> "INVALID",
+        IMM_FI.litValue        -> "FI",
       )
       strMap(immType.litValue)
     }
@@ -769,6 +628,7 @@ package object xiangshan {
         IMM_VSETIVLI.litValue  -> ImmUnion.VSETIVLI,
         IMM_LUI32.litValue     -> ImmUnion.LUI32,
         IMM_VRORVI.litValue    -> ImmUnion.VRORVI,
+        IMM_FI.litValue        -> ImmUnion.FI,
       )
       iuMap(immType.litValue)
     }
@@ -817,8 +677,7 @@ package object xiangshan {
     def VEC_VFREDOSUM    = "b111101".U // VEC_VFREDOSUM
     def VEC_MVNR         = "b000100".U // vmvnr
 
-    def AMO_CAS_W        = "b110101".U // amocas_w
-    def AMO_CAS_D        = "b110110".U // amocas_d
+    def AMO_CAS_BHWD     = "b110101".U // B/H/W/D: 2 uops
     def AMO_CAS_Q        = "b110111".U // amocas_q
     // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
@@ -828,7 +687,7 @@ package object xiangshan {
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
 
-    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
+    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_BHWD || UopSplitType === AMO_CAS_Q
   }
 
   object ExceptionNO {
@@ -934,24 +793,23 @@ package object xiangshan {
       virtualInstr,
       breakPoint
     )
-    def partialSelect(vec: Vec[Bool], select: Seq[Int]): Vec[Bool] = {
-      val new_vec = Wire(ExceptionVec())
-      new_vec.foreach(_ := false.B)
-      select.foreach(i => new_vec(i) := vec(i))
-      new_vec
-    }
-    def partialSelect(vec: Vec[Bool], select: Seq[Int], unSelect: Seq[Int]): Vec[Bool] = {
-      val new_vec = Wire(ExceptionVec())
-      new_vec.foreach(_ := false.B)
-      select.diff(unSelect).foreach(i => new_vec(i) := vec(i))
-      new_vec
-    }
-    def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
-    def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
-    def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
-      partialSelect(vec, fuConfig.exceptionOut)
-    def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
-      partialSelect(vec, fuConfig.exceptionOut, unSelect)
+    def fromFrontendSet = Seq(
+      instrAccessFault,
+      illegalInstr,
+      instrPageFault,
+      hardwareError,
+      instrGuestPageFault
+    )
+    def decodeSet = Seq(
+      instrAccessFault,
+      illegalInstr,
+      breakPoint, // new
+      instrPageFault,
+      hardwareError,
+      instrGuestPageFault,
+      virtualInstr, // new
+    )
+    def exceptionGenSet(params: BackendParams) = (params.exceptionOut ++ decodeSet).distinct.sorted
   }
 
   object TopDownCounters extends Enumeration {
@@ -972,13 +830,24 @@ package object xiangshan {
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
     val FetchFragBubble = Value("FetchFragBubble")
+    val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")
 
     // backend
     // long inst stall at rob head
+    val IssueCancelStallOg0 = Value("IssueCancelStallOg0")
+    val IssueCancelStallOg1 = Value("IssueCancelStallOg1")
+    val IssueCancelStallLd = Value("IssueCancelStallLd")
+    val IssueCancelStallSt = Value("IssueCancelStallSt")
+    val IssueCancelStallOther = Value("IssueCancelStallOther")
+    val IssueDelayStall = Value("IssueDelayStall")
     val DivStall = Value("DivStall") // int div, float div/sqrt
-    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
-    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
-    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head exec long
+    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head exec long
+    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head exec long
+    val OtherNotReadyStall = Value("OtherNotReadyStall")
+    val RobStall = Value("RobStall")
+    val LqStall = Value("LqStall")
+    val SqStall = Value("SqStall")
     // freelist full
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
@@ -986,6 +855,34 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
+    // fusion bubble
+    val FusionBubble = Value("FusionBubble")
+    // dispatch stall
+    // dispatch stall for dispatch policy
+    // TODO: explain only load store exist
+    val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall")
+    val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall")
+    val OtherDispatchPolicyStall = Value("OtherDispatchPolicyStall")
+    // dispatch stall for issuequeue full
+    val BalanceDispatchPolicyStallAlu = Value("BalanceDispatchPolicyStallAlu")
+    val BalanceDispatchPolicyStallBrh = Value("BalanceDispatchPolicyStallBrh")
+    val BalanceDispatchPolicyStallInt = Value("BalanceDispatchPolicyStallInt")
+    val BalanceDispatchPolicyStallFp = Value("BalanceDispatchPolicyStallFp")
+    val BalanceDispatchPolicyStallVec = Value("BalanceDispatchPolicyStallVec")
+    val BalanceDispatchPolicyStallLoad = Value("BalanceDispatchPolicyStallLoad")
+    val BalanceDispatchPolicyStallStore = Value("BalanceDispatchPolicyStallStore")
+    val OtherBalanceDispatchPolicyStall = Value("OtherBalanceDispatchPolicyStall")
+    val IQEnqPolicyStallIssued = Value("IQEnqPolicyStallIssued")
+    val IQEnqPolicyStall = Value("IQEnqPolicyStall")
+    val IntIQFullStallAlu = Value("IntIQFullStallAlu")
+    val IntIQFullStallBrh = Value("IntIQFullStallBrh")
+    val IntIQFullStallOther = Value("IntIQFullStallOther")
+    val FpIQFullStall = Value("FpIQFullStall")
+    val VecIQFullStall = Value("VecIQFullStall")
+    val LoadIQFullStall = Value("LoadIQFullStall")
+    val StoreIQFullStall = Value("StoreIQFullStall")
+    val OtherIQFullStall = Value("OtherIQFullStall")
+    val RobHeadNotIssued = Value("RobHeadNotIssued")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")
@@ -1001,13 +898,17 @@ package object xiangshan {
     val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
 
     // bad speculation
+    val ControlRedirectStall = Value("ControlRedirectStall")
+    val MemVioRedirectStall = Value("MemVioRedirectStall")
+    val OtherRedirectStall = Value("OtherRedirectStall")
     val ControlRecoveryStall = Value("ControlRecoveryStall")
     val MemVioRecoveryStall = Value("MemVioRecoveryStall")
     val OtherRecoveryStall = Value("OtherRecoveryStall")
 
     val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
+    val SpecialInsts = Value("SpecialInsts")
 
-    val OtherCoreStall = Value("OtherCoreStall")
+    val BackendOtherCoreStall = Value("BackendOtherCoreStall")
 
     val NumStallReasons = Value("NumStallReasons")
   }

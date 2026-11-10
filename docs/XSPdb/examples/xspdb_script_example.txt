@@ -1,0 +1,8 @@
+# Example XSPdb script
+xcmds
+xpc
+xwave_on
+xstep 200
+xwave_off
+xbreak SimTop_top.SimTop.timer eq 1000
+xstep 2000

@@ -400,7 +400,7 @@ def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
 
 
 class SRAMConfiguration(object):
-    ARRAY_NAME = "sram_array_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
+    ARRAY_NAME = r"sram_array_(\d)p(\d+)x(\d+)m(\d+)(_multicycle|)(_repair|)"
 
     SINGLE_PORT = 0
     SINGLE_PORT_MASK = 1

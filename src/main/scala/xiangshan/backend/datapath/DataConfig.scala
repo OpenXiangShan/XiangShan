@@ -22,7 +22,7 @@ object DataConfig {
   case class FakeIntData() extends DataConfig("fakeint", 64)
   case class NoData() extends DataConfig("nodata", 0)
 
-  def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData(), V0Data(), VlData())
+  def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData())
   def IntRegSrcDataSet: Set[DataConfig] = Set(IntData())
   def FpRegSrcDataSet : Set[DataConfig] = Set(FpData())
   def VecRegSrcDataSet : Set[DataConfig] = Set(VecData())

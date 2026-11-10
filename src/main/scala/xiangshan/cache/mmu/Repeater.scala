@@ -23,7 +23,6 @@ import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import utility._
-import utility.PopCount
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -154,11 +153,17 @@ class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) 
 
 }
 
+class PTWNewFilterIO(Width: Int)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint = true) {
+  val fastHint = ValidIO(new TLBHintResp)
+}
+
 class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint){
   val flush = Input(Bool())
   val refill = Output(Bool())
   val getGpa = Output(Bool())
   val memidx = Output(new MemBlockidxBundle)
+  val fastResp = if (hasHint) Some(Flipped(ValidIO(new PtwRespS2))) else None
+  val fastHint = if (hasHint) Some(ValidIO(new TLBHintResp)) else None
 }
 
 class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -180,6 +185,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val mptOnly = Option.when(HasMptCheck) (RegInit(Vec(Size, Bool()), 0.U.asTypeOf(Vec(Size, Bool()))))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
@@ -242,6 +248,9 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       v(enqidx(i)) := true.B
       sent(enqidx(i)) := false.B
       vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
+      if (HasMptCheck) {
+        mptOnly.get(enqidx(i)) := io.tlb.req(i).bits.mptOnly.get
+      }
       s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
       getGpa(enqidx(i)) := io.tlb.req(i).bits.getGpa
       memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
@@ -255,6 +264,9 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     io.ptw.req(0).valid := canissue
     io.ptw.req(0).bits.vpn := vpn(issueindex)
     io.ptw.req(0).bits.s2xlate := s2xlate(issueindex)
+    if (HasMptCheck) {
+      io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issueindex)
+    }
   }
   when (io.ptw.req(0).fire) {
     sent(issueindex) := true.B
@@ -272,6 +284,8 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   if (hasHint) {
     val hintIO = io.hint.getOrElse(new TlbHintIO)
+    val fastResp = io.fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
+    val fastHint = io.fastHint.getOrElse(ValidIO(new TLBHintResp))
     for (i <- 0 until LdExuCnt) {
       hintIO.req(i).id := enqidx(i)
       hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
@@ -279,6 +293,30 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     hintIO.resp.valid := io.refill
     hintIO.resp.bits.id := ptwResp_EntryMatchFirst
     hintIO.resp.bits.replay_all := PopCount(ptwResp_EntryMatchVec) > 1.U
+
+    // Keep the L2 response path short: match only the originating vpn/s2xlate,
+    // register the one-hot result, and encode the id from the registered bits.
+    val fastRespVpn = Mux(
+      fastResp.bits.s2xlate === onlyStage2,
+      fastResp.bits.s2.entry.tag(vpnLen - 1, 0),
+      Cat(fastResp.bits.s1.entry.tag, fastResp.bits.s1.addr_low)
+    )
+    val fastMatchVec = VecInit(vpn.zip(v).zip(s2xlate).map { case ((entryVpn, entryValid), entryS2xlate) =>
+      entryValid && entryS2xlate === fastResp.bits.s2xlate && entryVpn === fastRespVpn
+    }).asUInt
+    val fastMatchReg = RegEnable(fastMatchVec, 0.U(Size.W), fastResp.valid)
+    val fastRespValidReg = RegNext(fastResp.valid && !io.flush, init = false.B)
+    val fastHintId = Cat((0 until log2Up(Size)).reverse.map { bit =>
+      val idMask = (0 until Size).foldLeft(BigInt(0)) { case (mask, index) =>
+        if (((index >> bit) & 1) == 1) mask.setBit(index) else mask
+      }
+      (fastMatchReg & idMask.U(Size.W)).orR
+    })
+
+    // Multiple matching entries are handled by the original replay_all hint.
+    fastHint.valid := fastRespValidReg && fastMatchReg.orR && !io.flush
+    fastHint.bits.id := fastHintId
+    fastHint.bits.replay_all := false.B
   }
 
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
@@ -288,32 +326,22 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   // Perf Counter
   val counter = PopCount(v)
-  val inflight_counter = RegInit(0.U(log2Up(Size).W))
-  val inflight_full = inflight_counter === Size.U
-  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
-    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
-  }
-
-  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
+  val fullReqVec = io.tlb.req.indices.map(i =>
+    io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && !canenq(i)
+  )
+  val sentEntryCount = PopCount(v.zip(sent).map { case (valid, issued) => valid && issued })
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire, "when counter is 0, should not req")
   }
 
-  when (io.flush) {
-    inflight_counter := 0.U
-  }
-
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
   XSPerfAccumulate("tlb_req_count_filtered", PopCount(enqvalid))
+  XSPerfAccumulate("tlb_req_full_count", PopCount(fullReqVec))
+  XSPerfAccumulate("entry_cycle", counter)
+  XSPerfAccumulate("sent_entry_cycle", sentEntryCount)
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
-  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
-  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
-  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
-  XSPerfAccumulate("inflight_cycle", Cat(sent).orR)
-
-  for (i <- 0 until Size + 1) {
-    XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
+  XSPerfAccumulate("ptw_req_blocked", io.ptw.req(0).valid && !io.ptw.req(0).ready)
+  XSPerfAccumulate("ptw_resp_match_count", io.refill)
 
 }
 
@@ -328,7 +356,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   // all store address execute units, including sta and hyu
   private val StaExuCnt = backendParams.StaExuCnt
 
-  val io = IO(new PTWFilterIO(Width, hasHint = true))
+  val io = IO(new PTWNewFilterIO(Width))
 
   val load_filter = VecInit(Seq.fill(1) {
     val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + PfNumInDtlbLD, Size = loadfiltersize, hasHint = true))
@@ -368,6 +396,9 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   io.tlb.resp.bits.data.getGpa := DontCare // not used
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  if (HasMptCheck) {
+    io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
+  }
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
@@ -385,6 +416,11 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
+  val load_fastResp = load_filter(0).fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
+  val load_fastHint = load_filter(0).fastHint.getOrElse(ValidIO(new TLBHintResp))
+  load_fastResp.valid := io.ptw.resp.fire
+  load_fastResp.bits := io.ptw.resp.bits
+  io.fastHint := load_fastHint
   for (i <- 0 until LdExuCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
@@ -409,12 +445,18 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
     ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
     ptw_arb.io.in(i).bits.s2xlate := filter(i).ptw.req(0).bits.s2xlate
+    if (HasMptCheck) {
+      ptw_arb.io.in(i).bits.mptOnly.get := filter(i).ptw.req(0).bits.mptOnly.get
+    }
     filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
   }
   ptw_arb.io.out.ready := io.ptw.req(0).ready
   io.ptw.req(0).valid := ptw_arb.io.out.valid
   io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
   io.ptw.req(0).bits.s2xlate := ptw_arb.io.out.bits.s2xlate
+  if (HasMptCheck) {
+    io.ptw.req(0).bits.mptOnly.get := ptw_arb.io.out.bits.mptOnly.get
+  }
   io.ptw.resp.ready := true.B
 
   io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
@@ -428,6 +470,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val mptOnly = Option.when(HasMptCheck)(Reg(Vec(Size,Bool())))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
@@ -527,6 +570,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  if (HasMptCheck) {
+    io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
+  }
   io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
   io.tlb.resp.bits.vector := resp_vector
   io.tlb.resp.bits.data.getGpa := RegNext(PriorityMux(ptwResp_OldMatchVec, getGpa))
@@ -539,12 +585,17 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
   io.ptw.resp.ready := true.B
-
+  if (HasMptCheck) {
+    io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issPtr)
+  }
   reqs.zipWithIndex.map{
     case (req, i) =>
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
+        if (HasMptCheck) {
+          mptOnly.get(enqPtrVec(i)) := req.bits.mptOnly.get
+        }
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         getGpa(enqPtrVec(i)) := req.bits.getGpa
         memidx(enqPtrVec(i)) := req.bits.memidx
@@ -613,15 +664,16 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   // perf
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
-  XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
+  XSPerfAccumulate("tlb_req_fire_count", PopCount(io.tlb.req.map(_.fire)))
+  XSPerfAccumulate("tlb_req_blocked_count", PopCount(io.tlb.req.map(req => req.valid && !req.ready)))
+  XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, enqNum, 0.U))
+  XSPerfAccumulate("itlb_filter_allocated_cycle", counter)
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
+  XSPerfAccumulate("ptw_req_blocked", io.ptw.req(0).valid && !io.ptw.req(0).ready)
   XSPerfAccumulate("ptw_req_cycle", inflight_counter)
   XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
   XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
-  for (i <- 0 until Size + 1) {
-    XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
 }
 
 object PTWRepeater {

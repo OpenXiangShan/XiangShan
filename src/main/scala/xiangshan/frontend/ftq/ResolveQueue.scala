@@ -24,11 +24,13 @@ import utility.XSError
 import utility.XSPerfAccumulate
 import xiangshan.Resolve
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.SaturateCounter
 
 class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
 
   class ResolveQueueIO extends Bundle {
     val backendResolve: Vec[Valid[Resolve]]       = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
+    val ifuResolve:     Valid[Resolve]            = Input(Valid(new Resolve))
     val bpuTrain:       DecoupledIO[ResolveEntry] = Decoupled(new ResolveEntry)
 
     val backendRedirect:    Bool   = Input(Bool())
@@ -64,13 +66,37 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     "Backend resolves branches that should have been flushed\n"
   )
 
-  private val resolve = io.backendResolve.map { backendResolve =>
-    val filteredResolve = Wire(Valid(new Resolve))
-    filteredResolve.valid := backendResolve.valid &&
-      !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
-    filteredResolve.bits := backendResolve.bits
+  private class ResolveWithSource(implicit p: Parameters) extends Resolve {
+    val debug_source: UInt = ResolveSource()
+
+    def fromResolve(source: UInt, resolve: Resolve): ResolveWithSource = {
+      this.ftqIdx     := resolve.ftqIdx
+      this.ftqOffset  := resolve.ftqOffset
+      this.pc         := resolve.pc
+      this.target     := resolve.target
+      this.taken      := resolve.taken
+      this.mispredict := resolve.mispredict
+      this.attribute  := resolve.attribute
+      this.debug_isRVC.foreach(_ := resolve.debug_isRVC.get)
+      this.debug_source := source
+      this
+    }
+  }
+
+  private val backendFilteredResolve = io.backendResolve.map { backendResolve =>
+    val filteredResolve = Wire(Valid(new ResolveWithSource))
+    filteredResolve.valid := backendResolve.valid && !(
+      (backendResolve.bits.attribute.isDirect && !backendResolve.bits.mispredict) ||
+        backendResolve.bits.attribute.isReturn
+    )
+    filteredResolve.bits.fromResolve(ResolveSource.Backend, backendResolve.bits)
     filteredResolve
   }
+  private val ifuFilteredResolve = Wire(Valid(new ResolveWithSource))
+  ifuFilteredResolve.valid := io.ifuResolve.valid
+  ifuFilteredResolve.bits.fromResolve(ResolveSource.Ifu, io.ifuResolve.bits)
+
+  private val resolve = backendFilteredResolve ++ Seq(ifuFilteredResolve)
 
   private val hit = resolve.map { branch =>
     mem.map(entry =>
@@ -91,8 +117,9 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     branch.valid && !hit(i) && !hitPrevious(i).fold(false.B)(_ || _)
   }
 
-  private val enqIndex = WireDefault(VecInit.fill(backendParams.BrhCnt)(0.U(log2Ceil(ResolveQueueSize).W)))
-  enqIndex := VecInit((0 until backendParams.BrhCnt).map { i =>
+  // backendParams.BrhCnt backend resolves + 1 IFU resolve.
+  private val enqIndex = WireDefault(VecInit.fill(backendParams.BrhCnt + 1)(0.U(log2Ceil(ResolveQueueSize).W)))
+  enqIndex := VecInit((0 until backendParams.BrhCnt + 1).map { i =>
     val newIndex = MuxCase(
       (enqPtr + PopCount(needNewEntry.take(i))).value,
       hitPrevious(i).zipWithIndex.map { case (hit, j) => (hit, enqIndex(j)) }
@@ -104,9 +131,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   resolve.zipWithIndex.foreach { case (branch, i) =>
     when(branch.valid && !full) {
-      mem(enqIndex(i)).valid        := true.B
-      mem(enqIndex(i)).bits.ftqIdx  := branch.bits.ftqIdx
-      mem(enqIndex(i)).bits.startPc := branch.bits.pc
+      mem(enqIndex(i)).valid             := true.B
+      mem(enqIndex(i)).bits.ftqIdx       := branch.bits.ftqIdx
+      mem(enqIndex(i)).bits.startPc      := branch.bits.pc
+      mem(enqIndex(i)).bits.debug_source := branch.bits.debug_source
 
       val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
       val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))
@@ -155,5 +183,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   // because it is a sequential queue, which results in multiple flushed entries staying in the queue and blocking new
   // entries from being enqueued. More sophisticated designs should be considered.
   XSPerfAccumulate("resolveQueueFull", full)
-  XSPerfAccumulate("dropResolve", PopCount(io.backendResolve.map(_.valid && full)))
+  XSPerfAccumulate("resolveQueueFullDropResolve", PopCount(resolve.map(_.valid && full)))
+  XSPerfAccumulate("backendResolve", PopCount(io.backendResolve.map(_.valid && !full)))
+  XSPerfAccumulate("ifuResolve", io.ifuResolve.valid && !full)
+  XSPerfAccumulate("resolve", PopCount(resolve.map(_.valid && !full)))
 }

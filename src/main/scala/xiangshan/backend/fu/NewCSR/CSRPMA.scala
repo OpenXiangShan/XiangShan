@@ -29,8 +29,7 @@ trait CSRPMA { self: NewCSR =>
   val pmaaddr: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal).map(num =>
     Module(new CSRModule(s"Pmaaddr$num") with HasPMAAddrSink {
       // read condition
-      regOut := addrRegOut(num)
-      rdata := addrRData(num)
+      regOut := addrRData(num)
     })
       .setAddr(CSRConst.PmaaddrBase + num)
   )
@@ -57,18 +56,18 @@ trait CSRPMA { self: NewCSR =>
 }
 
 class PMACfgInitBundle(num: Int)(implicit val p: Parameters) extends PMACfgBundle with PMAInit {
-  override val R      = WARL(0, wNoFilter).withReset(pmaInit(num).r.B)
-  override val W      = WARL(1, wNoFilter).withReset(pmaInit(num).w.B)
-  override val X      = WARL(2, wNoFilter).withReset(pmaInit(num).x.B)
-  override val A      = PMPCfgAField(4, 3, wNoFilter).withReset(if (pmaInit(num).a > 0) pmaInit(num).a.U else 0.U)
-  override val ATOMIC = WARL(5, wNoFilter).withReset(pmaInit(num).atomic.B)
-  override val C      = WARL(6, wNoFilter).withReset(pmaInit(num).c.B)
-  override val L      = PMPCfgLField(7, wNoFilter).withReset(pmaInit(num).l.B)
+  override val R      = WARL(0, wNoFilter).withReset(pmaInit(num).r.B).withDescription("Read permission bit.")
+  override val W      = WARL(1, wNoFilter).withReset(pmaInit(num).w.B).withDescription("Write permission bit.")
+  override val X      = WARL(2, wNoFilter).withReset(pmaInit(num).x.B).withDescription("Execute permission bit.")
+  override val A      = PMPCfgAField(4, 3, wNoFilter).withReset(if (pmaInit(num).a > 0) pmaInit(num).a.U else 0.U).withDescription("Address-matching mode.")
+  override val ATOMIC = WARL(5, wNoFilter).withReset(pmaInit(num).atomic.B).withDescription("Atomic access permission bit.")
+  override val C      = WARL(6, wNoFilter).withReset(pmaInit(num).c.B).withDescription("Cacheable attribute bit.")
+  override val L      = PMPCfgLField(7, wNoFilter).withReset(pmaInit(num).l.B).withDescription("Lock bit.")
 }
 
 class PMACfgBundle extends PMPCfgBundle {
-  override val ATOMIC = WARL(5, wNoFilter).withReset(false.B)
-  override val C      = WARL(6, wNoFilter).withReset(false.B)
+  override val ATOMIC = WARL(5, wNoFilter).withReset(false.B).withDescription("Atomic access permission bit.")
+  override val C      = WARL(6, wNoFilter).withReset(false.B).withDescription("Cacheable attribute bit.")
 }
 
 trait HasPMACfgRSink { self: CSRModule[_] =>
@@ -77,7 +76,6 @@ trait HasPMACfgRSink { self: CSRModule[_] =>
 
 trait HasPMAAddrSink { self: CSRModule[_] =>
   val addrRData = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
-  val addrRegOut = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
 }
 
 trait PMAInit extends HasPMParameters with PMAReadWrite {

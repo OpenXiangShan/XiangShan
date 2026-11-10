@@ -16,16 +16,18 @@
 package xiangshan.frontend.bpu.abtb
 
 import chisel3.util._
+import scala.math.min
+import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
-    NumEntries:           Int = 1024,
-    NumBanks:             Int = 4,
-    NumWays:              Int = 8,
-    TagWidth:             Int = 24,
-    TargetLowerBitsWidth: Int = 22,
-    WriteBufferSize:      Int = 4,
-    TakenCounterWidth:    Int = 2,
+    NumEntries:        Int = 1024,
+    NumBanks:          Int = 4,
+    NumWays:           Int = 4,
+    TagWidth:          Int = 24,
+    TargetWidth:       Int = 22,
+    WriteBufferSize:   Int = 4,
+    TakenCounterWidth: Int = 2,
     // enable carry and borrow fix for target, so jumps around 2^(TargetWidth+1) boundary will not cause misprediction
     // mainBtb should handle this case, so performance affect should be slight, and, bad for timing
     EnableTargetFix: Boolean = false
@@ -34,17 +36,30 @@ case class AheadBtbParameters(
 trait HasAheadBtbParameters extends HasBpuParameters {
   def abtbParameters: AheadBtbParameters = bpuParameters.abtbParameters
 
-  def NumEntries:           Int = abtbParameters.NumEntries
-  def NumBanks:             Int = abtbParameters.NumBanks
-  def NumWays:              Int = abtbParameters.NumWays
-  def NumSets:              Int = NumEntries / NumWays / NumBanks
-  def TagWidth:             Int = abtbParameters.TagWidth
-  def TargetLowerBitsWidth: Int = abtbParameters.TargetLowerBitsWidth
-  def SetIdxWidth:          Int = log2Ceil(NumSets)
-  def WayIdxWidth:          Int = log2Ceil(NumWays)
-  def BankIdxWidth:         Int = log2Ceil(NumBanks)
-  def WriteBufferSize:      Int = abtbParameters.WriteBufferSize
-  def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
+  def NumEntries:        Int = abtbParameters.NumEntries
+  def NumBanks:          Int = abtbParameters.NumBanks
+  def NumWays:           Int = abtbParameters.NumWays
+  def NumSets:           Int = NumEntries / NumWays / NumBanks
+  def TagWidth:          Int = abtbParameters.TagWidth
+  def TargetWidth:       Int = abtbParameters.TargetWidth
+  def SetIdxWidth:       Int = log2Ceil(NumSets)
+  def WayIdxWidth:       Int = log2Ceil(NumWays)
+  def BankIdxWidth:      Int = log2Ceil(NumBanks)
+  def WriteBufferSize:   Int = abtbParameters.WriteBufferSize
+  def TakenCounterWidth: Int = abtbParameters.TakenCounterWidth
 
   def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
+
+  // Bit width participating in the index hash, used to disperse hot branches and bias bank conflicts.
+  def AheadBtbHashBitWidth: Int = 4
+
+  // Reuse the folded PHR component already maintained for MicroTage table 0.
+  // ABTB only uses it for index dispersion.
+  def AbtbHashFhInfo: FoldedHistoryInfo = {
+    val tableInfo     = bpuParameters.utageParameters.TableInfos.head
+    val historyLength = tableInfo.HistoryLength
+    val foldedLength  = min(log2Ceil(tableInfo.NumSets), historyLength)
+    require(AheadBtbHashBitWidth <= foldedLength)
+    new FoldedHistoryInfo(historyLength, foldedLength)
+  }
 }

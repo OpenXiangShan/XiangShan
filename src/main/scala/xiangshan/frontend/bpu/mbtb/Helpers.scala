@@ -39,8 +39,8 @@ trait Helpers extends HasMainBtbParameters
     extraFields = Seq(
       ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
       ("targetLower", instOffsetBits, TargetWidth),
-      ("position", instOffsetBits, FetchBlockAlignWidth),
-      ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
+      ("position", instOffsetBits, CfiAlignedPositionWidth),
+      ("cfiPosition", instOffsetBits, CfiPositionWidth)
     )
   )
 
@@ -67,6 +67,16 @@ trait Helpers extends HasMainBtbParameters
 
   def getTag(pc: PrunedAddr): UInt =
     addrFields.extract("tag", pc)
+
+  def getVictimBtbRawHitMask(entries: IndexedSeq[VictimBtbEntry], pc: PrunedAddr): Vec[Bool] = {
+    val internalBankIdx = getInternalBankIndex(pc)
+    val setIdx          = getSetIndex(pc)
+    val tag             = getTag(pc)
+
+    VecInit(entries.map { e =>
+      e.entry.valid && e.internalBankIdx === internalBankIdx && e.setIdx === setIdx && e.entry.tag === tag
+    })
+  }
 
   // detect multi-hit, return a mask indicating which way has multi-hit
   def detectMultiHit(hitMask: IndexedSeq[Bool], position: IndexedSeq[UInt]): UInt = {

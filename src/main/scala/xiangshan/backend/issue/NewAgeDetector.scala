@@ -22,7 +22,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import utility.PopCount
 
 class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {

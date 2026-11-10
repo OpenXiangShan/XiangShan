@@ -17,9 +17,13 @@ PMAConfigs:
 
 EnableCHIAsyncBridge: true
 
-L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true, enableFlush: false }
+LLC: OpenLLC
 
-L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
+L2CacheConfig: { size: 2 MB, ways: 8, inclusive: true, banks: 4, tp: false, enableFlush: false }
+
+OpenLLCConfig: { size: 32 MB, ways: 16, banks: 4 }
+
+ZhuJiangConfig: { size: 32 MB, ways: 16 }
 
 HartIDBits: 6
 
@@ -86,4 +90,4 @@ CVMParams:
 
 EnableBitmapCheck: true
 
-EnableBitmapCheckDefault: false
+EnableResetMtvec: false

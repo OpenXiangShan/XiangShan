@@ -15,14 +15,14 @@
 
 package xiangshan.frontend.instruncache
 
-import coupledL2.MemBackTypeMMField
-import coupledL2.MemPageTypeNCField
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.TLClientNode
 import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
+import xscache.coupledL2.MemBackTypeMMField
+import xscache.coupledL2.MemPageTypeNCField
 
 class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
   override def shouldBeInlined: Boolean = false

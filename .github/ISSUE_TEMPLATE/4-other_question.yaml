@@ -1,0 +1,35 @@
+name: Other Question
+description: Any other question about XiangShan.
+labels:
+  'type: question'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is only for questions that do not fit the other templates. Please check the other templates before using this one.
+
+        这个 issue 此模板仅适用于其他模板无法覆盖的问题，请先确认其他模板是否适用。
+  - type: checkboxes
+    id: before-start
+    attributes:
+      label: Before start
+      description: |
+        Before you start, please read the [Before contributing](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.md#before-contributing) section, and confirm the following items:
+
+        开始之前，请阅读[贡献前须知](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.zh-cn.md#贡献前须知)，并确认以下事项：
+      options:
+        - label: I have read the [RISC-V ISA Manual](https://github.com/riscv/riscv-isa-manual) and [XiangShan Documents](https://docs.xiangshan.cc/zh-cn/latest). 我已经阅读过 [RISC-V 指令集手册](https://github.com/riscv/riscv-isa-manual) 和 [香山文档](https://docs.xiangshan.cc/zh-cn/latest)。
+          required: true
+        - label: I have searched previous issues and PRs and did not find anything relevant. 我已经搜索过之前的 issue 和 PR，并没有找到相关的。
+          required: true
+  - type: textarea
+    id: describe
+    attributes:
+      label: Describe the question
+      description: |
+        A clear and concise description of your question.
+
+        请清晰、准确地描述您的问题。
+      placeholder:
+    validations:
+      required: true

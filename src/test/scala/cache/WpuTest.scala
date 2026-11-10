@@ -3,14 +3,14 @@ package cache
 import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
-import top.TLConfig
+import top.DefaultConfig
 import xiangshan.cache.wpu.DCacheWpuWrapper
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 
 class WpuBasicTest extends AnyFlatSpec with ChiselSim {
   behavior of "DCacheWPU"
   it should ("run") in {
-    val defaultConfig = (new TLConfig)
+    val defaultConfig = (new DefaultConfig)
     implicit val config = defaultConfig.alterPartial({
       case XSCoreParamsKey => defaultConfig(XSTileKey).head.copy()
     })

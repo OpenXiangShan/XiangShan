@@ -19,31 +19,42 @@ import chisel3._
 import chisel3.util._
 import scala.math.min
 import utility.ParallelXOR
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 
 trait HalfAlignHelper extends HasBpuParameters {
   def getAlignedPcUpper(pc: PrunedAddr): UInt =
     pc(pc.length - 1, FetchBlockAlignWidth)
 
-  def getAlignedPc(pc: PrunedAddr): PrunedAddr =
-    PrunedAddrInit(Cat(
+  def getAlignedPc[T <: PrunedAddr](pc: T): T = {
+    val alignedPc = Wire(chiselTypeOf(pc))
+    alignedPc := Cat(
       getAlignedPcUpper(pc),
       0.U(FetchBlockAlignWidth.W)
-    ))
+    )
+    alignedPc
+  }
 
-  def getNextAlignedPc(pc: PrunedAddr): PrunedAddr = {
+  def getNextAlignedPc[T <: PrunedAddr](pc: T): T = {
     val nextAlignedPcUpperBits = getAlignedPcUpper(pc) + 1.U
-    PrunedAddrInit(Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W)))
+    val nextAlignedPc          = Wire(chiselTypeOf(pc))
+    nextAlignedPc := Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W))
+    nextAlignedPc
   }
 
-  def getCfiPcFromPosition(startPc: PrunedAddr, position: UInt): PrunedAddr = {
+  def getCfiPcFromPosition[T <: PrunedAddr](startPc: T, position: UInt): T = {
     val cfiPcUpperBits = startPc(startPc.length - 1, FetchBlockAlignWidth) + position(CfiPositionWidth - 1)
-    PrunedAddrInit(Cat(cfiPcUpperBits, position(CfiPositionWidth - 2, 0), 0.U(instOffsetBits.W)))
+    val cfiPc          = Wire(chiselTypeOf(startPc))
+    cfiPc := Cat(cfiPcUpperBits, position(CfiPositionWidth - 2, 0), 0.U(instOffsetBits.W))
+    cfiPc
   }
 
-  def getCfiPcFromOffset(startPc: PrunedAddr, ftqOffset: UInt): PrunedAddr =
-    startPc + (ftqOffset << instOffsetBits.U).asUInt
+  def getCfiPcFromOffset[T <: PrunedAddr](startPc: T, ftqOffset: UInt): T = {
+    val cfiPc = Wire(chiselTypeOf(startPc))
+    cfiPc := startPc + (ftqOffset << instOffsetBits.U).asUInt
+    cfiPc
+  }
 
   def getRealCfiPcFromOffset(startPc: PrunedAddr, ftqOffset: UInt, isRVC: Bool): UInt = {
     val cfiPc = getCfiPcFromOffset(startPc, ftqOffset).toUInt
@@ -107,11 +118,14 @@ trait CrossPageHelper extends HasBpuParameters {
     // check full VPN
     getVpn(addr1) =/= getVpn(addr2)
 
-  def getPageAlignedAddr(addr: PrunedAddr): PrunedAddr =
-    PrunedAddrInit(Cat(
+  def getPageAlignedAddr[T <: PrunedAddr](addr: T): T = {
+    val pageAlignedAddr = Wire(chiselTypeOf(addr))
+    pageAlignedAddr := Cat(
       getVpn(addr),
       0.U(PageOffsetWidth.W)
-    ))
+    )
+    pageAlignedAddr
+  }
 }
 
 trait TargetFixHelper extends HasBpuParameters {
@@ -149,15 +163,15 @@ trait TargetFixHelper extends HasBpuParameters {
 
   // ubtb and abtb can select whether to use the targetCarry or not, so Option[TargetCarry]
   def getFullTarget(
-      startPc:     PrunedAddr,
+      startPc:     GuardedPc,
       target:      UInt,
       targetCarry: Option[TargetCarry],
       // pre-computed startPcUpper+-1 for timing, default is not needed
       startPcUpperPlusOne:  Option[UInt] = None,
       startPcUpperMinusOne: Option[UInt] = None
-  ): PrunedAddr = {
+  ): GuardedPc = {
     val startPcUpper = getTargetUpper(startPc)
-    PrunedAddrInit(Cat(
+    GuardedPcInit(Cat(
       if (targetCarry.isDefined) // `if (EnableTargetFix)` in ubtb and abtb
         fixTargetUpper(startPcUpper, targetCarry.get, startPcUpperPlusOne, startPcUpperMinusOne)
       else

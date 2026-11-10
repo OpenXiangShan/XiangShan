@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -23,16 +23,15 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class MicroTageParameters(
     // TODO: The length of the Tag and its alias status will need to be adjusted later. The same applies to the number of items.
     TableInfos: Seq[MicroTageInfo] = Seq(
-      new MicroTageInfo(512, 9, 9, 15), // 3Taken maybe better than 2Taken
-      // new MicroTageInfo(64, 16, 8, 18),
-      // new MicroTageInfo(512, 18, 9, 15) // 6Taken maybe better than 4Taken
-      new MicroTageInfo(512, 16, 12, 16) // follow Tage.
-      // new MicroTageInfo(128, 32, 16, 24)
+      new MicroTageInfo(512, 5, 5, 8),
+      new MicroTageInfo(512, 9, 8, 8) // 3Taken maybe better than 2Taken
+      // new MicroTageInfo(512, 12, 8, 8),
+      // new MicroTageInfo(512, 16, 8, 8), // follow Tage.
+      // new MicroTageInfo(512, 24, 8, 8)
     ),
     TakenCtrWidth:       Int = 3,
-    NumTables:           Int = 2,
-    LowTickWidth:        Int = 9,
-    HighTickWidth:       Int = 11,
+    LowTickWidth:        Int = 7,
+    HighTickWidth:       Int = 8,
     UsefulWidth:         Int = 2,
     PCHighTagStart:      Int = 7,
     EnableTraceAndDebug: Boolean = false,
@@ -43,34 +42,44 @@ trait HasMicroTageParameters extends HasBpuParameters {
   val utageParameters: MicroTageParameters = bpuParameters.utageParameters
   def TableInfos:      Seq[MicroTageInfo]  = utageParameters.TableInfos
   def TakenCtrWidth:   Int                 = utageParameters.TakenCtrWidth
-  def NumTables:       Int                 = utageParameters.NumTables
+  def NumTables:       Int                 = TableInfos.length
   def LowTickWidth:    Int                 = utageParameters.LowTickWidth
   def HighTickWidth:   Int                 = utageParameters.HighTickWidth
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
   def PCHighTagStart:  Int                 = utageParameters.PCHighTagStart
+  def NumWays:         Int                 = 1
+  def WayIdWidth:      Int                 = 1 max log2Ceil(NumWays)
 
   def MaxNumSets:        Int = 512
-  def MaxTagLen:         Int = 16
+  def MaxTagLen:         Int = 8
   def DebugPredIdxWidth: Int = log2Ceil(TableInfos(0).NumSets)
   def DebugPredTagWidth: Int = TableInfos(0).TagWidth
 
   // utage can only be fast-trained, we don't have continous predict block on resolve
-  def EnableFastTrain:     Boolean = true
+  def EnableFastTrain:     Boolean = false
   def EnableTraceAndDebug: Boolean = utageParameters.EnableTraceAndDebug
 
   // Hash PC into tag to reduce aliasing (at cost of capacity).
-  def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1)
-  def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(18, 16, 14, 12, 10, 6, 5, 4, 2, 1)
-  def PCTagHashXorPairsForLongHistory: Seq[(Int, Int)] = Seq(
-    (17, 3),
-    (16, 1),
-    (15, 11),
-    (13, 9),
-    (12, 8),
-    (10, 6),
-    (7, 4),
-    (5, 2)
-  )
-  def PCTagHashBitsDefault: Seq[Int] = Seq(1, 0)
+  def PCTagHashBitsForShortHistory:  Seq[Int] = Seq(23, 20, 17, 14, 11, 9, 7, 5, 3, 2, 1)
+  def PCTagHashBitsForMediumHistory: Seq[Int] = Seq(15, 13, 11, 9, 7, 6, 5, 4, 3, 2, 1)
+  def PCTagHashBitsForLongHistory:   Seq[Int] = Seq(18, 16, 14, 12, 10, 6, 5, 4, 2, 1)
+  def PCTagHashBitsDefault:          Seq[Int] = Seq(31, 19, 12, 7, 4, 2, 1, 0)
+
+  // The PHR’s history generation incorporates the target address; during a branch,
+  // this target address matches the starting address of the next predicted basic block.
+  // Fine-grained adjustments may be beneficial during folding.
+  def PCTagConcatBitsForShortHistory:    Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 4, 3, 2, 1)
+  def PCTagConcatBitsForMediumHistory:   Seq[Int] = Seq(17, 15, 13, 11, 10, 9, 8, 5, 3, 1)
+  def PCTagConcatBitsForLongHistory:     Seq[Int] = Seq(11, 10, 9, 7, 5, 3)
+  def PCTagConcatBitsForVeryLongHistory: Seq[Int] = Seq(11, 7, 5, 3)
+
+  // Adjust the utilized PC bits according to the Tag length.
+  def PCTagXorBitsForShortHistory:    Seq[Int] = Seq(12, 10, 8, 6, 4, 2)
+  def PCTagXorBitsForMediumHistory:   Seq[Int] = Seq(14, 12, 10, 8, 6, 4, 2, 0)
+  def PCTagXorBitsForLongHistory:     Seq[Int] = Seq(14, 13, 12, 10, 8, 6, 4, 3)
+  def PCTagXorBitsForVeryLongHistory: Seq[Int] = Seq(15, 13, 11, 9, 7, 6, 5, 2)
+
+  def PCTagConcatBitsDefault: Seq[Int] = PCTagConcatBitsForShortHistory
+  def PCTagXorBitsDefault:    Seq[Int] = PCTagXorBitsForShortHistory
 }

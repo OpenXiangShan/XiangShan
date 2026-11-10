@@ -18,14 +18,14 @@ package xiangshan.mem.prefetch
 
 import chisel3._
 import chisel3.util._
-import coupledL2.PrefetchCtrlFromCore
+import xscache.coupledL2.PrefetchCtrlFromCore
 import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.L1PrefetchReq
 
 object PrefetchTarget extends Enumeration{
@@ -46,14 +46,16 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   val l1D_pf_enable_pht = Bool()
   val l1D_pf_active_threshold = UInt(4.W)
   val l1D_pf_active_stride = UInt(6.W)
-  val l1D_pf_enable_stride = Bool()
+  val l1D_pf_stride_enable = Bool()
   val l2_pf_store_only = Bool()
   val l2_pf_recv_enable = Bool()
   val l2_pf_pbop_enable = Bool()
   val l2_pf_vbop_enable = Bool()
   val l2_pf_tp_enable = Bool()
+  val l2_pf_cdp_enable = Bool()
   val l2_pf_delay_latency = UInt(10.W)
-  val berti_enable = Bool()
+  val l1D_pf_berti_enable = Bool()
+  val l1D_pf_stream_enable = Bool()
 
   def toL2PrefetchCtrl(): PrefetchCtrlFromCore = {
     val res = Wire(new PrefetchCtrlFromCore)
@@ -62,6 +64,7 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
     res.l2_pbop_en := l2_pf_pbop_enable
     res.l2_vbop_en := l2_pf_vbop_enable
     res.l2_tp_en := l2_pf_tp_enable
+    res.l2_cdp_en := l2_pf_cdp_enable
     res.l2_pf_delay_latency := l2_pf_delay_latency
     res
   }
@@ -75,11 +78,14 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
 class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq
 
 class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
+  val robIdx = new RobPtr
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val pc = UInt(VAddrBits.W)
   val miss = Bool()
   val metaSource = UInt(L1PfSourceBits.W)
+  val isFirstIssue = Bool()
+  val isHwPrefetch = Bool()
   val refillLatency = UInt(LATENCY_WIDTH.W)
 }
 
@@ -90,10 +96,11 @@ class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
   val prefetchTarget = UInt(PrefetchTarget.PfTgtBits.W)
 }
 
-class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
+class PrefetcherIO()(implicit p: Parameters) extends XSBundle with HasPrefetcherParams {
   val enable = Input(Bool())
-  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
-  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
+  val fdbkDegree = Input(UInt(DEGREE_WIDTH.W))
+  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new TrainReqBundle())))
+  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new TrainReqBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())
@@ -105,16 +112,9 @@ class BertiPrefetcherIO()(implicit p: Parameters) extends PrefetcherIO {
   val refillTrain = Flipped(ValidIO(new TrainReqBundle()))
 }
 
-class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
-  val vaddr       = UInt(VAddrBits.W)
-  val paddr       = UInt(PAddrBits.W)
-  val pc          = UInt(VAddrBits.W)
-  val miss        = Bool()
-  val pfHitStream = Bool()
-}
-
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule
   with PrefetcherParams
+  with HasPrefetcherParams
   with HasDCacheParameters
 {
   lazy val io: PrefetcherIO = IO(new PrefetcherIO())

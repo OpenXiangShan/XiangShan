@@ -24,10 +24,11 @@ import chisel3.util._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.{ArgParser, TLConfig}
+import top.{ArgParser, DefaultConfig}
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
+import yunsuan.vector.Common.SewOH
 import yunsuan.vector._
 
 class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
@@ -211,7 +212,7 @@ object VerilogMgu extends App {
 
 class MguTest extends AnyFlatSpec with Matchers with ChiselSim {
 
-  val defaultConfig = (new TLConfig).alterPartial({
+  val defaultConfig = (new DefaultConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
   })
 

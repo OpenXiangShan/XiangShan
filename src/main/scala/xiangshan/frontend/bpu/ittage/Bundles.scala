@@ -19,6 +19,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
@@ -44,8 +46,8 @@ class IttageEntry(tagLen: Int)(implicit p: Parameters) extends IttageBundle {
   val tag:           UInt            = UInt(tagLen.W)
   val confidenceCnt: SaturateCounter = ConfidenceCounter()
   val targetOffset:  IttageOffset    = new IttageOffset()
-  val usefulCnt:  SaturateCounter = UsefulCounter() // Due to the bitMask the useful bit needs to be at the lowest bit
-  val paddingBit: UInt            = UInt(1.W)
+  val usefulCnt:     SaturateCounter = UsefulCounter()
+  val paddingBit:    UInt            = UInt(1.W)
 }
 
 class IttageOffset(implicit p: Parameters) extends IttageBundle {
@@ -55,8 +57,8 @@ class IttageOffset(implicit p: Parameters) extends IttageBundle {
 }
 
 class IttagePrediction(implicit p: Parameters) extends IttageBundle {
-  val hit:    Bool       = Bool()
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  val hit:    Bool      = Bool()
+  val target: GuardedPc = GuardedPc()
 }
 
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
@@ -69,8 +71,8 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   val providerCnt:       SaturateCounter = ConfidenceCounter()
   val altProviderCnt:    SaturateCounter = ConfidenceCounter()
   val allocate:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
-  val providerTarget:    PrunedAddr      = PrunedAddr(VAddrBits)
-  val altProviderTarget: PrunedAddr      = PrunedAddr(VAddrBits)
+  val providerTarget:    Pc              = Pc()
+  val altProviderTarget: Pc              = Pc()
 
   val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 

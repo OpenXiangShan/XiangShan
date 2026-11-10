@@ -19,22 +19,27 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.HasAheadPredictorIO
 import xiangshan.frontend.bpu.HasFastTrainIO
-import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
 class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
-  class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val redirectValid: Bool                   = Input(Bool())
-    val overrideValid: Bool                   = Input(Bool())
-    val prediction:    Vec[Valid[Prediction]] = Output(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
-    val meta:          AheadBtbMeta           = Output(new AheadBtbMeta)
-    val debug_startPc: PrunedAddr             = Output(PrunedAddr(VAddrBits))
+  class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO with HasAheadPredictorIO with HasFastTrainIO {
+    val normalPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+
+    val result: AheadBtbResult = Output(new AheadBtbResult)
+    val meta:   AheadBtbMeta   = Output(new AheadBtbMeta)
+
+    val toMicroTage: AheadBtbToMicroTageIO = Output(new AheadBtbToMicroTageIO)
+
+    val debug_bpuS2StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
+    val debug_bpuS3StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -46,11 +51,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val banks     = Seq.tabulate(NumBanks)(i => Module(new AheadBtbBank(i)))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
-  private val resetDone = RegInit(false.B)
-  when(banks.map(_.io.readReq.ready).reduce(_ && _)) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
 
   io.trainReady := true.B
 
@@ -62,41 +63,26 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     )
   )
 
+  /* --------------------------------------------------------------------------------------------------------------
+     predict pipeline control
+     -------------------------------------------------------------------------------------------------------------- */
+
   private val s0_fire = Wire(Bool())
   private val s1_fire = Wire(Bool())
   private val s2_fire = Wire(Bool())
 
-  private val s1_ready = Wire(Bool())
   private val s2_ready = Wire(Bool())
-
-  private val s1_flush = Wire(Bool())
-  private val s2_flush = Wire(Bool())
 
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
 
-  private val predictReqValid = io.stageCtrl.s0_fire
-  private val predictionSent  = io.stageCtrl.s1_fire
-  private val redirectValid   = io.redirectValid
-  private val overrideValid   = io.overrideValid
+  private val s2_state = RegInit(0.U.asTypeOf(new PipelineState))
 
-  s0_fire := io.enable && predictReqValid
-  s1_fire := io.enable && s1_valid && s2_ready && predictReqValid
-  s2_fire := io.enable && s2_valid && predictionSent
+  private val bpuS3ReplayState = RegInit(0.U.asTypeOf(Valid(new PipelineState)))
 
-  s1_ready := s1_fire || !s1_valid
-  s2_ready := s2_fire || !s2_valid || overrideValid || redirectValid
-
-  s2_flush := redirectValid
-  s1_flush := s2_flush
-
-  when(s0_fire)(s1_valid := true.B)
-    .elsewhen(s1_flush)(s1_valid := false.B)
-    .elsewhen(s1_fire)(s1_valid := false.B)
-
-  when(s1_fire)(s2_valid := true.B)
-    .elsewhen(s2_flush)(s2_valid := false.B)
-    .elsewhen(s2_fire)(s2_valid := false.B)
+  private val bpuS0Fire = io.stageCtrl.s0_fire
+  private val bpuS1Fire = io.stageCtrl.s1_fire
+  private val bpuS2Fire = io.stageCtrl.s2_fire
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0
@@ -104,96 +90,136 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - send read request to selected bank
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s0_previousStartPc = io.startPc
+  s0_fire := io.enable && bpuS0Fire
 
-  private val s0_setIdx   = getSetIndex(s0_previousStartPc)
-  private val s0_bankIdx  = getBankIndex(s0_previousStartPc)
-  private val s0_bankMask = UIntToOH(s0_bankIdx)
+  private val s0_simpleHash = io.normalPathHist.getHistWithInfo(AbtbHashFhInfo).foldedHist(AheadBtbHashBitWidth - 1, 0)
+  private val s0_hashIndex  = io.startPc(log2Ceil(NumEntries / NumWays) - 1, 0) ^ s0_simpleHash
+  private val s0_setIdx     = s0_hashIndex(log2Ceil(NumEntries / NumWays) - 1, log2Ceil(NumBanks))
+  private val s0_bankIdx    = s0_hashIndex(log2Ceil(NumBanks) - 1, 0)
+  private val s0_bankMask   = UIntToOH(s0_bankIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
-    b.io.readReq.valid       := predictReqValid && s0_bankMask(i)
+    b.io.readReq.valid       := s0_fire && s0_bankMask(i)
     b.io.readReq.bits.setIdx := s0_setIdx
   }
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 1
-     - get the latest start pc for compare tag in s2
-     - get entries from bank
+     - receive the SRAM entries
+     - use the normal-path start PC to match the SRAM entries
+     - use the override target to rematch old S2 data or the BPU S3 replay state
+     - select the normal or override result and prepare the complete S2 state
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s1_startPc = io.startPc
+  s1_fire := io.enable && s1_valid && s2_ready && bpuS0Fire
 
-  private val s1_setIdx   = RegEnable(s0_setIdx, s0_fire)
-  private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
-  private val s1_bankMask = RegEnable(s0_bankMask, s0_fire)
+  when(!io.enable) {
+    s1_valid := false.B
+  }.elsewhen(s0_fire) {
+    s1_valid := true.B
+  }.elsewhen(io.redirect || s1_fire) {
+    s1_valid := false.B
+  }
+
+  private val s1_setIdx       = RegEnable(s0_setIdx, s0_fire)
+  private val s1_bankIdx      = RegEnable(s0_bankIdx, s0_fire)
+  private val s1_bankMask     = RegEnable(s0_bankMask, s0_fire)
+  private val s1_debugIndexPc = Option.when(!env.FPGAPlatform)(RegEnable(io.startPc, s0_fire))
 
   private val s1_entries = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  private val s1_ctrVec  = takenCounter(s1_bankIdx)(s1_setIdx)
+
+  private val s1_normalState = WireInit(0.U.asTypeOf(new PipelineState))
+  s1_normalState.startPc  := io.newStartPc
+  s1_normalState.setIdx   := s1_setIdx
+  s1_normalState.bankIdx  := s1_bankIdx
+  s1_normalState.bankMask := s1_bankMask
+  s1_normalState.entries  := s1_entries
+  s1_normalState.ctrVec   := s1_ctrVec
+  s1_normalState.hitMask  := s1_normalState.getHitMask
+  s1_normalState.debug_indexPc.zip(s1_debugIndexPc).foreach { case (a, b) => a := b }
+
+  // compute hit mask for the override state, which is used to rematch the old S2 state or the BPU S3 replay state
+  private val s1_overrideState = WireInit(Mux(io.bpuS3Override, bpuS3ReplayState.bits, s2_state))
+  s1_overrideState.startPc := io.overrideStartPc
+  s1_overrideState.hitMask := s1_overrideState.getHitMask
+
+  private val s1_state = Mux(io.bpuS3Override || io.bpuS2Override, s1_overrideState, s1_normalState)
+
+  s2_state.debug_indexPc.zip(io.debug_bpuS2StartPc).foreach { case (indexPc, bpuStartPc) =>
+    when(io.enable && !io.redirect && io.bpuS2Override && !io.bpuS3Override && s2_valid) {
+      assert(indexPc === bpuStartPc, "AheadBtb S2 override reuses entries indexed by the wrong PC")
+    }
+  }
+  bpuS3ReplayState.bits.debug_indexPc.zip(io.debug_bpuS3StartPc).foreach { case (indexPc, bpuStartPc) =>
+    when(io.enable && !io.redirect && io.bpuS3Override && bpuS3ReplayState.valid) {
+      assert(indexPc === bpuStartPc, "AheadBtb S3 override reuses entries indexed by the wrong PC")
+    }
+  }
+
+  io.toMicroTage.fastPositions := s1_state.entries.map(_.position)
 
   /* --------------------------------------------------------------------------------------------------------------
-     predict pipeline stage 2 / 3
-     - get taken counter result
-     - compare tag and get taken mask
-     - compare positions and find first taken entry
-     - get target from found entry
-     - output prediction
-     - stage 3 is only for fast prediction when override is valid
+     predict pipeline stage 2
+     - latch the normal or replay state prepared in S1
+     - output the prediction
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s3_setIdx   = RegInit(0.U.asTypeOf(s1_setIdx))
-  private val s3_bankIdx  = RegInit(0.U.asTypeOf(s1_bankIdx))
-  private val s3_bankMask = RegInit(0.U.asTypeOf(s1_bankMask))
-  private val s3_entries  = RegInit(0.U.asTypeOf(s1_entries))
-  private val s3_startPc  = RegInit(0.U.asTypeOf(s1_startPc))
+  s2_ready := s2_fire || !s2_valid || io.bpuS2Override || io.bpuS3Override || io.redirect
 
-  private val s2_setIdx   = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
-  private val s2_bankIdx  = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
-  private val s2_bankMask = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
-  private val s2_entries  = RegEnable(Mux(overrideValid, s3_entries, s1_entries), s1_fire)
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
-
-  when(s2_fire) {
-    s3_setIdx   := s2_setIdx
-    s3_bankIdx  := s2_bankIdx
-    s3_bankMask := s2_bankMask
-    s3_entries  := s2_entries
-    s3_startPc  := s2_startPc
+  when(s1_fire || io.bpuS2Override || io.bpuS3Override) {
+    s2_state := s1_state
   }
 
-  private val s2_ctrResult = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
-
-  private val s2_tag = getTag(s2_startPc)
-  dontTouch(s2_tag)
-  private val s2_hitMask = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hit     = s2_hitMask.reduce(_ || _)
-
-  // When detect multi-hit, we need to invalidate one entry.
-  private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_entries.map(_.position))
-
-  io.prediction.zipWithIndex.foreach { case (pred, i) =>
-    pred.valid            := s2_valid && s2_hitMask(i)
-    pred.bits.taken       := s2_ctrResult(i)
-    pred.bits.cfiPosition := s2_entries(i).position
-    pred.bits.attribute   := s2_entries(i).attribute
-    pred.bits.target      := getFullTarget(s2_startPc, s2_entries(i).targetLowerBits, s2_entries(i).targetCarry)
+  when(!io.enable || io.redirect) {
+    s2_valid := false.B
+  }.elsewhen(io.bpuS3Override) {
+    s2_valid := bpuS3ReplayState.valid
+  }.elsewhen(s1_fire && !io.bpuS2Override) {
+    s2_valid := true.B
+  }.elsewhen(s2_fire) {
+    s2_valid := false.B
   }
 
-  io.meta.valid    := s2_valid
-  io.meta.setIdx   := s2_setIdx
-  io.meta.bankMask := s2_bankMask
+  s2_fire := s2_valid && bpuS1Fire && !io.bpuS3Override && !io.bpuS2Override && !io.redirect
+
+  io.result.entries.zipWithIndex.foreach { case (pred, i) =>
+    pred.valid            := s2_valid && s2_state.hitMask(i) && io.enable
+    pred.bits.taken       := s2_state.ctrVec(i).isPositive
+    pred.bits.cfiPosition := s2_state.entries(i).position
+    pred.bits.attribute   := s2_state.entries(i).attribute
+    pred.bits.target :=
+      getFullTarget(s2_state.startPc, s2_state.entries(i).targetLowerBits, s2_state.entries(i).targetCarry)
+  }
+  io.toMicroTage.result.zipWithIndex.foreach { case (pred, i) =>
+    pred.valid             := s2_valid && s2_state.hitMask(i) && io.enable
+    pred.bits.taken        := s2_state.ctrVec(i).isPositive
+    pred.bits.cfiPosition  := s2_state.entries(i).position
+    pred.bits.attribute    := s2_state.entries(i).attribute
+    pred.bits.isStrongBias := s2_state.ctrVec(i).isSaturate
+  }
+  io.meta.valid    := s2_valid && io.enable
+  io.meta.setIdx   := s2_state.setIdx
+  io.meta.bankMask := s2_state.bankMask
   io.meta.entries.zipWithIndex.foreach { case (e, i) =>
-    e.hit             := s2_hitMask(i)
-    e.attribute       := s2_entries(i).attribute
-    e.position        := s2_entries(i).position
-    e.targetLowerBits := s2_entries(i).targetLowerBits
+    e.hit             := s2_state.hitMask(i)
+    e.attribute       := s2_state.entries(i).attribute
+    e.position        := s2_state.entries(i).position
+    e.targetLowerBits := s2_state.entries(i).targetLowerBits
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc
+  io.result.debug_startPc.foreach(_ := s2_state.startPc)
 
-  replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
-    r.io.readSetIdx  := s2_setIdx
-    r.io.readWayMask := s2_hitMask
+  /* --------------------------------------------------------------------------------------------------------------
+     old state for bpu s3 override
+     -------------------------------------------------------------------------------------------------------------- */
+
+  when(!io.enable || io.redirect || io.bpuS3Override) {
+    bpuS3ReplayState.valid := false.B
+  }.elsewhen(bpuS2Fire) {
+    bpuS3ReplayState.valid := s2_valid
+    bpuS3ReplayState.bits  := s2_state
   }
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -203,7 +229,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.finalPrediction.taken && t0_train.abtbMeta.valid
+  private val t0_fire = io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.enable
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -220,11 +246,12 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_setMask  = UIntToOH(t1_setIdx)
   private val t1_bankMask = t1_meta.bankMask
 
-  // use taken branch of s3 prediction to train abtb
-  private val t1_trainTaken           = t1_train.finalPrediction.taken
-  private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
-  private val t1_trainAttribute       = t1_train.finalPrediction.attribute
-  private val t1_trainTarget          = t1_train.finalPrediction.target
+  // A taken final prediction can allocate/correct an entry. A not-taken
+  // prediction only updates counters of the conditional entries that hit.
+  private val t1_trainTaken           = t1_train.branch.taken
+  private val t1_trainPosition        = t1_train.branch.cfiPosition
+  private val t1_trainAttribute       = t1_train.branch.attribute
+  private val t1_trainTarget          = t1_train.branch.target
   private val t1_trainTargetLowerBits = getTargetLowerBits(t1_trainTarget)
 
   private val t1_condMask           = t1_meta.entries.map(e => e.hit && e.attribute.isConditional)
@@ -244,6 +271,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
         val needDecrease = updateThisSet && isCond && (!t1_trainTaken || t1_trainTaken && posBefore)
         val needIncrease = updateThisSet && isCond && t1_trainTaken && posEqual
 
+        // For timing purposes, the indirect jump branch in the abtb comparison matrix relies on
+        // the default CTR assignment and omits extra attribute checks.
         when(needReset)(ctr.resetWeakPositive())
           .elsewhen(needDecrease)(ctr.selfDecrease())
           .elsewhen(needIncrease)(ctr.selfIncrease())
@@ -256,7 +285,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     e.hit && e.position === t1_trainPosition && e.attribute === t1_trainAttribute
   }
   private val t1_hit               = t1_hitMask.reduce(_ || _)
-  private val t1_needWriteNewEntry = !t1_hit
+  private val t1_needWriteNewEntry = !t1_hit && t1_trainTaken
 
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
@@ -278,24 +307,55 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
+  private val t2_fire              = RegNext(t1_fire, init = false.B)
+  private val t2_victimWayIdx      = RegNext(VecInit(victimWayIdx))
+  private val t2_setIdx            = RegNext(t1_setIdx)
+  private val t2_bankMask          = RegNext(t1_bankMask)
+  private val t2_hitMaskOH         = RegNext(VecInit(t1_hitMaskOH))
+  private val t2_needWriteNewEntry = RegNext(t1_needWriteNewEntry)
+  private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
+  private val t2_writeEntry        = RegNext(t1_writeEntry)
+  private val t2_hit               = RegNext(t1_hit)
+  private val t2_hitMask           = RegNext(VecInit(t1_hitMask))
+  private val t2_trainTaken        = RegNext(t1_trainTaken)
+
+  // When detect multi-hit, we need to invalidate one entry.
+  private val (s2_multiHit, s2_multiHitWayIdx) =
+    detectMultiHit(s2_state.hitMask, s2_state.entries.map(_.position))
+  private val s2_needCleanMultiHit = s2_fire && s2_multiHit
+
+  private val multiHitSetIdx   = RegEnable(s2_state.setIdx, s2_needCleanMultiHit)
+  private val multiHitBankMask = RegEnable(s2_state.bankMask, s2_needCleanMultiHit)
+  private val multiHitWayIdx   = RegEnable(s2_multiHitWayIdx, s2_needCleanMultiHit)
+
+  private val cleanMultiHitValid   = RegInit(false.B)
+  private val cleanMultiHitApplied = WireInit(VecInit.fill(NumBanks)(false.B))
+
+  when(s2_needCleanMultiHit) {
+    cleanMultiHitValid := true.B
+  }.elsewhen(cleanMultiHitApplied.asUInt.orR) {
+    cleanMultiHitValid := false.B
+  }
+
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
-      b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(t1_fire && t1_needCorrectTarget && t1_bankMask(i)) {
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := t2_victimWayIdx(i)
+      b.io.writeReq.bits.entry        := t2_writeEntry
+    }.elsewhen(t2_fire && t2_needCorrectTarget && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := OHToUInt(t1_hitMaskOH)
-      b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(s2_valid && s2_multiHit && s2_bankMask(i)) {
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := OHToUInt(t2_hitMaskOH)
+      b.io.writeReq.bits.entry        := t2_writeEntry
+    }.elsewhen(cleanMultiHitValid && multiHitBankMask(i)) {
+      cleanMultiHitApplied(i)         := true.B
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
-      b.io.writeReq.bits.setIdx       := s2_setIdx
-      b.io.writeReq.bits.wayIdx       := s2_multiHitWayIdx
+      b.io.writeReq.bits.setIdx       := multiHitSetIdx
+      b.io.writeReq.bits.wayIdx       := multiHitWayIdx
       b.io.writeReq.bits.entry        := 0.U.asTypeOf(new AheadBtbEntry)
     }.otherwise {
       b.io.writeReq.valid := false.B
@@ -308,16 +368,23 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
   }
+  // update replacer -- Allocation touch and training touch are triggered at different times,
+  // so they cannot share the same interface.
+  replacers.zipWithIndex.foreach { case (r, i) =>
+    r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
+    r.io.readSetIdx  := t2_setIdx
+    r.io.readWayMask := t2_hitMask
+  }
 
   /* --------------------------------------------------------------------------------------------------------------
      performance counter
      -------------------------------------------------------------------------------------------------------------- */
 
-  XSPerfAccumulate("predict_req_num", predictReqValid)
+  XSPerfAccumulate("predict_req_num", s0_fire)
   XSPerfAccumulate("predict_num", s2_fire)
-  XSPerfAccumulate("predict_hit", s2_fire && s2_hit)
-  XSPerfAccumulate("predict_miss", s2_fire && !s2_hit)
-  XSPerfAccumulate("predict_hit_entry_num", Mux(s2_fire, PopCount(s2_hitMask), 0.U))
+  XSPerfAccumulate("predict_hit", s2_fire && s2_state.hitMask.reduce(_ || _))
+  XSPerfAccumulate("predict_miss", s2_fire && !s2_state.hitMask.reduce(_ || _))
+  XSPerfAccumulate("predict_hit_entry_num", Mux(s2_fire, PopCount(s2_state.hitMask), 0.U))
   XSPerfAccumulate("predict_multi_hit", s2_fire && s2_multiHit)
 
   XSPerfAccumulate("train_req_num", io.fastTrain.get.valid)
@@ -325,11 +392,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   XSPerfAccumulate("train_actual_taken", t1_fire && t1_trainTaken)
   XSPerfAccumulate("train_actual_not_taken", t1_fire && !t1_trainTaken)
 
-  XSPerfAccumulate("total_write", t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
+  XSPerfAccumulate(
+    "total_write",
+    t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_fire && s2_multiHit
+  )
   XSPerfAccumulate("train_write_new_entry", t1_fire && t1_needWriteNewEntry)
   XSPerfAccumulate("train_correct_target", t1_fire && t1_needCorrectTarget)
   XSPerfAccumulate(
     "train_write_conflict",
-    t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
+    t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_fire && s2_multiHit
   )
 }

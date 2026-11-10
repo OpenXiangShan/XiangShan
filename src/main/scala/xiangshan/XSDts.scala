@@ -72,7 +72,7 @@ trait HasXSDts {
 
     def nextLevelCacheProperty: PropertyOption = {
       if(coreParams.dcacheParametersOpt.nonEmpty){
-        val outer = memBlock.inner.dcache.clientNode.edges.out.flatMap(_.manager.managers)
+        val outer = memBlock.inner.dcache.clientNodes.head.edges.out.flatMap(_.manager.managers)
           .filter(_.supportsAcquireB)
           .flatMap(_.resources.headOption)
           .map(_.owner.label)

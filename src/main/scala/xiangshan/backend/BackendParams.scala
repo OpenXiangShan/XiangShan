@@ -29,6 +29,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.vector.{Exu, RegionParam}
 
 import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
@@ -37,11 +38,12 @@ case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
   iqWakeUpParams : Seq[WakeUpConfig],
-) {
+) extends NewParam {
 
-  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
-
-  def robCompressEn: Boolean = false
+  def debugEn(implicit p: Parameters): Boolean = {
+    val debugOpts = p(DebugOptionsKey)
+    debugOpts.EnableDifftest || debugOpts.FullBasicDiff
+  }
 
   def regCacheEn: Boolean = true
 
@@ -84,6 +86,12 @@ case class BackendParams(
   def allRealExuParams =
     allExuParams.filterNot(_.fakeUnit)
 
+  // TODO: add vecSchdParams when it is ready
+  def iqEntryNum = Seq(
+    intSchdParams.get,
+    fpSchdParams.get,
+  ).flatMap(_.issueBlockParams).map(_.numEntries).sum
+
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def fpPregParams: FpPregParams = pregParams.collectFirst { case x: FpPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
@@ -107,18 +115,21 @@ case class BackendParams(
   def StdCnt = allSchdParams.map(_.StdCnt).sum
   def LduCnt = allSchdParams.map(_.LduCnt).sum
   def HyuCnt = allSchdParams.map(_.HyuCnt).sum
-  def VlduCnt = allSchdParams.map(_.VlduCnt).sum
-  def VstuCnt = allSchdParams.map(_.VstuCnt).sum
   def LsExuCnt = StaCnt + LduCnt + HyuCnt
   val LdExuCnt = LduCnt + HyuCnt
   val StaExuCnt = StaCnt + HyuCnt
   def JmpCnt = allSchdParams.map(_.JmpCnt).sum
+  def LinkCnt = allSchdParams.map(_.LinkCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum
   def CsrCnt = allSchdParams.map(_.CsrCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
-  def numPcMemReadPort = allExuParams.filter(_.needPc).size
-  def numTargetReadPort = allRealExuParams.count(x => x.needTarget)
+  def hasLoadSchd = LdExuCnt > 0
+  def hasStoreSchd = StaExuCnt > 0
+
+  def aluBjuPcPortNum = allExuParams.count(_.aluBjuNeedPc)
+  def numPcMemReadPort = allExuParams.count(_.needPc)
+  def numTargetReadPort = allRealExuParams.count(_.needTarget)
 
   def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)
   def numPregWb(dataCfg: DataConfig) = this.getRfWriteSize(dataCfg)
@@ -126,7 +137,7 @@ case class BackendParams(
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
 
-  def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
+  def numException(implicit p: Parameters) = getWrite2RobSize(_.needExceptionGen)
 
   def numRedirect = 1 // only for ahead info to frontend
 
@@ -167,7 +178,22 @@ case class BackendParams(
   }
 
   def genWrite2RobBundles(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
-    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle.flatten).flatten)
+    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle(needExtraVld = true).flatten).flatten)
+  }
+
+  def getWrite2RobParams(needExtraVld: Boolean = true): Seq[ExeUnitParams] = {
+    allIssueParams.flatMap(_.getWriteBackRobParams(needExtraVld))
+  }
+
+  def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
+    getWrite2RobParams().count(cond)
+
+  def genNewExuOutputBundle[T <: Bundle](
+    builder: NewExuOutput => T,
+    when: ExeUnitParams => Boolean,
+    dataConfigs: Seq[DataConfig],
+  )(implicit p: Parameters): MixedVec[MixedVec[T]] = {
+    MixedVec(allSchdParams.flatMap(_.genNewExuOutputBundle(builder, when)))
   }
 
   def getIntWbArbiterParams: WbArbiterParams = {
@@ -186,7 +212,7 @@ case class BackendParams(
   }
 
   def getV0WbArbiterParams: WbArbiterParams = {
-    val v0WbCfgs: Seq[V0WB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeV0)).map(_.asInstanceOf[V0WB])
+    val v0WbCfgs: Seq[V0WB] = allIssueParams.flatMap(_.exuBlockParams.filter(_.v0WB != null).map(_.v0WB))
     datapath.WbArbiterParams(v0WbCfgs, v0PregParams, this)
   }
 
@@ -212,6 +238,22 @@ case class BackendParams(
       .toSeq
       .sortBy(_._1)
     cfgs
+  }
+
+  def getV0RdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
+    allRealExuParams
+      .filter(_.v0RD != null)
+      .map(x => (x.v0RD, x.exuIdx))
+      .groupBy { case (rdCfg, exuIdx) => rdCfg.port }
+      .map {
+        case (port, cfgExuIdxSeq) =>
+          port ->
+            cfgExuIdxSeq
+              .map { case (v0Rd, exuIdx) => (exuIdx, v0Rd.priority) }
+              .sortBy { case (exuIdx, prio) => prio }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
   }
 
   def getVlRdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
@@ -249,6 +291,24 @@ case class BackendParams(
   }
 
   /**
+   * Get v0 regfile write back port params
+   *
+   * @return Seq[port -> Seq[(exuIdx, priority)] ]
+   */
+  def getV0WbPortParams = {
+    allRealExuParams
+      .filter(_.v0WB != null)
+      .map(exuParams => exuParams.v0WB -> exuParams.exuIdx)
+      .groupBy{ case (v0wb, exuIdx) => v0wb.port }
+      .map{
+        case (port, wbIdxSeq) =>
+          port -> wbIdxSeq.map { case (wb, exuIdx) => (exuIdx, wb.priority) }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
+  }
+
+  /**
    * Get vl regfile write back port params
    *
    * @return Seq[port -> Seq[(exuIdx, priority)] ]
@@ -269,6 +329,7 @@ case class BackendParams(
   def getRdPortIndices(dataCfg: DataConfig) = {
     dataCfg match {
       case VlData() => this.getVlRdPortParams.map(_._1)
+      case V0Data() => this.getV0RdPortParams.map(_._1)
       case _ => this.getRdPortParams(dataCfg).map(_._1)
     }
   }
@@ -276,6 +337,7 @@ case class BackendParams(
   def getWbPortIndices(dataCfg: DataConfig) = {
     dataCfg match {
       case VlData() => this.getVlWbPortParams.map(_._1)
+      case V0Data() => this.getV0WbPortParams.map(_._1)
       case _ => this.getWbPortParams(dataCfg).map(_._1)
     }
   }
@@ -292,10 +354,54 @@ case class BackendParams(
     rdCfgs
   }
 
+  def getRdCfgsIntSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = intSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsFltSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = fpSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsVecSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = vecSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
   def getVlRdCfgs: Seq[Seq[Seq[VlRD]]] = {
     allIssueParams.map(
       _.exuBlockParams.map(
         x => Option(x.vlRD).toSeq
+      )
+    )
+  }
+
+  def getV0RdCfgs: Seq[Seq[Seq[V0RD]]] = {
+    allIssueParams.map(
+      _.exuBlockParams.map(
+        x => Option(x.v0RD).toSeq
       )
     )
   }
@@ -336,6 +442,9 @@ case class BackendParams(
     this.fpPregParams.numWrite.getOrElse(this.getWbPortIndices(FpData()).size)
   }
 
+  def getFpRfReadSize = {
+    this.fpPregParams.numRead.getOrElse(this.getRdPortIndices(FpData()).size)
+  }
   /**
     * Get size of read ports of vec regfile
     *
@@ -362,6 +471,15 @@ case class BackendParams(
     this.vlPregParams.numWrite.getOrElse(this.getWbPortIndices(VlData()).size)
   }
 
+  /**
+   * Get size of read ports of vl regfile
+   *
+   * @return if [[VlPregParams.numRead]] is [[None]], get size of ports in [[VlRD]]
+   */
+  def getVlRfReadSize = {
+    this.vlPregParams.numRead.getOrElse(this.getRdPortIndices(VlData()).size)
+  }
+
   def getRfReadSize(dataCfg: DataConfig) = {
     dataCfg match{
       case IntData() | FpData() | VecData() | V0Data() | VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
@@ -385,6 +503,8 @@ case class BackendParams(
     this.allExuParams.filter(x => x.isMemExeUnit && x.readIntRf).map(_.numIntSrc).reduce(_ + _)
   }
 
+  def getExuRCReadSize = getIntExuRCReadSize + getMemExuRCReadSize
+
   /**
     * Get size of write ports of int regcache
     */
@@ -395,6 +515,8 @@ case class BackendParams(
   def getMemExuRCWriteSize = {
     this.allExuParams.filter(x => x.hasLoadExu && x.isIQWakeUpSource && x.readIntRf).size
   }
+
+  def getExuRCWriteSize = getIntExuRCWriteSize + getMemExuRCWriteSize
 
   def getExuIdx(name: String): Int = {
     val exuParams = allRealExuParams
@@ -440,6 +562,9 @@ case class BackendParams(
   def getVfWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getVfWBPort .nonEmpty).groupBy(_.getVfWBPort.get.port)
   def getV0WBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getV0WBPort .nonEmpty).groupBy(_.getV0WBPort.get.port)
   def getVlWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getVlWBPort .nonEmpty).groupBy(_.getVlWBPort.get.port)
+
+  def exceptionOut = allExuParams.flatMap(_.exceptionOut).distinct.sorted
+  def getExceptionOutList = allRealExuParams.map(_.exceptionOut).filter(_.nonEmpty)
 
   private def isContinuous(portIndices: Seq[Int]): Boolean = {
     val portIndicesSet = portIndices.toSet
@@ -531,6 +656,28 @@ case class BackendParams(
   }
 }
 
+sealed trait NewParam { self: BackendParams =>
+  def getIntRegionParam: RegionParam = RegionParam(intSchdParams.get, this)
+  def getFltRegionParam: RegionParam = RegionParam(fpSchdParams.get, this)
+  def getVecRegionParam: RegionParam = RegionParam(vecSchdParams.get, this)
+
+  def regionParams: Seq[RegionParam] = Seq(
+    getIntRegionParam,
+    getFltRegionParam,
+    getVecRegionParam,
+  )
+
+  // New api name
+  def gpPregParams = this.intPregParams
+  def vpPregParams = this.vfPregParams
+  def getFpWriteSize = this.getFpRfWriteSize
+  def getVpWriteSize = this.getVfRfWriteSize
+
+  def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
+    regionParams.map(_.genExuToRfBundle(pregParams))
+  )
+}
+
 object BackendV2SchdParams {
 
   def intSchdVlWbPort = 0
@@ -548,12 +695,12 @@ object BackendV2SchdParams {
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
+        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
+        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(1, 0)), Seq(IntRD(5, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
+        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -565,7 +712,7 @@ object BackendV2SchdParams {
           2,
           vlWB = VlWB(port = intSchdVlWbPort, 0),
         ),
-        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
+        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU3", Seq(AluCfg, BkuCfg, MulCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(7, 0))), true, 2)
@@ -604,13 +751,13 @@ object BackendV2SchdParams {
     SchdBlockParams(Seq(
       // FcmpCfg and FcvtCfg must be in the same ExuUnit because they both need to write to the integer register file.
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
+        ExeUnitParams("FEX0", Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
     ),
       numPregs = numPregsFp,
@@ -627,7 +774,7 @@ object BackendV2SchdParams {
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
+          Seq(VialuCfg, VimacCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
           Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 7, 0), FpWB(port = 6, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
           vlWB = VlWB(port = vfSchdVlWbPort, 0),
@@ -637,30 +784,10 @@ object BackendV2SchdParams {
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
-          Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg),
+          Seq(VialuCfg, VfdivCfg, VidivCfg),
           Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
           vlRD = VlRD(1, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU0",
-          Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg),
-          Seq(VfWB(2, 0), V0WB(2, 0)),
-          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0))),
-          vlWB = VlWB(port = 2, 0),
-          vlRD = VlRD(2, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU1",
-          Seq(VlduCfg, VstuCfg),
-          Seq(VfWB(3, 0), V0WB(3, 0)),
-          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0))),
-          vlWB = VlWB(port = 3, 0),
-          vlRD = VlRD(3, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
     ),

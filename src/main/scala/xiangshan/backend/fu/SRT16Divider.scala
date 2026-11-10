@@ -35,7 +35,6 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.util.CSA3_2
-import utility.PriorityEncoder
 
 class SRT16DividerDataModule(len: Int) extends Module {
   val io = IO(new Bundle() {

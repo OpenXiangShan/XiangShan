@@ -4,8 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
-import xiangshan.ExceptionNO
-import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, PrivMode, SatpMode, VirtMode}
@@ -60,6 +58,7 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.valid := valid
   out.mstatus  .valid := valid
+  out.vsstatus .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits          := outPrivState

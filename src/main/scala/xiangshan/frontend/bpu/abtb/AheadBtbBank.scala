@@ -31,6 +31,8 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     val readResp:  BankReadResp             = Output(new BankReadResp)
     val writeReq:  Valid[BankWriteReq]      = Flipped(Valid(new BankWriteReq))
     val writeResp: Valid[BankWriteResp]     = Valid(new BankWriteResp)
+
+    val sramResetDone: Bool = Output(Bool())
   }
   val io: BankIO = IO(new BankIO)
 
@@ -60,6 +62,8 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
 
   io.readResp.entries := sram.io.r.resp.data
 
+  io.sramResetDone := sram.io.resetDone
+
   /* --------------------------------------------------------------------------------------------------------------
      write
      -------------------------------------------------------------------------------------------------------------- */
@@ -74,7 +78,7 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     nameSuffix = s"abtbBank$bandIdx"
   ))
 
-  // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
+  // WriteBuffer accepts every pulse; a full miss overwrites an older dirty entry.
   writeBuffer.io.write.head.valid := io.writeReq.valid
   writeBuffer.io.write.head.bits  := io.writeReq.bits
 
@@ -99,7 +103,7 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
 
   XSPerfAccumulate("read", sram.io.r.req.fire)
   XSPerfAccumulate("write", sram.io.w.req.fire)
-  XSPerfAccumulate("write_buffer_full", !writeBuffer.io.write.head.ready)
-  XSPerfAccumulate("write_buffer_full_drop_write", !writeBuffer.io.write.head.ready && io.writeReq.valid)
+  XSPerfAccumulate("write_buffer_full", writeBuffer.io.full.head)
+  XSPerfAccumulate("write_buffer_overwrite", writeBuffer.io.overwrite.head)
   XSPerfAccumulate("need_reset_ctr", io.writeResp.valid && io.writeResp.bits.needResetCtr)
 }

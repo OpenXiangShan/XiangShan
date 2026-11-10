@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.sc
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.PrunedAddr
@@ -33,13 +34,20 @@ class ScTable(
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:       Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
-    val resp:      Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
-    val update:    ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
-    val resetDone: Bool              = Output(Bool())
+    val predictReadReq:  Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val predictReadResp: Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val trainReadReq:    Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val trainReadResp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update:          ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val sramResetDone:   Bool              = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
+
+  println(f"Sc$tableType[$tableIdx]:")
+  println(f"  Size(set, bank, way): $numSets * $NumBanks * $numWays")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
 
   def numRows: Int = numSets
 
@@ -50,7 +58,6 @@ class ScTable(
       way = numWays,
       singlePort = true,
       shouldReset = true,
-      holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl,
@@ -63,23 +70,30 @@ class ScTable(
       new ScTableSramWriteReq(numRows, numWays),
       WriteBufferSize,
       numPorts = 1,
+      numWays = numWays,
+      hasWayMask = true,
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
 
   // read path table by setIndex
-  private val reqSetIdx   = io.req.bits.setIdx
-  private val reqBankMask = io.req.bits.bankMask
-  sram.zip(reqBankMask.asBools).foreach {
-    case (bank, bankEnable) =>
-      bank.io.r.req.valid       := io.req.valid && bankEnable
-      bank.io.r.req.bits.setIdx := reqSetIdx
+  sram.zipWithIndex.foreach { case (bank, bankIdx) =>
+    val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
+    val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
+    bank.io.r.req.valid       := predictReadValid || trainReadValid
+    bank.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
+    assert(!(predictReadValid && trainReadValid), s"read conflict in sc${tableType}${tableIdx}_${bankIdx}")
   }
 
-  io.resetDone := sram.map(_.io.r.req.ready).reduce(_ && _)
+  io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)
 
-  private val respBankMask = RegEnable(reqBankMask, io.req.valid)
-  io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
+  private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
+  private val predictReadData         = Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+  // Preserve the prediction response across s1 stalls while training reads share the SRAM banks.
+  io.predictReadResp := DataHoldBypass(predictReadData, RegNext(io.predictReadReq.valid, init = false.B))
+
+  private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
+  io.trainReadResp := Mux1H(trainReadBankMaskNext, sram.map(_.io.r.resp.data))
 
   // update path table
   private val updateValid    = io.update.valid && io.update.wayMask.reduce(_ || _)
@@ -92,15 +106,15 @@ class ScTable(
       val writeValid = updateValid && bankEnable
       buffer.io.write.head.valid       := writeValid
       buffer.io.write.head.bits.setIdx := updateIdx
-      buffer.io.write.head.bits.wayMask := Mux(
+      buffer.io.write.head.bits.wayMask.get := Mux(
         writeValid,
         updateWayMask,
         VecInit.fill(numWays)(false.B)
       )
-      buffer.io.write.head.bits.entryVec := Mux(
+      buffer.io.write.head.bits.wayData.get := Mux(
         writeValid,
-        io.update.entryVec,
-        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
+        VecInit(io.update.entryVec.map(_.asUInt)),
+        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()).asUInt)
       )
   }
 
@@ -108,9 +122,9 @@ class ScTable(
     case ((bank, buffer), i) =>
       bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
       bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
-      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.asUInt
-      bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
+      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.get.asUInt
+      bank.io.w.req.bits.data        := VecInit(buffer.io.read.head.bits.wayData.get.map(_.asTypeOf(new ScEntry())))
+      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
-
 }

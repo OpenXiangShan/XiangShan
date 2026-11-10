@@ -6,14 +6,16 @@ import chisel3.util._
 import utility._
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.Bundles.{VIAluCtrlSignals, VPUCtrlSignals}
+import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl, Vxsat}
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxsat}
+import xiangshan.ExceptionNO
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
+import xiangshan.backend.fu.fpu.Bundles._
+import yunsuan.fpu.fmul.utils.FMULToFADDCtrlBundle
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -46,9 +48,9 @@ object UncertainLatency {
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
-  val toRobValid  = Bool()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
+  val pdestV0     = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
   val pdestVl     = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
@@ -62,40 +64,46 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(FetchBlockInstOffsetWidth.W))
   val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
     val target     = UInt(VAddrData().dataWidth.W)
-    val fixedTaken = Bool()
     val predTaken  = Bool()
   })
-  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
-  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
-  val vialuCtrl   = OptionWrapper(cfg.needVIaluCtrl, new VIAluCtrlSignals)
+  val frm         = Option.when(cfg.needInstFrm)(Frm())
+  val fflagsWen   = OptionWrapper(cfg.writeFflags, Bool())
+  val vm          = OptionWrapper(cfg.needVecCtrl, Bool())
+  val uopIdx      = OptionWrapper(cfg.needVecCtrl, UopIdx())
+  val lastUop     = OptionWrapper(cfg.needVecCtrl, Bool())
+  val vtype       = OptionWrapper(cfg.needVecCtrl, VType())
+  val oldVType    = Option.when(cfg.writeVType)(VType())
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val toRobValid    = Bool()
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
+  val pdestV0       = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
   val pdestVl       = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
   val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
-  val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
+  val exceptionVec  = ExceptSparseVec(cfg.exceptionOut)
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
+  val satpFlush     = OptionWrapper(cfg.isCsr,      Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
-  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
-  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val fflagsWen     = OptionWrapper(cfg.writeFflags, Bool())
+  val vm            = OptionWrapper(cfg.needVecCtrl, Bool())
+  val uopIdx        = OptionWrapper(cfg.needVecCtrl, UopIdx())
+  val lastUop       = OptionWrapper(cfg.needVecCtrl, Bool())
+  val vtype         = OptionWrapper(cfg.needVecCtrl, VType())
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val vl        = Option.when(cfg.readVl)(Vl())
+  val v0        = Option.when(cfg.readV0)(V0())
   val imm       = UInt(cfg.destDataBits.W)
-  val pc        = OptionWrapper(cfg.needPc || cfg.aluNeedPc, UInt(VAddrData().dataWidth.W))
-  val nextPcOffset = OptionWrapper(cfg.needPc, UInt((FetchBlockInstOffsetWidth + 2).W))
-
-  def getSrcMask    : UInt = src(cfg.maskSrcIdx)
+  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+  val nextPcOffset = OptionWrapper(cfg.isBrh || cfg.isJmp || cfg.isLink, UInt((FetchBlockInstOffsetWidth + 2).W))
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -123,6 +131,23 @@ class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
 }
 
+class FuncUnitFaluInputFromFmul(implicit p: Parameters) extends XSBundle {
+  val FMULToFALUCtrl = new FMULToFADDCtrlBundle(64)
+  val fpAAppend = UInt(53.W)
+  val fpA = UInt(64.W)
+  val src2 = UInt(64.W)
+  val isSub = Bool()
+}
+
+class FuncUnitFmulOutputToFalu(implicit p: Parameters) extends XSBundle {
+  val falucfg = FuConfig.FaluCfg
+  val fuType = FuType()
+  val ctrl = new FuncUnitCtrlInput(falucfg)
+  val data = new FuncUnitDataInput(falucfg)
+  val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+  val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
+}
+
 class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
@@ -136,12 +161,12 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
   val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
-  val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
+  val frm = OptionWrapper(cfg.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
-  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh || cfg.isAlu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isLink || cfg.isBrh)(Input(new AddrTransType))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
@@ -152,9 +177,9 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
-    io.out.bits.ctrl.toRobValid := RegEnable(io.in.bits.ctrl.toRobValid, io.in.fire)
     io.out.bits.ctrl.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest  := RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.pdestV0.foreach(_ := RegEnable(io.in.bits.ctrl.pdestV0.get, io.in.fire))
     io.out.bits.ctrl.rfWen  .foreach(_ := RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire))
     io.out.bits.ctrl.fpWen  .foreach(_ := RegEnable(io.in.bits.ctrl.fpWen.get, io.in.fire))
     io.out.bits.ctrl.vecWen .foreach(_ := RegEnable(io.in.bits.ctrl.vecWen.get, io.in.fire))
@@ -162,16 +187,19 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen .foreach(_ := RegEnable(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := RegEnable(io.in.bits.ctrl.isRVC.get, io.in.fire))
-    io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
-    io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.fflagsWen.foreach(_ := RegEnable(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
+    io.out.bits.ctrl.vm       .foreach(_ := RegEnable(io.in.bits.ctrl.vm.get, io.in.fire))
+    io.out.bits.ctrl.uopIdx   .foreach(_ := RegEnable(io.in.bits.ctrl.uopIdx.get, io.in.fire))
+    io.out.bits.ctrl.lastUop  .foreach(_ := RegEnable(io.in.bits.ctrl.lastUop.get, io.in.fire))
+    io.out.bits.ctrl.vtype    .foreach(_ := RegEnable(io.in.bits.ctrl.vtype.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := RegEnable(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
   }
 
   def connectNonPipedCtrlDataHoldBypass: Unit = {
-    io.out.bits.ctrl.toRobValid := DataHoldBypass(io.in.bits.ctrl.toRobValid, io.in.fire)
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.pdestV0.foreach(_ := DataHoldBypass(io.in.bits.ctrl.pdestV0.get, io.in.fire))
     io.out.bits.ctrl.rfWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
     io.out.bits.ctrl.fpWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpWen.get, io.in.fire))
     io.out.bits.ctrl.vecWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
@@ -179,16 +207,19 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := DataHoldBypass(io.in.bits.ctrl.isRVC.get, io.in.fire))
-    io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
-    io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.fflagsWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
+    io.out.bits.ctrl.vm.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vm.get, io.in.fire))
+    io.out.bits.ctrl.uopIdx.foreach(_ := DataHoldBypass(io.in.bits.ctrl.uopIdx.get, io.in.fire))
+    io.out.bits.ctrl.lastUop.foreach(_ := DataHoldBypass(io.in.bits.ctrl.lastUop.get, io.in.fire))
+    io.out.bits.ctrl.vtype.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vtype.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := DataHoldBypass(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := DataHoldBypass(io.in.bits.debug_seqNum.get, io.in.fire))
   }
 
   def connect0LatencyCtrlSingal: Unit = {
-    io.out.bits.ctrl.toRobValid := io.in.bits.ctrl.toRobValid
     io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
     io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
+    io.out.bits.ctrl.pdestVl.foreach(_ := io.in.bits.ctrl.pdestVl.get)
     io.out.bits.ctrl.rfWen.foreach(_ := io.in.bits.ctrl.rfWen.get)
     io.out.bits.ctrl.fpWen.foreach(_ := io.in.bits.ctrl.fpWen.get)
     io.out.bits.ctrl.vecWen.foreach(_ := io.in.bits.ctrl.vecWen.get)
@@ -196,8 +227,11 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen.foreach(_ := io.in.bits.ctrl.vlWen.get)
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
-    io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
-    io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
+    io.out.bits.ctrl.fflagsWen.foreach(_ := io.in.bits.ctrl.fflagsWen.get)
+    io.out.bits.ctrl.vm.foreach(_ := io.in.bits.ctrl.vm.get)
+    io.out.bits.ctrl.uopIdx.foreach(_ := io.in.bits.ctrl.uopIdx.get)
+    io.out.bits.ctrl.lastUop.foreach(_ := io.in.bits.ctrl.lastUop.get)
+    io.out.bits.ctrl.vtype.foreach(_ := io.in.bits.ctrl.vtype.get)
     io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
     io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
   }
@@ -283,26 +317,20 @@ trait HasPipelineReg { this: FuncUnit =>
 
   io.in.ready := fixRdyVec.head
   io.out.valid := fixValidVec.last
-  io.out.bits.ctrl.toRobValid := ctrlVec.last.toRobValid
   io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
   io.out.bits.ctrl.pdest := ctrlVec.last.pdest
+  io.out.bits.ctrl.pdestV0.foreach(_ := ctrlVec.last.pdestV0.get)
   io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
   io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
   io.out.bits.ctrl.v0Wen.foreach(_ := ctrlVec.last.v0Wen.get)
   io.out.bits.ctrl.vlWen.foreach(_ := ctrlVec.last.vlWen.get)
-  io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
-  io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
+  io.out.bits.ctrl.fflagsWen.foreach(_ := ctrlVec.last.fflagsWen.get)
+  io.out.bits.ctrl.vm.foreach(_ := ctrlVec.last.vm.get)
+  io.out.bits.ctrl.uopIdx.foreach(_ := ctrlVec.last.uopIdx.get)
+  io.out.bits.ctrl.lastUop.foreach(_ := ctrlVec.last.lastUop.get)
   io.out.bits.perfDebugInfo.foreach(_ := fixPerfVec.last.get)
   io.out.bits.debug_seqNum.foreach(_ := fixSeqNumVec.last.get)
-
-  // vstart illegal
-  if (cfg.exceptionOut.nonEmpty) {
-    val outVstart = ctrlVec.last.vpu.get.vstart
-    val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-    io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
-  }
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)
 

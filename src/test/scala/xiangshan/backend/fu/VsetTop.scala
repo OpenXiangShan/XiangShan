@@ -15,6 +15,7 @@ class VsetTop(implicit p: Parameters) extends XSModule {
       val vtype = Input(VType())
       val func  = Input(FuOpType())
       val oldVl = Input(UInt(8.W))
+      val oldVt = Input(VType())
     }
 
     val out = Output(new XSBundle {

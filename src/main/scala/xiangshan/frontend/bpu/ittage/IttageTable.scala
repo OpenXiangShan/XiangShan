@@ -24,21 +24,24 @@ import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.IttageTableInfo
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 class IttageTable(
-    val nRows:    Int,
-    val histLen:  Int,
-    val tagLen:   Int,
-    val tableIdx: Int
+    val tableIdx:      Int,
+    implicit val info: IttageTableInfo
 )(implicit p: Parameters) extends IttageModule {
+  private val nRows   = info.Size
+  private val histLen = info.HistoryLength
+  private val tagLen  = TagWidth
+
   class IttageTableIO extends IttageBundle {
     class Req extends Bundle {
-      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    Pc                    = Pc()
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
     }
 
@@ -49,7 +52,7 @@ class IttageTable(
     }
 
     class Update extends Bundle {
-      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    Pc                    = Pc()
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
       // update tag and ctr
       val valid:   Bool            = Bool()
@@ -68,26 +71,22 @@ class IttageTable(
     val req:    DecoupledIO[Req] = Flipped(DecoupledIO(new Req))
     val resp:   Valid[Resp]      = Output(Valid(new Resp))
     val update: Update           = Input(new Update)
+
+    val sramResetDone: Bool = Output(Bool())
   }
 
   val io: IttageTableIO = IO(new IttageTableIO)
 
   // Banked organization: split rows evenly across banks to allow predict/read and update on different banks.
-  private val bankIdxWidth = IttageBankIdxWidth
-  private val numBanks     = IttageNumBanks
-  require(nRows % numBanks == 0, "ITTAGE table rows must be divisible by number of banks")
-  private val setsPerBank  = nRows / numBanks
-  private val setIdxWidth  = log2Ceil(setsPerBank)
-  private val idxFullWidth = setIdxWidth + bankIdxWidth
-  private val foldedWidth  = if (setsPerBank >= TableSramSize) setsPerBank / TableSramSize else 1
-  private val dataSplit    = if (setsPerBank <= 2 * TableSramSize) 1 else 2
+  private val foldedWidth = if (NumSetsPerBank >= TableSramSize) NumSetsPerBank / TableSramSize else 1
+  private val dataSplit   = if (NumSetsPerBank <= 2 * TableSramSize) 1 else 2
 
   if (nRows < TableSramSize) {
     println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
   }
 
   require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
-  private val idxFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, setIdxWidth))
+  private val idxFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, SetIdxWidth))
   private val tagFhInfo    = new FoldedHistoryInfo(histLen, min(histLen, tagLen))
   private val altTagFhInfo = new FoldedHistoryInfo(histLen, min(histLen, tagLen - 1))
 
@@ -96,16 +95,16 @@ class IttageTable(
       val idxFh      = allFh.getHistWithInfo(idxFhInfo).foldedHist
       val tagFh      = allFh.getHistWithInfo(tagFhInfo).foldedHist
       val altTagFh   = allFh.getHistWithInfo(altTagFhInfo).foldedHist
-      val bankIdx    = if (bankIdxWidth == 0) 0.U else unhashedIdx(bankIdxWidth - 1, 0)
-      val setIdxBase = unhashedIdx(bankIdxWidth + setIdxWidth - 1, bankIdxWidth)
-      val setIdx     = (setIdxBase ^ idxFh)(setIdxWidth - 1, 0)
-      val tagBase    = (unhashedIdx >> idxFullWidth).asUInt
+      val bankIdx    = if (BankIdxWidth == 0) 0.U else unhashedIdx(BankIdxWidth - 1, 0)
+      val setIdxBase = unhashedIdx(BankIdxWidth + SetIdxWidth - 1, BankIdxWidth)
+      val setIdx     = (setIdxBase ^ idxFh)(SetIdxWidth - 1, 0)
+      val tagBase    = (unhashedIdx >> FullIdxWidth).asUInt
       val tag        = (tagBase ^ tagFh ^ (altTagFh << 1).asUInt)(tagLen - 1, 0)
       (bankIdx, setIdx, tag)
     } else {
       require(tagLen == 0)
-      val bankIdx = if (bankIdxWidth == 0) 0.U else unhashedIdx(bankIdxWidth - 1, 0)
-      val setIdx  = unhashedIdx(bankIdxWidth + setIdxWidth - 1, bankIdxWidth)
+      val bankIdx = if (BankIdxWidth == 0) 0.U else unhashedIdx(BankIdxWidth - 1, 0)
+      val setIdx  = unhashedIdx(BankIdxWidth + SetIdxWidth - 1, BankIdxWidth)
       (bankIdx, setIdx, 0.U)
     }
 
@@ -116,7 +115,7 @@ class IttageTable(
   require(ittageEntrySz == (new IttageEntry(tagLen)).getWidth)
 
   // pc is start address of basic block, most 2 branch inst in block
-  def getUnhashedIdx(pc: PrunedAddr): UInt = (pc >> instOffsetBits).asUInt
+  def getUnhashedIdx(pc: Pc): UInt = (pc >> instOffsetBits).asUInt
 
   private val s0_valid       = io.req.valid
   private val s0_startPc     = io.req.bits.startPc
@@ -124,20 +123,20 @@ class IttageTable(
   private val (s0_bankIdx, s0_setIdx, s0_tag) =
     computeTagAndHash(s0_unhashedIdx, io.req.bits.foldedHist)
 
-  private val s0_bankMask = UIntToOH(s0_bankIdx, numBanks)
+  private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   private val (s1_setIdx, s1_tag) = (RegEnable(s0_setIdx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   private val s1_bankMask         = RegEnable(s0_bankMask, io.req.fire)
   private val s1_valid            = RegNext(s0_valid)
 
   // Each bank is a single-port SRAM slice; banking lets predict/read and commit/update touch different banks concurrently.
-  private val tables = Seq.tabulate(numBanks) { bankIdx =>
+  private val tables = Seq.tabulate(NumBanks) { bankIdx =>
     Module(new FoldedSRAMTemplate(
       new IttageEntry(tagLen),
       setSplit = 1,
       waySplit = 1,
       dataSplit = dataSplit,
-      set = setsPerBank,
+      set = NumSetsPerBank,
       width = foldedWidth,
       shouldReset = true,
       holdRead = true,
@@ -149,6 +148,9 @@ class IttageTable(
       suffix = Option(s"bpu_ittage_bank$bankIdx")
     )).suggestName(s"ittage_table_bank$bankIdx")
   }
+
+  io.sramResetDone := tables.map(_.io.resetDone).reduce(_ && _)
+
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
     bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)
@@ -169,19 +171,21 @@ class IttageTable(
   private val updateFoldedHist                      = io.update.foldedHist
   private val updateUnhashedIdx                     = getUnhashedIdx(io.update.startPc)
   private val (updateBankIdx, updateIdx, updateTag) = computeTagAndHash(updateUnhashedIdx, updateFoldedHist)
-  private val updateBankMask                        = UIntToOH(updateBankIdx, numBanks)
+  private val updateBankMask                        = UIntToOH(updateBankIdx, NumBanks)
   private val updateWdata                           = Wire(new IttageEntry(tagLen))
 
   private val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
   private val updateNoBitmask  = VecInit.fill(ittageEntrySz)(0.U).asUInt // update no
-  private val updateNoUsBitmask =
-    VecInit.tabulate(ittageEntrySz)(_.U >= UsefulCntWidth.U).asUInt // update others besides useful bit
-  private val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < UsefulCntWidth.U).asUInt // update useful bit
+  // Build the mask through the entry field itself so it follows the Bundle's actual layout.
+  private val usefulMaskEntry = WireInit(0.U.asTypeOf(new IttageEntry(tagLen)))
+  usefulMaskEntry.usefulCnt := UsefulCounter.SaturatePositive
+  private val updateUsefulBitmask       = usefulMaskEntry.asUInt
+  private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
   private val needReset      = RegInit(false.B)
   private val usefulCanReset = !(io.req.fire || io.update.valid) && needReset
-  // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in setsPerBank cycles.
-  private val (resetSet, resetFinish) = Counter(usefulCanReset, setsPerBank)
+  // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in NumSetsPerBank cycles.
+  private val (resetSet, resetFinish) = Counter(usefulCanReset, NumSetsPerBank)
   when(io.update.resetUsefulCnt) {
     needReset := true.B
   }.elsewhen(resetFinish) {
@@ -190,16 +194,16 @@ class IttageTable(
   private val updateBitmask = Mux(
     io.update.usefulCntValid && io.update.valid,
     updateAllBitmask,
-    Mux(io.update.valid, updateNoUsBitmask, Mux(usefulCanReset, updateUsBitmask, updateNoBitmask))
+    Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
   )
 
   /**
     Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
     Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
   */
-  private val writeBuffers = Seq.tabulate(numBanks) { bankIdx =>
+  private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
     Module(new WriteBuffer(
-      gen = new IttageWriteReq(tagLen, setsPerBank, ittageEntrySz),
+      gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
       numEntries = TableWriteBufferSize,
       numPorts = 1,
       nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
@@ -269,11 +273,11 @@ class IttageTable(
       bank.io.r.req.valid && buffer.io.read.head.valid
     }).asUInt.orR
   )
-  private val targetBankReady = writeBuffers
+  private val updateOverwrite = writeBuffers
     .zip(updateBankMask.asBools)
-    .map { case (buffer, sel) => buffer.io.write.head.ready && sel }
+    .map { case (buffer, sel) => buffer.io.overwrite.head && sel }
     .reduce(_ || _)
-  XSPerfAccumulate("ittage_table_update_drop", io.update.valid && !targetBankReady)
+  XSPerfAccumulate("ittage_table_update_overwrite", io.update.valid && updateOverwrite)
 
   if (debug) {
     val u    = io.update
@@ -304,7 +308,7 @@ class IttageTable(
     XSDebug(RegNext(io.req.fire) && !s1_reqReadHit, "TageTableResp: no hits!\n")
 
     // ------------------------------Debug-------------------------------------
-    val valids = RegInit(VecInit.fill(numBanks)(VecInit.fill(setsPerBank)(false.B)))
+    val valids = RegInit(VecInit.fill(NumBanks)(VecInit.fill(NumSetsPerBank)(false.B)))
     when(io.update.valid)(valids(updateBankIdx)(updateIdx) := true.B)
     XSDebug("ITTAGE Table usage:------------------------\n")
     val totalValid = valids.map(bankVec => PopCount(bankVec)).reduce(_ +& _)

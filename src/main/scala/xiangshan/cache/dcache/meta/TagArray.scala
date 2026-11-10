@@ -128,7 +128,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
   val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeDcacheTag", hasMbist)
 
   def getECCFromEncTag(encTag: UInt) = {
-    if (EnableDataEcc) {
+    if (EnableTagEcc) {
       require(encTag.getWidth == encTagBits, s"encTag=$encTag != encTagBits=$encTagBits!")
       encTag(encTagBits - 1, tagBits)
     } else {

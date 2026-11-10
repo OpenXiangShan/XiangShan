@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import utility.{DelayN, GatedValidRegNext}
 import utils._
-import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
 import xiangshan.backend.fu.NewCSR.InterruptNO
@@ -37,8 +36,11 @@ class InterruptFilter extends Module {
   val miprios = io.in.miprios
   val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
-  val fromAIAValid = io.in.fromAIA.meip || io.in.fromAIA.seip || io.in.fromAIA.notice_pending
   val platformValid = io.in.platform.meip || io.in.platform.seip
+  val mvienSEIE = io.in.mvienSEIE
+  val mvipSEIP = io.in.mvipSEIP
+  val midelegSEI = io.in.mideleg.SEI.asBool
+  val SEIfromEIC = io.in.platform.seip || io.in.fromAIA.seip
 
   /**
    * Sort by implemented interrupt default priority
@@ -60,12 +62,7 @@ class InterruptFilter extends Module {
   val hstopigather = hsip & hsie & (~hideleg).asUInt
   val vstopigather = vsip & vsie & NoSEIMask
 
-  val flag = RegInit(false.B)
-  when (platformValid) {
-    flag := true.B
-  }.elsewhen(fromAIAValid) {
-    flag := false.B
-  }
+  val injectSEI = !(midelegSEI === mvienSEIE) && mvipSEIP
 
   val mipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
   mipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
@@ -73,7 +70,7 @@ class InterruptFilter extends Module {
     when (mtopigather(defaultPrio)) {
       iprio.enable := true.B
       when (defaultPrio.U === InterruptNO.MEI.U) {
-        iprio.isZero := platformValid || flag
+        iprio.isZero := platformValid
         val mtopeiGreaterThan255 = mtopei.IPRIO.asUInt(10, 8).orR
         iprio.greaterThan255 := mtopeiGreaterThan255
         iprio.prioNum := mtopei.IPRIO.asUInt(7, 0)
@@ -95,9 +92,9 @@ class InterruptFilter extends Module {
     when (hstopigather(defaultPrio)) {
       iprio.enable := true.B
       when (defaultPrio.U === InterruptNO.SEI.U) {
-        iprio.isZero := platformValid || flag
+        iprio.isZero := platformValid
         val stopeiGreaterThan255 = stopei.IPRIO.asUInt(10, 8).orR
-        iprio.greaterThan255 := stopeiGreaterThan255
+        iprio.greaterThan255 := (injectSEI && !SEIfromEIC) || stopeiGreaterThan255
         iprio.prioNum := stopei.IPRIO.asUInt(7, 0)
       }.otherwise {
         iprio.isZero := !hsiprios(7 + 8 * defaultPrio, 8 * defaultPrio).orR
@@ -210,7 +207,7 @@ class InterruptFilter extends Module {
 
   private val meiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
   private val seiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-  private val vseiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U
+  private val vseiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
 
   private val mipriosTmp = Wire(Vec(8, new IpriosSort))
   mipriosSortTmp.zipWithIndex.foreach { case (iprios, i) =>
@@ -295,10 +292,10 @@ class InterruptFilter extends Module {
   val Candidate123 = Candidate1 || Candidate2 || Candidate3
   val Candidate45 = Candidate4 || Candidate5
 
-  // Candidate2,Candidate5 不可能同时成立
+  // Candidate2,Candidate5 cannot both be true.
   val onlyC1Enable = Candidate1 & !Candidate45
   val onlyC2Enable = Candidate2 & !Candidate45
-  val onlyC3Enable = Candidate3 & !Candidate123
+  val onlyC3Enable = Candidate3 & !Candidate45
   val onlyC4Enable = Candidate4 & !Candidate123
   val onlyC5Enable = Candidate5 & !Candidate123
   val C1C4Enable   = Candidate1 & Candidate4
@@ -361,8 +358,9 @@ class InterruptFilter extends Module {
   val C1GreaterThan255 = vstopeiReg.IPRIO.asUInt(10, 8).orR
   val C4IsZero = !hvipriosRegTmp.prioNum.orR
   val C2C5IsZero = !hvictlReg.IPRIO.asUInt.orR
-  val C4HighVSEI = iidC4Idx < findIndex(InterruptNO.VSEI.U)
-  val SEIHighC4 = findIndex(InterruptNO.SEI.U) < iidC4Idx
+  val SEIIdx = findIndex(InterruptNO.SEI.U)
+  val C4HighVSEI = iidC4Idx < SEIIdx
+  val SEIHighC4 = SEIIdx < iidC4Idx
   val iprioC1GreaterThan255 = Mux(C1GreaterThan255, 255.U, iprioC1Tmp)
 
   iprioC1 := vstopeiReg.IPRIO.asUInt
@@ -407,7 +405,7 @@ class InterruptFilter extends Module {
     iidC1C5 := iidOnlyC5
     iprioC1C5 := iprioC3C5Tmp
   }
-  
+
   // C2,C4 enable
   when(C4IsZero) {
     iidC2C4 := Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1)
@@ -427,7 +425,7 @@ class InterruptFilter extends Module {
   iidC3C4 := Mux(C4IsZero, Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1), iidOnlyC4)
   iprioC3C4 := iprioC4Tmp
   // C3,C5 enable
-  iidC3C5 := Mux(C2C5IsZero, Mux(hvictlReg.DPR.asBool, iidOnlyC5, iidOnlyC1), iidOnlyC5)
+  iidC3C5 := Mux(C2C5IsZero, Mux(hvictlReg.DPR.asBool, iidOnlyC1, iidOnlyC5), iidOnlyC5)
   iprioC3C5 := iprioC3C5Tmp
 
   // update vstopi
@@ -480,16 +478,20 @@ class InterruptFilter extends Module {
     0.U
   )
 
-  val mIRNotZero  = mIRVecTmp.orR
-  val hsIRNotZero = hsIRVecTmp.orR
-  val vsIRNotZero = vsIRVecTmp.orR
+  val mIRVecReg  = RegNext(mIRVecTmp,  0.U.asTypeOf(mIRVecTmp))
+  val hsIRVecReg = RegNext(hsIRVecTmp, 0.U.asTypeOf(hsIRVecTmp))
+  val vsIRVecReg = RegNext(vsIRVecTmp, 0.U.asTypeOf(vsIRVecTmp))
+
+  val mIRNotZero  = mIRVecReg.orR
+  val hsIRNotZero = hsIRVecReg.orR
+  val vsIRNotZero = vsIRVecReg.orR
 
   val irToHS = !mIRNotZero && hsIRNotZero
   val irToVS = !mIRNotZero && !hsIRNotZero && vsIRNotZero
 
-  val mIRVec  = mIRVecTmp
-  val hsIRVec = Mux(irToHS, hsIRVecTmp, 0.U)
-  val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecTmp, 64), 0.U)
+  val mIRVec  = mIRVecReg
+  val hsIRVec = Mux(irToHS, hsIRVecReg, 0.U)
+  val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecReg, 64), 0.U)
 
   val vsMapHostIRVecTmp = Cat((0 until vsIRVec.getWidth).map { num =>
     // 2,6,10
@@ -530,43 +532,29 @@ class InterruptFilter extends Module {
   val disableDebugIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
   val enableDebugIntr = io.in.debugIntr && !disableDebugIntr
 
-  val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
+  val debugIntrReg = RegNext(enableDebugIntr, false.B)
+  val disableAllIntrReg = RegNext(disableDebugIntr || !io.in.mnstatusNMIE, false.B)
+  val nmiReg = RegNext(io.in.nmi, false.B)
+  val nmiVecReg = RegNext(nmiVec, 0.U.asTypeOf(nmiVec))
 
-  val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec
-  val intrVec = Mux(disableAllIntr, 0.U, Mux(io.in.nmi, nmiVec, normalIntrVec))
+  val normalIntrVecReg = mIRVec | hsIRVec | vsMapHostIRVec
+  val intrVecReg = Mux(disableAllIntrReg, 0.U, Mux(nmiReg, nmiVecReg, normalIntrVecReg))
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
-  val SelectCandidate5 = onlyC5EnableReg || C3C5EnableReg ||
-                         C1C5EnableReg && (iprioC1 === iprioC2C5 && !hvictlReg.DPR.asBool || iprioC1 > iprioC2C5)
-  // delay at least 6 cycles to maintain the atomic of sret/mret
-  // 65bit indict current interrupt is NMI
-  val intrVecReg = RegInit(0.U(8.W))
-  val debugIntrReg = RegInit(false.B)
-  val nmiReg = RegInit(false.B)
-  val viIsHvictlInjectReg = RegInit(false.B)
-  val irToHSReg = RegInit(false.B)
-  val irToVSReg = RegInit(false.B)
-  intrVecReg := intrVec
-  debugIntrReg := enableDebugIntr
-  nmiReg := io.in.nmi
-  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
-  irToHSReg := irToHS
-  irToVSReg := irToVS
-  val delayedIntrVec = DelayN(intrVecReg, 5)
-  val delayedDebugIntr = DelayN(debugIntrReg, 5)
-  val delayedNMI = DelayN(nmiReg, 5)
-  val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
-  val delayedIRToHS = DelayN(irToHSReg, 5)
-  val delayedIRToVS = DelayN(irToVSReg, 5)
+  val SelectCandidate5 = onlyC5EnableReg ||
+                         C1C5EnableReg && ((!C2C5IsZero && (iprioC1 > iprioC2C5 || (iprioC1 === iprioC2C5) && !hvictlReg.DPR.asBool)) ||
+                                           (C2C5IsZero && !hvictlReg.DPR.asBool)) ||
+                         C3C5EnableReg && (!C2C5IsZero || !hvictlReg.DPR.asBool)
+  val viIsHvictlInjectReg = RegNext(vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE, false.B)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR || delayedDebugIntr || delayedVIIsHvictlInjectReg
-  io.out.interruptVec.bits := delayedIntrVec
-  io.out.debug := delayedDebugIntr
-  io.out.nmi := delayedNMI
-  io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
-  io.out.irToHS := delayedIRToHS & !delayedNMI
-  io.out.irToVS := delayedIRToVS & !delayedNMI
+  io.out.interruptVec.valid := intrVecReg.orR || debugIntrReg
+  io.out.interruptVec.bits := intrVecReg
+  io.out.debug := debugIntrReg
+  io.out.nmi := nmiReg
+  io.out.virtualInterruptIsHvictlInject := viIsHvictlInjectReg & !nmiReg
+  io.out.irToHS := irToHS & !nmiReg
+  io.out.irToVS := irToVS & !nmiReg
 
   dontTouch(hsip)
   dontTouch(hsie)
@@ -617,6 +605,8 @@ class InterruptFilterIO extends Bundle {
       val seip = Bool()
       val notice_pending = Bool()
     }
+    val mvienSEIE = Bool()
+    val mvipSEIP = Bool()
   })
 
   val out = Output(new Bundle {

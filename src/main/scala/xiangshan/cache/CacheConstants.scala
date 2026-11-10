@@ -51,10 +51,12 @@ trait MemoryOpConstants {
   def M_XA_CASQ = "b11000".U // AMOCAS.Q
   def M_XA_CASW = "b11010".U // AMOCAS.W
   def M_XA_CASD = "b11011".U // AMOCAS.D
+  def M_XA_CASH = "b11100".U // AMOCAS.H
+  def M_XA_CASB = "b11101".U // AMOCAS.B
 
   def isAMOLogical(cmd: UInt) = cmd === M_XA_SWAP || cmd === M_XA_XOR || cmd === M_XA_OR || cmd === M_XA_AND
   def isAMOArithmetic(cmd: UInt) = cmd === M_XA_ADD || cmd === M_XA_MIN || cmd === M_XA_MAX || cmd === M_XA_MINU || cmd === M_XA_MAXU
-  def isAMOCAS(cmd: UInt) = cmd === M_XA_CASW || cmd === M_XA_CASD || cmd === M_XA_CASQ
+  def isAMOCAS(cmd: UInt) = cmd === M_XA_CASB || cmd === M_XA_CASH || cmd === M_XA_CASW || cmd === M_XA_CASD || cmd === M_XA_CASQ
   def isAMOCASQ(cmd: UInt) = cmd === M_XA_CASQ
   def isAMO(cmd: UInt) = isAMOLogical(cmd) || isAMOArithmetic(cmd) || isAMOCAS(cmd)
   def isPrefetch(cmd: UInt) = cmd === M_PFR || cmd === M_PFW

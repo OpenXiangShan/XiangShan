@@ -47,14 +47,23 @@ JAR = $(BUILD_DIR)/xsgen.jar
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
-CONFIG ?= TLConfig
+CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
-CHISEL_TARGET ?= systemverilog
+LLC ?= OpenLLC
 
 SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
 $(error "Unsupported CHI issue: $(ISSUE)")
+endif
+SUPPORT_LLC = OpenLLC ZhuJiang
+ifeq ($(findstring $(LLC), $(SUPPORT_LLC)),)
+$(error "Unknown LLC: $(LLC)")
+endif
+ifeq ($(LLC),ZhuJiang)
+ifneq ($(ISSUE),E.b)
+$(error "LLC=ZhuJiang only supports ISSUE=E.b or newer")
+endif
 endif
 
 ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
@@ -67,6 +76,27 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+IOMMU_ENABLED := $(WITH_IOMMU)
+
+# GSIM reads CHIRRTL directly, so Verilog is not needed for these goals.
+# An explicit CHISEL_TARGET on the command line still takes precedence.
+ifneq ($(filter sim-chirrtl gsim,$(GOALS)),)
+CHISEL_TARGET ?= chirrtl
+ifeq ($(WITH_IOMMU),1)
+$(info WITH_IOMMU=1 is ignored for GSIM/CHIRRTL)
+endif
+IOMMU_ENABLED := 0
+endif
+CHISEL_TARGET ?= systemverilog
+
+# The RTL emitted by the simulation top depends on the chisel target:
+# CHIRRTL stops right after elaboration, the other targets run firtool and convert to SV
+ifeq ($(CHISEL_TARGET),chirrtl)
+SIM_TOP_OUT = $(RTL_DIR)/$(SIM_TOP).fir
+else
+SIM_TOP_OUT = $(SIM_TOP_V)
+endif
+
 # JVM memory configurations
 JVM_XMX ?= 40G
 JVM_XSS ?= 256m
@@ -74,9 +104,16 @@ JVM_XSS ?= 256m
 # mill arguments for build.sc
 MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
 
+# NOTE: ccache is intentionally disabled by default, as:
+#   1. it does not help XiangShan's build performance in most cases, as slight change in chisel result in significant change in cpp code
+#   2. it introduces too much IO overhead
+# NOTE: use `make emu OBJCACHE=ccache` to enable it
+OBJCACHE ?=
+
 # common chisel args
 MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
+RTL_INCLUDE ?=
 
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
@@ -105,7 +142,7 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
-# enable or disable sram ctl maunally
+# enable or disable sram ctl manually
 ifeq ($(SRAM_WITH_CTL),1)
 COMMON_EXTRA_ARGS += --sram-with-ctl
 endif
@@ -120,6 +157,9 @@ endif
 ifneq ($(CHI_ADDR_WIDTH),)
 COMMON_EXTRA_ARGS += --chi-addr-width $(CHI_ADDR_WIDTH)
 endif
+
+# LLC backend selection
+COMMON_EXTRA_ARGS += --llc $(LLC)
 
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
@@ -141,6 +181,10 @@ ifeq ($(DISABLE_XMR),1)
 COMMON_EXTRA_ARGS += --disable-xmr
 endif
 
+ifeq ($(CACHED_PARAM_DISABLE),1)
+COMMON_EXTRA_ARGS += --disable-cached-parameters
+endif
+
 # configuration from yaml file
 ifneq ($(YAML_CONFIG),)
 COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
@@ -156,6 +200,21 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# OpenIOMMU is enabled only for the configuration that provides the BOSC
+# lightweight integration. GSIM forces the effective option off above.
+ifeq ($(IOMMU_ENABLED),1)
+ifeq ($(CONFIG),DefaultConfig)
+override SIM_ARGS += --with-iommu
+else
+$(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
+endif
+endif
+
+# SimAXIMem size in GB (for sim-verilog only)
+ifneq ($(SIM_MEM_SIZE),)
+override SIM_ARGS += --sim-mem-size $(SIM_MEM_SIZE)
 endif
 
 # run emu with chisel-db
@@ -199,15 +258,10 @@ endif
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
-override DEBUG_ARGS += --firtool-opt "--default-layer-specialization=enable"
 ifeq ($(FPGA), 1)
-override DEBUG_ARGS	+= --fpga-platform --disable-all --remove-assert
+override DEBUG_ARGS	+= --fpga-platform --firtool-opt "--default-layer-specialization=disable"
 else
-ifeq ($(DISABLE_DIFFTEST),1)
-override DEBUG_ARGS += --disable-difftest
-else
-override DEBUG_ARGS	+= --enable-difftest
-endif
+override DEBUG_ARGS	+= --enable-difftest --firtool-opt "--default-layer-specialization=enable"
 endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
@@ -227,6 +281,10 @@ ifeq ($(or $(PLDM),$(FPGA)), 1)
 TOPMAIN_ARGS += $(DEBUG_ARGS)
 else
 TOPMAIN_ARGS += $(RELEASE_ARGS)
+endif
+
+ifeq ($(DUMP_CSR),1)
+TOPMAIN_ARGS += --dump-csr
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
@@ -272,9 +330,9 @@ endif
 
 verilog: $(call docker-deps,$(TOP_V))
 
-$(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
+$(SIM_TOP_OUT): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@echo -e "\n[mill] Generating $(CHISEL_TARGET) files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
@@ -295,7 +353,10 @@ endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 
-sim-verilog: $(call docker-deps,$(SIM_TOP_V))
+sim-verilog: $(call docker-deps,$(SIM_TOP_OUT))
+
+# elaboration only, stopping at CHIRRTL without generating Verilog
+sim-chirrtl: $(call docker-deps,$(SIM_TOP_OUT))
 
 clean:
 	$(MAKE) -C ./difftest clean
@@ -307,7 +368,7 @@ GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
 init:
 	git submodule update --init $(GIT_FORCE_FLAG)
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
-	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
+	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB ZhuJiang
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
@@ -335,17 +396,17 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
-gsim: sim-verilog
+gsim: sim-chirrtl
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
 simv: sim-verilog
-	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -371,4 +432,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog sim-chirrtl gsim emu clean help init init-force bump bsp $(REF_SO)

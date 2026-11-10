@@ -43,6 +43,10 @@ case class IttageParameters(
     RegionReplacer: String = "plru" // "random", "plru", "lru"
 ) {
   require(isPow2(TableSramSize), "TableSramSize must be a power of 2")
+  require(isPow2(NumBanks), "NumBanks must be a power of 2")
+  TableInfos.foreach { info =>
+    require(info.Size % NumBanks == 0, "ITTAGE table rows must be divisible by number of banks")
+  }
 }
 
 // TODO: expose this to Parameters.scala / XSCore.scala
@@ -52,9 +56,13 @@ trait HasIttageParameters extends HasBpuParameters {
   def TableInfos: Seq[IttageTableInfo] = ittageParameters.TableInfos
   def NumTables:  Int                  = TableInfos.length
 
-  def IttageNumBanks:     Int = ittageParameters.NumBanks
-  def IttageBankIdxWidth: Int = log2Ceil(IttageNumBanks)
-  require(isPow2(IttageNumBanks), "IttageNumBanks must be a power of 2")
+  def NumBanks:     Int = ittageParameters.NumBanks
+  def BankIdxWidth: Int = log2Ceil(NumBanks)
+
+  def NumSetsPerBank(implicit info: IttageTableInfo): Int = info.Size / NumBanks
+
+  def SetIdxWidth(implicit info:  IttageTableInfo): Int = log2Ceil(NumSetsPerBank)
+  def FullIdxWidth(implicit info: IttageTableInfo): Int = SetIdxWidth + BankIdxWidth
 
   def TagWidth:           Int = ittageParameters.TagWidth
   def ConfidenceCntWidth: Int = ittageParameters.ConfidenceCntWidth

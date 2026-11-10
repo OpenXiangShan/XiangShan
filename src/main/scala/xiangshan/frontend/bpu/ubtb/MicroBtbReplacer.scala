@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
 import xiangshan.frontend.bpu.SaturateCounter
-import utility.PriorityEncoder
 
 class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
   class MicroBtbReplacerIO extends Bundle {

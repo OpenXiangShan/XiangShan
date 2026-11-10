@@ -19,7 +19,7 @@ package chisel3.stage.phases.xiangshan
 
 import chisel3._
 import chisel3.stage.ChiselCircuitAnnotation
-import chisel3.stage.phases.Elaborate
+import chisel3.stage.phases.{AddSerializationAnnotations, Elaborate}
 import firrtl.AnnotationSeq
 import firrtl.options.{Dependency, Phase}
 
@@ -30,6 +30,10 @@ class PrintModuleName extends Phase {
   import chisel3.internal.firrtl.ir._
 
   override def prerequisites = Seq(Dependency[Elaborate])
+  // The circuit serialized as CHIRRTL is captured by AddSerializationAnnotations, so module
+  // names must be resolved before that phase takes its snapshot. Without this ordering, the
+  // emitted FIRRTL keeps the raw module object names in log and assertion messages.
+  override def optionalPrerequisiteOf = Seq(Dependency[AddSerializationAnnotations])
   override def invalidates(a: Phase) = false
 
   def transform(annotations: AnnotationSeq): AnnotationSeq = {

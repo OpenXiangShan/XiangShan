@@ -34,6 +34,8 @@ import xiangshan.frontend.bpu.utage.MicroTageParameters
 case class BpuParameters(
     // general
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
+    // ppa
+    NumStartPcDuplicate: Int = 3, // duplicate pc-related register to control fan-out
     // debug
     EnableBpTrace: Boolean = false,
     // history
@@ -61,26 +63,40 @@ trait HasBpuParameters extends HasFrontendParameters {
   def FetchBlockAlignWidth:   Int = log2Ceil(FetchBlockAlignSize)
   def FetchBlockAlignInstNum: Int = FetchBlockAlignSize / instBytes
 
+  // ppa
+  def NumStartPcDuplicate: Int = bpuParameters.NumStartPcDuplicate
+
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
   def NumAheadBtbPredictionEntries: Int = bpuParameters.abtbParameters.NumWays
 
-  def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * bpuParameters.mbtbParameters.NumAlignBanks
+  def NumBtbAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
+  def NumBtbResultEntries: Int =
+    (bpuParameters.mbtbParameters.NumWay + 1) * NumBtbAlignBanks // one VBTB result per align bank
 
-  def GhrShamt:         Int = NumBtbResultEntries
-  def GhrHistoryLength: Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
-  def BWHistoryLength:  Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
+  def GhrShamt:          Int = NumBtbResultEntries
+  def GhrHistoryLength:  Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
+  def BWHistoryLength:   Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
+  def ImliHistoryLength: Int = bpuParameters.scParameters.ImliTableInfo.HistoryLength
+
+  def CompareAddrLowWidth: Int = bpuParameters.mbtbParameters.TargetWidth
+
+  def MaxBtbTargetWidth: Int = Seq(
+    bpuParameters.mbtbParameters.TargetWidth + (if (bpuParameters.mbtbParameters.EnableTargetFix) 1 else 0),
+    bpuParameters.ubtbParameters.TargetWidth + (if (bpuParameters.ubtbParameters.EnableTargetFix) 1 else 0),
+    bpuParameters.abtbParameters.TargetWidth + (if (bpuParameters.abtbParameters.EnableTargetFix) 1 else 0)
+  ).max
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {
-      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.NumBanks, bpuParameters.tageParameters.TagWidth)
+      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
     }.reduce(_ ++ _) ++
       bpuParameters.ittageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth, bpuParameters.ittageParameters.NumBanks)
       }.reduce(_ ++ _) ++
       bpuParameters.scParameters.PathTableInfos.map {
-        _.getFoldedHistoryInfoSet(NumBtbResultEntries, bpuParameters.scParameters.NumBanks)
+        _.getFoldedHistoryInfoSet()
       }.reduce(_ ++ _) ++
       bpuParameters.utageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet()

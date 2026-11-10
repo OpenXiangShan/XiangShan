@@ -19,8 +19,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSDebug
+import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 
 class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
@@ -33,7 +33,7 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
     class PreDecodeResp(implicit p: Parameters) extends IfuBundle {
       val pd:         Vec[PreDecodeInfo] = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
       val instr:      Vec[UInt]          = Vec(IBufferEnqueueWidth, UInt(32.W))
-      val jumpOffset: Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val jumpOffset: Vec[Pc]            = Vec(IBufferEnqueueWidth, Pc())
     }
 
     val req:  Valid[PreDecodeReq] = Flipped(ValidIO(new PreDecodeReq))

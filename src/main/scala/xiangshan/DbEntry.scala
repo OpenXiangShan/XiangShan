@@ -7,7 +7,6 @@ import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 import xiangshan.backend.fu.FuType
 import utility.MemReqSource
-import xiangshan.mem.prefetch.HasL1PrefetchHelper
 
 /** Mem */
 class LoadMissEntry(implicit p: Parameters) extends DCacheBundle {
@@ -48,7 +47,7 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   // val commitLatency = UInt(XLEN.W) // can not record when writing back
   val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
   val lsInfo = new DebugLsInfo
-  val exceptType = UInt(ExceptionVec.ExceptionVecSize.W)
+  val exceptType = UInt(ExceptSparseVec.ExceptionVecSize.W)
 }
 
 class LoadInfoEntry(implicit p: Parameters) extends XSBundle{
@@ -60,11 +59,10 @@ class LoadInfoEntry(implicit p: Parameters) extends XSBundle{
   val exeLatency = UInt(64.W)
 }
 
-class StreamPFTraceInEntry(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper{
+class StreamPFTraceInEntry(implicit p: Parameters) extends XSBundle{
   val TriggerPC = UInt(VAddrBits.W)
   val TriggerVaddr = UInt(VAddrBits.W)
   val PFVaddr = UInt(VAddrBits.W)
-  val PFSink = UInt(SINK_BITS.W)
 }
 
 class StreamTrainTraceEntry(implicit p: Parameters) extends XSBundle with HasDCacheParameters{
@@ -76,7 +74,6 @@ class StreamTrainTraceEntry(implicit p: Parameters) extends XSBundle with HasDCa
   val Miss = Bool()
 }
 
-class StreamPFTraceOutEntry(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper{
+class StreamPFTraceOutEntry(implicit p: Parameters) extends XSBundle{
   val PFVaddr = UInt(VAddrBits.W)
-  val PFSink = UInt(SINK_BITS.W)
 }

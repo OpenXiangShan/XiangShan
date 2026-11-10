@@ -15,53 +15,65 @@
 
 package xiangshan.frontend.bpu.mbtb
 
-import chisel3._
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class MainBtbParameters(
     NumEntries: Int = 8192,
     NumWay:     Int = 4,
-    // Lowest level banks, each bank is a physical SRAM
-    // This banking is used to resolve read-write conflicts and reduce SRAM power
+    // Lowest level banks used to resolve read-write conflicts and reduce SRAM power, each bank is a physical SRAM
     NumInternalBanks: Int = 4,
-    // Highest level banks
-    // This banking is used to resolve the alignement restriction of the BTB
-    // When using align banking, the BTB can provide at most banks - 1 / banks * predict width wide prediction
-    NumAlignBanks:   Int = 2,
-    TagWidth:        Int = 16,
-    TargetWidth:     Int = 20,       // 2B aligned
+    // NumAlignBanks is determined by top-level FetchBlockSize and FetchBlockAlignSize, not adjustable in mbtb
     WriteBufferSize: Int = 4,
     Replacer:        String = "Lru", // "Lru" or "Plru"
-    // Base table
-    TakenCntWidth: Int = 2,
+    // Entry config
+    TagWidth:        Int = 16,
+    EnableTargetFix: Boolean = true,
+    TargetWidth:     Int = 20, // 2B aligned
+    TakenCntWidth:   Int = 2,
     // Mbtb write trace
-    EnableMainbtbTrace: Boolean = false
+    EnableMainbtbTrace: Boolean = false,
+    // Vbtb
+    NumVictimBtbEntries: Int = 32, // 16 entries per align bank
+    VictimBtbReplacer:   String = "plru"
 ) {}
 
-// TODO: expose this to Parameters.scala / XSCore.scala
 trait HasMainBtbParameters extends HasBpuParameters {
   def mbtbParameters: MainBtbParameters = bpuParameters.mbtbParameters
 
-  def NumEntries:       Int = mbtbParameters.NumEntries
-  def NumWay:           Int = mbtbParameters.NumWay
-  def NumInternalBanks: Int = mbtbParameters.NumInternalBanks
-  def NumAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
-  // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
-  def NumSets:            Int    = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
-  def TagWidth:           Int    = mbtbParameters.TagWidth
-  def TargetWidth:        Int    = mbtbParameters.TargetWidth
-  def SetIdxLen:          Int    = log2Ceil(NumSets)
-  def InternalBankIdxLen: Int    = log2Ceil(NumInternalBanks)
-  def AlignBankIdxLen:    Int    = log2Ceil(NumAlignBanks)
-  def WriteBufferSize:    Int    = mbtbParameters.WriteBufferSize
-  def Replacer:           String = mbtbParameters.Replacer
+  def NumEntries:       Int    = mbtbParameters.NumEntries
+  def NumWay:           Int    = mbtbParameters.NumWay
+  def NumInternalBanks: Int    = mbtbParameters.NumInternalBanks
+  def WriteBufferSize:  Int    = mbtbParameters.WriteBufferSize
+  def Replacer:         String = mbtbParameters.Replacer
 
-  // Base table
-  def TakenCntWidth: Int = mbtbParameters.TakenCntWidth
+  def NumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
+  // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
+  def NumSets: Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
+
+  def SetIdxLen:          Int = log2Ceil(NumSets)
+  def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)
+  def AlignBankIdxLen:    Int = log2Ceil(NumAlignBanks)
+
+  // Entry config
+  def TagWidth:        Int     = mbtbParameters.TagWidth
+  def TargetWidth:     Int     = mbtbParameters.TargetWidth
+  def EnableTargetFix: Boolean = mbtbParameters.EnableTargetFix
+  def TakenCntWidth:   Int     = mbtbParameters.TakenCntWidth
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
 
   def EnableMainbtbTrace: Boolean = mbtbParameters.EnableMainbtbTrace
+
+  // Victim Btb
+  def NumVictimBtbEntries:     Int    = mbtbParameters.NumVictimBtbEntries
+  def NumVictimBtbWays:        Int    = NumVictimBtbEntries / NumAlignBanks
+  def VictimBtbReplacerPolicy: String = mbtbParameters.VictimBtbReplacer
+
+  require(
+    NumVictimBtbEntries % NumAlignBanks == 0,
+    "VBTB entries must be evenly distributed across align banks"
+  )
+  require(NumVictimBtbWays > 0)
 }

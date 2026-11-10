@@ -30,7 +30,7 @@ trait Helpers extends HasAheadBtbParameters with TargetFixHelper {
     maxWidth = Option(VAddrBits),
     extraFields = Seq(
       ("tag", instOffsetBits, TagWidth),
-      ("targetLower", instOffsetBits, TargetLowerBitsWidth)
+      ("targetLower", instOffsetBits, TargetWidth)
     )
   )
 

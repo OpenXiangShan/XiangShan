@@ -15,14 +15,6 @@ on:
         required: false
         type: string
         default: kunminghu-v3
-      recompile:
-        description: Recompile the emu
-        required: false
-        type: choice
-        options:
-          - false
-          - true
-        default: false
       emulator:
         description: emulator to use
         required: false
@@ -36,36 +28,71 @@ on:
         required: false
         type: choice
         options:
-          - CHIConfig
-          - TLConfig
-          - TLBackendV2Config
-        default: CHIConfig
+          - DefaultConfig
+          - BackendV2Config
+          - KunminghuV2Config
+        default: DefaultConfig
       benchmark_type:
         description: Benchmark type
         required: false
         type: choice
         options:
-          - gcc15-spec06-1.0c
-          - xscc-spec06-1.0c
-          - gcc12-spec06-0.3c
-          - gcc12-spec06-0.8c
-          - gcc12-spec06-1.0c
+          - spec06-rva23-novec-gcc16-0.3c
+          - spec06-rva23-novec-gcc16-1.0c
+          - spec06-rv64gcb-xscc-1.0c
+          - spec17-rva23-novec-gcc16-0.3c
+          - spec17-rva23-novec-gcc16-1.0c
+          - spec17-rva23-novec-xscc-0.3c
+          - spec17-rva23-novec-xscc-1.0c
+          - spec26-gcc15-0.3c
+          - spec26-gcc15-1.0c
           - custom
-        default: gcc15-spec06-1.0c
+        default: spec06-rva23-novec-gcc16-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
         type: string
+      cst_file:
+        description: Constantin file path (empty for default init setting, or file path for specific file)
+        required: false
+        type: string
+      disable_diff:
+        description: Disable difftest
+        required: false
+        type: boolean
+        default: false
+      enable_db:
+        description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump, which implies enable_db (High disk usage, 4~16G/ckpt, use with caution!)
+        required: false
+        type: boolean
+        default: false
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
         type: string
       checkpoint_path:
-        description: Directory for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: "Custom checkpoint directory. Empty: json_path is a workload list"
         required: false
         type: string
       json_path:
-        description: JSON file path for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: Custom JSON, or workload list if checkpoint_path is empty
+        required: false
+        type: string
+      warmup:
+        description: emu -W (default 20000000)
+        required: false
+        type: string
+      max_instr:
+        description: emu -I (default 40000000)
+        required: false
+        type: string
+      max_cycles:
+        description: emu -C (omit for unlimited)
         required: false
         type: string
 
@@ -74,12 +101,17 @@ jobs:
     uses: ./.github/workflows/perf-template.yml
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
-        recompile: ${{ github.event.inputs.recompile }}
         emulator: ${{ github.event.inputs.emulator }}
         xs_config: ${{ github.event.inputs.xs_config }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
+        cst_file: ${{ github.event.inputs.cst_file }}
+        disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
+        enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
+        enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}
-        perf_report_dir: /nfs/home/cirunner/perf-report-custom
+        warmup: ${{ github.event.inputs.warmup }}
+        max_instr: ${{ github.event.inputs.max_instr }}
+        max_cycles: ${{ github.event.inputs.max_cycles }}

@@ -364,6 +364,7 @@ stack.info*
 *.vpd
 *.vcd
 *.bin
+*.fst
 
 !ready-to-run/*
 
@@ -373,3 +374,11 @@ simulator_out.txt
 *.log
 *.err
 cr*/
+
+# Bug report files
+bug-report/
+bug-report.tar.gz
+
+# Python virtual environment
+.venv/
+venv/

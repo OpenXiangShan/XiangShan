@@ -24,7 +24,6 @@ import utils.HasTLDump
 import xiangshan.WfiReqBundle
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
-import utility.PriorityEncoder
 
 class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
     with HasInstrUncacheParameters

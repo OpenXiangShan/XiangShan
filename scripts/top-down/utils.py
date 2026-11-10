@@ -11,7 +11,7 @@ def to_num(x: str) -> (int, float):
 
 
 def xs_get_stats(stat_file: str, targets: list) -> dict:
-
+    stat_path = expu(stat_file)
     if not os.path.isfile(expu(stat_file)):
         print(stat_file)
     assert os.path.isfile(expu(stat_file))
@@ -47,10 +47,9 @@ def xs_get_stats(stat_file: str, targets: list) -> dict:
     obtained_keys = set(stats.keys())
     not_found_keys = desired_keys - obtained_keys
     if not_found_keys:
-        print(stat_file)
-        print(targets)
-        print(not_found_keys)
-    assert len(not_found_keys) == 0
+        print(f"[WARN] missing keys in {stat_path}: {sorted(not_found_keys)}")
+        for k in not_found_keys:
+            stats[k] = 0
 
     stats['ipc'] = stats['commitInstr'] / stats['total_cycles']
     return stats

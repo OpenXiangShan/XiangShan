@@ -19,7 +19,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
-import xiangshan.frontend.PrunedAddr
+import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.Prediction
 
@@ -27,19 +28,37 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val valid: Bool = Bool()
   val ghr:   UInt = UInt(GhrHistoryLength.W)
   val bw:    UInt = UInt(BWHistoryLength.W)
-}
-class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
-  val taken:            Bool              = Bool()
-  val condHitMask:      Vec[Bool]         = Vec(NumBtbResultEntries, Bool())
-  val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
-  val position:         Vec[UInt]         = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val startPc:          PrunedAddr        = PrunedAddr(VAddrBits)
-  val target:           PrunedAddr        = PrunedAddr(VAddrBits)
+
+  val predStartPc: Option[Pc] = Some(Pc()) // for debug
 }
 
+class Update(implicit p: Parameters) extends CommonHRBundle {
+  val isOverride: Bool       = Bool()
+  val startPc:    Pc         = Pc()
+  val prediction: Prediction = new Prediction()
+}
+
+class S2Update(implicit p: Parameters) extends Update {
+  val condHitMask: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+  val positions:   Vec[UInt] = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val targets:     Vec[Pc]   = Vec(NumBtbResultEntries, Pc())
+}
+
+class S3Update(implicit p: Parameters) extends Update {
+  val firstTakenBranchOH: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+}
+
+class CommonHRResolveMeta(implicit p: Parameters) extends CommonHRBundle {
+  val valid: Bool = Bool() // commonHR valid bit
+  val ghr:   UInt = UInt(GhrHistoryLength.W)
+  val bw:    UInt = UInt(BWHistoryLength.W)
+
+  val imli: UInt = UInt(ImliHistoryLength.W)
+}
 class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:       UInt                 = UInt(GhrHistoryLength.W)
   val bw:        UInt                 = UInt(BWHistoryLength.W)
+  val imli:      UInt                 = UInt(ImliHistoryLength.W)
   val hitMask:   Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
   val attribute: Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
   val position:  Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
@@ -47,9 +66,26 @@ class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
 
 class CommonHRRedirect(implicit p: Parameters) extends CommonHRBundle {
   val valid:     Bool            = Bool()
-  val cfiPc:     PrunedAddr      = PrunedAddr(VAddrBits)
+  val cfiPc:     Pc              = Pc()
   val taken:     Bool            = Bool()
   val attribute: BranchAttribute = new BranchAttribute
-  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:    Pc              = Pc()
   val meta:      CommonHRMeta    = new CommonHRMeta
+}
+
+class HistPtr(entries: Int) extends CircularQueuePtr[HistPtr](entries) {
+  def this()(implicit p: Parameters) =
+    this(p(XSCoreParamsKey).frontendParameters.bpuParameters.commonHRParameters.HistQueueSize)
+}
+
+object HistPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): HistPtr = {
+    val ptr = Wire(new HistPtr)
+    ptr.flag  := f
+    ptr.value := v
+    ptr
+  }
+
+  def width(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).frontendParameters.bpuParameters.commonHRParameters.HistQueueSize)
 }

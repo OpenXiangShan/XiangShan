@@ -31,6 +31,10 @@ class CmdInfo:
         self.info_watch_list = OrderedDict()
         self.info_force_address = None
         self.info_last_address = None
+        self.info_prev_pc_last = None
+        self.info_cache_order = []
+        self.info_cache_limit = 32
+        self.info_last_offset = 0
 
     def api_increase_info_force_address(self, deta):
         """Increase the force mid address for disassembly Info (the disassembly info in the TUI window)
@@ -72,6 +76,22 @@ class CmdInfo:
         """
         return self.info_force_address
 
+    def api_get_info_last_offset(self):
+        """Get the last effective offset for disassembly Info."""
+        return self.info_last_offset
+
+    def _info_cache_get(self, index):
+        if index in self.info_cache_asm:
+            return self.info_cache_asm[index]
+        asm_data = self.api_all_data_to_asm(index, self.info_cache_bsz)
+        self.info_cache_asm[index] = asm_data
+        self.info_cache_order.append(index)
+        if len(self.info_cache_order) > self.info_cache_limit:
+            old = self.info_cache_order.pop(0)
+            if old in self.info_cache_asm:
+                del self.info_cache_asm[old]
+        return asm_data
+
     def api_info_get_last_commit_pc(self):
         """Get the last commit PC
 
@@ -100,7 +120,7 @@ class CmdInfo:
         except ValueError:
             error(f"Invalid address: {arg}")
             
-    def api_asm_info(self, size):
+    def api_asm_info(self, size, offset_lines=0):
         """Get the current memory disassembly
 
         Args:
@@ -128,39 +148,71 @@ class CmdInfo:
         if self.info_force_address:
             pc_last = self.info_force_address - self.info_force_address % 2
 
+        # Reset follow offset when PC changes (only in follow mode).
+        if self.info_force_address is None and self.info_prev_pc_last is not None and pc_last != self.info_prev_pc_last:
+            offset_lines = 0
+
+        # Disable cross-call cache in follow mode to keep asm fresh.
+        if self.info_force_address is None:
+            self.info_cache_asm.clear()
+            self.info_cache_order.clear()
+
         self.info_last_address = pc_last
+        self.info_prev_pc_last = pc_last
         self.info_cached_cmpclist = pc_list.copy()
         # Check the cache first; if not found, generate it
         cache_index = pc_last - pc_last % self.info_cache_bsz
-        asm_data = self.info_cache_asm.get(cache_index,
-                                           self.api_all_data_to_asm(cache_index, self.info_cache_bsz))
-        self.info_cache_asm[cache_index] = asm_data
-
-        # Need to check boundaries; if near a boundary, fetch adjacent cache blocks
-        cache_index_ext = base_addr
-        if pc_last % self.info_cache_bsz < h:
-            cache_index_ext = cache_index - self.info_cache_bsz
-        elif self.info_cache_bsz - pc_last % self.info_cache_bsz < h:
-            cache_index_ext = cache_index + self.info_cache_bsz
-
-        # Boundary is valid
-        if cache_index_ext > base_addr:
-            asm_data_ext = self.info_cache_asm.get(cache_index_ext,
-                                                   self.api_all_data_to_asm(cache_index_ext, self.info_cache_bsz))
-            self.info_cache_asm[cache_index_ext] = asm_data_ext
-            if cache_index_ext < cache_index:
-                asm_data = self.api_merge_asm_list_overlap_append(asm_data_ext, asm_data)
-            else:
-                asm_data = self.api_merge_asm_list_overlap_append(asm_data, asm_data_ext)
+        asm_data = self._info_cache_get(cache_index)
+        min_index = cache_index
+        max_index = cache_index
+        min_block = base_addr - (base_addr % self.info_cache_bsz)
+        expand_limit = 16
+        for _ in range(expand_limit):
+            address_list = [x[0] for x in asm_data]
+            pc_last_index = bisect.bisect_left(address_list, pc_last)
+            desired_start = pc_last_index - h // 2 + int(offset_lines or 0)
+            desired_end = desired_start + h
+            expanded = False
+            if desired_start < 0 and (min_index - self.info_cache_bsz) >= min_block:
+                min_index -= self.info_cache_bsz
+                asm_data = self.api_merge_asm_list_overlap_append(self._info_cache_get(min_index), asm_data)
+                expanded = True
+            if desired_end > len(asm_data):
+                max_index += self.info_cache_bsz
+                asm_data = self.api_merge_asm_list_overlap_append(asm_data, self._info_cache_get(max_index))
+                expanded = True
+            if not expanded:
+                break
 
         # Quickly locate the position of pc_last
         address_list = [x[0] for x in asm_data]
         pc_last_index = bisect.bisect_left(address_list, pc_last)
-        start_line = max(0, pc_last_index - h//2)
+        total_lines = len(asm_data)
+        start_line = pc_last_index - h // 2 + int(offset_lines or 0)
+        if total_lines <= h:
+            start_line = 0
+        else:
+            start_line = max(0, min(start_line, total_lines - h))
+        self.info_last_offset = start_line - (pc_last_index - h // 2)
         asm_lines = []
-        for l in  asm_data[start_line:start_line + h]:
+        window = asm_data[start_line:start_line + h]
+        if not window:
+            return asm_lines
+        addr_w = max(8, max(len(f"{x[0]:x}") for x in window))
+        byte_w = max(8, max(len(str(x[1])) for x in window))
+        mn_w = max(6, max(len(str(x[2])) for x in window))
+        for l in window:
             find_pc = l[0] in valid_pc_list
-            line = "%s|0x%x: %s  %s  %s" % (">" if find_pc else " ", l[0], l[1], l[2], l[3])
+            line = "%s0x%0*x: %-*s  %-*s  %s" % (
+                ">" if find_pc else " ",
+                addr_w,
+                l[0],
+                byte_w,
+                l[1],
+                mn_w,
+                l[2],
+                l[3],
+            )
             if find_pc and l[0] == pc_last:
                 line = ("norm_red", line)
             if self.info_force_address is not None:
@@ -188,14 +240,14 @@ class CmdInfo:
             if not hasattr(self.xsp, "GetFromU64Array"):
                 return [('error_red',"<Error! xspcomm.GetFromU64Array not find, please update your xspcomm lib>>")]
             return " ".join(["%3s: 0x%x" % (self.iregs[i],
-                                            self.xsp.GetFromU64Array(self.difftest_stat.regs_int.value, i))
+                                            self.xsp.GetFromU64Array(self.difftest_stat.regs.xrf.value, i))
                              for i in range(32)])
         abs_list += [ireg_map()]
         # Float regs
         abs_list += ["\nFloatReg:"]
         def freg_map():
             return " ".join(["%3s: 0x%x" % (self.fregs[i],
-                                            self.xsp.GetFromU64Array(self.difftest_stat.regs_fp.value, i))
+                                            self.xsp.GetFromU64Array(self.difftest_stat.regs.frf.value, i))
                              for i in range(32)])
         abs_list += [freg_map()]
         # Commit PCs
@@ -206,23 +258,23 @@ class CmdInfo:
 
         # csr
         abs_list += ["\nCSR:"]
-        abs_list += ["mstatus: 0x%x  " % self.difftest_stat.csr.mstatus + 
-                     "mcause: 0x%x  " % self.difftest_stat.csr.mcause +
-                     "mepc: 0x%x  " % self.difftest_stat.csr.mepc +
-                     "mtval: 0x%x  " % self.difftest_stat.csr.mtval +
-                     "mtvec: 0x%x  " % self.difftest_stat.csr.mtvec +
-                     "privilegeMode: %d  " % self.difftest_stat.csr.privilegeMode +
-                     "mie: 0x%x  " % self.difftest_stat.csr.mie +
-                     "mip: 0x%x  " % self.difftest_stat.csr.mip + 
-                     "satp: 0x%x  " % self.difftest_stat.csr.satp +
-                     "sstatus: 0x%x  " % self.difftest_stat.csr.sstatus +
-                     "scause: 0x%x  " % self.difftest_stat.csr.scause +
-                     "sepc: 0x%x  " % self.difftest_stat.csr.sepc +
-                     "stval: 0x%x  " % self.difftest_stat.csr.stval +
-                     "stvec: 0x%x  " % self.difftest_stat.csr.stvec
+        abs_list += ["mstatus: 0x%x  " % self.difftest_stat.regs.csr.mstatus +
+                     "mcause: 0x%x  " % self.difftest_stat.regs.csr.mcause +
+                     "mepc: 0x%x  " % self.difftest_stat.regs.csr.mepc +
+                     "mtval: 0x%x  " % self.difftest_stat.regs.csr.mtval +
+                     "mtvec: 0x%x  " % self.difftest_stat.regs.csr.mtvec +
+                     "privilegeMode: %d  " % self.difftest_stat.regs.csr.privilegeMode +
+                     "mie: 0x%x  " % self.difftest_stat.regs.csr.mie +
+                     "mip: 0x%x  " % self.difftest_stat.regs.csr.mip +
+                     "satp: 0x%x  " % self.difftest_stat.regs.csr.satp +
+                     "sstatus: 0x%x  " % self.difftest_stat.regs.csr.sstatus +
+                     "scause: 0x%x  " % self.difftest_stat.regs.csr.scause +
+                     "sepc: 0x%x  " % self.difftest_stat.regs.csr.sepc +
+                     "stval: 0x%x  " % self.difftest_stat.regs.csr.stval +
+                     "stvec: 0x%x  " % self.difftest_stat.regs.csr.stvec
                      ]
         # fcsr
-        abs_list += ["\nFCSR: 0x%x" % self.difftest_stat.fcsr.fcsr]
+        abs_list += ["\nFCSR: 0x%x" % self.difftest_stat.regs.fcsr.fcsr]
 
         # DASM info base address
         if self.info_force_address is not None:
@@ -283,6 +335,26 @@ class CmdInfo:
                     abs_list += [("error_red", f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}")]
                 else:
                     abs_list += [f"{br[0]}(0x{br[1]:x}) {br[2]} 0x{br[3]:x} hinted: {br[4]}"]
+        
+        if self.api_is_xbreak_expr_on():
+            abs_list += ["\nXBreak Exprs:"]
+            for k, hit, expr in self.api_xbreak_expr_list():
+                if hit:
+                    abs_list += [("error_red", f"{k}: hit={hit} expr={expr}")]
+                else:
+                    abs_list += [f"{k}: hit={hit} expr={expr}"]
+        if self.api_is_xbreak_fsm_on():
+            abs_list += ["\nXBreak FSM:"]
+            try:
+                status = self.api_xbreak_fsm_status()
+                if status:
+                    line = f"name={status['name']} state={status['state']} triggered={status['triggered']} trigger_state={status['trigger_state']}"
+                    if status.get("triggered"):
+                        abs_list += [("error_red", line)]
+                    else:
+                        abs_list += [line]
+            except Exception as e:
+                abs_list += [("error_red", f"<Error! read xbreak_fsm status failed: {e}>")]
 
         # TBD
         # abs_list += [("error_red", "\nFIXME:\nMore Data to be done\n")]

@@ -13,7 +13,7 @@ import configs as cf
 from draw import draw
 
 
-def batch():
+def batch(out_csv_path: str):
     paths = u.glob_stats(cf.stats_dir, fname='simulator_err.txt')
 
     manager = Manager()
@@ -56,8 +56,7 @@ def batch():
     df = df.reindex(sorted(df.columns), axis=1)
 
     df = df.fillna(0)
-
-    df.to_csv(cf.CSV_PATH, index=True)
+    df.to_csv(out_csv_path, index=True)
 
 
 def proc_input(wl_df: pd.DataFrame, js: dict, workload: str):
@@ -118,13 +117,14 @@ def proc_bmk(bmk_df: pd.DataFrame, js: dict):
     weight_metric = np.matmul(vec_weight.values.reshape(1, -1), metrics.values)
     return weight_metric, metrics.columns
 
-
-def compute_weighted_metrics():
-    df = pd.read_csv(cf.CSV_PATH, index_col=0)
+def compute_weighted_metrics(in_csv_path: str, out_csv_path: str, scale: float = 1.0):
+    df = pd.read_csv(in_csv_path, index_col=0)
     bmks = df['bmk'].unique()
     with open(cf.JSON_FILE, 'r', encoding='utf-8') as f:
         js = json.load(f)
+
     weighted = {}
+    cols = None
     for bmk in bmks:
         if bmk not in cf.spec_bmks['06']['int'] and cf.INT_ONLY:
             continue
@@ -138,29 +138,108 @@ def compute_weighted_metrics():
         else:
             metrics, cols = proc_bmk(df_bmk, js)
         weighted[bmk] = metrics[0]
-    weighted_df = pd.DataFrame.from_dict(
-        weighted, orient='index', columns=cols)
+
+    weighted_df = pd.DataFrame.from_dict(weighted, orient='index', columns=cols)
+
+    # ===== NEW: scale all numeric columns by `scale` (except commitInstr) =====
+    scale = float(scale)
+
+    # only scale numeric columns; exclude commitInstr
+    scale_cols = [c for c in weighted_df.columns if c != 'commitInstr']
+    weighted_df[scale_cols] = weighted_df[scale_cols].astype(float) * scale
+    if 'commitInstr' in weighted_df.columns:
+        weighted_df['commitInstr'] = weighted_df['commitInstr'].astype(float)
+    # =========================================================================
+
     if 'cpi' in weighted_df.columns:
         weighted_df = weighted_df.sort_values(by='cpi', ascending=False)
     else:
         weighted_df = weighted_df.sort_index()
-    weighted_df.to_csv(cf.OUT_CSV)
+    weighted_df.to_csv(out_csv_path)
+
+
+def run_one(tag: str, stat_dir: str, csv_path: str, out_path: str, rename_width: int = 1) -> str:
+    print(f"\n========== RUN {tag} ==========")
+    cf.stats_dir = stat_dir
+    batch(csv_path)
+    compute_weighted_metrics(csv_path, out_path, rename_width)
+    return out_path
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(usage='generate top-down results')
-    parser.add_argument('-s', '--stat-dir', action='store', required=True,
-                        help='stat output directory')
+    parser = argparse.ArgumentParser(usage='generate top-down results for base/ref (optional)')
+    parser.add_argument('-b', '--base-stat-dir', action='store', required=True, default=None,
+                        help='base stat output directory (required)')
+    parser.add_argument('-r', '--ref-stat-dir', action='store', default=None,
+                        help='ref stat output directory (optional)')
     parser.add_argument('-j', '--json', action='store', required=True,
                         help='specify json file', default='resources/spec06_rv64gcb_o2_20m.json')
+    parser.add_argument('--base-issue', type=float, default=None,
+                        help='base issue width (required when both --base-stat-dir and --ref-stat-dir are provided)')
+    parser.add_argument('--ref-issue', type=float, default=None,
+                        help='ref issue width (required when both --base-stat-dir and --ref-stat-dir are provided)')
+    parser.add_argument('--base-label', type=str, default='BASE',
+                        help='label prefix for base (default: BASE)')
+    parser.add_argument('--ref-label', type=str, default='REF',
+                        help='label prefix for ref (default: REF)')
+
     opt = parser.parse_args()
-    cf.stats_dir = opt.stat_dir
+
     cf.JSON_FILE = opt.json
+
     if not osp.exists('results'):
         os.makedirs('results')
+
     if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 8192:
         resource.setrlimit(resource.RLIMIT_NOFILE, (8192, 8192))
 
-    batch()
-    compute_weighted_metrics()
-    draw()
+    out_csv_paths = []
+    labels = []
+
+    base_scale = 1.0
+    ref_scale  = 1.0
+    base_issue = 8.0 if opt.base_issue is None else float(opt.base_issue)
+    ref_issue = 8.0 if opt.ref_issue is None else float(opt.ref_issue)
+    draw_issue_width = 8.0
+
+    if opt.base_stat_dir and opt.ref_stat_dir:
+        if opt.base_issue is None or opt.ref_issue is None:
+            raise SystemExit(
+                "Error: when both --base-stat-dir and --ref-stat-dir are provided, "
+                "you must also provide --base-issue and --ref-issue"
+            )
+        b = float(opt.base_issue)
+        r = float(opt.ref_issue)
+        if b <= 0 or r <= 0:
+            raise SystemExit("Error: --base-issue and --ref-issue must be > 0")
+
+        if b < r:
+            base_scale = r / b
+        elif r < b:
+            ref_scale = b / r
+
+        print(f"[INFO] issue widths: base={b}, ref={r}")
+        print(f"[INFO] computed scales: BASE scale={base_scale:.6f}, REF scale={ref_scale:.6f}")
+        draw_issue_width = max(b, r)
+    else:
+        print("[INFO] only one stat dir provided -> scale=1.0")
+        if opt.base_stat_dir:
+            draw_issue_width = base_issue
+        elif opt.ref_stat_dir:
+            draw_issue_width = ref_issue
+
+    if opt.base_stat_dir:
+        print(f"[INFO] Run BASE with scale={base_scale:.6f}")
+        out_base = run_one("BASE", opt.base_stat_dir, cf.CSV_BASE, cf.OUT_BASE, base_scale)
+        out_csv_paths.append(out_base)
+        labels.append(opt.base_label)
+
+    if opt.ref_stat_dir:
+        print(f"[INFO] Run REF with scale={ref_scale:.6f}")
+        out_ref = run_one("REF", opt.ref_stat_dir, cf.CSV_REF, cf.OUT_REF, ref_scale)
+        out_csv_paths.append(out_ref)
+        labels.append(opt.ref_label)
+
+    if not out_csv_paths:
+        raise SystemExit("Error: please provide at least one of --base-stat-dir or --ref-stat-dir")
+    draw(out_csv_paths, labels, draw_issue_width)

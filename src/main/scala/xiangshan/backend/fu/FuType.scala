@@ -2,36 +2,22 @@ package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util.BitPat
-import utils.EnumUtils.OHEnumeration
+import utils.EnumUtils._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 
 import scala.language.implicitConversions
 
-object FuType extends OHEnumeration {
-  class OHType(i: Int, name: String) extends super.OHVal(i: Int, name: String)
-
-  def OHType(i: Int, name: String): OHType = new OHType(i, name)
-
-  implicit class fromOHValToLiteral(x: OHType) {
-    def U: UInt = x.ohid.U
-    def U(width: Width): UInt = x.ohid.U(width)
-  }
-
-  private var initVal = 0
-
-  private def addType(name: String): OHType = {
-    val ohval = OHType(initVal, name)
-    initVal += 1
-    ohval
-  }
+object FuType extends ChiselOHEnum {
+  type OHType = super.OHType
+  val FuTypeOrR: IsOneOf.type = IsOneOf
 
   // int
-  val jmp = addType(name = "jmp")
+  val jmp = addType(name = "njmp")
+  val link = addType(name = "link")
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
-  val f2v = addType(name = "f2v")
   val csr = addType(name = "csr")
   val alu = addType(name = "alu")
   val mul = addType(name = "mul")
@@ -41,7 +27,7 @@ object FuType extends OHEnumeration {
 
   // fp
   val falu = addType(name = "falu")
-  val fmac = addType(name = "fmac")
+  val fmul = addType(name = "fmul")
   val fcvt = addType(name = "fcvt")
   val fDivSqrt = addType(name = "fDivSqrt")
   val fcmp = addType(name = "fcmp")
@@ -52,27 +38,24 @@ object FuType extends OHEnumeration {
   val mou = addType(name = "mou")
 
   // vec
-  val vipu = addType(name = "vipu")
-  val vialuF = addType(name = "vialuF")
-  val vppu = addType(name = "vppu")
+  val vset = addType(name = "vset")
+  val vmpu = addType(name = "vmpu")
+  val vialu = addType(name = "vialu")
   val vimac = addType(name = "vimac")
   val vidiv = addType(name = "vidiv")
-  val vfalu = addType(name = "vfalu")
-  val vmove = addType(name = "vmove")
-  val vfma = addType(name = "vfma")
+
+  val vfmac = addType(name = "vfmac")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
-  val vsetiwi = addType(name = "vsetiwi") // vset read rs write rd
-  val vsetiwf = addType(name = "vsetiwf") // vset read rs write vconfig
-  val vsetfwf = addType(name = "vsetfwf") // vset read old vl write vconfig
 
-  // vec ls
-  val vldu = addType(name = "vldu")
-  val vstu = addType(name = "vstu")
-  val vsegldu = addType(name = "vsegldu")
-  val vsegstu = addType(name = "vsegstu")
+  val vmove = addType(name = "vmove")
+  val vredu = addType(name = "vredu")
+  val vperm = addType(name = "vperm")
 
-  val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  val vsha256ms = addType(name = "vsha256ms")
+  val vsha256c = addType(name = "vsha256c")
+
+  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -123,18 +106,13 @@ object FuType extends OHEnumeration {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
+  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
-  val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
-  val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
+  val vecOPI = Seq(vialu, vimac, vidiv)
+  val vecOPF = Seq(vfmac, vfdiv, vfcvt)
+  val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
-  val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
-  val vecArithOrMem = vecArith ++ vecMem
-  val vecAll = vecVSET ++ vecArithOrMem
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
-  val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
-  val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
   val blockBackCompress = Seq(brh, jmp)
 
   def X = BitPat.N(num) // Todo: Don't Care
@@ -145,7 +123,7 @@ object FuType extends OHEnumeration {
 
   def apply() = UInt(num.W)
 
-  def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll) || FuTypeOrR(fuType, vsetiwi, vsetiwf)
+  def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll) || FuTypeOrR(fuType, vset)
   def isIntDq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0All)
   def isIntDq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1All)
   def isIntDq0Deq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0Deq0)
@@ -163,6 +141,8 @@ object FuType extends OHEnumeration {
 
   def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp))
 
+  def isLink(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(link))
+
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
   def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
@@ -177,102 +157,49 @@ object FuType extends OHEnumeration {
 
   def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
 
+  def isFmul(fuType: UInt): Bool = FuTypeOrR(fuType, fmul)
+
+  def isFalu(fuType: UInt): Bool = FuTypeOrR(fuType, falu)
+
+  def isFdiv(fuType: UInt): Bool = FuTypeOrR(fuType, fDivSqrt)
+
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
   def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
 
-  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
-
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
-  def isVIAluF(fuType: UInt): Bool = FuTypeOrR(fuType, vialuF)
-
-  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu)
-
-  def isVnonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
-
-  def isVsegls(futype: UInt): Bool = FuTypeOrR(futype, vsegldu, vsegstu)
-
-  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu)
-
-  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu)
-
-  def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
-
-  def isVSegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vsegstu)
-
-  def isVNonsegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
-
-  def isVNonsegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
+  def isVIAlu(fuType: UInt): Bool = FuTypeOrR(fuType, vialu)
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
-
-  def isVecOPFFma(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
-
-  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
 
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
   def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
-  def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
-
-  def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
-
-  def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
-
   def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
 
-  object FuTypeOrR {
-    def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
-      apply(fuType, fu0 +: fus)
-    }
-
-    def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
-      fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
-    }
-
-    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = {
-      apply(fuType, fu0 +: fus)
-    }
-
-    def apply(fuTupe: OHType, fus: Seq[OHType]): Boolean = {
-      fus.map(x => x == fuTupe).fold(false)(_ || _)
-    }
-  }
-
   val functionNameMap = Map(
-    jmp -> "jmp",
     brh -> "brh",
     i2f -> "int_to_float",
     i2v -> "int_to_vector",
-    f2v -> "float_to_vector",
     csr -> "csr",
     alu -> "alu",
     mul -> "mul",
     div -> "div",
     fence -> "fence",
     bku -> "bku",
-    fmac -> "fmac",
+    fmul -> "fmul",
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",
     mou -> "mou",
-    vsetiwi -> "vsetiwi",
-    vsetiwf -> "vsetiwf",
-    vsetfwf -> "vsetfwf",
-    vipu -> "vipu",
-    vialuF -> "vialuF",
-    vldu -> "vldu",
-    vstu -> "vstu",
-    vppu -> "vppu",
+    vialu -> "vialu",
     vimac -> "vimac",
     vidiv -> "vidiv",
-    vfalu -> "vfalu",
+    vfmac -> "vfmac",
     vmove -> "vmove",
-    vfma -> "vfma",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
   )
 }
-

@@ -133,7 +133,7 @@ class Duplicate[T <: Data](
     DuplicateInit(names, dups)
   }
 
-  def getNext: T = {
+  def get: T = {
     val ret = this.dup(this.next)
     this.next = (this.next + 1) % this.num
     ret
@@ -165,6 +165,20 @@ class Duplicate[T <: Data](
   def toVec: Vec[T] = this.dup
 
   def :=(source: T): Unit = this.dup.foreach(_ := source)
+
+  def :=(source: Duplicate[T]): Unit = this.dup.foreach(_ := source.get)
+
+  def foreach(f: T => Unit): Unit = this.dup.foreach(f)
+
+  def map[TT <: Data](f: T => TT): Duplicate[TT] = {
+    val mapped = this.dup.map(f)
+    DuplicateInit(this.names, mapped)
+  }
+
+  def generateAssertion(valid: Bool = true.B): Unit =
+    this.dup.tail.zipWithIndex.foreach { case (dup, idx) =>
+      assert(!valid || dup === this.head, s"Duplicate assertion failed for ${idx}")
+    }
 }
 
 object Duplicate {

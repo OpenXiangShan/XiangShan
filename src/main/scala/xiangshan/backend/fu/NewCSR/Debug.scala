@@ -6,8 +6,9 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.util.SdtrigExt
-import xiangshan._
 import utils._
+import xiangshan._
+import xiangshan.backend.fu.NewCSR.CSRConfig._
 
 class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new DebugIO)
@@ -28,10 +29,17 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val tdata1Selected = io.in.tdata1Selected
   private val tdata2Selected = io.in.tdata2Selected
   private val tdata1Vec = io.in.tdata1Vec
+  private val tdata3Vec = io.in.tdata3Vec
 
   private val tdata1Update  = io.in.tdata1Update
   private val tdata2Update  = io.in.tdata2Update
+  private val tdata3Update  = io.in.tdata3Update
   private val tdata1Wdata   = io.in.tdata1Wdata
+  private val scontextValue = io.in.scontext.asUInt
+  private val mhcontextValue = io.in.mhcontext.asUInt
+  private val satpAsid = io.in.satpAsid
+  private val vsatpAsid = io.in.vsatpAsid
+  private val hgatpVmid = io.in.hgatpVmid
 
   /**
    * ways to entry Dmode：
@@ -63,6 +71,15 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
     mcontrol6Wire := mod.DATA.asUInt
     mcontrol6Wire
   }}
+  val tdata3WireVec = tdata3Vec.map { mod =>
+    val tdata3Wire = Wire(new Tdata3Bundle)
+    tdata3Wire := mod.asUInt
+    tdata3Wire
+  }
+  val currentAsid = Mux(privState.isVirtual, vsatpAsid, satpAsid)
+  val tdata3MatchVec = tdata3WireVec.map(tdata3 =>
+    TriggerUtil.textraMatch(tdata3, scontextValue, currentAsid, mhcontextValue, hgatpVmid)
+  )
 
   val triggerCanRaiseBpExp = io.in.triggerCanRaiseBpExp
   val triggerEnterDebugMode = hasExp && TriggerAction.isDmode(trigger)
@@ -93,14 +110,14 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
 
   val frontendTriggerUpdate =
     tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isFetchTrigger ||
-      mcontrol6Selected.isFetchTrigger && triggerUpdate
+      mcontrol6Selected.isFetchTrigger && (triggerUpdate || tdata3Update)
 
   val memTriggerUpdate =
     tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isMemAccTrigger ||
       mcontrol6Selected.isMemAccTrigger && triggerUpdate
 
-  val triggerEnableVec = tdata1Vec.zip(mcontrol6WireVec).map { case(tdata1, mcontrol6) =>
-    tdata1.TYPE.isLegal && (
+  val triggerEnableVec = tdata1Vec.zip(mcontrol6WireVec).zip(tdata3MatchVec).map { case((tdata1, mcontrol6), tdata3Match) =>
+    tdata1.TYPE.isLegal && tdata3Match && (
       mcontrol6.M && privState.isModeM  ||
         mcontrol6.S && privState.isModeHS ||
         mcontrol6.U && privState.isModeHU ||
@@ -114,7 +131,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isMemAccTrigger
   }
-  
+
   io.out.frontendTrigger.tUpdate.valid        := RegNext(RegNext(frontendTriggerUpdate))
   io.out.frontendTrigger.tUpdate.bits.addr    := tselect.asUInt
   io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
@@ -160,10 +177,17 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     val tdata1Selected = new Tdata1Bundle
     val tdata2Selected = new Tdata2Bundle
     val tdata1Vec = Vec(TriggerNum, new Tdata1Bundle)
+    val tdata3Vec = Vec(TriggerNum, new Tdata3Bundle)
     val triggerCanRaiseBpExp = Bool()
+    val scontext = new ScontextBundle
+    val mhcontext = new McontextBundle
+    val satpAsid = UInt(ASIDLEN.W)
+    val vsatpAsid = UInt(ASIDLEN.W)
+    val hgatpVmid = UInt(VMIDLEN.W)
 
     val tdata1Update = Bool()
     val tdata2Update = Bool()
+    val tdata3Update = Bool()
     val tdata1Wdata = new Tdata1Bundle
   })
 
@@ -249,13 +273,24 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
 
   val tiggerVaddrHit = Mux(isCacheLine, cacheLineEq, Mux(isVectorStride, hitVecVectorStride, triggerHitVec))
   TriggerCheckCanFire(TriggerNum, triggerCanFireVec, tiggerVaddrHit, triggerTimingVec, triggerChainVec)
-  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
-  val triggerVaddr  = PriorityMux(triggerFireOH, VecInit(tdataVec.map(_.tdata2))).asUInt
-  val triggerMask   = PriorityMux(triggerFireOH, VecInit(tdataVec.map(x => UIntToOH(x.tdata2(lowBitWidth-1, 0))))).asUInt
 
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
-  TriggerUtil.triggerActionGen(triggerAction, triggerCanFireVec, actionVec, triggerCanRaiseBpExp)
+  val fireDebugModeVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
+  val fireBreakpointExpVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+  val fireDebugMode = fireDebugModeVec.asUInt.orR
+  val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
+  triggerAction := MuxCase(TriggerAction.None, Seq(
+    fireDebugMode -> TriggerAction.DebugMode,
+    breakPointExp -> TriggerAction.BreakpointExp,
+  ))
+  val triggerFireVec = MuxCase(VecInit(Seq.fill(TriggerNum)(false.B)), Seq(
+    fireDebugMode -> fireDebugModeVec,
+    breakPointExp -> fireBreakpointExpVec,
+  ))
+  val triggerFireOH = PriorityEncoderOH(triggerFireVec)
+  val triggerVaddr  = Mux(triggerFireVec.asUInt.orR, PriorityMux(triggerFireOH, VecInit(tdataVec.map(_.tdata2))).asUInt, 0.U(VAddrBits.W))
+  val triggerMask   = Mux(triggerFireVec.asUInt.orR, PriorityMux(triggerFireOH, VecInit(tdataVec.map(x => UIntToOH(x.tdata2(lowBitWidth-1, 0))))).asUInt, 0.U((VLEN/8).W))
 
   io.toLoadStore.triggerAction := triggerAction
   io.toLoadStore.triggerVaddr  := triggerVaddr
@@ -295,12 +330,19 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
   }
 
   def DcacheLineBitsEq(): (Bool, Vec[Bool])= {
+    val cacheLineBase = Cat(vaddr(VAddrBits - 1, DCacheLineOffset), 0.U(DCacheLineOffset.W))
+    val cacheLineLast = Cat(vaddr(VAddrBits - 1, DCacheLineOffset), Fill(DCacheLineOffset, 1.U(1.W)))
     (
     io.isCbo.getOrElse(false.B),
     VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+      val tdata2 = tdata.tdata2(VAddrBits - 1, 0)
+      val cacheLineMatch = MuxLookup(tdata.matchType, false.B)(Seq(
+        TrigMatchEnum.EQ -> (vaddr(VAddrBits - 1, DCacheLineOffset) === tdata2(VAddrBits - 1, DCacheLineOffset)),
+        TrigMatchEnum.GE -> (cacheLineLast >= tdata2),
+        TrigMatchEnum.LT -> (cacheLineBase < tdata2)
+      ))
       !tdata.select && !debugMode && en &&
-        tdata.store && io.isCbo.getOrElse(false.B) &&
-        (vaddr >> DCacheLineOffset) === (tdata.tdata2 >> DCacheLineOffset)
+        tdata.store && io.isCbo.getOrElse(false.B) && cacheLineMatch
     })
     )
   }

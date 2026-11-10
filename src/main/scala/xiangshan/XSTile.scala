@@ -28,8 +28,7 @@ import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
 import utility._
 import utility.sram.SramBroadcastBundle
-import coupledL2.EnableCHI
-import coupledL2.tl2chi.PortIO
+import xscache.chi.{DecoupledPortIO, PortIO}
 import xiangshan.backend.trace.TraceCoreInterface
 
 class XSTile()(implicit p: Parameters) extends LazyModule
@@ -43,8 +42,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
   val memBlock = core.memBlock.inner
-  val core_l3_pf_port = memBlock.l3_pf_sender_opt
-  val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
+  val memory_port = None
   val tl_uncache = l2top.inner.mmio_port
   val sep_tl_opt = l2top.inner.sep_tl_port_opt
   val beu_int_source = l2top.inner.beu.intNode
@@ -60,10 +58,17 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1 to l1_xbar
-  coreParams.dcacheParametersOpt.map { _ =>
-    l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcache_port :=
-      memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
+  // L1D clients connect directly to the custom L1-to-L2 fabric. Its channel queues are
+  // placed after arbitration, so there is no per-client TLBuffer here.
+  coreParams.dcacheParametersOpt.foreach { _ =>
+    val clientNodes = memBlock.dcache.clientNodes
+    (memBlock.dcache_port zip clientNodes).zipWithIndex.foreach {
+      case ((port, clientNode), i) =>
+        l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := clientNode
+    }
+  }
+  l2top.inner.l1_l2_fabric.specSink.foreach { sink =>
+    sink := memBlock.dcache.dcache.specFabricSource.get
   }
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
@@ -77,6 +82,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2.pf_recv_node.foreach(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := memBlock.l2_pf_sender_opt.get
+      })
+      l2.l3_pf_recv_node.foreach(recv => {
+        println("Connecting L1 prefetcher L3 requests to L2!")
+        recv := memBlock.l3_pf_sender_opt.get
       })
     case None =>
   }
@@ -106,7 +115,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
       val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
-      val cpu_halt = Output(Bool())
+      val reset_mtvec  = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
+      val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
@@ -115,8 +125,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = if (enableCHI) Some(new PortIO) else None
-      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val chi = Option.when(isOpenLLC)(new PortIO)
+      val decoupledCHI = Option.when(isZhuJiang)(new DecoupledPortIO)
+      val nodeID = Some(Input(UInt(NodeIDWidth.W)))
       val clintTime = Input(ValidIO(UInt(64.W)))
       val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
@@ -134,6 +145,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
+    core.module.io.reset_mtvec.foreach(_ := l2top.module.io.reset_mtvec.get.toCore)
     core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
     l2top.module.io.msiInfo.fromTile := io.msiInfo
     core.module.io.teemsiInfo zip l2top.module.io.teemsiInfo foreach { case (core_teemsiInfo, l2top_teemsiInfo) =>
@@ -145,8 +157,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.clintTime := l2top.module.io.clintTime.toCore
     l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
-    l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
-    io.cpu_halt := l2top.module.io.cpu_halt.toTile
+    l2top.module.io.reset_mtvec.foreach(x => x.fromTile := io.reset_mtvec.get)
+    l2top.module.io.cpu_wfi.fromCore := core.module.io.cpu_wfi
+    io.cpu_wfi := l2top.module.io.cpu_wfi.toTile
     l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
     l2top.module.io.msiAck.fromCore := core.module.io.msiAck
@@ -180,11 +193,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (enableL2) {
       // TODO: add ECC interface of L2
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
+      core.module.io.l2_fdbk_pf_ctrl := l2top.module.io.l2_fdbk_pf_ctrl
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
-      core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
-      core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
+      core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2top.module.io.debugTopDown.l2MissMatch
@@ -198,9 +210,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
-      core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
-      core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
+      core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := false.B
@@ -220,6 +230,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.topDownInfo.l3Miss := l2top.module.io.l3Miss.toCore
 
     io.chi.foreach(_ <> l2top.module.io.chi.get)
+    io.decoupledCHI.foreach(_ <> l2top.module.io.decoupledCHI.get)
     l2top.module.io.nodeID.foreach(_ := io.nodeID.get)
 
     if (debugOpts.ResetGen && enableL2) {

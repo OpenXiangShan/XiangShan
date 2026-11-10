@@ -9,12 +9,12 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val pcExtend = Input(UInt((VAddrBits + 1).W))
+    val pcExtend = Input(UInt((VAddrBits + 2).W))
     val taken = Input(Bool())
     val isRVC = Input(Bool())
     val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
@@ -24,7 +24,7 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
   val immMinWidth = FuConfig.BrhCfg.immType.map(x => x.len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
-    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),
+    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 2),
     io.pcExtend + io.nextPcOffset
   ), XLEN)
 }
@@ -35,12 +35,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.src(0) := io.in.bits.data.src(0) // rs1
   dataModule.io.src(1) := io.in.bits.data.src(1) // rs2
   dataModule.io.func := io.in.bits.ctrl.fuOpType
-  dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
+  dataModule.io.predTaken := io.in.bits.ctrl.predictInfo.get.predTaken
 
-  val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
-    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)
-  )
+  val pcExtend = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, VAddrBits + 2)
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
@@ -52,12 +49,12 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val brhRealTarget = addModule.io.target(VAddrData().dataWidth - 1, 0)
-  val targetWrong = dataModule.io.fixedTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
+  val targetWrong = dataModule.io.predTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
   val isMisPred = dataModule.io.mispredict || targetWrong
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid && (isMisPred || redirect.bits.hasBackendFault)
+      redirect.valid := io.out.valid && isMisPred
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.level := RedirectLevel.flushAfter
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
@@ -67,23 +64,21 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.isMisPred := isMisPred
       redirect.bits.taken := dataModule.io.taken
       redirect.bits.target := addModule.io.target
-      redirect.bits.pc := io.in.bits.data.pc.get
-      redirect.bits.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
-      redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
-      redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
+      redirect.bits.pc := pcExtend(VAddrBits, 0)
+      redirect.bits.backendIAF := false.B
+      redirect.bits.backendIPF := false.B
+      redirect.bits.backendIGPF := false.B
       redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend)
-  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
+  io.toFrontendBJUResolve.get.bits.pc := PcInit(pcExtend(VAddrBits - 1, 0))
+  io.toFrontendBJUResolve.get.bits.target := PcInit(addModule.io.target(VAddrBits - 1, 0))
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
-  if (io.toFrontendBJUResolve.get.bits.debug_isRVC.isDefined) {
-    io.toFrontendBJUResolve.get.bits.debug_isRVC.get := io.in.bits.ctrl.isRVC.get
-  }
+  io.toFrontendBJUResolve.get.bits.debug_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
   connect0LatencyCtrlSingal
 }

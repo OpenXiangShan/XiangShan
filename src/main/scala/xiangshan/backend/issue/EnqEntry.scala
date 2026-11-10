@@ -32,7 +32,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   val common              = Wire(new CommonWireBundle)
   val entryUpdate         = Wire(new EntryBundle)
-  val entryRegNext        = Wire(new EntryBundle)
   val enqDelayValidRegNext= Wire(Bool())
   val hasWakeupIQ         = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
 
@@ -46,20 +45,18 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
-  val entryReg = RegNext(entryRegNext)
+  val entryReg = RegNext(Mux(
+    io.commonIn.enq.valid && common.enqReady,
+    io.commonIn.enq.bits,
+    entryUpdate
+  ))
   val enqDelayValidReg = GatedValidRegNext(enqDelayValidRegNext, false.B)
 
   //Wire
-  CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)
+  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.payload.og1Payload, currentStatus, io.commonIn, true)
 
   when(io.commonIn.enq.valid) {
     assert(common.enqReady, s"${params.getIQName}'s EnqEntry is not ready when enq is valid\n")
-  }
-
-  when(io.commonIn.enq.valid && common.enqReady) {
-    entryRegNext := io.commonIn.enq.bits
-  }.otherwise {
-    entryRegNext := entryUpdate
   }
 
   when(io.commonIn.enq.valid && common.enqReady) {
@@ -136,6 +133,10 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       srcStatusVl.srcState := entryReg.status.srcStatusVl.get.srcState | enqDelayOut1.srcVlWakeUpByWB.get
       srcStatusVl.dataSource.value := DataSource.reg // change it when support fast wakeup.
     }
+    currentStatus.srcStatusV0.foreach { case srcStatusV0 =>
+      srcStatusV0.srcState := entryReg.status.srcStatusV0.get.srcState | enqDelayOut1.srcV0WakeUpByWB.get
+      srcStatusV0.dataSource.value := DataSource.reg // change it when support fast wakeup.
+    }
   }
 
   if (params.hasIQWakeUp) {
@@ -151,22 +152,12 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
-class EnqEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
-  with HasCircularQueuePtrHelper {
-
-  require(params.isVecMemIQ, "EnqEntryVecMem can only be instance of VecMem IQ")
-
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate)
-}
-
 object EnqEntry {
   def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
       case FpScheduler()  => new EnqEntry(isComp)
-      case VecScheduler() =>
-        if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
-        else new EnqEntry(isComp)
+      case VecScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }

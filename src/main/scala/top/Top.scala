@@ -20,16 +20,20 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import difftest.{DifftestModule, HasDiffTestInterfaces}
+import difftest.{DifftestMemIO, DifftestModule, HasDiffTestInterfaces}
 import xiangshan._
 import utils._
 import utility._
 import utility.sram.SramBroadcastBundle
-import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
-import coupledL2.EnableCHI
-import coupledL2.tl2chi.CHILogger
-import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
-import openLLC.TargetBinder._
+import xscache.chi.{CHIDataCheckKey, CHILogger, CHIPoisonKey}
+import xscache.openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
+import xscache.openLLC.TargetBinder._
+import xs.utils.debug.{HardwareAssertionKey, HwaParams}
+import xs.utils.perf.{DebugOptions => ZJDebugOptions, DebugOptionsKey => ZJDebugOptionsKey}
+import xs.utils.perf.{LogUtilsOptions => ZJLogUtilsOptions, LogUtilsOptionsKey => ZJLogUtilsOptionsKey}
+import xs.utils.perf.{PerfCounterOptions => ZJPerfCounterOptions, PerfCounterOptionsKey => ZJPerfCounterOptionsKey, XSPerfLevel => ZJXSPerfLevel}
+import zhujiang.{HasCHIToZhuJiangBridge, HasZhuJiangAXI4Bridge, Zhujiang, ZJParametersKey}
+import zhujiang.perf.{XiangShanUtilityPerfBackend, ZJPerfBackendKey}
 import cc.xiangshan.openncb._
 import system._
 import device._
@@ -42,6 +46,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
+import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSink}
 import chisel3.experimental.annotate
 
 import scala.collection.mutable.Map
@@ -84,10 +89,14 @@ trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
 }
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc()
+  with HasCHIToZhuJiangBridge
+  with HasZhuJiangAXI4Bridge
 {
-  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
-  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
-  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
+  private val useExternalLLC = p(UseExternalLLCKey)
+  require(!useExternalLLC || isOpenLLC, "External LLC requires LLC=OpenLLC")
+
+  val nocMisc = Some(LazyModule(new MemMisc()))
+  val misc: MemMisc = nocMisc.get
 
   override lazy val tlManagers = List(
     misc.l3_xbar.map(_.asInstanceOf[TLNexusNode]),
@@ -97,25 +106,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
   val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alter((site, here, up) => {
+    LazyModule(new XSTile()(XSCachedParametersOptional(p(CachedParameterKey), p.alter((site, here, up) => {
       case XSCoreParamsKey => coreParams
       case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = coreParams.HartId)
-    })))
+      case CHIDataCheckKey if isZhuJiang => "none"
+      case CHIPoisonKey if isZhuJiang => false
+    }))))
   )
-
-  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param.copy(
-        hartIds = tiles.map(_.HartId),
-        FPGAPlatform = debugOpts.FPGAPlatform
-      )
-      case MaxHartIdBits => p(MaxHartIdBits)
-      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
-      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
-    })))
-  )
-
-  val chi_llcBridge_opt = Option.when(enableCHI)(
+  val chi_llcBridge_opt = Option.when(isOpenLLC && !useExternalLLC)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth    = 64,
@@ -129,7 +127,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   )
 
-  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI)(
+  val chi_extllc_opt = Option.when(useExternalLLC) {
+    require(NumCores <= 2, s"External LLC wrapper currently supports up to two RNs, got $NumCores")
+    LazyModule(new ExternalLLC())
+  }
+
+  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(isOpenLLC && !useExternalLLC)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth            = 32,
@@ -147,17 +150,53 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   ))
 
-  // receive all prefetch req from cores
-  val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
-    x => x.map(_ => BundleBridgeSink(Some(() => new PrefetchRecv)))
-  }
-
-  val l3_pf_sender_opt = soc.L3CacheParamsOpt.getOrElse(HCCacheParameters()).prefetch match {
-    case Some(pf) => Some(BundleBridgeSource(() => new PrefetchRecv))
-    case None => None
-  }
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, NumCores, (new NonmaskableInterruptIO).elements.size))
   val nmi = InModuleBody(nmiIntNode.makeIOs())
+  private def imsicParamsForHart(hartIndex: Int): aia.IMSICParams = {
+    val params = soc.IMSICParams
+    params.copy(
+      mAddr = params.mAddr + (hartIndex.toLong << params.intFileMemWidth),
+      sgAddr = params.sgAddr + (hartIndex.toLong << (params.intFileMemWidth + log2Ceil(1 + params.geilen)))
+    )
+  }
+  val imsic_bus_tops = Seq.tabulate(NumCores) { i =>
+    LazyModule(new imsic_bus_top()(p.alter((_, _, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(IMSICParams = imsicParamsForHart(i))
+    })))
+  }
+  imsic_bus_tops.zipWithIndex.foreach { case (imsic_bus_top, i) =>
+    imsic_bus_top.aplic_axi4.foreach { aplic_axi4 =>
+      val hartImsicParams = imsicParamsForHart(i)
+      aplic_axi4 := aia.AXI4Map { addrSet =>
+        val base = addrSet.base.toLong
+        val (groupID, memberID) = soc.APLICParams.hartIndex_to_gh(i)
+        val mOffset = (groupID.toLong << soc.APLICParams.groupStrideWidth) +
+          (memberID.toLong << soc.APLICParams.mStrideWidth)
+        val sgOffset = (groupID.toLong << soc.APLICParams.groupStrideWidth) +
+          (memberID.toLong << soc.APLICParams.sgStrideWidth)
+        if (base == hartImsicParams.mAddr) {
+          soc.APLICParams.mBaseAddr + mOffset
+        } else if (base == hartImsicParams.sgAddr) {
+          soc.APLICParams.sgBaseAddr + sgOffset
+        } else if (base == hartImsicParams.tee_mAddr) {
+          soc.APLICParams.mBaseAddr + mOffset
+        } else if (base == hartImsicParams.tee_sgAddr) {
+          soc.APLICParams.sgBaseAddr + sgOffset
+        } else {
+          base
+        }
+      } := misc.aplic.toIMSIC
+    }
+    imsic_bus_top.axi_mem_xbar.foreach { imsicXbar =>
+      imsicXbar :=
+        AXI4Buffer() :=
+        AXI4UserYanker() :=
+        TLToAXI4() :=
+        TLFragmenter(4, 8, holdFirstDeny = true) :=
+        TLWidthWidget(8) :=
+        misc.device_xbar.get
+    }
+  }
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_node := misc.timer.intnode
@@ -165,14 +204,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     core_with_l2(i).nmi_int_node := nmiIntNode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
-    if (!enableCHI) {
-      misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache
-    }
-    core_with_l2(i).memory_port.foreach(port => (misc.core_to_l3_ports.get)(i) :=* port)
-    memblock_pf_recv_nodes(i).map(recv => {
-      println(s"Connecting Core_${i}'s L1 pf source to L3!")
-      recv := core_with_l2(i).core_l3_pf_port.get
-    })
     misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")
@@ -184,44 +215,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       SepTLXbarOpt := core_with_l2(i).sep_tl_opt.get
     }
   }
-  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
-  l3cacheOpt.map(_.intnode.map(int => {
-    misc.plic.intnode := IntBuffer() := int
-  }))
-
-  val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
-    l3cacheOpt.get.rst_nodes.get
-  } else {
-    core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
-  }
+  val core_rst_nodes = core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
 
   core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({
     case (source, sink) =>  sink := source
   })
-
-  l3cacheOpt match {
-    case Some(l3) =>
-      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar.get
-      l3.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L3!")
-        recv := l3_pf_sender_opt.get
-      })
-      l3.tpmeta_recv_node.foreach(recv => {
-        for ((core, i) <- core_with_l2.zipWithIndex) {
-          println(s"Connecting core_$i\'s L2 TPmeta request to L3!")
-          recv := core.core_l3_tpmeta_source_port.get
-        }
-      })
-      l3.tpmeta_send_node.foreach(send => {
-        val broadcast = LazyModule(new ValidIOBroadcast[TPmetaResp]())
-        broadcast.node := send
-        for ((core, i) <- core_with_l2.zipWithIndex) {
-          println(s"Connecting core_$i\'s L2 TPmeta response to L3!")
-          core.core_l3_tpmeta_sink_port.get := broadcast.node
-        }
-      })
-    case None =>
-  }
 
   chi_llcBridge_opt match {
     case Some(ncb) =>
@@ -229,12 +227,57 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     case None =>
   }
 
+  chi_extllc_opt.foreach { externalLLC =>
+    misc.soc_xbar.get := externalLLC.axi4node
+    misc.soc_xbar.get := externalLLC.periAXI4Node
+  }
+
   chi_mmioBridge_opt.foreach { e =>
     e match {
-      case Some(ncb) =>
-        misc.soc_xbar.get := ncb.axi4node
-      case None =>
+    case Some(ncb) =>
+      misc.soc_xbar.get := ncb.axi4node
+    case None =>
     }
+  }
+
+  private val zhujiangNocConfig = Option.when(isZhuJiang)(ZhuJiangNoCTopology(NumCores, soc.ZhuJiangParams, L3OuterBusWidth))
+  private val zhujiangCfgNodes = zhujiangNocConfig
+    .map(_.island.filter(_.nodeType == xijiang.NodeType.HI))
+    .getOrElse(Seq.empty)
+  private val zhujiangMemNodes = zhujiangNocConfig
+    .map(_.island.filter(_.nodeType == xijiang.NodeType.S))
+    .getOrElse(Seq.empty)
+  private val zhujiangMemOutstanding = zhujiangMemNodes.headOption
+    .map(_.outstanding)
+    .getOrElse(8)
+
+  val zhujiangMemMaster = Option.when(isZhuJiang)(AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    masters = Seq(AXI4MasterParameters(
+      name = "zhujiang-mem",
+      id = IdRange(0, zhujiangMemOutstanding),
+      aligned = true,
+      maxFlight = Some(1)
+    ))
+  ))))
+
+  zhujiangMemMaster.foreach { master =>
+    misc.soc_xbar.get := master
+  }
+
+  val zhujiangCfgMasters = zhujiangCfgNodes.zipWithIndex.map { case (node, i) =>
+    val outstanding = node.axiDevParams.map(_.outstanding).getOrElse(8)
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = s"zhujiang-cfg-$i",
+        id = IdRange(0, outstanding),
+        aligned = true,
+        maxFlight = Some(1)
+      ))
+    )))
+  }
+
+  zhujiangCfgMasters.foreach { master =>
+    misc.soc_xbar.get := AXI4Buffer() := master
   }
 
   class XSTopImp(wrapper: XSTop) extends LazyRawModuleImp(wrapper)
@@ -243,18 +286,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     override def localModulePrefix = soc.XSTopPrefix
     override def localModulePrefixUseSeparator = false
 
-    val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
     val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))
     val memory = IO(new VerilogAXI4Record(misc.memory.elts.head.params))
-
-    socMisc match {
-      case Some(m) =>
-        m.dma.elements.head._2 <> dma.get.viewAs[AXI4Bundle]
-        dontTouch(dma.get)
-      case None =>
-    }
-
-    memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
@@ -274,9 +307,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       val debug_reset = Output(Bool())
       val rtc_clock = Input(Clock())
       val cacheable_check = new TLPMAIO()
-      val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_wfi = Output(Vec(NumCores, Bool()))
       val riscv_critical_error = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
+      val riscv_rst_mtvec = Option.when(tiles.exists(_.enableResetMtvec))(Input(Vec(NumCores, UInt(soc.PAddrBits.W))))
       val traceCoreInterface = Vec(NumCores, new Bundle {
         val fromEncoder = Input(new Bundle {
           val enable = Bool()
@@ -298,7 +332,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
-    val chi_openllc_opt = Option.when(enableCHI)(
+    val chi_openllc_opt = Option.when(isOpenLLC && !useExternalLLC) {
       withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
@@ -306,6 +340,45 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
             FPGAPlatform = debugOpts.FPGAPlatform
           )
         })))
+      }
+    }
+    chi_extllc_opt.foreach { externalLLC =>
+      externalLLC.module.io.clock := io.clock
+      externalLLC.module.io.reset := io.reset.asBool
+    }
+    memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
+    val zhujiangParams = p.alterPartial {
+      case ZJParametersKey => ZhuJiangNoCTopology(NumCores, soc.ZhuJiangParams, L3OuterBusWidth)
+      case ZJPerfBackendKey => XiangShanUtilityPerfBackend
+      case HardwareAssertionKey => HwaParams(enable = false)
+      case ZJLogUtilsOptionsKey => ZJLogUtilsOptions(
+        enableDebug = false,
+        enablePerf = debugOpts.EnablePerfDebug,
+        fpgaPlatform = debugOpts.FPGAPlatform
+      )
+      case ZJPerfCounterOptionsKey => ZJPerfCounterOptions(
+        enablePerfPrint = debugOpts.EnablePerfDebug && !debugOpts.FPGAPlatform,
+        enablePerfDB = debugOpts.EnableRollingDB && !debugOpts.FPGAPlatform,
+        perfLevel = ZJXSPerfLevel.withName(debugOpts.PerfLevel),
+        perfDBHartID = 0
+      )
+      case ZJDebugOptionsKey => ZJDebugOptions(
+        FPGAPlatform = debugOpts.FPGAPlatform,
+        EnableDifftest = false,
+        AlwaysBasicDiff = false,
+        EnableDebug = false,
+        EnablePerfDebug = debugOpts.EnablePerfDebug,
+        UseDRAMSim = false,
+        EnableTopDown = false,
+        EnableChiselDB = false,
+        AlwaysBasicDB = false,
+        EnableRollingDB = debugOpts.EnableRollingDB,
+        EnableHWMoniter = false
+      )
+    }
+    val zhujiang_opt = Option.when(isZhuJiang)(
+      withClockAndReset(io.clock, io.reset) {
+        Module(new Zhujiang()(zhujiangParams))
       }
     )
 
@@ -325,7 +398,43 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+    val imsic_axi4 = Option.when(!useExternalLLC && NumCores == 1)(imsic_bus_tops.head.axi4.map { x =>
+      IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32))))
+    }).flatten
+    val imsic_axi4s = Option.when(!useExternalLLC && NumCores > 1)(imsic_bus_tops.head.axi4.map { x =>
+      IO(Vec(NumCores, Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
+    }).flatten
+    imsic_bus_tops.zipWithIndex.foreach { case (imsic_bus_top, i) =>
+      imsic_bus_top.axi4.foreach { x =>
+        chi_extllc_opt match {
+          case Some(externalLLC) =>
+            externalLLC.module.io.imsic(i).viewAs[AXI4Bundle] <> x.elements.head._2
+          case None =>
+            val imsic_axi4_port = if (NumCores == 1) imsic_axi4.get else imsic_axi4s.get(i)
+            imsic_axi4_port.viewAs[AXI4Bundle] <> x.elements.head._2
+        }
+      }
+      imsic_bus_top.tl_m.foreach { x =>
+        val imsic_m_tl = IO(chiselTypeOf(x.getWrappedValue))
+        imsic_m_tl.suggestName(if (NumCores == 1) "imsic_m_tl" else s"imsic_${i}_m_tl")
+        x <> imsic_m_tl
+      }
+      imsic_bus_top.tl_s.foreach { x =>
+        val imsic_s_tl = IO(chiselTypeOf(x.getWrappedValue))
+        imsic_s_tl.suggestName(if (NumCores == 1) "imsic_s_tl" else s"imsic_${i}_s_tl")
+        x <> imsic_s_tl
+      }
+      imsic_bus_top.module.msi.foreach { x =>
+        val imsic = IO(chiselTypeOf(x))
+        imsic.suggestName(if (NumCores == 1) "imsic" else s"imsic_${i}")
+        x <> imsic
+      }
+      imsic_bus_top.module.teemsi.foreach { x =>
+        val teemsi = IO(chiselTypeOf(x))
+        teemsi.suggestName(if (NumCores == 1) "teemsi" else s"teemsi_${i}")
+        x <> teemsi
+      }
+    }
     // syscnt io input descrip
     val ref_reset_sync = withClockAndReset(io.rtc_clock, io.reset) { ResetGen() }
     misc.module.scntIO.update_en := false.B
@@ -336,14 +445,32 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     misc.module.bus_clock := io.clock
     misc.module.bus_reset := io.reset
 
-
+    val clintTime = WireInit(0.U.asTypeOf(ValidIO(UInt(64.W))))
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        val time_sink = withClockAndReset(core_with_l2.head.module.clock, core_with_l2.head.module.reset)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        time_sink.io.async <> misc.module.clintTime
+        time_sink.io.deq.ready := true.B
+        clintTime.valid := time_sink.io.deq.valid
+        clintTime.bits  := time_sink.io.deq.bits
+      case None =>
+       clintTime := misc.module.clintTime
+    }
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
-      core.module.io.msiInfo := msiInfo
-      core.module.io.teemsiInfo.foreach(_ := msiInfo)
-      core.module.io.clintTime := misc.module.clintTime
-      io.riscv_halt(i) := core.module.io.cpu_halt
+      core.module.io.msiInfo.valid := imsic_bus_tops(i).module.msiio.vld_req
+      core.module.io.msiInfo.bits := imsic_bus_tops(i).module.msiio.data
+      imsic_bus_tops(i).module.msiio.vld_ack := core.module.io.msiAck
+      imsic_bus_tops(i).module.teemsiio zip core.module.io.teemsiInfo foreach { case (teemsiio, teemsiInfo) =>
+        teemsiInfo.valid := teemsiio.vld_req
+        teemsiInfo.bits := teemsiio.data
+      }
+      imsic_bus_tops(i).module.teemsiio zip core.module.io.teemsiAck foreach { case (teemsiio, teemsiAck) =>
+        teemsiio.vld_ack := teemsiAck
+      }
+      core.module.io.clintTime := clintTime
+      io.riscv_wfi(i) := core.module.io.cpu_wfi
       io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
       // trace Interface
       val traceInterface = core.module.io.traceCoreInterface
@@ -361,76 +488,114 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       core.module.io.dft.foreach(dontTouch(_) := DontCare)
       core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
+      core.module.io.reset_mtvec.foreach(_ := io.riscv_rst_mtvec.get(i))
     }
 
     withClockAndReset(io.clock, io.reset) {
-      Option.when(enableCHI)(true.B).foreach { _ =>
+      if (isOpenLLC && useExternalLLC) {
         for ((core, i) <- core_with_l2.zipWithIndex) {
+          val coreCHI = core.module.io.chi.get
+          val extLLCLogger = CHILogger(s"L2[${i}]_ExtLLC", true)
+          val extLLCRN = chi_extllc_opt.get.module.io.rn(i)
+          dontTouch(coreCHI)
+          coreCHI <> extLLCLogger.io.up
+          extLLCRN <> extLLCLogger.io.down
+          require(coreCHI.getWidth == extLLCRN.getWidth)
+        }
+      } else if (isOpenLLC) {
+        val llcRouteId = NumCores * 2
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          val coreCHI = core.module.io.chi.get
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
           val llcLogger = CHILogger(s"L2[${i}]_LLC", true)
-          dontTouch(core.module.io.chi.get)
+          val mmioRouteId = NumCores + i
+          val lowAddressRange = AddressSet(0x0L, 0x00007fffffffL)
+          val chiRouteMap = Map[AddressSet, Int]() ++
+            Seq(lowAddressRange -> mmioRouteId) ++
+            AddressSet(0x0L, 0xffffffffffffL).subtract(lowAddressRange).map(_ -> llcRouteId)
+          dontTouch(coreCHI)
           bind(
-            route(
-              core.module.io.chi.get, Map((AddressSet(0x0L, 0x00007fffffffL), NumCores + i)) ++ AddressSet(0x0L,
-              0xffffffffffffL).subtract(AddressSet(0x0L, 0x00007fffffffL)).map(addr => (addr, NumCores * 2)).toMap
-            ),
-            Map((NumCores + i) -> mmioLogger.io.up, (NumCores * 2) -> llcLogger.io.up)
+            route(coreCHI, chiRouteMap),
+            Map(mmioRouteId -> mmioLogger.io.up, llcRouteId -> llcLogger.io.up)
           )
           chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
-          chi_openllc_opt.get.io.rn(i) <> llcLogger.io.down
-          require(core.module.io.chi.get.getWidth == llcLogger.io.up.getWidth)
-          require(llcLogger.io.down.getWidth == chi_openllc_opt.get.io.rn(i).getWidth)
+          val llcRN = chi_openllc_opt.get.io.rn(i)
+          llcRN <> llcLogger.io.down
+          require(llcLogger.io.down.getWidth == llcRN.getWidth)
+          require(coreCHI.getWidth == llcLogger.io.up.getWidth)
         }
-        val memLogger = CHILogger(s"LLC_MEM", true)
-        chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
-        chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
-        chi_openllc_opt.get.io.nodeID := (NumCores * 2).U
-        chi_openllc_opt.foreach { l3 =>
-          l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        chi_openllc_opt.foreach { openLLC =>
+          val memLogger = CHILogger(s"LLC_MEM", true)
+          openLLC.io.sn.connect(memLogger.io.up)
+          chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
+          openLLC.io.nodeID := llcRouteId.U
+          openLLC.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+          core_with_l2.zip(openLLC.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
+            tile.module.io.debugTopDown.l3MissMatch := l3Match
+          }
+          core_with_l2.foreach(_.module.io.l3Miss := openLLC.io.l3Miss)
         }
-        core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
-          tile.module.io.debugTopDown.l3MissMatch := l3Match
-        }
-        core_with_l2.map(_.module.io.l3Miss := (if (chi_openllc_opt.nonEmpty) chi_openllc_opt.get.io.l3Miss else false.B))
       }
     }
 
-    if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
-      // tie off core soft reset
-      for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset
-      }
-    }
+    zhujiang_opt.foreach { zj =>
+      withClockAndReset(io.clock, io.reset) {
+        val zjp = zhujiangNocConfig.get
+        val ccNodes = zjp.island.filter(_.nodeType == xijiang.NodeType.CC)
+        require(ccNodes.size >= NumCores, s"ZhuJiang exposes ${ccNodes.size} CC nodes, but $NumCores cores are requested")
+        require(zj.ccnIO.size >= NumCores, s"ZhuJiang exposes ${zj.ccnIO.size} CCN IOs, but $NumCores cores are requested")
+        require(zj.ddrIO.nonEmpty, "XiangShan + ZhuJiang expects at least one DDR AXI port")
+        require(
+          zj.cfgIO.size == zhujiangCfgMasters.size,
+          s"ZhuJiang exposes ${zj.cfgIO.size} cfg AXI ports, but ${zhujiangCfgMasters.size} cfg master nodes were built"
+        )
 
-    l3cacheOpt match {
-      case Some(l3) =>
-        l3.pf_recv_node match {
-          case Some(recv) =>
-            l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
-            for (i <- 0 until NumCores) {
-              when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
-                l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
-                l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
-              }
-            }
-          case None =>
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          connectCHIToZhuJiang(core.module.io.decoupledCHI.get, zj.ccnIO(i), ccNodes(i), zhujiangParams)
         }
-        l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
-        core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
-        core_with_l2.foreach(_.module.io.l3Miss := l3.module.io.l3Miss)
-      case None =>
-    }
 
-    (chi_openllc_opt, l3cacheOpt) match {
-      case (None, None) =>
+        zj.io.ci := 0.U
+        zj.io.dft := DontCare
+        zj.io.ramctl := DontCare
+        val (zjMemAxi, _) = zhujiangMemMaster.get.out.head
+        connectZJToAXI4(zj.ddrIO.head, zjMemAxi)
+        zj.ddrIO.drop(1).foreach { axi => axi := DontCare }
+        zj.cfgIO.zip(zhujiangCfgMasters).foreach { case (cfg, master) =>
+          val (cfgAxi, _) = master.out.head
+          connectZJToAXI4(cfg, cfgAxi)
+        }
+        zj.dmaIO.foreach { axi => axi := DontCare }
+        zj.hwaIO.foreach { axi => axi := DontCare }
+
         core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
         core_with_l2.foreach(_.module.io.l3Miss := false.B)
-      case _ =>
+      }
+    }
+
+    // tie off core soft reset
+    for(node <- core_rst_nodes){
+      node.out.head._1 := false.B.asAsyncReset
+    }
+
+    if (isOpenLLC) chi_openllc_opt match {
+      case Some(l3) =>
+        l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        core_with_l2.zip(l3.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
+          tile.module.io.debugTopDown.l3MissMatch := l3Match
+        }
+        core_with_l2.foreach(_.module.io.l3Miss := l3.io.l3Miss)
+      case None =>
+        core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+        core_with_l2.foreach(_.module.io.l3Miss := false.B)
     }
 
     core_with_l2.zipWithIndex.foreach { case (tile, i) =>
       tile.module.io.nodeID.foreach { case nodeID =>
-        nodeID := i.U
+        if (useExternalLLC) {
+          nodeID := chi_extllc_opt.get.module.io.rnNodeId(i)
+        } else {
+          nodeID := i.U
+        }
         dontTouch(nodeID)
       }
     }
@@ -454,12 +619,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     withClockAndReset(io.clock, reset_sync) {
       // Modules are reset one by one
-      // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
-      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module))
+      // reset ----> SYNC --> {SoCMisc, Cores}
+      val resetChain = Seq(Seq(misc.module))
       ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
-      // Ensure that cores could be reset when DM disable `hartReset` or l3cacheOpt.isEmpty.
+      // Ensure that cores could be reset when DM disable `hartReset`.
       val dmResetReqVec = misc.module.debug_module_io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(Vec(core_with_l2.map(_.module).length, Bool())))
-      val syncResetCores = if(l3cacheOpt.nonEmpty) l3cacheOpt.map(_.module).get.reset.asBool else misc.module.reset.asBool
+      val syncResetCores = misc.module.reset.asBool
       (core_with_l2.map(_.module)).zip(dmResetReqVec).map { case(core, dmResetReq) =>
         ResetGen(Seq(Seq(core)), (syncResetCores || dmResetReq).asAsyncReset, !debugOpts.ResetGen)
       }
@@ -475,9 +640,10 @@ class XSTileDiffTop(implicit p: Parameters) extends XSTop {
   override lazy val desiredName: String = "XSTop"
 
   class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) with HasDiffTestInterfaces {
-    override def cpuName: Option[String] = Some("XiangShan")
+    override def cpuName: Option[String] = Some("XIANGSHAN_KMHV3")
     override protected def implicitClock: Clock = io.clock
     override protected def implicitReset: Reset = io.reset
+    override def difftestMemIO: Option[DifftestMemIO] = Some(DifftestMemIO(memory))
   }
   override lazy val module = new XSTileDiffTopImp(this)
 }
@@ -516,7 +682,7 @@ object TopMain extends App {
 
     // generate difftest bundles (w/o DifftestTopIO)
     if (enableDifftest) {
-      DifftestModule.collect("XiangShan")
+      DifftestModule.collect("XIANGSHAN_KMHV3")
     }
   }
 

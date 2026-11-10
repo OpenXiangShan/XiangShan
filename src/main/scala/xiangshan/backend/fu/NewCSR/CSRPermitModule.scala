@@ -52,6 +52,8 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   indirectCSRPermitMod.io.in.csrAccess := io.in.csrAccess
   indirectCSRPermitMod.io.in.privState := io.in.privState
   indirectCSRPermitMod.io.in.aia       := io.in.aia
+  indirectCSRPermitMod.io.in.xcounteren := io.in.xcounteren
+  indirectCSRPermitMod.io.in.xenvcfg   := io.in.xenvcfg
   indirectCSRPermitMod.io.in.xstateen  := io.in.xstateen
 
   private val (ren, wen) = (
@@ -195,6 +197,7 @@ class MLevelPermitModule extends Module {
   private val menvcfg = io.in.xenvcfg.menvcfg
 
   private val menvcfgSTCE = menvcfg(63)
+  private val menvcfgCDE = menvcfg(60)
 
   private val (sFSIsOff, sVSIsOff, sOrVsFSIsOff, sOrVsVSIsOff) = (
     io.in.status.mstatusFSOff,
@@ -222,13 +225,16 @@ class MLevelPermitModule extends Module {
 
   private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
 
-  private val rwStimecmp_EX_II = !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_II = !privState.isModeM &&
+                                (!mcounterenTM && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U) ||
+                                 !menvcfgSTCE && (addr === CSRs.stimecmp.U))
 
   private val accessHPM_EX_II = csrIsHPM && !privState.isModeM && !mcounteren(counterAddr)
 
   private val rwSatp_EX_II = privState.isModeHS && tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
 
   private val rwStopei_EX_II = privState.isModeHS && mvienSEIE && (addr === CSRs.stopei.U)
+  private val rwScountinhibit_EX_II = !menvcfgCDE && (addr === CSRs.scountinhibit.U)
 
   /**
    * Sm/Ssstateen begin
@@ -294,7 +300,7 @@ class MLevelPermitModule extends Module {
    */
 
   io.out.mLevelPermit_EX_II := rwIllegal || fpVec_EX_II || rwStimecmp_EX_II ||
-    accessHPM_EX_II || rwSatp_EX_II || rwStopei_EX_II || xstateControlAccess_EX_II
+    accessHPM_EX_II || rwSatp_EX_II || rwStopei_EX_II || rwScountinhibit_EX_II || xstateControlAccess_EX_II
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
 }
@@ -366,7 +372,7 @@ class PrivilegePermitModule extends Module {
     BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
-  private val regularPrivilegeLegal = utility.decoder(
+  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
     privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
     accessTable
   ).asBool
@@ -417,6 +423,7 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
   private val henvcfg = io.in.xenvcfg.henvcfg
 
   private val henvcfgSTCE = henvcfg(63)
+  private val menvcfgCDE = io.in.xenvcfg.menvcfg(60)
 
   private val (hstateen0, hstateen1, hstateen2, hstateen3, sstateen0) = (
     io.in.xstateen.hstateen0,
@@ -440,6 +447,8 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
 
   private val rwStimecmp_EX_VI = privState.isModeVS && (addr === CSRs.stimecmp.U) &&
     (!hcounterenTM || !henvcfgSTCE || wen && hvictlVTI)
+  private val readScountovf_EX_VI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountovf.U)
+  private val rwScountinhibit_EX_VI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountinhibit.U)
 
   private val accessHPM_EX_VI = csrIsHPM && (
       privState.isModeVS && !hcounteren(counterAddr) ||
@@ -493,80 +502,8 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
   io.out.virtualLevelPermit_EX_II := rwVStopei_EX_II
-  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwStopei_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
-}
-
-class IndirectCSRPermitModule extends Module {
-  val io = IO(new Bundle() {
-    val in = Input(new Bundle {
-      val csrAccess = new csrAccessIO
-      val privState = new PrivState
-      val aia = new aiaIO
-      val xstateen = new xstateenIO
-    })
-    val out = Output(new Bundle {
-      val indirectCSR_EX_II = Bool()
-      val indirectCSR_EX_VI = Bool()
-    })
-  })
-
-  private val (addr, privState) = (
-    io.in.csrAccess.addr,
-    io.in.privState,
-  )
-
-  private val (miselect, siselect, vsiselect) = (
-    io.in.aia.miselect,
-    io.in.aia.siselect,
-    io.in.aia.vsiselect,
-  )
-
-  private val (mstateen0, hstateen0) = (
-    io.in.xstateen.mstateen0,
-    io.in.xstateen.hstateen0,
-  )
-
-  private val mvienSEIE = io.in.aia.mvienSEIE
-
-  private val rwMireg_EX_II = (
-      Iselect.isInAIA(miselect) && Iselect.isOdd(miselect) ||
-      Iselect.isInOthers(miselect)
-    ) && addr === CSRs.mireg.U
-
-  private val rwMireg2_6_EX_II = Ireg.isInMireg2_6(addr)
-
-  private val rwSireg_EX_II = (
-      !privState.isVirtual && (
-        Iselect.isInAIA(siselect) && Iselect.isOdd(siselect) ||
-        Iselect.isInOthers(siselect)
-      ) ||
-      privState.isModeHS && (
-        mvienSEIE && Iselect.isInImsic(siselect) ||
-        !mstateen0.AIA.asBool && Iselect.isInAIA(siselect) ||
-        !mstateen0.IMSIC.asBool && Iselect.isInImsic(siselect)
-      ) ||
-      privState.isVirtual && (
-        Iselect.isInOthers(vsiselect) ||
-        !mstateen0.AIA.asBool && Iselect.isInAIA(vsiselect) ||
-        !mstateen0.IMSIC.asBool && Iselect.isInImsic(vsiselect)
-      )
-    ) && addr === CSRs.sireg.U
-
-  private val rwSireg_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect) && !hstateen0.IMSIC.asBool) && addr === CSRs.sireg.U
-
-  private val rwSireg2_6_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect)) && Ireg.isInSireg2_6(addr)
-
-  private val rwSireg2_6_EX_II = Ireg.isInSireg2_6(addr) && !rwSireg2_6_EX_VI
-
-  private val rwVSireg_EX_II = (
-      !Iselect.isInImsic(vsiselect) ||
-      !privState.isModeM && !mstateen0.IMSIC.asBool
-    ) && addr === CSRs.vsireg.U
-
-  private val rwVSireg2_6_EX_II = Ireg.isInVSireg2_6(addr)
-
-  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwMireg2_6_EX_II || rwSireg_EX_II || rwSireg2_6_EX_II || rwVSireg_EX_II || rwVSireg2_6_EX_II
-  io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
+  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwStopei_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI ||
+    accessHPM_EX_VI || xstateControlAccess_EX_VI || readScountovf_EX_VI || rwScountinhibit_EX_VI
 }
 
 class csrAccessIO extends Bundle {
@@ -612,7 +549,7 @@ class xcounterenIO extends Bundle {
 
 class xenvcfgIO extends Bundle {
   // Machine environment configuration register.
-  // Accessing stimecmp or vstimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
+  // Accessing stimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
   val menvcfg = UInt(64.W)
   // Hypervisor environment configuration register.
   // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0

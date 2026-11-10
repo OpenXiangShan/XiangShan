@@ -4,13 +4,14 @@ import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.TLConfig
+import top.DefaultConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.{VSETOpType, XSCoreParameters, XSCoreParamsKey, XSTileKey}
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class VsetModuleMain extends AnyFlatSpec with Matchers with ChiselSim {
 
-  val defaultConfig = (new TLConfig).alterPartial({
+  val defaultConfig = (new DefaultConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
   })
 
@@ -75,7 +76,13 @@ class VsetModuleMain extends AnyFlatSpec with Matchers with ChiselSim {
         m.io.in.vtype.vma.poke(vma)
         m.io.in.vtype.vsew.poke(vsew)
         m.io.in.vtype.vlmul.poke(vlmul)
+        // TODO: add check for oldVType.vill or ratio change
         m.io.in.oldVl.poke(oldVl)
+        m.io.in.oldVt.illegal.poke(ill)
+        m.io.in.oldVt.vta.poke(vta)
+        m.io.in.oldVt.vma.poke(vma)
+        m.io.in.oldVt.vsew.poke(vsew)
+        m.io.in.oldVt.vlmul.poke(vlmul)
 
         val message = " ill: " + ill.litToBoolean +
                       " vta: " + vta.litToBoolean +

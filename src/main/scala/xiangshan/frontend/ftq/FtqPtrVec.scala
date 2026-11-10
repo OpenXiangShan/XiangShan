@@ -38,6 +38,8 @@ class FtqPtrVec(val num: Int = 1)(implicit p: Parameters) extends FtqBundle {
 
   def >(that: FtqPtr): Bool = ptrs(0) > that
 
+  def >(that: FtqPtrVec): Bool = ptrs(0) > that.ptrs(0)
+
   def >=(that: FtqPtr): Bool = ptrs(0) >= that
 
   def apply(offset: Int): FtqPtr = {

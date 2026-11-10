@@ -21,7 +21,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
 import utility._
-import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.FuType
@@ -29,17 +28,13 @@ import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import yunsuan.MULOpType
 
-abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
-  extends DecodeUnitConstants {
+abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters) {
   require(pair.length == 2)
 
   protected val inst1: XSInstBitFields = instr(0).asTypeOf(new XSInstBitFields)
   protected val inst2: XSInstBitFields = instr(1).asTypeOf(new XSInstBitFields)
 
   protected def instr: Seq[UInt] = pair.map(_.bits)
-  protected def pairValid: Bool = VecInit(pair.map(_.valid)).asUInt.andR
-  protected def instr1Rs1: UInt = inst1.RS1
-  protected def instr1Rs2: UInt = inst1.RS2
   protected def instr1Rd: UInt = inst1.RD
   def instr2Rs1: UInt = inst2.RS1
   def instr2Rs2: UInt = inst2.RS2
@@ -49,38 +44,14 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   protected def destToRs2: Bool = instr1Rd === instr2Rs2
   protected def instr2Rs1ToRs2: Bool = instr2Rs1 === instr2Rs2
 
-  protected def getInstrTable(pat: BitPat): List[BitPat] = {
-    // Only these instructions can be fused now
-    val allDecodeTable = XDecode.table ++ BitmanipDecode.table ++ ScalarCryptoDecode.table
-    allDecodeTable.filter(_._1 == pat).map(_._2).head
-  }
-  // Must sync these indices with MicroOp.decode
-  protected def getInstrFuType(pat: BitPat): BitPat = getInstrTable(pat)(3)
-  protected def getInstrFuOpType(pat: BitPat): BitPat = getInstrTable(pat)(4)
-  protected def getInstrSrc1Type(pat: BitPat): BitPat = getInstrTable(pat)(0)
-  protected def getInstrSrc2Type(pat: BitPat): BitPat = getInstrTable(pat)(1)
-
   def isValid: Bool
   // To optimize the timing, only these control signals can be affected by instruction fusion.
-  def thisInstr: Option[BitPat] = None
-  def fusedInstr: Option[BitPat] = None
   // By default, None means unchanged.
-  private def compareAndGet(func: BitPat => BitPat): Option[Int] = {
-    if (fusedInstr.isDefined) {
-      require(thisInstr.isDefined, "thisInstr must be defined to infer the ctrl signals")
-      val fused = func(fusedInstr.get)
-      // Only when the two instructions have different control field, we make it not None.
-      if (fused != func(thisInstr.get)) Some(fused.value.toInt) else None
-    } else None
-  }
-  // We assume only fuType, fuOpType, lsrc2 may be changed now.
-  def fuType: Option[Int] = compareAndGet(getInstrFuType)
-  def fuOpType: Option[UInt => UInt] = {
-    val t = compareAndGet(getInstrFuOpType)
-    if (t.isDefined) Some((_: UInt) => t.get.U) else None
-  }
-  def src2Type: Option[Int] = compareAndGet(getInstrSrc2Type)
+  def fuType: Option[Int] = None
+  def fuOpType: Option[UInt => UInt] = None
+  def src2Type: Option[Int] = None
   def selImm: Option[UInt] = None
+  def getImm: Option[UInt] = None
   def lsrc2NeedZero: Boolean = false
   def lsrc2NeedMux: Boolean = false
   def lsrc2MuxResult: UInt = Mux(destToRs1, instr2Rs2, instr2Rs1)
@@ -100,8 +71,8 @@ class FusedAdduw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
   def inst2Cond = instr(1) === Instructions.SRLI && inst2.SHAMT6 === 32.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD_UW)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.adduw)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedZero: Boolean = true
 
   def fusionName: String = "slli32_srli32"
@@ -115,8 +86,8 @@ class FusedZexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
   def inst2Cond = instr(1) === Instructions.SRLI && inst2.SHAMT6 === 48.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.PACKW)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.packw)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedZero: Boolean = true
 
   def fusionName: String = "slli48_srli48"
@@ -129,8 +100,6 @@ class FusedZexth1(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends FusedZ
   override def inst1Cond: Bool = instr(0) === Instructions.SLLIW && inst1.SHAMT5 === 16.U
   override def inst2Cond: Bool = instr(1) === Instructions.SRLIW && inst2.SHAMT5 === 16.U
 
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLIW)
-
   override def fusionName: String = "slliw16_srliw16"
 }
 
@@ -142,8 +111,7 @@ class FusedSexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
   def inst2Cond = instr(1) === Instructions.SRAIW && inst2.SHAMT5 === 16.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLIW)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.SEXT_H)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sexth)
   override def lsrc2NeedZero: Boolean = true
 
   def fusionName: String = "slliw16_sraiw16"
@@ -157,8 +125,8 @@ class FusedSh1add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.SH1ADD)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sh1add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "slli1_add"
@@ -172,8 +140,8 @@ class FusedSh2add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.SH2ADD)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sh2add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "slli2_add"
@@ -187,8 +155,8 @@ class FusedSh3add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.SH3ADD)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sh3add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "slli3_add"
@@ -254,9 +222,8 @@ class FusedSh4add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sh4add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "slli4_add"
@@ -270,9 +237,8 @@ class FusedSr29add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sr29add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "srli29_add"
@@ -286,9 +252,8 @@ class FusedSr30add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sr30add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "srli30_add"
@@ -302,9 +267,8 @@ class FusedSr31add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sr31add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "srli31_add"
@@ -318,9 +282,8 @@ class FusedSr32add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.sr32add)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "srli32_add"
@@ -334,9 +297,8 @@ class FusedOddadd(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.oddadd)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "andi1_add"
@@ -350,9 +312,8 @@ class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def inst2Cond = instr(1) === Instructions.ADDW && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.ADD)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.oddaddw)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "andi1_addw"
@@ -361,8 +322,7 @@ class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 // Case: addw and extract its lower 8 bits (fused into addwbyte)
 class FusedAddwbyte(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends BaseFusionCase(pair) {
-  // the first instruction is a ALUOpType.addw
-  // According to DecodeUnit.scala, only ADDIW and ADDW are ALUOpType.addw, which are used for inst1Cond.
+  // ADDIW and ADDW are the two supported producers of an ALUOpType.addw result.
   def inst1Cond = instr(0) === Instructions.ADDIW || instr(0) === Instructions.ADDW
   def inst2Cond = instr(1) === Instructions.ANDI && inst2.IMM12 === 0xff.U
 
@@ -444,9 +404,8 @@ class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
   def inst2Cond = instr(1) === Instructions.OR && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.OR)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.orh48)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "andi_f00_or"
@@ -461,9 +420,9 @@ class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def inst2Cond = instr(1) === Instructions.MULW && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
-  override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
-  override def fusedInstr: Option[BitPat] = Some(Instructions.MULW)
+  override def fuType: Option[Int] = Some(FuType.mul.U.litValue.toInt)
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => MULOpType.mulw7)
+  override def src2Type: Option[Int] = Some(SrcType.reg.litValue.toInt)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "andi127_mulw"
@@ -476,11 +435,15 @@ class FusedLui32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.LUI
   def inst2Cond = instr(1) === Instructions.ADDI
+  def inst1Imm  = instr(0)(31,12)
+  def inst2Imm  = instr(1)(31,20)
+  def imm32 = Cat(inst1Imm, inst2Imm)
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
 
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32add)
   override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
+  override def getImm: Option[UInt] = Some(imm32)
 
   def fusionName: String = "lui_addi"
 
@@ -494,11 +457,15 @@ class FusedLui32w(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.LUI
   def inst2Cond = instr(1) === Instructions.ADDIW
+  def inst1Imm  = instr(0)(31,12)
+  def inst2Imm  = instr(1)(31,20)
+  def imm32 = Cat(inst1Imm, inst2Imm)
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
 
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32addw)
   override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
+  override def getImm: Option[UInt] = Some(imm32)
 
   def fusionName: String = "lui_addiw"
 
@@ -517,6 +484,7 @@ class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
   val lsrc2 = Valid(UInt(LogicRegsWidth.W))
   val src2Type = Valid(SrcType())
   val selImm = Valid(SelImm())
+  val imm = Valid(UInt(32.W))
 
   def update(cs: DecodeOutUop): Unit = {
     when (fuType.valid) {
@@ -533,6 +501,9 @@ class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
     }
     when (selImm.valid) {
       cs.selImm := selImm.bits
+    }
+    when (imm.valid) {  
+      cs.imm := imm.bits
     }
   }
 }
@@ -647,6 +618,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodeOutUop) => x.fuOpType, fusionList.map(_.fuOpType))
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     connectByUInt((x: FusionDecodeReplace) => x.selImm, fusionList.map(_.selImm), false)
+    connectByUInt((x: FusionDecodeReplace) => x.imm, fusionList.map(_.getImm), true)
 
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR

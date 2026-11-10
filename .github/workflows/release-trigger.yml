@@ -1,0 +1,22 @@
+name: Release Jobs Trigger
+
+run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.test_branch }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: Test note, will be displayed in the title
+        required: true
+        type: string
+      test_branch:
+        description: Branch or commit to run performance test on
+        required: false
+        type: string
+        default: kunminghu-v3
+
+jobs:
+  release-jobs:
+    uses: ./.github/workflows/release.yml
+    with:
+      test_branch: ${{ github.event.inputs.test_branch }}

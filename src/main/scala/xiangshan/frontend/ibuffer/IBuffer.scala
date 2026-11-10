@@ -17,6 +17,9 @@ package xiangshan.frontend.ibuffer
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.Instructions.VSETIVLI
+import freechips.rocketchip.rocket.Instructions.VSETVL
+import freechips.rocketchip.rocket.Instructions.VSETVLI
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
@@ -29,31 +32,42 @@ import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
-import xiangshan.frontend.BpuTopDownInfo
+import xiangshan.backend.BackendToIBufBundle
+import xiangshan.backend.decode.VTypeGen
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
-import utility.PriorityEncoder
-import utility.PopCount
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
-    val flush:           Bool                        = Input(Bool())
-    val in:              DecoupledIO[FetchToIBuffer] = Flipped(DecoupledIO(new FetchToIBuffer))
-    val out:             Vec[DecoupledIO[CtrlFlow]]  = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-    val full:            Bool                        = Output(Bool())
-    val decodeCanAccept: Bool                        = Input(Bool())
+    val in:  DecoupledIO[FetchToIBuffer] = Flipped(DecoupledIO(new FetchToIBuffer))
+    val out: Vec[DecoupledIO[CtrlFlow]]  = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+
+    val flush: Bool = Input(Bool())
+
+    val full:  Bool = Output(Bool())
+    val empty: Bool = Output(Bool())
+
+    val fromBackend: BackendToIBufBundle = Input(new BackendToIBufBundle)
 
     // top-down
-    val bpuTopDownInfo:  BpuTopDownInfo = Input(new BpuTopDownInfo)
-    val controlRedirect: Bool           = Input(Bool())
-    val memVioRedirect:  Bool           = Input(Bool())
-    val stallReason:     StallReasonIO  = new StallReasonIO(DecodeWidth)
+    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
 
-  // io alias
-  private val decodeCanAccept = io.decodeCanAccept
+  /**
+   * io alias
+   * When updating vtype from rob, ibuffer should not send new instructions to outputEntries.
+   * Therefore, outputEntries and related counters will not be updated when resumingVType is true.
+   * Otherwise, the instructions passed to outputEntries will get wrong speculated vtype.
+   */
+  private val decodeCanAccept = io.fromBackend.decodeCanAccept
+  private val resumingVType   = io.fromBackend.resumingVType
+
+  // Modules
+  private val vtypeGen = Module(new VTypeGen)
 
   // cross-module parameters check
   require(
@@ -85,7 +99,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Normal read wire
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
-  private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufOutEntry))))
+  private val outputEntries     = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufOutEntry))))
+  private val outputEntriesNext = Wire(outputEntries.cloneType)
+
   private val outputEntriesValidNum =
     PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse, 0.U)
 
@@ -102,18 +118,40 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val deqPtr        = deqPtrVec(0)
 
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
-  private val enqPtr    = enqPtrVec(0)
+  private val enqPtrDup = RegInit(VecInit.fill(EnqPtrDupNum)(0.U.asTypeOf(new IBufPtr)))
+  private val enqPtr    = enqPtrDup(0)
+  // Use the IFU-IBuffer interaction to pre-determine the queue position for each instruction output by IFU.
+  private val ifuAlignedEnqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
+
+  // No bubble for ibuffer.out, so head.valid is enough
+  io.empty := enqPtr === deqPtr && !io.out.head.valid
+  XSError(
+    !io.out.head.valid && io.out.tail.map(_.valid).reduce(_ || _),
+    "Bubble in ibuffer.out"
+  )
 
   XSError(
     io.in.valid && io.in.bits.prevIBufEnqPtr =/= enqPtr,
     "The enqueueing behavior of the IBuffer does not match expectations."
   )
 
+  /**
+   * For better timing, only spread vtype from [[ibuf]] to [[outputEntries]]
+   * Check if there is any VSET{I}VL{I} in enq insts.
+   * Disable bypass if true.
+   */
+  private val enqHasVSet: Bool =
+    io.in.valid &&
+      (io.in.bits.valid.asBools lazyZip io.in.bits.enqEnable.asBools lazyZip io.in.bits.instrs).map {
+        case (valid, enqEnable, inst) =>
+          valid && enqEnable && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === inst).reduce(_ || _)
+      }.reduce(_ || _)
+
   private val numTryEnq = WireDefault(0.U)
   private val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
 
   // empty and decode can accept insts
-  private val useBypass = enqPtr === deqPtr && decodeCanAccept
+  private val useBypass = enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
@@ -136,9 +174,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
    */
   allowEnq := io.in.bits.prevInstrCount < nextNumInvalid
 
-  private val enqOffset = VecInit.tabulate(EnqueueWidth) { i =>
-    if (i == 0) 0.U else PopCount(io.in.bits.valid(i - 1, 0))
-  }
+  private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
   private val enqBankOffset =
     WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
@@ -159,24 +195,30 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val deqExceptionOffset = Wire(UInt(log2Ceil(DecodeWidth).W))
 
   // Current Exception Wire
-  private val currentException       = Wire(new IBufExceptionEntry).fromFetch(io.in.bits)
-  private val currentExceptionOffset = enqOffset(io.in.bits.exceptionOffset)
+  private val currentException  = Wire(new IBufExceptionEntry).fromFetch(io.in.bits)
+  private val enqExceptionIndex = PriorityEncoder(io.in.bits.exceptionMask)
 
   private val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
   private val numBypass              = Wire(UInt(DecodeWidth.U.getWidth.W))
   // when using bypass, bypassed entries do not enqueue
+  // Timing optimization: only count enqEnable up to MaxBypassNum.
+  // - Higher-index enqEnable bits arrive later (longer datapath).
+  // - Reducing PopCount width improves timing
+  private val maybeBypassNum = Mux(io.in.valid, PopCount(io.in.bits.enqEnable.take(MaxBypassNum)), 0.U)
   when(useBypass) {
-    when(numFromFetch >= DecodeWidth.U) {
+    when(maybeBypassNum >= DecodeWidth.U) {
       numBypass := DecodeWidth.U
     }.otherwise {
-      numBypass := numFromFetch
+      numBypass := maybeBypassNum
     }
   }.otherwise {
     numBypass := 0.U
   }
   numTryEnq := numFromFetch
 
-  when(decodeCanAccept) {
+  when(resumingVType) {
+    numOut := 0.U
+  }.elsewhen(decodeCanAccept) {
     numOut := Mux(useBypass, numBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
   }.elsewhen(outputEntriesIsNotFull) {
     numOut := Mux(numValid >= DecodeWidth.U - outputEntriesValidNum, DecodeWidth.U - outputEntriesValidNum, numValid)
@@ -187,18 +229,44 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Bypass
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // timing optimization：
+  // Bypass selection relies on the IFU-to-IBuffer pre-alignment contract:
+  // valid instructions from IFU are packed contiguously after the leading
+  // bank-alignment bubbles. The low bits of enqPtr identify the write-bank
+  // offset of the first valid instruction.
+  //
+  // Example with NumWriteBank = 4 and bankOffset = 3:
+  // lane index:  0 1 2 3 4 5 6 7 8 ...
+  // valid mark:  0 0 0 1 1 1 1 1 0 ...
+  //
+  // In general, bypass entry idx selects lane idx + bankOffset from the
+  // sliding window [idx, idx + NumWriteBank - 1]. This avoids computing
+  // enqOffset with a prefix PopCount on the bypass path.
+  private val bypassExceptionMask = Wire(Vec(DecodeWidth, Bool()))
   bypassEntries.zipWithIndex.foreach { case (entry, idx) =>
-    // Select
-    val validOH = (0 until MaxBypassNum).map { i =>
-      io.in.bits.valid(i) &&
-      io.in.bits.enqEnable(i) &&
-      enqOffset(i) === idx.asUInt
-    } // Should be OneHot
-    entry.valid := validOH.reduce(_ || _) && io.in.fire && !io.flush
-    entry.bits  := Mux1H(validOH, enqData.take(MaxBypassNum))
+    val bankOffset = enqPtrDup(2).value(log2Ceil(NumWriteBank) - 1, 0)
+    val bankOH     = UIntToOH(bankOffset, NumWriteBank)
 
-    // Debug Assertion
-    XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+    val selectedValid = Mux1H(
+      bankOH,
+      VecInit.tabulate(NumWriteBank)(i =>
+        io.in.bits.valid(i + idx) && io.in.bits.enqEnable(i + idx)
+      )
+    )
+
+    entry.valid := selectedValid && io.in.fire && !io.flush
+    entry.bits := Mux1H(
+      bankOH,
+      VecInit.tabulate(NumWriteBank)(i =>
+        enqData(i + idx)
+      )
+    )
+    bypassExceptionMask(idx) := Mux1H(
+      bankOH,
+      VecInit.tabulate(NumWriteBank)(i =>
+        io.in.bits.exceptionMask(i + idx) && io.in.bits.valid(i + idx) && io.in.bits.enqEnable(i + idx)
+      )
+    )
   }
 
   // => Decode Output
@@ -207,51 +275,114 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     io.valid := reg.valid
     io.bits  := reg.bits.toCtrlFlow
   }
-  (outputEntries zip bypassEntries).zipWithIndex.foreach { case ((out, bypass), i) =>
-    when(decodeCanAccept) {
-      when(useBypass && io.in.valid) {
-        out.valid := bypass.valid
-        out.bits := Mux(
-          i.U === currentExceptionOffset,
+
+  // Non-bypass path: deqEntries → outputEntriesFromDeqNext
+  // VTypeGen is fed from this path to keep bypass out of the vtype timing path.
+  private val outputEntriesFromDeqNext = Wire(outputEntriesNext.cloneType)
+  (outputEntriesFromDeqNext lazyZip outputEntries lazyZip deqEntries).zipWithIndex.foreach {
+    case ((outFromDeq, outReg, deq), i) =>
+      when(decodeCanAccept && !resumingVType) {
+        outFromDeq.valid := deq.valid
+        outFromDeq.bits := Mux(
+          deqHasException && i.U === deqExceptionOffset,
+          deq.bits.toIBufOutEntry(firstException.bits),
+          deq.bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
+        )
+      }.elsewhen(outputEntriesIsNotFull && !resumingVType) {
+        // valid mirrors bits: old entries keep outReg.valid; new entries are
+        // valid iff they lie within the numDeq dequeued this cycle.
+        // useBypass is always 0 in this branch (!decodeCanAccept), so no need to gate it.
+        outFromDeq.valid := Mux(
+          i.U < outputEntriesValidNum,
+          outReg.valid,
+          (i.U - outputEntriesValidNum) < numDeq
+        )
+        outFromDeq.bits := Mux(
+          i.U < outputEntriesValidNum,
+          outReg.bits,
+          Mux(
+            deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
+            VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
+              firstException.bits
+            ),
+            VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
+              0.U.asTypeOf(firstException.bits)
+            )
+          )
+        )
+      }.otherwise {
+        outFromDeq := outReg
+      }
+  }
+
+  // Final outputEntriesNext: bypass overrides the deq-based output
+  (outputEntriesNext lazyZip outputEntriesFromDeqNext lazyZip bypassEntries).zipWithIndex.foreach {
+    case ((outNext, outFromDeq, bypass), i) =>
+      when(decodeCanAccept && !resumingVType && useBypass && io.in.valid) {
+        outNext.valid := bypass.valid
+        outNext.bits := Mux(
+          bypassExceptionMask(i),
           bypass.bits.toIBufOutEntry(currentException),
           bypass.bits.toIBufOutEntry(0.U.asTypeOf(currentException))
         )
       }.otherwise {
-        out.valid := deqEntries(i).valid
-        out.bits := Mux(
-          deqHasException && i.U === deqExceptionOffset,
-          deqEntries(i).bits.toIBufOutEntry(firstException.bits),
-          deqEntries(i).bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
-        )
+        outNext := outFromDeq
       }
+  }
+
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // VTypeGen's connection
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  vtypeGen.in.canUpdateVType  := !resumingVType && (decodeCanAccept || outputEntriesIsNotFull)
+  vtypeGen.in.walkToArchVType := io.fromBackend.walkToArchVType
+  vtypeGen.in.walkVType       := io.fromBackend.walkVType
+  vtypeGen.in.vsetvlVType     := io.fromBackend.vsetvlVType
+  vtypeGen.in.commitVType     := io.fromBackend.commitVType
+  for (i <- 0 until DecodeWidth) {
+    when(resumingVType) {
+      vtypeGen.in.insts(i).valid := false.B
+    }.elsewhen(decodeCanAccept) {
+      vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
     }.elsewhen(outputEntriesIsNotFull) {
-      out.valid := deqEntries(i).valid
-      out.bits := Mux(
-        i.U < outputEntriesValidNum,
-        out.bits,
-        Mux(
-          deqHasException && (i.U - outputEntriesValidNum) === deqExceptionOffset,
-          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
-            firstException.bits
-          ),
-          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum).toIBufOutEntry(
-            0.U.asTypeOf(firstException.bits)
-          )
-        )
-      )
+      // Only lanes carrying a genuinely new deq entry (within numDeq) are fed to VTypeGen.
+      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, (i.U - outputEntriesValidNum) < numDeq)
+    }.otherwise {
+      vtypeGen.in.insts(i).valid := false.B
+    }
+    vtypeGen.in.insts(i).bits := outputEntriesFromDeqNext(i).bits.inst
+  }
+
+  // update vtype field, overwrite the assignment of outputEntriesNext above
+  for (i <- outputEntriesNext.indices) {
+    when(decodeCanAccept && !resumingVType) {
+      // vtype can not be from bypass
+      outputEntriesNext(i).bits.vtype     := vtypeGen.out.vtype(i)
+      outputEntriesNext(i).bits.specvtype := vtypeGen.out.specvtype(i)
+    }.elsewhen(outputEntriesIsNotFull && !resumingVType) {
+      when(i.U < outputEntriesValidNum) {
+        outputEntriesNext(i).bits.vtype     := outputEntries(i).bits.vtype
+        outputEntriesNext(i).bits.specvtype := outputEntries(i).bits.specvtype
+      }.otherwise {
+        outputEntriesNext(i).bits.vtype     := vtypeGen.out.vtype(i)
+        outputEntriesNext(i).bits.specvtype := vtypeGen.out.specvtype(i)
+      }
     }
   }
+
+  outputEntries := outputEntriesNext
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Enqueue
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   io.in.ready := allowEnq
   // Data
+  // Rebase enqueue pointers to the IFU pre-aligned lane coordinate.
   for (bank <- 0 until NumWriteBank) {
     bankedIBufWriteWire(bank).zipWithIndex.foreach { case (entry, idx) =>
       // Select
       val validOH = (0 until EnqueueWidth / NumWriteBank).map { j =>
-        val normalMatch = enqPtrVec(enqBankOffset(bank)(j)).value === (bank + idx * NumWriteBank).asUInt
+        val normalMatch = ifuAlignedEnqPtrVec(bank + NumWriteBank * j).value === (bank + idx * NumWriteBank).asUInt
         io.in.bits.valid(bank + NumWriteBank * j) && io.in.bits.enqEnable(bank + NumWriteBank * j) && normalMatch
       } // Should be OneHot
       val useBypassMatch = (0 until DecodeWidth).map(k => enqPtrVec(k).value === (bank + idx * NumWriteBank).U)
@@ -267,8 +398,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   // Pointer maintenance
+  // IBuffer enqueue pointers advance sequentially. Therefore the low bits used as
+  // the write-bank index cycle as 0, 1, ..., NumWriteBank-1, then wrap.
+  // IFU output lanes are aligned to the same write-bank partitioning, so each IFU
+  // lane's target enqueue pointer can be precomputed from the current enqPtr.
+  //
+  // This assumes the IBuffer size is compatible with NumWriteBank, so the pointer
+  // low-bit bank cycle is preserved across wrap-around.
+  private val baseAlignedPtr = Wire(new IBufPtr)
+  private val alignedMask    = (~(NumWriteBank - 1).U(log2Ceil(Size).W)).asUInt
+  baseAlignedPtr       := (enqPtrDup(1) + numTryEnq)
+  baseAlignedPtr.value := (enqPtrDup(1) + numTryEnq).value & alignedMask
   when(io.in.fire && !io.flush) {
     enqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq))
+    enqPtrDup.map(_ := enqPtrDup(1) + numTryEnq)
+    ifuAlignedEnqPtrVec := VecInit((0 until EnqueueWidth).map(i => baseAlignedPtr + i.U))
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -276,8 +420,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   private val outputEntriesValidNumNext = Wire(UInt(DecodeWidth.U.getWidth.W))
   XSError(outputEntriesValidNumNext > DecodeWidth.U, "Ibuffer: outputEntriesValidNumNext > DecodeWidth.U")
-  private val validVec = UIntToMask(outputEntriesValidNumNext(DecodeWidth.U.getWidth - 1, 0), DecodeWidth)
-  when(decodeCanAccept) {
+  when(resumingVType) {
+    outputEntriesValidNumNext := outputEntriesValidNum
+  }.elsewhen(decodeCanAccept) {
     outputEntriesValidNumNext := Mux(useBypass, numBypass, numDeq)
   }.elsewhen(outputEntriesIsNotFull) {
     outputEntriesValidNumNext := outputEntriesValidNum + numDeq
@@ -291,15 +436,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val readStage1: Vec[IBufEntry] =
     VecInit.tabulate(NumReadBank)(bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID)))
   for (i <- 0 until DecodeWidth) {
-    deqEntries(i).valid := validVec(i)
+    // Genuine dequeue validity: only the numDeq lanes actually consumed this cycle are valid.
+    // Under bypass no real data is read from ibuf, so the deq read window is invalid.
+    deqEntries(i).valid := (i.U < numDeq) && !useBypass
     deqEntries(i).bits  := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
   deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
   deqPtrVecNext     := VecInit(deqPtrVec.map(_ + numDeq))
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach { case ((ptrNext, ptr), idx) =>
-    // validVec[k] == bankValid[deqBankPtr + k]
-    // So bankValid[n] == validVec[n - deqBankPtr]
+    // bank n holds the (n - deqBankPtr mod NumReadBank)-th dequeued entry;
+    // it advances iff that entry is within the numDeq consumed this cycle
     val validIdx = Mux(
       idx.asUInt >= deqBankPtr.value,
       idx.asUInt - deqBankPtr.value,
@@ -316,18 +463,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Register the first encountered exceptions into the IBuffer.
   private val receiveExceptionFire = io.in.fire && !io.flush && !firstException.valid
   private val nextFirstHasException =
-    currentException.exceptionType.hasException && (!useBypass || useBypass && currentExceptionOffset >= DecodeWidth.U)
+    currentException.exceptionType.hasException &&
+      (io.in.bits.exceptionMask & io.in.bits.enqEnable).orR &&
+      (!useBypass || useBypass && !bypassExceptionMask.reduce(_ || _))
 
-  // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
-  // We require numEnq to be non-zero to avoid the case when io.in.fire and numEnq is zero,
-  // i.e. current last instruction is half RVI
-  when(receiveExceptionFire && nextFirstHasException && numEnq =/= 0.U) {
+  when(receiveExceptionFire && nextFirstHasException) {
     firstException.valid := true.B
   }
 
   when(!firstException.valid) {
     firstException.bits := currentException
-    firstExceptionIdx   := enqPtrVec(currentExceptionOffset)
+    firstExceptionIdx   := ifuAlignedEnqPtrVec(enqExceptionIndex)
   }
 
   // Dequeue the first encountered exceptions to outputEntries.
@@ -342,7 +488,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // When exceptions are dequeued, clear firstException.valid.
   // Dequeue has higher priority, because once an exception has been processed,
   // later exceptions are no longer relevant.
-  when(deqHasException && (decodeCanAccept || outputEntriesIsNotFull)) {
+  when(deqHasException && !resumingVType && (decodeCanAccept || outputEntriesIsNotFull)) {
     firstException.valid := false.B
   }
 
@@ -354,11 +500,13 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Flush
   when(io.flush) {
-    allowEnq      := true.B
-    enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
-    deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
-    deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
-    deqPtrVec     := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    allowEnq  := true.B
+    enqPtrVec := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    enqPtrDup.map(_ := 0.U.asTypeOf(new IBufPtr))
+    ifuAlignedEnqPtrVec := ifuAlignedEnqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    deqBankPtrVec       := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
+    deqInBankPtr        := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
+    deqPtrVec           := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     outputEntries.foreach(_.valid := false.B)
     firstException.valid := false.B
   }.otherwise {
@@ -371,32 +519,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  topdownStage := io.in.bits.topdownInfo
-  when(io.flush) {
-    when(io.controlRedirect) {
-      when(io.bpuTopDownInfo.btbMissBubble) {
-        topdownStage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.tageMissBubble) {
-        topdownStage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.scMissBubble) {
-        topdownStage.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.ittageMissBubble) {
-        topdownStage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.rasMissBubble) {
-        topdownStage.reasons(TopDownCounters.RASMissBubble.id) := true.B
-      }
-    }.elsewhen(io.memVioRedirect) {
-      topdownStage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    }.otherwise {
-      topdownStage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-    }
+  private def numStages     = 2
+  private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
+
+  topdownStages(0) := io.in.bits.topdownInfo
+  for (i <- 1 until numStages) {
+    topdownStages(i) := topdownStages(i - 1)
   }
 
-  private val matchBubble   = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
-  private val deqValidCount = PopCount(validVec)
+  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
+
+  private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdownStage.reasons.reverse)
+  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
+    topdownStages.last.reasons.reverse
+  )
 
   io.stallReason.reason.foreach(_ := 0.U)
   for (i <- 0 until DecodeWidth) {
@@ -405,7 +542,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }
   }
 
-  when(!(deqWasteCount === DecodeWidth.U || topdownStage.reasons.asUInt.orR)) {
+  when(!(deqWasteCount === DecodeWidth.U || topdownStages.last.reasons.asUInt.orR)) {
     // should set reason for FetchFragmentationStall
     // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
     for (i <- 0 until DecodeWidth) {
@@ -413,11 +550,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
       }
     }
-  }
-
-  when(io.stallReason.backReason.valid) {
-    // Backend always overrides frontend reasons
-    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
   }
 
   // Debug info
@@ -469,9 +601,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", perf_ibufferIDWidthHvButNotFull)
 
-  private val perf_fetchBubble = Mux(decodeCanAccept && !perf_headBubble, DecodeWidth.U - numOut, 0.U)
+  private val perf_fetchBubble = Mux(decodeCanAccept && !resumingVType && !perf_headBubble, DecodeWidth.U - numOut, 0.U)
 
-  private val perf_fetchLatency = decodeCanAccept && !perf_headBubble && numOut === 0.U
+  private val perf_fetchLatency = decodeCanAccept && !resumingVType && !perf_headBubble && numOut === 0.U
 
   XSPerfAccumulate("if_fetch_bubble", perf_fetchBubble)
   XSPerfAccumulate("if_fetch_bubble_eq_max", perf_fetchLatency)

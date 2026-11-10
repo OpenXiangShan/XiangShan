@@ -19,6 +19,7 @@ package xiangshan
 import chisel3.util.log2Ceil
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.tile.XLen
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import system.{CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.fu.{MMPMAConfig, MMPMAMethod}
 
@@ -57,4 +58,7 @@ trait HasPMParameters {
 
   def PlatformGrain = pmParams.PlatformGrain
   def mmpma = pmParams.mmpma
+
+  def debugStart = p(DebugModuleKey).get.baseAddress
+  def debugEnd = debugStart + 0xFFF
 }

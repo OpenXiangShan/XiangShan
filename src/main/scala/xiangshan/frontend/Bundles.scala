@@ -19,8 +19,11 @@ import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
+import ftq.FtqToMainPipeBundle
+import ftq.FtqToPrefetchBundle
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
+import utility.XSError
 import utils.EnumUInt
 import xiangshan.Redirect
 import xiangshan.TopDownCounters
@@ -36,23 +39,21 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
-import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.ibuffer.IBufPtr
+import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
-import xiangshan.frontend.icache.ICacheRespBundle
 import xiangshan.frontend.icache.ICacheTopdownInfo
+import xiangshan.frontend.icache.MainPipeToIfuReq
+import xiangshan.frontend.icache.WayLookupBundle
+import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
-
-class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
-  val reasons:    Vec[Bool] = Vec(TopDownCounters.NumStallReasons.id, Bool())
-  val stallWidth: UInt      = UInt(FetchBlockInstOffsetWidth.W)
-}
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
   val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
+  val s2FtqPtr:   FtqPtr                     = Output(new FtqPtr)
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
@@ -72,10 +73,10 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
   // fast path: Timing critical
-  val valid:              Bool       = Bool()
-  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
+  val valid:         Bool      = Bool()
+  val startVAddr:    GuardedPc = GuardedPc()
+  val nextLineVAddr: GuardedPc = GuardedPc()
+  val target:        GuardedPc = GuardedPc()
   // slow path
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
@@ -83,49 +84,38 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
   def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset.bits)
 
   override def toPrintable: Printable =
-    p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
-      p"[tgt] ${Hexadecimal(nextStartVAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${takenCfiOffset.valid}" +
+    p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextLineVAddr.toUInt)}" +
+      p"[tgt] ${Hexadecimal(target.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${takenCfiOffset.valid}" +
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr        = new FtqPtr
-  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
-  val backendException:   ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
-}
-
-class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr     = new FtqPtr
-  val takenCfiOffset:     UInt       = UInt(CfiPositionWidth.W)
-  val isBackendException: Bool       = Bool()
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
+class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val valid:               Bool           = Bool()
+  val vAddr:               Vec[GuardedPc] = Vec(PortNumber, GuardedPc())
+  def startVAddr:          GuardedPc      = vAddr(0)
+  def nextLineVAddr:       GuardedPc      = vAddr(1)
+  val taken:               Bool           = Bool()
+  val endPosition:         UInt           = UInt(CfiPositionWidth.W)
+  val bankSel:             Vec[UInt]      = Vec(PortNumber, UInt(DataBanks.W))
+  val ftqIdx:              FtqPtr         = new FtqPtr
+  val vSetIdx:             Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val hasBackendException: Bool           = Bool()
+  val hasSatpFlush:        Bool           = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
-  // NOTE: req.bits must be prepared in T cycle
-  // while req.valid is set true in T + 1 cycle
-  val fetchReq:      DecoupledIO[FtqFetchRequest]    = Decoupled(new FtqFetchRequest)
-  val prefetchReq:   DecoupledIO[FtqPrefetchRequest] = Decoupled(new FtqPrefetchRequest)
-  val flushFromBpu:  BpuFlushInfo                    = new BpuFlushInfo
-  val redirectFlush: Bool                            = Output(Bool())
+  val toPrefetch:    DecoupledIO[FtqToPrefetchBundle] = Decoupled(new FtqToPrefetchBundle)
+  val toMainPipe:    DecoupledIO[FtqToMainPipeBundle] = Decoupled(new FtqToMainPipeBundle)
+  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
+  val redirectFlush: Bool                             = Output(Bool())
 }
 
-class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  val fetchResp:  Valid[ICacheRespBundle] = Valid(new ICacheRespBundle)
-  val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
-  val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
-  val fetchReady: Bool                    = Output(Bool())
-}
-
-class IfuToICacheIO(implicit p: Parameters) extends FrontendBundle {
-  val stall: Bool = Output(Bool())
+class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val req:        DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
+  val corrupt:    Vec[Vec[Bool]]                = Vec(FetchPorts, Vec(PortNumber, Bool()))
+  val topdown:    ICacheTopdownInfo             = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo                = Output(new ICachePerfInfo)
+  val fetchReady: Bool                          = Output(Bool())
 }
 
 class IfuToInstrUncacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -137,36 +127,26 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  class FtqToIfuReq extends Bundle {
-    val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
-    val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
-  }
-  val req:             DecoupledIO[FtqToIfuReq] = Decoupled(new FtqToIfuReq)
-  val redirect:        Valid[Redirect]          = Valid(new Redirect)
-  val topdownRedirect: Valid[Redirect]          = Valid(new Redirect) // TODO: what's this for?
-  val flushFromBpu:    BpuFlushInfo             = new BpuFlushInfo
+  val redirect:     Valid[Redirect]       = Valid(new Redirect)
+  val flushFromBpu: BpuFlushInfo          = new BpuFlushInfo
+  val topdownInfo:  FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
-  val pc:     UInt   = UInt(VAddrBits.W)
-  val taken:  Bool   = Bool()
+  //
+  val canTrain: Bool = Bool()
+  val pc:       UInt = UInt(GuardedVAddrBits.W)
+  val taken:    Bool = Bool()
   // The early end position may not always be a branch instruction.
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
   val attribute: BranchAttribute = new BranchAttribute
-  val target:    UInt            = UInt(VAddrBits.W)
+  val target:    UInt            = UInt(GuardedVAddrBits.W)
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val mmioCommitRead: MmioCommitRead          = new MmioCommitRead
-  val wbRedirect:     Valid[FrontendRedirect] = Valid(new FrontendRedirect)
-}
-
-class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {
-  val valid:          Bool   = Output(Bool())
-  val mmioFtqPtr:     FtqPtr = Output(new FtqPtr)
-  val mmioLastCommit: Bool   = Input(Bool())
+  val wbRedirect: Valid[FrontendRedirect] = Valid(new FrontendRedirect)
 }
 
 class ExceptionType extends Bundle {
@@ -319,9 +299,8 @@ class FtqPcOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
-  val predTaken:  Bool = Bool()
-  val fixedTaken: Bool = Bool()
-  val offset:     UInt = UInt(FetchBlockInstOffsetWidth.W)
+  val predTaken: Bool = Bool()
+  val offset:    UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
@@ -334,13 +313,14 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
 
   val exceptionType:      ExceptionType = new ExceptionType
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val exceptionCrossPage: Bool          = Bool()
-  val exceptionOffset:    UInt          = UInt(log2Ceil(IBufferEnqueueWidth).W)
+  val exceptionMask:      UInt          = UInt(IBufferEnqueueWidth.W)
 
   val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
   val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
-  val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+  val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
@@ -348,14 +328,15 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
+class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {
+  val wen:   Bool        = Bool()
+  val waddr: UInt        = UInt(log2Ceil(FtqSize).W)
+  val wdata: GPAMemEntry = new GPAMemEntry
+}
+
 class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
   // write to backend gpaddr mem
-  class ToGpAddrMem extends Bundle {
-    val wen:   Bool        = Bool()
-    val waddr: UInt        = UInt(log2Ceil(FtqSize).W)
-    val wdata: GPAMemEntry = new GPAMemEntry
-  }
-  val gpAddrMem: ToGpAddrMem = new ToGpAddrMem
+  val gpAddrMem: IfuToGpAddrMem = new IfuToGpAddrMem
 }
 
 object BlameBpuSource {
@@ -367,72 +348,97 @@ object BlameBpuSource {
     def SC:     UInt = 4.U(width.W)
   }
 
-  def apply(perf: BpuPerfMeta, branch: BranchInfo): UInt = {
+  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo)(implicit p: Parameters): UInt = {
     import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
-    val src         = perf.bpSource
-    val pred        = perf.bpPred
-    val attr        = branch.attribute
-    val isHitInMbtb = perf.mbtbMeta.entries.flatten.map(_.hit(branch)).reduce(_ || _)
+    val src              = perf.bpSource
+    val pred             = perf.bpPred
+    val attr             = branch.attribute
+    val isMatchMask      = perf.mbtbMeta.entries.flatten.map(e => e.hit(branch) && e.attribute === branch.attribute)
+    val isMatchInMbtb    = isMatchMask.reduce(_ || _)
+    val matchBranchOH    = PriorityEncoderOH(isMatchMask)
+    val matchBranchUseSc = Mux1H(matchBranchOH, perf.scUsed.asBools)
 
-    // Check mispredict type
-    val onlyDirectionWrong = branch.taken =/= pred.taken && branch.cfiPosition === pred.cfiPosition
-    val blame              = WireInit(BTB) // Default to BTB
+    val blame    = WireInit(BTB) // Default to BTB
+    val posError = WireInit(false.B)
+    val retError = WireInit(false.B)
 
-    when(!isHitInMbtb) {
+    when(!isMatchInMbtb) {
       blame := BTB
-    }.elsewhen(src.s3Ras) {
+    }.elsewhen(src.s3Sc || src.s3Tage) {
       when(attr.isConditional) {
-        // If cond before, TAGE mispredicts
-        // If cond after, should trigger assertion, TODO
-        blame := TAGE
-      }.elsewhen(attr.isReturn && pred.cfiPosition === branch.cfiPosition) {
-        blame := RAS
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := Mux(matchBranchUseSc, SC, TAGE)
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          blame := Mux(branch.taken =/= pred.taken, Mux(src.s3Sc, SC, TAGE), BTB)
+        }.otherwise {
+          blame := Mux(src.s3Sc, SC, TAGE)
+        }
       }.otherwise {
-        // Other branch type mismatch
-        blame := BTB
+        when(branch.cfiPosition <= pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          blame := Mux(src.s3Sc, SC, TAGE)
+        }
       }
-    }.elsewhen(src.s3ITTage) {
-      when(attr.isIndirect) {
-        blame := ITTAGE
-      }.elsewhen(attr.isConditional) {
-        blame := TAGE
-        // If cond after, should trigger assertion, TODO
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3MbtbSc) {
+    }.elsewhen(src.s3Ras || src.s3ITTage || src.s3Mbtb) {
       when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, SC, BTB)
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3MbtbTage || src.s3FallthroughTage) {
-      when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, TAGE, BTB)
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3Mbtb) {
-      when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, TAGE, BTB)
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := Mux(matchBranchUseSc, SC, TAGE)
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          // resolved branch's position > predicted branch(jump)'s position,
+          // which means execution flow error, should trigger assertion.
+          posError := true.B
+        }
+      }.elsewhen(attr.isReturn) {
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := BTB
+        }
+        when(branch.cfiPosition === pred.cfiPosition) {
+          // if branch type is return, prediction use ras directly
+          // so blame to ras only when source is ras
+          // and trigger assertion when source is mbtb
+          blame    := Mux(src.s3Ras, RAS, BTB)
+          retError := src.s3Mbtb
+        }.otherwise {
+          posError := true.B
+        }
       }.elsewhen(attr.isIndirect) {
-        blame := ITTAGE
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := BTB
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          // if branch type is indirect, prediction use ittage when hit, otherwise use mbtb as base table
+          // so blame to ittage when src is ittage(target wrong) or src is mbtb(ittage not hit)
+          blame := Mux(src.s3ITTage || src.s3Mbtb, ITTAGE, BTB)
+        }.otherwise {
+          posError := true.B
+        }
+      }.otherwise { // isDirect
+        when(branch.cfiPosition <= pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          posError := true.B
+        }
+      }
+    }.otherwise { // s3Fallthrough
+      when(attr.isConditional) {
+        blame := Mux(matchBranchUseSc, SC, TAGE)
       }.otherwise {
         blame := BTB
       }
-    }.elsewhen(src.s3Fallthrough) {
-      blame := BTB
     }
+    XSError(en && posError, "resolved branch's position cannot be greater than predicted jump's position")
+    XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
     blame
   }
 }
 
-class BpuPerfInfo(implicit p: Parameters) extends FrontendBundle {
-  val bpRight: UInt = UInt(XLEN.W)
-  val bpWrong: UInt = UInt(XLEN.W)
-}
+class BackendRedirectTopdown(implicit p: Parameters) extends FrontendBundle {
+  val backendRedirect:         Bool = Bool()
+  val controlFlowRedirect:     Bool = Bool()
+  val memoryViolationRedirect: Bool = Bool()
 
-class BpuTopDownInfo(implicit p: Parameters) extends FrontendBundle {
   val btbMissBubble:    Bool = Bool()
   val tageMissBubble:   Bool = Bool()
   val scMissBubble:     Bool = Bool()
@@ -440,11 +446,26 @@ class BpuTopDownInfo(implicit p: Parameters) extends FrontendBundle {
   val rasMissBubble:    Bool = Bool()
 }
 
-class FrontendPerfInfo(implicit p: Parameters) extends FrontendBundle {
-  val ibufFull: Bool        = Bool()
-  val bpuInfo:  BpuPerfInfo = new BpuPerfInfo
+class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
+  val reasons:    Vec[Bool] = Vec(TopDownCounters.NumStallReasons.id, Bool())
+  val stallWidth: UInt      = UInt(FetchBlockInstOffsetWidth.W)
+
+  def backendRedirectOverride(backendRedirectTopdown: BackendRedirectTopdown): Unit =
+    when(backendRedirectTopdown.backendRedirect) {
+      when(backendRedirectTopdown.controlFlowRedirect) {
+        reasons(TopDownCounters.BTBMissBubble.id)    := backendRedirectTopdown.btbMissBubble
+        reasons(TopDownCounters.TAGEMissBubble.id)   := backendRedirectTopdown.tageMissBubble
+        reasons(TopDownCounters.SCMissBubble.id)     := backendRedirectTopdown.scMissBubble
+        reasons(TopDownCounters.ITTAGEMissBubble.id) := backendRedirectTopdown.ittageMissBubble
+        reasons(TopDownCounters.RASMissBubble.id)    := backendRedirectTopdown.rasMissBubble
+      }.elsewhen(backendRedirectTopdown.memoryViolationRedirect) {
+        reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      }.otherwise {
+        reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      }
+    }
 }
 
 class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {
-  val robHeadVaddr: Valid[PrunedAddr] = Valid(PrunedAddr(VAddrBits))
+  val robHeadVaddr: Valid[Pc] = Valid(Pc())
 }

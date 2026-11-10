@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.TLConfig
+import top.DefaultConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
 import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 
 
 class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
-  implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new TLConfig).alterPartial {
+  implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new DefaultConfig).alterPartial {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
     case LogUtilsOptionsKey => LogUtilsOptions(
@@ -38,7 +38,7 @@ class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
         m.io.frontendTrigger.tUpdate.bits.tdata.matchType.poke(3.U)
         m.io.frontendTrigger.tUpdate.bits.tdata.tdata2.poke("h1234_567f".U)
         m.io.pc.zipWithIndex.map { case (pc, i) =>
-          pc.poke(PrunedAddrInit((0x1234_5676 + 2 * i).U))
+          pc.poke(PcInit((0x1234_5676 + 2 * i).U(pc.length.W)))
         }
         for (_ <- 0 until 4) { m.clock.step() }
         m.io.triggered.zipWithIndex.map { case (action, i) =>

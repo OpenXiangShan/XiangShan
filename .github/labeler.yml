@@ -14,9 +14,7 @@
   - any-glob-to-any-file:
     - src/main/scala/xiangshan/cache/**
     - src/main/scala/xiangshan/mem/**
-    - coupledL2
-    - huancun
-    - openLLC
+    - XSCache
 
 "module: top":
 - changed-files:
@@ -55,6 +53,7 @@
   - any-glob-to-any-file:
     - src/main/scala/device/**
     - ChiselAIA
+    - ChiselIOPMP
     - rocket-chip
 
 "module: documentation":
@@ -63,6 +62,19 @@
     - images/**
     - "**.md"
     - LICENSE
+
+"note: submodule bump":
+- changed-files:
+  - any-glob-to-any-file:
+    - .gitmodules
+    - ChiselAIA
+    - ChiselIOPMP
+    - XSCache
+    - difftest
+    - ready-to-run
+    - rocket-chip
+    - utility
+    - yunsuan
 
 "topic: functionality":
 - head-branch:

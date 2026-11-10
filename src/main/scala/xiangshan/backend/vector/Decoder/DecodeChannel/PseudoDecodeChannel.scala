@@ -1,0 +1,377 @@
+package xiangshan.backend.vector.Decoder.DecodeChannel
+
+import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
+import chisel3.util.{BitPat, ValidIO}
+import freechips.rocketchip.rocket.CSRs
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.backend.decode.opcode.OpcodeTraits._
+import sourcecode.{Name => SourceName}
+import top.ArgParser
+import xiangshan.{XSCoreParameters, XSCoreParamsKey}
+import xiangshan.CommitType
+import xiangshan.backend.decode.isa.PseudoInstructions
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, CsrOpcodes, JmpOpcodes, LduOpcodes, Opcode, VSetOpcodes}
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.backend.fu.NewCSR.CSROoORead
+import xiangshan.backend.vector.Decoder.InstPattern._
+import xiangshan.backend.vector.Decoder.SrcRenType
+import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, DecodeSrcType}
+import xiangshan.backend.vector.Decoder.util._
+import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField}
+import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
+import xiangshan.backend.vector.util.Select.Mux1HLookUp
+import xiangshan.backend.vector.util.Verilog
+import xiangshan.backend.vector.HasVectorSettings
+import xiangshan.backend.decode.ImmUnion
+
+import scala.collection.SeqMap
+import scala.language.implicitConversions
+
+@instantiable
+class PseudoDecodeChannel(
+  instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
+)(implicit val p: Parameters) extends Module with HasVectorSettings {
+  import PseudoDecodeChannel._
+
+  @public
+  val in = IO(Input(new In()))
+  @public
+  val out = IO(Output(ValidIO(new Out)))
+
+  val instBitFields: XSInstBitFields = in.rawInst.asTypeOf(new XSInstBitFields)
+
+  val patterns = instSeq
+
+  val fields = Seq(
+    legalField,
+    fuTypeField,
+    opcodeField,
+    gpWenField,
+    fpWenField,
+    noSpecField,
+    blockBackField,
+    flushPipeField,
+    selImmField,
+    src1Field,
+    src2Field,
+    needVecEnableField,
+    commitTypeField,
+    canRobCompressField,
+    isJField,
+    isJrField,
+  )
+
+  val table = new DecodeTable(patterns, fields)
+
+  val bundle = table.decode(in.rawInst)
+
+  val selImm = Wire(ValidIO(DecodeSelImm()))
+  val imm = Wire(UInt(32.W))
+
+  selImm := bundle(selImmField)
+  imm := Mux1HLookUp(
+    selImm.bits,
+    Seq(
+      DecodeSelImm.I         -> ImmUnion.I.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.I.len),
+      DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
+      DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
+      DecodeSelImm.S         -> ImmUnion.S.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.S.len),
+      DecodeSelImm.Z         -> ImmUnion.Z.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.Z.len),
+    )
+  )
+
+  out.valid := bundle(legalField)
+  out.bits.fuType := bundle(fuTypeField)
+  out.bits.opcode := bundle(opcodeField)
+  out.bits.src1RenType := bundle(src1Field)
+  out.bits.src2RenType := bundle(src2Field)
+  out.bits.lsrc1 := instBitFields.RS1
+  out.bits.lsrc2 := instBitFields.RS2
+  out.bits.ldest := instBitFields.RD
+  out.bits.gpWen := bundle(gpWenField) && instBitFields.RD =/= 0.U
+  out.bits.fpWen := bundle(fpWenField)
+  out.bits.noSpec := bundle(noSpecField)
+  out.bits.blockBack := bundle(blockBackField)
+  out.bits.flushPipe := bundle(flushPipeField)
+  out.bits.selImm := selImm
+  out.bits.imm := imm
+  out.bits.commitType := bundle(commitTypeField)
+  out.bits.canRobCompress := bundle(canRobCompressField)
+  out.bits.isJ := bundle(isJField)
+  out.bits.isJr := bundle(isJrField)
+  out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
+}
+
+object PseudoDecodeChannel {
+  def main(args: Array[String]): Unit = {
+    val targetDir = "build/decoder"
+
+    val (config, _, _) = ArgParser.parse(
+      args :+ "--disable-always-basic-diff" :+ "--fpga-platform" :+ "--target" :+ "verilog")
+
+    val defaultConfig = config.alterPartial({
+      case XSCoreParamsKey => XSCoreParameters
+    })
+
+    Verilog.emitVerilog(
+      new PseudoDecodeChannel()(defaultConfig),
+      Array("--full-stacktrace", "--target-dir", targetDir),
+    )
+  }
+
+  import InstPatterns._
+
+  class In(implicit p: Parameters) extends Bundle {
+    val rawInst = UInt(32.W)
+    val fromCSR = new CSRToDecode
+  }
+
+  class Out extends Bundle {
+    val fuType: UInt = FuType()
+    val opcode: UInt = Opcode()
+    val src1RenType = new SrcRenType
+    val src2RenType = new SrcRenType
+    val lsrc1 = UInt(5.W)
+    val lsrc2 = UInt(5.W)
+    val ldest = UInt(5.W)
+    val gpWen = Bool()
+    val fpWen = Bool()
+    val noSpec = Bool()
+    val blockBack = Bool()
+    val flushPipe = Bool()
+    val selImm = ValidIO(DecodeSelImm())
+    val imm = UInt(32.W)
+    val commitType = CommitType()
+    val canRobCompress = Bool()
+    val isJ = Bool()
+    val isJr = Bool()
+    val exceptionII = Bool()
+  }
+
+  object InstPatterns {
+    val CSRRVL       = PseudoInstPattern(makeCSRRallBitPat(CSRs.vl))
+
+    val CSRRVLENB    = PseudoInstPattern(makeCSRRallBitPat(CSRs.vlenb))
+
+    def onlyBlockBackwardList = CSROoORead.blockBackwardCsrReadList.diff(CSROoORead.waitForwardCsrReadList)
+    def onlyWaitForwardList   = CSROoORead.waitForwardCsrReadList.diff(CSROoORead.blockBackwardCsrReadList)
+    def noBlockAndWaitList    = CSROoORead.fullCSRList.diff(CSROoORead.blockBackwardCsrReadList).diff(CSROoORead.waitForwardCsrReadList).diff(List(CSRs.vl, CSRs.vlenb))
+    val CSRR_CR_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
+    val CSRR_CR_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
+    val CSRR_CR_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
+
+    val PREFETCH_I   = PseudoInstPattern(PseudoInstructions.PREFETCH_I)
+    val PREFETCH_R   = PseudoInstPattern(PseudoInstructions.PREFETCH_R)
+    val PREFETCH_W   = PseudoInstPattern(PseudoInstructions.PREFETCH_W)
+
+    val J            = PseudoInstPattern(PseudoInstructions.J)
+    val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+  }
+
+  class DecodeFieldGen[-T <: InstPattern, +D <: Data](
+    gen: => D,
+    tableFunc: T => BitPat,
+    defaultFunc: Option[BitPat] = None,
+  )(
+    implicit val _name: SourceName
+  ) extends DecodeField[T, D] {
+    override def name: String = _name.value
+
+    override def chiselType: D = gen
+
+    override def genTable(op: T): BitPat = {
+      tableFunc(op)
+    }
+
+    override def default: BitPat = defaultFunc.getOrElse(super.default)
+
+    override def toString: String = {
+      name + "@" + this.getClass.getSimpleName
+    }
+  }
+
+  val uopTable: SeqMap[InstPattern, Opcode] = SeqMap[InstPattern, Opcode](
+    CSRRVL        -> (VSetOpcodes.readvl + NeedVecEnable),
+    CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),
+    PREFETCH_I    -> (LduOpcodes.prefetch_i + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
+    PREFETCH_R    -> (LduOpcodes.prefetch_r + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
+    PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
+    J             -> (JmpOpcodes.j),
+    JALR_RD_ZERO  -> (JmpOpcodes.jr),
+  ) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress)))
+
+  val legalField = new DecodeFieldGen(
+    Bool(),
+    (_: InstPattern) => BitPat.Y(),
+    defaultFunc = Option(BitPat.N()), // only the pattern passed in is legal
+  )
+
+  val fuTypeField = new DecodeFieldGen(
+    FuType(),
+    (op: InstPattern) => {
+      val fuType = uopTable(op).factory match {
+        case _: Opcode.AluOpcodes.type => FuType.alu.U
+        case _: Opcode.BruOpcodes.type => ???
+        case _: Opcode.LinkOpcodes.type => ???
+        case _: Opcode.JmpOpcodes.type => FuType.jmp.U
+        case _: Opcode.MulOpcodes.type => ???
+        case _: Opcode.DivOpcodes.type => ???
+        case _: Opcode.LduOpcodes.type => FuType.ldu.U
+        case _: Opcode.StuOpcodes.type => ???
+        case _: Opcode.AmoOpcodes.type => ???
+        case _: Opcode.BkuOpcodes.type => ???
+        case _: Opcode.CsrOpcodes.type => FuType.csr.U
+        case _: Opcode.FenceOpcodes.type => ???
+        case _: Opcode.FMacOpcodes.type => ???
+        case _: Opcode.FDivOpcodes.type => ???
+        case _: Opcode.FCvtOpcodes.type => ???
+        case _: Opcode.FMiscOpcodes.type => ???
+        case _: Opcode.VSetOpcodes.type => FuType.vset.U
+        case _: Opcode.VIAluOpcodes.type => ???
+        case _: Opcode.VMAluOpcodes.type => ???
+        case _: Opcode.VIMacOpcodes.type => ???
+        case _: Opcode.VIRedOpcodes.type => ???
+        case _: Opcode.VIPermOpcodes.type => ???
+        case _: Opcode.VIDivOpcodes.type => ???
+      }
+      fuType.pad(FuType.width).toBitPat
+    }
+  )
+
+  val opcodeField = new DecodeFieldGen(
+    Opcode(),
+    (op: InstPattern) => {
+      uopTable(op).encode.pad0To(Opcode.getWidth)
+    }
+  )
+
+  val gpWenField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(GpWen).toBitPat
+  )
+
+  val fpWenField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(FpWen).toBitPat
+  )
+
+  val src1Field = new DecodeFieldGen(
+    new SrcRenType,
+    (op: InstPattern) => uopTable(op).getTraits.collect { case x: Src1Trait => x }.ensuring(_.size <= 1).headOption.map(_.srcType match {
+      case Vp | Vm | Vs | Vw | Vws => DecodeSrcType.VP
+      case Fp => DecodeSrcType.FP
+      case Gp => DecodeSrcType.GP
+      case Imm => DecodeSrcType.IMM
+    }).map((x: UInt) => BitPat.Y() ## x.toBitPat).getOrElse(BitPat.N() ## BitPat.dontCare(DecodeSrcType.width))
+  )
+
+  val src2Field = new DecodeFieldGen(
+    new SrcRenType,
+    (op: InstPattern) => uopTable(op).getTraits.collect { case x: Src2Trait => x }
+      .ensuring(_.size <= 1, s"${uopTable(op)} has more than 1 Src2Trait(${uopTable(op).getTraits})")
+      .headOption
+      .map(
+        _.srcType match {
+          case Vp | Vm | Vs | Vw | Vws => DecodeSrcType.VP
+          case Fp => DecodeSrcType.FP
+          case Gp => DecodeSrcType.GP
+          case Imm => DecodeSrcType.IMM
+        }
+      )
+      .map((x: UInt) => BitPat.Y() ## x.toBitPat)
+      .getOrElse(BitPat.N() ## BitPat.dontCare(DecodeSrcType.width))
+  )
+
+  val noSpecField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(NoSpec).toBitPat,
+  )
+
+  val blockBackField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(BlockBack).toBitPat
+  )
+
+  val flushPipeField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(FlushPipe).toBitPat
+  )
+
+  val needVecEnableField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => uopTable(op).getTraits.contains(NeedVecEnable).toBitPat
+  )
+
+  val selImmField = new DecodeFieldGen(
+    ValidIO(DecodeSelImm()),
+    (op: InstPattern) => uopTable(op).getTraits.collect { case Src2Imm(selImm) => selImm }
+      .ensuring(_.size <= 1)
+      .headOption
+      .map(BitPat.Y() ## _)
+      .getOrElse(BitPat.N() ## BitPat.dontCare(DecodeSelImm.width))
+  )
+
+  val commitTypeField = new DecodeFieldGen(
+    CommitType(),
+    (op: InstPattern) => (op match {
+      case _: IntJTypePattern => CommitType.BRANCH
+      case _: JalrPattern => CommitType.BRANCH
+      case _ => CommitType.NORMAL
+    }).toBitPat
+  )
+
+  val canRobCompressField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (!uopTable(op).getTraits.contains(CannotRobCompress)).toBitPat
+  )
+
+  val isJField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == J).toBitPat
+  )
+
+  val isJrField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
+  )
+
+  def makeCSRRallBitPat(csrno: Int): BitPat = {
+    new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_?1?_?????_1110011")
+  }
+
+  /**
+   * Although "CSRR rd, csr" is encoded as "CSRRS rd, csr, x0", other instructions (CSRRSI/CSRRC/CSRRCI) performs the
+   * same when their RS1 is x0. They only read CSR value and write it into GPR[vd].
+   */
+  def makeCSRRCBitPat(csrno: Int): BitPat  = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_011_?????_1110011")
+  def makeCSRRCIBitPat(csrno: Int): BitPat = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_111_?????_1110011")
+  def makeCSRRSBitPat(csrno: Int): BitPat  = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_010_?????_1110011")
+  def makeCSRRSIBitPat(csrno: Int): BitPat = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_110_?????_1110011")
+
+  implicit def StringToBitPat(str: String): BitPat = BitPat(str)
+}

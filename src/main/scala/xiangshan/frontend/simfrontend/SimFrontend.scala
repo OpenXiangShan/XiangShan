@@ -27,7 +27,6 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import utility._
-import utility.PopCount
 import utility.InstSeqNum
 import utility.PerfCCT
 import xiangshan._
@@ -198,7 +197,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   val fetchHelper = Module(new SimFrontFetchHelper)
 
-  val readyCount = Mux(io.backend.canAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
+  val readyCount = Mux(io.backend.toIBuf.decodeCanAccept, PopCount(io.backend.cfVec.map(_.ready)), 0.U)
 
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
@@ -246,8 +245,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
     cfVec.bits.isRvc := fetchOut.preDecode(1)
 
-    cfVec.bits.fixedTaken := fetchOut.preDecode(6)
-    cfVec.bits.predTaken  := fetchOut.preDecode(6)
+    cfVec.bits.predTaken := fetchOut.preDecode(6)
 
     cfVec.bits.ftqPtr.value := fetchOut.preDecode(12, 7)
     cfVec.bits.ftqPtr.flag  := fetchOut.preDecode(13)
@@ -260,7 +258,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
       (idx + 1).U,
       fetchOut.pc,
       fetchOut.instr,
-      io.backend.canAccept && cfVec.fire,
+      io.backend.toIBuf.decodeCanAccept && cfVec.fire,
       clock,
       reset
     )
@@ -268,7 +266,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
   io.backend.fromFtq.wen     := fetchHelper.io.out_ftqPackData(6)
   io.backend.fromFtq.ftqIdx  := fetchHelper.io.out_ftqPackData(5, 0)
-  io.backend.fromFtq.startPc := PrunedAddrInit(fetchHelper.io.out_ftqPc)
+  io.backend.fromFtq.startPc := GuardedPcInit(fetchHelper.io.out_ftqPc(GuardedVAddrBits - 1, 0))
 
   XSPerfAccumulate("all_redirect", io.backend.toFtq.redirect.valid)
   XSPerfAccumulate("mispred_redirect", io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.isMisPred)

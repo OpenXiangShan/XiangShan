@@ -161,8 +161,8 @@ class RunContext:
     def genRunCMD(self, population, id, numa = None, coreStart = None, coreEnd = None) -> str:
         stdinStr = self.getStdIn(population, id)
         if None in [numa, coreStart, coreEnd]:
-            return "{} | {} -i {} --diff {} -I {} -s {}".format(stdinStr, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
-        return "{} | numactl -m {} -C {}-{} {} -i {} --diff {} -I {} -s {}".format(stdinStr, numa, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
+            return "{} | {} -i {} --diff {} -I {} -s {} --cst-file stdin".format(stdinStr, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
+        return "{} | numactl -m {} -C {}-{} {} -i {} --diff {} -I {} -s {} --cst-file stdin".format(stdinStr, numa, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
     
     def getOutPath(self, iterid, i):
         dirPath = os.path.join(BUILD_PATH, self.config.tag)

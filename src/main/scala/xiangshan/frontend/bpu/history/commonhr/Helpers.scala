@@ -17,7 +17,7 @@ package xiangshan.frontend.bpu.history.commonhr
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.TLMessages.isC
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.HalfAlignHelper
 
 trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
@@ -50,4 +50,7 @@ trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
     }
     keep
   }
+
+  def isBackwardBranch(cfiPc: PrunedAddr, target: PrunedAddr): Bool =
+    cfiPc.addr(CompareAddrLowWidth - 1, 0) > target.addr(CompareAddrLowWidth - 1, 0)
 }

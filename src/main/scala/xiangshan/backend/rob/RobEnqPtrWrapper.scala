@@ -22,7 +22,6 @@ import chisel3.util._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
-import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
@@ -30,7 +29,6 @@ import xiangshan.backend.Bundles.{ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
-import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
@@ -45,7 +43,7 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     val out = Output(Vec(RenameWidth, new RobPtr))
   })
 
-  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(_.U.asTypeOf(new RobPtr)))
+  val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(i => RobPtr(false.B, i.U)))
 
   // enqueue
   val canAccept = io.allowEnqueue && !io.hasBlockBackward
@@ -53,9 +51,13 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   for ((ptr, i) <- enqPtrVec.zipWithIndex) {
     when(io.redirect.valid) {
-      ptr := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx + i.U, io.redirect.bits.robIdx + (i + 1).U)
+      ptr := Mux(
+        io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(),
+        io.redirect.bits.robIdx.addEntries(i.U).asFormer,
+        io.redirect.bits.robIdx.addEntries((i + 1).U).asFormer
+      )
     }.otherwise {
-      ptr := ptr + dispatchNum
+      ptr := ptr.addEntries(dispatchNum).asFormer
     }
   }
 
