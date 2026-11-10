@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.ittage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.PerfCounterOptionsKey
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.PrunedAddr
@@ -60,17 +61,30 @@ class IttagePrediction(implicit p: Parameters) extends IttageBundle {
   val target: GuardedPc = GuardedPc()
 }
 
+// Prediction-time candidate reasons for performance attribution only.
+class IttageReadCandidates(implicit p: Parameters) extends IttageBundle {
+  val noAlt:      Bool = Bool()
+  val sameTarget: Bool = Bool()
+}
+
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
   // The hit flag controls training reads; the index tracks provider changes.
   // Counters, targets and allocation candidates are re-read during training.
   val provider: Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
   // Prediction-time hint, not a guarantee about the state at training time.
   val skipReadOnCorrect: Bool = Bool()
+  // Diagnostic bits exist only with performance logging; they never control training.
+  val debug_readCandidates: Option[IttageReadCandidates] =
+    Option.when(p(PerfCounterOptionsKey).enablePerfPrint)(new IttageReadCandidates)
 
   // Qualify the hint at the BPU's final prediction selection.
   def fromPrediction(that: IttageMeta, used: Bool): Unit = {
     this              := that
     skipReadOnCorrect := that.skipReadOnCorrect && used
+    debug_readCandidates.zip(that.debug_readCandidates).foreach { case (out, in) =>
+      out.noAlt      := in.noAlt && used
+      out.sameTarget := in.sameTarget && used
+    }
   }
 
   // Associate training logs with the original prediction.

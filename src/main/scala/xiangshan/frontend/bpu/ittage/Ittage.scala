@@ -29,6 +29,7 @@ import utility.GTimer
 import utility.LowerMask
 import utility.ParallelORR
 import utility.ParallelSelectTwo
+import utility.PerfCounterOptionsKey
 import utility.SelectTwoInterRes
 import utility.XSDebug
 import utility.XSPerfAccumulate
@@ -209,6 +210,20 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.provider.valid    := s3_provided
   ittageMeta.provider.bits     := s3_provider
   ittageMeta.debug_predCycle.foreach(_ := GTimer())
+  ittageMeta.debug_readCandidates.foreach { candidates =>
+    // Exclude useful==1: noAlt measures only the coverage added by !altProvided.
+    val usefulNotOne = providerInfo.usefulCnt.value =/= 1.U
+    val noAlt = provided && providerInfo.cnt.isSaturatePositive && usefulNotOne && !altProvided
+    val sameTarget = provided && providerInfo.cnt.isSaturatePositive && usefulNotOne && altProvided &&
+      providerCatTarget === altProviderCatTarget
+    candidates.noAlt      := RegEnable(noAlt, false.B, s2_fire)
+    candidates.sameTarget := RegEnable(sameTarget, false.B, s2_fire)
+    XSPerfSeqAccumulate(
+      "ittage_read_candidate",
+      s2_fire,
+      Seq(("no_alt_at_pred", noAlt), ("same_target_at_pred", sameTarget))
+    )
+  }
 
   /* *** train/update pipeline *** */
   // Select the indirect branch used by ITTAGE training before issuing a
@@ -587,6 +602,86 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   XSPerfAccumulate("ittage_train_read_stall_cycles", perf_t0ReadStall)
   XSPerfAccumulate("ittage_train_read_stall_cycles_exclusive", perf_t0ExclusiveReadStall)
 
+  // These candidates were qualified by the BPU's final ITTAGE selection.
+  // They describe prediction-time state; a later re-read can disagree with it.
+  t0_meta.debug_readCandidates.foreach { candidates =>
+    val skipNoAlt = perf_skipCorrect && candidates.noAlt
+    val sameTargetRead = t0_hasTrainBranch && t0_needRead && !t0_updateMisPred && candidates.sameTarget
+    XSPerfSeqAccumulate(
+      "ittage_train",
+      t0_fire,
+      Seq(
+        ("skip_correct_no_alt", skipNoAlt),
+        ("skip_correct_useful", perf_skipCorrect && !candidates.noAlt),
+        ("skip_correct_no_alt_bank_conflict", skipNoAlt && perf_bankConflict),
+        ("no_alt_hint_mispredict_read", t0_meta.provider.valid && candidates.noAlt && t0_updateMisPred),
+        ("same_target_candidate", sameTargetRead)
+      )
+    )
+    XSPerfSeqAccumulate(
+      "ittage_train_skip_correct_no_alt",
+      io.enable && io.debug_trainValid && skipNoAlt && perf_bankConflict,
+      Seq(
+        ("bank_conflict_cycles", true.B),
+        ("bank_conflict_cycles_exclusive", io.debug_trainOtherReady)
+      )
+    )
+    XSPerfSeqAccumulate(
+      "ittage_train_same_target_candidate",
+      io.enable && io.debug_trainValid && sameTargetRead && perf_bankConflict,
+      Seq(
+        ("bank_conflict_cycles", true.B),
+        ("bank_conflict_cycles_exclusive", io.debug_trainOtherReady)
+      )
+    )
+  }
+  t2_train.meta.ittage.debug_readCandidates.foreach { candidates =>
+    XSPerfSeqAccumulate(
+      "ittage_train_read_same_target_candidate",
+      t2_updateValid && t2_needRead && !t2_updateMisPred && candidates.sameTarget,
+      Seq(
+        ("total", true.B),
+        ("noop", perf_readNoop),
+        ("entry_change", perf_entryChange),
+        ("other_work", !perf_entryChange && !perf_readNoop),
+        ("stall_cycles", true.B, perf_t2StallCycles),
+        ("stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles)
+      )
+    )
+  }
+
+  // Observe opportunities only. No comparator below participates in trainReady.
+  // A shareable transaction needs matching bank/set in every table, not just PC.
+  if (p(PerfCounterOptionsKey).enablePerfPrint) {
+    val sameRows = tables.map(_.io.debug_trainReadSameRow.get)
+    val allSameRow = sameRows.reduce(_ && _)
+    val anySameRow = sameRows.reduce(_ || _)
+    val rowClasses = Seq(
+      "all_tables"  -> allSameRow,
+      "some_tables" -> (anySameRow && !allSameRow),
+      "no_tables"   -> !anySameRow
+    )
+    rowClasses.foreach { case (name, cond) =>
+      XSPerfSeqAccumulate(
+        s"ittage_train_read_share_row_$name",
+        perf_t0ReadStall && cond,
+        Seq(("cycles", true.B), ("cycles_exclusive", io.debug_trainOtherReady))
+      )
+    }
+    XSPerfSeqAccumulate(
+      "ittage_train_read_share_row_all_tables",
+      perf_t0ReadStall && allSameRow,
+      Seq(("correct_cycles", !t0_updateMisPred), ("mispredict_cycles", t0_updateMisPred))
+    )
+    sameRows.zipWithIndex.foreach { case (sameRow, i) =>
+      XSPerfSeqAccumulate(
+        s"ittage_train_read_share_row_table_$i",
+        perf_t0ReadStall && sameRow,
+        Seq(("cycles", true.B), ("cycles_exclusive", io.debug_trainOtherReady))
+      )
+    }
+  }
+
   // Compare prediction-time provider identity with the actual training snapshot.
   // Same table does not imply unchanged counters/target or the same entry lifetime.
   private val perf_oldProvider = t2_train.meta.ittage.provider
@@ -656,19 +751,60 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   )
 
   // Mutually exclusive reasons for rereading a non-mispredicted branch.
-  // Saturated/correct providers can still need a useful-counter update to 1.
-  XSPerfSeqAccumulate(
-    "ittage_train_read_correct",
-    t2_updateValid && t2_needRead && !t2_updateMisPred,
-    Seq(
-      ("total", true.B),
-      ("no_provider", !t2_hasProvider),
-      ("provider_wrong", t2_hasProvider && !providerCorrect),
-      ("provider_correct_unsaturated", providerCorrect && !t2_providerInfo.cnt.isSaturatePositive),
-      ("provider_useful_only", providerCorrect && t2_providerInfo.cnt.isSaturatePositive && perf_providerUsefulChange),
-      ("provider_no_change", perf_providerNoChange)
-    )
+  // Attribute each accepted request's full bank-conflict history to its class.
+  private val perf_correctReadClasses = Seq(
+    "total"                        -> true.B,
+    "no_provider"                  -> !t2_hasProvider,
+    "provider_wrong"               -> (t2_hasProvider && !providerCorrect),
+    "provider_correct_unsaturated" -> (providerCorrect && !t2_providerInfo.cnt.isSaturatePositive),
+    "provider_useful_only" ->
+      (providerCorrect && t2_providerInfo.cnt.isSaturatePositive && perf_providerUsefulChange),
+    "provider_no_change" -> perf_providerNoChange
   )
+  perf_correctReadClasses.foreach { case (name, cond) =>
+    XSPerfAccumulate(s"ittage_train_read_correct_$name", t2_updateValid && t2_needRead && !t2_updateMisPred && cond)
+    XSPerfSeqAccumulate(
+      s"ittage_train_read_correct_$name",
+      t2_updateValid && t2_needRead && !t2_updateMisPred && cond,
+      Seq(
+        ("stall_cycles", true.B, perf_t2StallCycles),
+        ("stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles)
+      )
+    )
+  }
+
+  // Split saturated/no-change reads without assuming prediction-time state was
+  // identical. These three classes partition provider_no_change after re-reading.
+  private val perf_noChangeReadClasses = Seq(
+    "useful"      -> (t2_providerInfo.usefulCnt.value === 1.U),
+    "no_alt"      -> (t2_providerInfo.usefulCnt.value =/= 1.U && !t2_hasAltProvider),
+    "same_target" -> (t2_providerInfo.usefulCnt.value =/= 1.U && t2_hasAltProvider && !t2_altDiffers)
+  )
+  perf_noChangeReadClasses.foreach { case (name, cond) =>
+    XSPerfSeqAccumulate(
+      s"ittage_train_read_correct_provider_no_change_$name",
+      t2_updateValid && t2_needRead && !t2_updateMisPred && perf_providerNoChange && cond,
+      Seq(
+        ("total", true.B),
+        ("stall_cycles", true.B, perf_t2StallCycles),
+        ("stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles)
+      )
+    )
+  }
+  // cnt=0 needs target-handling work; nonzero unsaturated counters are the
+  // first candidates for a future counter-only meta training path.
+  for (cnt <- 0 until (1 << ConfidenceCntWidth)) {
+    XSPerfSeqAccumulate(
+      s"ittage_train_read_correct_provider_cnt_$cnt",
+      t2_updateValid && t2_needRead && !t2_updateMisPred && providerCorrect &&
+        t2_providerInfo.cnt.value === cnt.U,
+      Seq(
+        ("total", true.B),
+        ("stall_cycles", true.B, perf_t2StallCycles),
+        ("stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles)
+      )
+    )
+  }
 
   // Updates count requests to the table write buffers, even if the stored value
   // stays unchanged. Background useful-counter clears are counted separately.

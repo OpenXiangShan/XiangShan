@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
 import utility.ParallelXOR
+import utility.PerfCounterOptionsKey
 import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.XSPerfSeqAccumulate
@@ -77,6 +78,9 @@ class IttageTable(
     val update:    Update      = Input(new Update)
 
     val sramResetDone: Bool = Output(Bool())
+    // Compare addresses even while trainReq.valid is suppressed by trainReady.
+    val debug_trainReadSameRow: Option[Bool] =
+      Option.when(p(PerfCounterOptionsKey).enablePerfPrint)(Output(Bool()))
   }
 
   val io: IttageTableIO = IO(new IttageTableIO)
@@ -143,6 +147,7 @@ class IttageTable(
   private val (trainBankIdx, trainSetIdx, trainTag) =
     computeTagAndHash(trainUnhashedIdx, io.trainReq.bits.foldedHist)
   private val trainBankMask = UIntToOH(trainBankIdx, NumBanks)
+  io.debug_trainReadSameRow.foreach(_ := s0_bankIdx === trainBankIdx && s0_setIdx === trainSetIdx)
   private val trainReqValid = io.trainReq.valid && !powerOnResetState
 
   private val trainTagReg      = RegEnable(trainTag, trainReqValid)
