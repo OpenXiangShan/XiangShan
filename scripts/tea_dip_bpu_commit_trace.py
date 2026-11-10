@@ -21,12 +21,12 @@ COLUMNS |= {stage + '_' + field for stage in ['S1', 'S2', 'S3'] for field in
             ['TAKEN', 'ATTRIBUTE_RASACTION', 'ATTRIBUTE_BRANCHTYPE', 'TARGET_ADDR', 'CFIPOSITION']}
 
 
-def summarize(rows, expected):
+def summarize(rows, expected, s1_names=S1):
     marginals = {key: Counter() for key in ['reason', 's1_source', 's3_source', 'types', 'no_override', 'conditional_reason']}
     joint, pcs = Counter(), Counter()
     stamps, count = [], 0
     for row in rows:
-        reason, s1, s3 = REASONS[row['REASON']], S1[row['SOURCE_S1SOURCE']], S3[row['SOURCE_S3SOURCE']]
+        reason, s1, s3 = REASONS[row['REASON']], s1_names[row['SOURCE_S1SOURCE']], S3[row['SOURCE_S3SOURCE']]
         kind = TYPES[row['BRANCH_ATTRIBUTE_BRANCHTYPE']]
         assert row['BRANCH_MISPREDICT'] == 1 and row['SOURCE_S2OVERRIDE'] in [0, 1] and row['SOURCE_S3OVERRIDE'] in [0, 1]
         assert row['USEDSC'] in [0, 1] and row['MBTBMATCH'] in [0, 1]
