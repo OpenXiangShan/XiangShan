@@ -202,6 +202,14 @@ class FltIssuePipe(
   ex0Next.bits.bypassCtrl.fromIssueDeq(is1.bits)
   ex0Next.bits.debug.foreach(_ := is1.bits.debug.get)
 
+  out.fdivReadyAhead3Cycle.zip(exu.out.fdivReadyAhead3Cycle).foreach { case (ready, unitReady) =>
+    // These surviving older requests reach the FU before a new IQ selection.
+    // The unit prediction already excludes a request starting in EX0 now.
+    val is0FdivInFlight = is1Next.valid && FuType.isFdiv(is0.bits.fuType)
+    val is1FdivInFlight = ex0Next.valid && FuType.isFdiv(is1.bits.fuType)
+    ready := unitReady && !is0FdivInFlight && !is1FdivInFlight
+  }
+
   ex0Next.bits.data.src.zipWithIndex.foreach {
     case (src, srcIdx) =>
       val fpKV: Seq[(Bool, UInt)] = Option.when(readPortCfgs(srcIdx).exists(_.isInstanceOf[FpRD]))(
@@ -348,6 +356,7 @@ object FltIssuePipe {
     val is0Resp = new FltRespBundle()(p, param.getIssueParam())
     val is1Resp = new FltRespBundle()(p, param.getIssueParam())
     val ex0Resp = new FltRespBundle()(p, param.getIssueParam())
+    val fdivReadyAhead3Cycle = Option.when(param.fuConfigs.exists(_.isFdiv))(Bool())
     val ex1Resp = new FltRespBundle()(p, param.getIssueParam())
     val ex0RespFailLat1Next = Bool()
     val is0FpRdAddr: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.fpPregParams)
