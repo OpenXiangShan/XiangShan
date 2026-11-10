@@ -23,6 +23,36 @@ def snapshot(pid, start_ticks):
                 sched_run_ns=run, sched_wait_ns=wait, sched_slices=slices)
 
 
+def placement(pid, start_ticks):
+    """Read placement once per interval endpoint, outside the fast scheduler loop."""
+    begin = time.monotonic_ns()
+    root = Path('/proc', str(pid))
+    stat = (root / 'stat').read_text().rsplit(')', 1)[1].split()
+    assert stat[19] == start_ticks, 'Original process identity changed'
+    affinity = sorted(os.sched_getaffinity(pid))
+    cpus = {}
+    for cpu in affinity:
+        path = Path('/sys/devices/system/cpu', 'cpu' + str(cpu))
+        frequency = path / 'cpufreq/scaling_cur_freq'
+        cpus[str(cpu)] = dict(socket=int((path / 'topology/physical_package_id').read_text()),
+                              core=int((path / 'topology/core_id').read_text()),
+                              numa_nodes=sorted(int(p.name[4:]) for p in path.glob('node[0-9]*')),
+                              instantaneous_scaling_kHz=int(frequency.read_text()) if frequency.exists() else None)
+    numa_bytes = {}
+    for line in (root / 'numa_maps').read_text().splitlines():
+        fields = dict(token.split('=', 1) for token in line.split() if '=' in token)
+        nodes = {key[1:]: int(value) for key, value in fields.items() if key.startswith('N') and key[1:].isdigit()}
+        if nodes:
+            page_bytes = int(fields['kernelpagesize_kB']) * 1024
+            for node, pages in nodes.items():
+                numa_bytes[node] = numa_bytes.get(node, 0) + pages * page_bytes
+    assert (root / 'stat').read_text().rsplit(')', 1)[1].split()[19] == start_ticks
+    return dict(begin_monotonic_ns=begin, end_monotonic_ns=time.monotonic_ns(),
+                last_cpu=int(stat[36]), affinity=affinity, cpu_topology_and_frequency=cpus,
+                mapped_resident_bytes_by_NUMA_node=numa_bytes,
+                scope='Instantaneous kernel placement/frequency and mapped resident memory, not effective GHz, total RSS or proof of remote-memory traffic. Reads are sequential. No historical state is inferred.')
+
+
 def parse_perf(text):
     result = {}
     for line in text.splitlines():
@@ -52,11 +82,13 @@ def metrics(events):
 
 
 def sample(pid, start_ticks, seconds):
+    placement_before = placement(pid, start_ticks)
     before = snapshot(pid, start_ticks)
     command_line = (Path('/proc', str(pid)) / 'cmdline').read_bytes().decode().split('\0')[:-1]
     command = ['perf', 'stat', '-x,', '-p', str(pid), '-e', ','.join(EVENTS), '--', 'sleep', str(seconds)]
     result = subprocess.run(command, text=True, capture_output=True, env={**os.environ, 'LC_ALL': 'C'})
     after = snapshot(pid, start_ticks)
+    placement_after = placement(pid, start_ticks)
     counters = parse_perf(result.stderr)
     delta = {key: after[key] - before[key] for key in ['cpu_ticks', 'minor_faults', 'major_faults', 'sched_run_ns', 'sched_wait_ns', 'sched_slices']}
     return dict(utc=datetime.now(timezone.utc).isoformat(), host=socket.gethostname(), pid=pid, start_ticks=start_ticks,
@@ -64,6 +96,7 @@ def sample(pid, start_ticks, seconds):
                                    perf_version=subprocess.check_output(['perf', '--version'], text=True).strip()),
                 original_process_live_before_and_after=True, command_line=command_line, affinity=sorted(os.sched_getaffinity(pid)),
                 clock_ticks_per_second=os.sysconf('SC_CLK_TCK'), before=before, after=after, delta=delta,
+                placement_before=placement_before, placement_after=placement_after,
                 perf_command=command, perf_returncode=result.returncode, perf_stdout=result.stdout, perf_stderr=result.stderr,
                 events=counters, metrics=metrics(counters) if result.returncode == 0 else None,
                 tool_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), database_read=False,
