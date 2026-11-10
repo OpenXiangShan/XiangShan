@@ -166,11 +166,11 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
     instr.isPrevEndHalfRvi  := entry.isPrevEndHalfRvi
     instr.isCrossBlockInstr := entry.isCrossBlockInstr
   }
-  aligned.instrPcVec := VecInit(s3DecodedForIFU.map(d => traceGuardedPc(d.compact.traceInfo.pcVA)))
-  aligned.instrValid := VecInit(s3DecodedForIFU.map(_.compact.valid)).asUInt
-  aligned.instrCount := PopCount(s3DecodedForIFU.map(_.compact.valid))
-  aligned.foldPc     := VecInit(aligned.instrPcVec.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)))
-  aligned.pdInfoVec  := VecInit(s3DecodedForIFU.map(_.pd))
+  aligned.instrPcVec    := VecInit(s3DecodedForIFU.map(d => traceGuardedPc(d.compact.traceInfo.pcVA)))
+  aligned.instrValid    := VecInit(s3DecodedForIFU.map(_.compact.valid)).asUInt
+  aligned.instrCount    := PopCount(s3DecodedForIFU.map(_.compact.valid))
+  aligned.foldPc        := VecInit(aligned.instrPcVec.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)))
+  aligned.pdInfoVec     := VecInit(s3DecodedForIFU.map(_.pd))
   aligned.jumpOffsetVec := VecInit(s3DecodedForIFU.map(_.jumpOffset))
   aligned.traceInfo     := VecInit(s3DecodedForIFU.map(_.compact.traceInfo))
 }

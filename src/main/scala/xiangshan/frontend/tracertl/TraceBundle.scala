@@ -33,7 +33,7 @@ class TraceModule(implicit p: Parameters) extends FrontendModule {
   def trtl = p(TraceRTLParamKey)
 
   // Trace addresses are TraceVAddrWidth wide; the frontend keeps VAddrBits.
-  def traceGuardedPc(addr: UInt): GuardedPc = PcInit(addr(VAddrBits - 1, 0)).signGuard
+  def traceGuardedPc(addr:  UInt): GuardedPc  = PcInit(addr(VAddrBits - 1, 0)).signGuard
   def tracePrunedAddr(addr: UInt): PrunedAddr = PrunedAddrInit(addr(VAddrBits - 1, 0))
 }
 

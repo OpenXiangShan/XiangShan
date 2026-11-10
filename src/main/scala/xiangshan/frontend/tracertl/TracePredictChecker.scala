@@ -122,7 +122,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   // block 1 wins when both blocks have an invalid taken at this lane
   private val selectedInvalidBlock = invalidTakenAt(1)(mispredCompactIdx)
   private val selectedInvalidInfo  = io.predictInfo.block(selectedInvalidBlock)
-  private val invalidTakenPc = selectedInvalidInfo.startAddr + (selectedInvalidInfo.ftqOffset.bits << 1)
+  private val invalidTakenPc       = selectedInvalidInfo.startAddr + (selectedInvalidInfo.ftqOffset.bits << 1)
 
   private val fixedIsJump = instrValid(mispredCompactIdx) && mispredIdx.valid && !selectedInvalidTaken &&
     (pds(mispredCompactIdx).isJal || pds(mispredCompactIdx).isBr ||

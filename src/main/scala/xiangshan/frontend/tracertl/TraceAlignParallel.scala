@@ -182,10 +182,10 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
     if (i == 0) 0.U(log2Ceil(width + 1).W) else PopCount(compactSourceValid.take(i))
   )
 
-  io.result.traceRange          := traceRangeMerge & combinedRange
-  io.result.candidateCount      := PopCount(compactSourceValid)
-  io.result.concede2Bytes       := taken2BVec.asUInt.orR
-  io.result.traceForceJump      := traceForceJump
+  io.result.traceRange     := traceRangeMerge & combinedRange
+  io.result.candidateCount := PopCount(compactSourceValid)
+  io.result.concede2Bytes  := taken2BVec.asUInt.orR
+  io.result.traceForceJump := traceForceJump
 
   io.result.compact.zipWithIndex.foreach { case (entry, compactIdx) =>
     val sourceOH = VecInit.tabulate(width)(i =>
