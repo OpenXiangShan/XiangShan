@@ -127,6 +127,8 @@ def analyze(folder, receipt_path):
                       'student and issue-gate decisions; student takeover is a training event, not a sent request. '
                       'Score-table phase totals count s_idle observations and can include startup idle; '
                       'they do not directly count phaseEndPulse or reconstruct issue-confidence updates. '
+                      'Feedback-control-drop counts enable && s1_req_valid && fdbkDegree == 0 condition cycles; '
+                      'it is not unique dropped requests and has a different population from accepted training. '
                       'Student/local-disable overlap bounds use their common atomic training population, not CPU-loss cycles. '
                       'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets.')
 
