@@ -115,7 +115,7 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
   }
 
   def get_napot(base: BigInt, range: BigInt): BigInt = {
-    val PlatformGrainBytes = 1 << PlatformGrain
+    val PlatformGrainBytes = BigInt(1) << PlatformGrain
     if ((base % PlatformGrainBytes) != 0) {
       println("base: %x", base)
     }
@@ -129,7 +129,7 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
   }
 
   def matchMask(cfgA0: Bool, paddr: UInt): UInt = {
-    val matchMaskCAddr = Cat(paddr, cfgA0) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    val matchMaskCAddr = Cat(paddr, cfgA0) | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
     Cat(matchMaskCAddr & (~(matchMaskCAddr + 1.U)).asUInt, ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
@@ -154,7 +154,7 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
   }
 
   def genMask(a: BigInt, initAddr: BigInt) = {
-    val matchMaskAddr = (initAddr << 1) | (a & 0x1) | (((1 << PlatformGrain) - 1) >> PMPOffBits)
+    val matchMaskAddr = (initAddr << 1) | (a & 0x1) | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits)
     val mask = ((matchMaskAddr & ~(matchMaskAddr + 1)) << PMPOffBits) | ((1 << PMPOffBits) - 1)
     mask.U(PMPAddrWidth.W)
   }

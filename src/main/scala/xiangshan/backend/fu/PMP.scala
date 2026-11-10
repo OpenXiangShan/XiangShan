@@ -82,7 +82,7 @@ object PMPConfigUInt {
 }
 trait PMPReadWriteMethodBare extends PMPConst {
   def match_mask(cfg: PMPConfig, paddr: UInt) = {
-    val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
     Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
@@ -189,7 +189,7 @@ class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod 
 
 trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   /** compare_addr is used to compare with input addr */
-  def compare_addr: UInt = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PMPAddrBits.W))).asUInt
+  def compare_addr: UInt = ((addr << PMPOffBits) & ~(((BigInt(1) << PlatformGrain) - 1).U(PMPAddrBits.W))).asUInt
 
   /** size and maxSize are all log2 Size
    * for dtlb, the maxSize is bPMXLEN which is 8

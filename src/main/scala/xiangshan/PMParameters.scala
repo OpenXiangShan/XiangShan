@@ -40,7 +40,9 @@ case class PMParameters
     sameCycle = true,
     num = 2
   )
-)
+) {
+  require(PlatformGrain >= 2 && PlatformGrain < 64, s"PlatformGrain must be in [2, 64), got $PlatformGrain")
+}
 //trait HasPMParameters extends PMParameters
 trait HasPMParameters {
   implicit val p: Parameters
