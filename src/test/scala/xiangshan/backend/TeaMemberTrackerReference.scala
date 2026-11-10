@@ -144,7 +144,9 @@ class TeaMemberTrackerReference(writebackPorts: Int, eventPorts: Int)(implicit p
       live(ptr.value)(rank) && flags(ptr.value) === ptr.flag &&
         members(ptr.value)(rank).isFormer === ptr.isFormer))
     io.read(port).valid := mask.asUInt.orR
-    io.read(port).bits := result(ptr.value, PriorityEncoder(mask))
+    val member = result(ptr.value, PriorityEncoder(mask))
+    io.read(port).pc := member.pc
+    io.read(port).psv := member.psv
   }
 
   for (entryLane <- 0 until CommitWidth; rank <- 0 until RenameWidth) {

@@ -1,10 +1,10 @@
 # 香山 TEA 实现机制：压缩 ROB 下的指令级时间归因
 
-本文描述当前工作区的 TEA 实现，包括架构指令元数据、完成跟踪、周期采样、延迟归因及 PICS 计算。对应实现基于 HEAD `a549cc7b9e75af6fdeae87e323013d4ad39467d4` 上的本地修改，记录日期为 2026-10-15。
+本文描述 TEA 的架构指令元数据、完成跟踪、周期采样、延迟归因及 PICS 计算。
 
 TEA 保留功能 ROB 原有的压缩、执行和提交决策，额外维护 debug 元数据。每个采样边界先判断周期状态，再确定归因指令，最后按照指令的性能签名向量 PSV（Performance Signature Vector）累计时间权重。
 
-当前 Stalled 采用用户选择的“队首物理 Entry 中最老未完成成员”策略：A 已完成、B 未完成时归给 B。这是对论文 next-committing 口径的压缩适配扩展，不等同于严格关键路径判定。
+Stalled 采用“队首物理 Entry 中最老未完成成员”策略：A 已完成、B 未完成时归给 B。这是对论文 next-committing 口径的压缩适配扩展，不等同于严格关键路径判定。
 
 ## 1. 整体数据流
 
@@ -38,7 +38,7 @@ flowchart TD
     └── rank 3：I3，PC、PSV、执行 owner、剩余写回数
 ```
 
-`rank` 是成员在物理 Entry 内的程序顺序。当前不再用 Slot 首条指令的 PC 和聚合 PSV 代表整个 Slot，也不保留旧 `slotPsv` 兼容层。
+`rank` 是成员在物理 Entry 内的程序顺序，各成员分别保存 PC 和 PSV。
 
 ### 2.2 Rename 捕获与部分 Dispatch
 
@@ -75,7 +75,7 @@ target = (allocationCycle, robIndex, rank)
 
 ## 3. 指令完成、退休和清除
 
-`TeaMemberTracker` 为各成员保存 `live`、PSV、执行 owner 和剩余写回数，并为被 Stalled 采中过的成员设置标记。
+`TeaMemberTracker` 通过仿真器原生 helper 为各成员保存 `live`、PSV、执行 owner 和剩余写回数，并为被 Stalled 采中过的成员设置标记。独立 RTL 参考实现用于差分测试。
 
 对于多成员 Simple Slot，实际被 ROB 接受的逐端口写回按 Slot 和 rank 匹配，更新：
 
@@ -157,7 +157,7 @@ Computing 优先级最高。即使同时存在恢复相关信号，有真实提�
 
 设当周期所有退休 Entry 合计退休 N 条架构指令，则每条权重为 `1/N`。例如 Entry A 退休 3 条、Entry B 退休 1 条，四条指令各得 `1/4`，不会先按 Entry 或 Slot 等分。
 
-RTL 直接记录展开后的有效成员 PC/PSV，离线脚本计算权重。当前采用 `CommitWidth * RenameWidth` 宽采样记录，没有实现“只记提交 Entry、再离线查完整元数据表”的分层 Computing 日志。
+采样表直接记录展开后的有效成员 PC/PSV，容量为 `CommitWidth * RenameWidth`；离线脚本计算权重。
 
 ### 5.2 Stalled：锁定最老未完成成员，延迟读取最终 PSV
 
@@ -253,8 +253,7 @@ Computing 的 N 在 PC 排除前计算。四条指令各得 1/4，即使过滤�
 EMU 构建需要 ChiselDB、Constantin 和 backend debug PC 支持。当前使用的构建命令为：
 
 ```bash
-proxychains -q make emu WITH_TEA=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j64 \
-  NOOP_HOME=/nfs/home/wujiabin/work/xs-env/XiangShan2-wt-tea-correctness
+NOOP_HOME="$PWD" make emu WITH_TEA=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j8
 ```
 
 准备 `tea.cst`：
@@ -288,19 +287,21 @@ python3 scripts/tea_visualize.py build/tea.db \
 | [Rename.scala](../src/main/scala/xiangshan/backend/rename/Rename.scala) | 架构成员捕获、压缩映射、融合 owner 和 rank |
 | [CtrlBlock.scala](../src/main/scala/xiangshan/backend/CtrlBlock.scala) | 成员 sideband 的 packet 保持与入队流水对齐 |
 | [TeaMemberTracker.scala](../src/main/scala/xiangshan/backend/rob/TeaMemberTracker.scala) | 成员生命周期、完成状态、PSV、提交展开、目标选择和终结 |
+| [member_tracker.h](../src/main/resources/tea/member_tracker.h) | 仿真器原生成员历史维护 |
 | [Rob.scala](../src/main/scala/xiangshan/backend/rob/Rob.scala) | 接入实际分配/写回/提交/事件，维护恢复原因并写数据库 |
 | [RobBundles.scala](../src/main/scala/xiangshan/backend/rob/RobBundles.scala) | ROB 指针的 Entry/Slot/flag 身份比较 |
 | [tea_visualize.py](../scripts/tea_visualize.py) | 延迟关联、权重计算、PC 聚合和图表导出 |
 
-## 10. 当前验证范围
+## 10. 回归验证
 
-已有 18 项硬件测试、4 项分析测试及 6 组整机 NEMU DiffTest 通过。定向程序、CoreMark 5k 窗口、中断与非法指令程序的 TEA 开关对照，显示指令数和核周期一致；三份 period=1 数据库的边界连续、总权重守恒。新增测试覆盖 Sv39 地址符号扩展、bare 地址零扩展，以及 SQLite 有符号 64 位 PC 到 ELF 地址的匹配。新增 PC 扩展和 elaboration 开关后尚未重新运行整机 DiffTest。
+模块测试覆盖预热丢弃、架构成员退休、融合与消除、ROB 复用、事件传播及 PC 扩展；差分测试比较原生 helper 和独立 RTL 参考的全部输出。分析测试覆盖延迟关联、时间权重守恒及正式窗口边界。
 
-定向结果包含：除法 B 的 643 个 Stalled 边界，融合两条指令和 eliminated move 各 32 次架构退休，ECALL 的 544 个 FL_EX 恢复边界。具体命令、数据和图表见[验证报告](../reports/tea-members-verification.md)。
-
-这些检查没有穷尽全部压缩边界。混合 RVC 的逐条 PC 对照、SC/CS/CC 各类型独立定向验证、Latter 真实异常以及向新分配 Entry 专门注入旧 flag 事件，尚未全部做专项覆盖。也未完成全套 SPEC、长程压力或 vector 端到端验证。
-
-当前没有评估宽 Computing 日志的长期采集开销、综合面积与时序。TEA 开关对照验证的是所测路径的执行行为，不能用来判断 ROB 压缩本身的性能收益。
+```bash
+mill --no-server xiangshan.test.testOnly xiangshan.TeaCycleStatsTest \
+  xiangshan.backend.TeaHelperTest xiangshan.backend.TeaMemberTrackerTest \
+  xiangshan.backend.TeaMemberTrackerDifferentialTest
+PYTHONPATH=scripts python3 -m unittest test_tea_visualize
+```
 
 ## 11. 低开销周期统计与队首上下文
 
@@ -330,8 +331,8 @@ GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用�
 
 ### 统计口径与边界
 
-- `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期写一条累计快照。
-  enable 为 `enableTeaStats || enableTea`。重新开启累计值不清零，但无提交区间不会跨过关闭窗口。
+- `TeaCycleSummary` 在统计 enable 开启/关闭边界、每 4096 个连续启用周期及性能 dump 时写一条累计快照。
+  enable 为 `(enableTeaStats || enableTea) && inRoi`。重新开启累计值不清零，但无提交区间不会跨过关闭窗口。
 - `STATES_0..3` 是启用期间 Computing/Stalled/Flushed/Drained 的精确周期数，
   `RETIRED` 是架构指令数；不是物理 Entry 数。`CYCLE` 是已观察前缀的右开边界。
 - `GAPS_0..4` 统计完整无提交区间的 1–7、8–31、32–127、128–511、512+ 周期直方图。
@@ -339,14 +340,14 @@ GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用�
   二者均不进入完整区间直方图，而是计入 `CENSOREDGAPS`。截断区间不受明细阈值限制。
 - `TeaNoCommit` 保存 `[START, ENDCYCLE)` 和区间内 Stalled/Flushed/Drained 周期数；三者之和等于区间长度。
   区间可能跨越多个队首或恢复原因，不把整个区间归给恢复提交的 PC。可按 CYCLE 查找附近 TEA 样本。
-- 关闭采集后必须再执行一个采样时钟，才能写出关闭快照及截断区间。
-  若仿真直接结束，最后快照只覆盖其 `CYCLE` 之前的启用周期，最多可能漏掉 4095 个尾部周期；
-  `PENDING` 保留快照时尚未结束的无提交长度，`CLOSED=0` 表明未观察到采集关闭。
-  重新开启立即写入 CLOSED=0 的快照，避免沿用上一窗口的关闭标记。不能将未关闭结果当作完整切片统计。
+- 最终性能 dump 的快照包含当周期，覆盖其 `CYCLE` 之前的启用周期。
+  `PENDING` 保留快照时尚未结束的无提交长度。关闭采集后再执行一个时钟，才会写出
+  `CLOSED=1` 的关闭快照及截断区间；正常退出时的 dump 可以保持 `CLOSED=0`。
+  是否覆盖整个正式窗口，应核对最终快照的周期和原生 PERF 窗口。重新开启会立即写入 `CLOSED=0` 的快照。
 
 ### 原因快照
 
-`Tea_0.CONTEXT_*` 保存当周期实际退休数、队首指针/有效/完成状态及原有 Top-down 原因。
+`Tea_0.CONTEXT_*` 保存当周期实际退休数、队首完成状态及原有 Top-down 原因。
 `COMMITBLOCKMASK` 的 bit 0..8 依次为 misPredBlock、lastCycleFlush、WFI、redirect、
 待处理 deq flush、deqFlushBlock、criticalError、traceBlock、walk。
 原始 mask 保留重叠条件；离线主分类优先 Computing，其次最低有效 mask bit，最后是有效队首原因。

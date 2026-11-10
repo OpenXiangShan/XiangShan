@@ -95,7 +95,7 @@ class DipSlot(implicit p: Parameters) extends XSBundle {
 
 class DipEntry(implicit p: Parameters) extends XSBundle {
   val cycle = UInt(64.W)
-  val totalRetired = UInt(64.W) // prefix before this cycle, for exact warmup filtering
+  val totalRetired = UInt(64.W) // formal-window retirement prefix before this cycle
   val retired = UInt(log2Ceil(CommitWidth * RenameWidth + 1).W)
   val slots = Vec(RenameWidth, new DipSlot)
 }

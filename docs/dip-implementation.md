@@ -2,7 +2,7 @@
 
 基于当前 TEA 的 debug/ChiselDB/Constantin 基础设施实现 ASPLOS 2026 DIP 的 Dispatch 归因规则。论文依据为作者稿 `dip-asplos26-aam.pdf` 的 Figure 3、Section 3.1–3.2。
 
-RTL 按固定周期间隔采样并分类槽位，只跟踪被采中的 ROB slot 和前端后继。数据库保存采样点及必要的终结/重归因事件，不导出逐周期 Dispatch/ROB 生命周期。尚未实现论文的 CSR 和采样中断；没有将 BOOM 的 49 B 开销作为香山开销。
+采集器按固定周期间隔采样并分类槽位，只跟踪被采中的 ROB slot 和前端后继。数据库保存采样点及必要的终结/重归因事件，不导出逐周期 Dispatch/ROB 生命周期。尚未实现论文的 CSR 和采样中断；没有将 BOOM 的 49 B 开销作为香山开销。
 
 ## 归因规则
 
@@ -58,7 +58,7 @@ python3 scripts/dip_analyze.py build/dip.db --output build/dip-profile
 | `Dip_0` | 仅在采样点记录周期、该周期之前的累计退休数、当周期退休数，以及各槽位的状态、原因、PC 和目标身份 |
 | `DipDelayedFinal_0` | 被采目标的提交、相关 flush、前端后继绑定，以及确认自身清除原因稳定的提交水位 |
 
-RTL 为每个 ROB Former/Latter slot 保存是否被引用、环绕 flag、首次被引用的周期 generation 和是否作为恢复原因。未被采样引用的分派/提交不产生记录。前端等待共享一个 generation；遇到下一条 Dispatch 指令时，仅输出一次绑定。同一目标可被任意多个周期样本引用，不占用逐样本硬件队列。flush 只在影响已采工作时输出；离线将其重归到原因目标，保留后续更老 flush 再次重归的能力。generation 避免 ROB 索引复用与旧样本串联。
+原生采集器为每个 ROB Former/Latter slot 保存是否被引用、环绕 flag、首次被引用的周期 generation 和是否作为恢复原因。未被采样引用的分派/提交不产生记录。前端等待共享一个 generation；遇到下一条 Dispatch 指令时，仅输出一次绑定。同一目标可被任意多个周期样本引用，不占用逐样本硬件队列。flush 只在影响已采工作时输出；离线将其重归到原因目标，保留后续更老 flush 再次重归的能力。generation 避免 ROB 索引复用与旧样本串联。
 
 EMU 的实际 `inRoi` 信号控制采集：预热期间原生采集器保持复位，不累计退休数、不维护目标或恢复历史，也不写表。正式窗口开始后才从空状态采集，`CYCLE` 保留原始周期，`TOTALRETIRED` 从正式窗口起点的 0 开始。分析本版本的正式窗口数据使用默认 `--warmup-instr 0`；该参数仅用于进一步按窗口内退休前缀截取。`--end-cycle C` 设定排他的采样终点；更晚的终结事件仍参与归因。输出 `pics.csv` 按 PC、最终状态和多热原因组合聚合；`summary.json` 给出采样数、重归因数、各状态周期和未定案槽位。
 
