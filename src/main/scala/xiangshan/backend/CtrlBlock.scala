@@ -28,6 +28,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo,
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
+import xiangshan.backend.fu.NewCSR.{IcountEvent, IcountResponse}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
@@ -122,7 +123,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
+  private val disableFusion = decode.in.fromCSR.singlestep || io.icountResponse.status.serial || !decode.in.fromCSR.custom.fusion_enable
 
   private val s0_robFlushRedirect = rob.out.flushOut
   private val s0_robFlushPcInfo = rob.out.flushPcInfo
@@ -466,6 +467,11 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.in.fromCSR := io.fromCSR.toDecode
+  decode.in.icount := io.icountResponse
+  decode.in.commit.valid := rob.out.commits.isCommit && rob.out.commits.commitValid(0)
+  decode.in.commit.bits := rob.out.commits.robIdx(0)
+  decode.in.exception := rob.out.exception
+  io.icountEvent <> decode.out.icountEvent
   decode.in.debugMode := io.fromCSR.debugMode
   // Only the permitted single-step instruction can execute and request a
   // non-trap flush-itself. A branch or flush-after has completed that step.
@@ -824,6 +830,11 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
 
+  val debugDispatched = dispatch.io.fromRename.map { uop =>
+    uop.fire && uop.bits.firstUop && uop.bits.debugSerial
+  }
+  decode.in.debugDispatched := VecInit(debugDispatched).asUInt.orR
+
   // lsqEnqCtrl assign
   lsqEnqCtrl.io.redirect := s1_s3_redirect
   lsqEnqCtrl.io.fromDispatch <> dispatch.io.toLsqEnqCtrl.lsqEnqIO
@@ -956,6 +967,8 @@ class CtrlBlockImp(
 }
 
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
+  val icountResponse = Input(new IcountResponse)
+  val icountEvent = Valid(new IcountEvent)
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
   }

@@ -29,6 +29,7 @@ import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
+import xiangshan.backend.fu.NewCSR.{IcountEvent, IcountResponse}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import xiangshan.backend.rob.RobPtr
@@ -91,6 +92,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   val robDeqPtr = Input(new RobPtr)
+  val icountEvent = Input(Valid(new IcountEvent))
+  val icountResponse = Output(new IcountResponse)
   // Observation-only handshake: publish a latter trap after the former retires.
   val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Bool()))
   val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))

@@ -12,6 +12,8 @@ import xiangshan.backend.{PipelineStallReason, StoreBubbleReason}
 import xiangshan.backend.decode.DecodeDebug
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.NewCSR.{IcountEvent, IcountResponse}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -88,20 +90,24 @@ class DecodeStageImp(
   debug.in.singleStep := in.fromCSR.singlestep
   debug.in.trapTrigger := in.fromCSR.trapTrigger
   debug.in.debugMode := in.debugMode
-  debug.in.redirect := in.redirect.valid
+  debug.in.redirect := in.redirect
   debug.in.replay := in.stepReplay
-  debug.in.mops.zip(in.mop).foreach { case (sink, source) =>
-    sink.valid := source.valid
-    sink.fire := source.fire
-    sink.triggerAction := source.bits.trigger
-  }
+  debug.in.icount := in.icount
+  debug.in.dispatched := in.debugDispatched
+  debug.in.commit := in.commit
+  debug.in.exception := in.exception
+  out.icountEvent <> debug.out.icountEvent
+
 
   for (i <- decodeChannels.in.mops.indices) {
     val inMopBits = in.mop(i).bits
 
     decodeChannels.in.redirect := in.redirect.valid
     decodeChannels.in.renameCanAccept := out.uop.head.ready
-    decodeChannels.in.mops(i).valid := in.mop(i).valid
+    decodeChannels.in.mops(i).valid := in.mop(i).valid && debug.out.allow(i)
+    debug.in.mops(i).valid := in.mop(i).valid
+    debug.in.mops(i).fire := in.mop(i).fire
+    debug.in.mops(i).triggerAction := inMopBits.trigger
     decodeChannels.in.mops(i).bits.info match {
       case info =>
         info.rawInst := inMopBits.instr
@@ -116,6 +122,8 @@ class DecodeStageImp(
         ctrl.satpFlushFirstFetchFault := inMopBits.satpFlushFirstFetchFault
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := debug.out.triggerAction(i)
+        ctrl.debugSerial      := debug.out.serial
+        ctrl.icountSelected   := debug.out.icountSelected(i)
         ctrl.isRVC            := inMopBits.isRVC
         ctrl.predTaken        := inMopBits.predTaken
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
@@ -131,7 +139,7 @@ class DecodeStageImp(
 
   in.mop.zipWithIndex.foreach {
     case (mop, i) =>
-      mop.ready := decodeChannels.in.mops(i).ready
+      mop.ready := decodeChannels.in.mops(i).ready && debug.out.allow(i)
   }
 
   out.uop.zipWithIndex.foreach { case (uop, i) =>
@@ -150,6 +158,7 @@ class DecodeStageImp(
         bits.satpFlushFirstFetchFault := mopInfo.satpFlushFirstFetchFault
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger
+        bits.debugSerial := mopInfo.debugSerial
         bits.isRVC := mopInfo.isRVC
         bits.predTaken := mopInfo.predTaken
         bits.crossPageIPFFix := mopInfo.crossPageIPFFix
@@ -209,6 +218,14 @@ class DecodeStageImp(
           x.pc := mopInfo.debug.get.pc
           x.debug_seqNum.seqNum := mopInfo.debug.get.debug_seqNum.seqNum
           x.debug_seqNum.uopIdx := uopInfo.uopIdx
+        }
+        when(mopInfo.icountSelected) {
+          bits.exceptionVec := 0.U.asTypeOf(bits.exceptionVec)
+          bits.exceptionVec(breakPoint) := true.B
+          bits.isFetchMalAddr := false.B
+          bits.crossPageIPFFix := false.B
+          bits.satpFlushFirstFetchFault := false.B
+          bits.flushPipe := false.B
         }
     }
   }
@@ -292,7 +309,6 @@ class DecodeStageImp(
 
 object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
-    val debugMode = Input(Bool())
     val stepReplay = Input(Bool())
     val redirect = Input(ValidIO(new Redirect))
     val isResumeVType = Input(Bool())
@@ -307,6 +323,11 @@ object DecodeStage {
     // from CSR
     val fromCSR = Input(new CSRToDecode)
     val vstart = Input(Vstart())
+    val debugMode = Input(Bool())
+    val icount = Input(new IcountResponse)
+    val debugDispatched = Input(Bool())
+    val commit = Flipped(Valid(new RobPtr))
+    val exception = Flipped(Valid(new ExceptionInfo))
   }
 
   class Out(implicit p: Parameters) extends XSBundle {
@@ -320,6 +341,7 @@ object DecodeStage {
 
     // to Rename
     val uop = Vec(DecodeWidth, DecoupledIO(new DecodeOutUop))
+    val icountEvent = Valid(new IcountEvent)
 
     // to RAT
     val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(log2Ceil(IntLogicRegs)))))

@@ -651,6 +651,8 @@ object DecodeChannelOutput {
 }
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
+  val debugSerial      = Bool()
+  val icountSelected   = Bool()
   val foldpc           = UInt(MemPredPCWidth.W)
   val exceptionVec     = ExceptSparseVec(ExceptionNO.fromFrontendSet)
   val satpFlushFirstFetchFault = Bool()

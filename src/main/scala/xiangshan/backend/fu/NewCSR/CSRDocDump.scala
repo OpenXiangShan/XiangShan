@@ -186,6 +186,10 @@ trait CSRDocDump { self: NewCSR =>
         new Mcontrol6,
         s"${tdata1Mod.modName}(tdata1.DATA view)",
       )
+      if (idx == 0) {
+        dumpBundleCSV(writer, "D", "icount[0]", CSRs.tdata1, new Icount,
+          s"${tdata1Mod.modName}(tdata1.DATA view)")
+      }
       dumpBundleCSV(
         writer,
         "D",

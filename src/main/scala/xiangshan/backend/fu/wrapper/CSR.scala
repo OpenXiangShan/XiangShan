@@ -105,6 +105,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.in match {
     case in =>
       in.valid := valid
+      in.bits.robIdx := thisRobIdx
       in.bits.wen := csrWen
       in.bits.ren := csrRen
       in.bits.op  := CSROpType.getCSROp(func)
@@ -165,6 +166,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
   csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+  csrMod.io.icountEvent := csrIn.icountEvent
+  csrOut.icountResponse := RegNext(csrMod.io.status.icount, 0.U.asTypeOf(new IcountResponse))
 
   csrMod.io.fromRename.diffVl.zip(csrIn.vpu.diffVl).foreach { case (sink, source) =>
     sink := source
