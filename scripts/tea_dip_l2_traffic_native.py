@@ -104,6 +104,11 @@ def analyze(folder, receipt_path):
             controller = '.l2cache.prefetcher.prefetchController.'
             row['controller_active_epochs'] = scalar(controller + 'epoch_activeEpochCount' + role, blocks[stamp])[1]
             row['controller_inactive_epochs'] = scalar(controller + 'epoch_inactiveEpochCount' + role, blocks[stamp])[1]
+            trained, selected, disabled = [row[key] for key in
+                                           ['bop_train', 'bop_student_takeover', 'bop_drop_for_auto_disable']]
+            assert selected <= trained and disabled <= trained, (role, phase, trained, selected, disabled)
+            row['student_selected_auto_disabled_bounds'] = dict(
+                lower=max(0, selected + disabled - trained), upper=min(selected, disabled), unit='training events')
             generators[role] = row
         learning[phase] = dict(native_print_stamp=stamp, generators=generators)
     return dict(point=receipt['point'], source=receipt['source'], native_cycles=cycles,
@@ -120,6 +125,7 @@ def analyze(folder, receipt_path):
                       'prefetch matching an MSHR OR request-buffer entry. Neither measures CPU waiting. '
                       'Controller-active epochs do not prove local issueEnable. Local auto-disable includes teacher, '
                       'student and issue-gate decisions; student takeover is a training event, not a sent request. '
+                      'Student/local-disable overlap bounds use their common atomic training population, not CPU-loss cycles. '
                       'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets.')
 
 
