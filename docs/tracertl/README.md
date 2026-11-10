@@ -1,148 +1,62 @@
 # TraceRTL
 
-[TraceRTL](https://ieeexplore.ieee.org/document/11408626)[^1] runs the XiangShan RTL on an **instruction trace** instead of a program
-image. The trace records, for every instruction on the correct path, what decides
-performance: the PC, the encoding, the control-flow outcome, and the memory address.
-The RTL replays these records cycle by cycle. Register values and execution results
-are not computed faithfully. However, every decision that affects performance takes the
-traced value, so the pipeline behaves as it would on the real program.
+## 1. Overview
 
-This page covers the idea, the high-level design and the basic usage. The
-implementation, with the module map and how the Scala and C++ sides fit together,
-is in [design/implementation.md](design/implementation.md).
+[TraceRTL](https://ieeexplore.ieee.org/document/11408626)[^1] introduces an agile,
+trace-driven performance evaluation methodology that decouples the functional and
+performance components of a CPU RTL design. Following this idea, we adapted XiangShan
+to support both trace-driven and execution-driven simulation, with minimal switching
+overhead and zero side effects on the mainline: trace-driven mode is selected at
+elaboration by `--trace-rtl`, and without the flag the generated Verilog is the same
+as mainline. Below, we call trace-driven XiangShan simply TraceRTL.
 
-## 1. Motivation
+TraceRTL is a performance exploration framework that bypasses full functional
+correctness while preserving performance accuracy. It does so in two steps.
 
-XiangShan performance work happens in two places:
+First, TraceRTL runs on an **instruction trace stream** instead of a program image.
+The trace is a sequence of records, one per instruction on the correct path, captured
+by NEMU/QEMU while running the program. Each record holds the information that may
+affect performance: the PC, the encoding, the control-flow outcome and target,
+exceptions and interrupts, and memory addresses.
 
-- **Architecture exploration (gem5).** New ideas are modelled and measured on SPEC
-  slices quickly. However, callibration with RTL takes a lot of effort.
-- **RTL implementation.** The real design is measured by booting checkpoints with a
-  full, functionally correct system: memory image, devices and difftest. A
-  performance feature can only be measured once everything around it executes
-  correctly, which may also be a time consuming process.
+Then, TraceRTL injects the golden data from the trace into the modules that produce
+performance-critical events. Everything else (rename, issue, branch prediction,
+caches, TLBs, prefetchers, DRAM) still runs as real RTL, while register values and
+load / store data are don't care.
 
-TraceRTL bridges the two: it enables feature exploration directly on the RTL, and
-classifies modules as either *performance correct* or *functionally correct*. The
-RTL stays performance correct, while functional correctness is relaxed.
-
-## 2. Core idea: relax functional correctness, keep performance correctness
-
-An out-of-order core's performance depends on a small set of facts about each instruction.
-TraceRTL takes those facts from the trace. Everything else runs as real RTL.
-
-| What performance depends on | Where it comes from in TraceRTL |
-| --- | --- |
-| Instruction stream (PC, encoding) | trace, injected at the IFU |
-| Branch direction and jump target | trace |
-| Exceptions, interrupts, trap and xret targets | trace |
-| Load, store and AMO addresses (VA and PA) | trace |
-| Data-dependent latency (div, fdiv/fsqrt operands) | trace |
-| Register dependencies, structural hazards, queues | real RTL: the encodings are real, so rename and issue see the true dependencies |
-| Branch prediction, caches, TLBs, page walks, prefetchers, DRAM | real RTL, driven by the traced addresses |
-| Register values, load data, store data | don't care |
-
-### What the trace records
-
-The trace is produced by NEMU's trace writer (`--tracefile`) and compressed with
-zstd. It holds one record per instruction on the correct path:
-
-| Field | Meaning |
-| --- | --- |
-| `pcVA`, `pcPA` | instruction address |
-| `inst` | instruction encoding (RVC or RVI) |
-| `branchType`, `branchTaken`, `target` | control flow: is it a CFI, is it taken, where it goes (also the trap / xret target) |
-| `exception` | non-zero if the instruction traps; bit 7 marks an interrupt or synthetic force-jump |
-| `memoryType`, `memorySize`, `memoryAddrVA`, `memoryAddrPA` | load / store / AMO / LR / SC and their address. For div and fdiv, the two address words carry the source operands instead |
-| `InstID` | sequence number, starting at 1 |
-
-## 3. High-level design
-
-TraceRTL addresses five problems. The rest of the core stays unchanged.
-
-### 3.1 Injecting the trace into the pipeline
-
-TraceRTL hijacks the **IFU**. A `TraceRTL` module inside the IFU builds, from the
-trace, the fetch packet the IFU would otherwise build from ICache data. From then on
-the IFU talks to the IBuffer and the backend exactly as in normal execution.
-
-1. **Read.** A 128-entry trace buffer is refilled from the C++ runtime over DPI-C,
-   32 instructions at a time.
-2. **Align.** The BPU and FTQ still predict fetch blocks as usual. For each predicted
-   block (up to two per cycle), TraceRTL maps the next trace instructions onto the
-   block's halfword slots, following the traced PCs.
-3. **Check the prediction.** The trace equivalent of the IFU's PredChecker compares
-   the prediction with the traced instructions. For example, it catches a `jal` that
-   was not predicted taken, or a predicted-taken slot that holds no branch. When the
-   prediction is wrong, it redirects the BPU, as a predecode fault would.
-4. **Deliver.** The checked packet replaces the IFU's own aligned packet. The trace
-   record of each instruction (`traceInfo`) travels with it down the pipeline.
-
-The trace contains only the correct path. When the frontend runs down a wrong path,
-the fetch block no longer matches the trace, and the IFU **stalls** until the
-redirect arrives. Wrong-path instructions therefore become bubbles instead of being
-executed.
-
-### 3.2 Control flow from the trace
-
-Without real register values, the core cannot compute branch outcomes, so they are
-replaced by the traced ones:
-
-- **Conditional branches.** The BranchUnit takes `taken` from the trace and
-  mispredicts when the prediction disagrees.
-- **Jumps.** The JumpUnit, and the IFU checker when it redirects a jump, use the
-  traced `target` instead of computing it.
-- **Exceptions.** A traced exception is raised at decode as an illegal instruction.
-  The CSR unit sends the trap to the traced target. All other exception sources
-  (TLB, PMP, CSR permission, misalignment) are silenced, so the RTL traps exactly
-  where the trace did. `xret` targets come from the trace too.
-- **Force jumps.** Records with `exception` bit 7 set (interrupts, and the
-  synthetic jump from the reset vector to the first traced PC) pass through the
+- **Execution flow.** The PC and instruction encoding come directly from the trace.
+  A module inside the IFU aligns trace instructions onto the fetch blocks that the
+  BPU and FTQ predict, and its packet replaces the one built from ICache data. Since
+  the encodings are real, rename and issue see the true dependencies.
+- **Control flow.** The BranchUnit takes the taken bit from the trace and the
+  JumpUnit takes the target. The IFU checks each prediction against the trace and
+  redirects the BPU when it is wrong. The trace holds only the correct path, so on a
+  wrong path the IFU stalls until the backend redirect arrives, and wrong-path
+  instructions become bubbles. After every redirect, the trace reader rewinds to the
+  instruction that caused it.
+- **Exceptions and interrupts.** A traced exception is raised at decode as an
+  illegal instruction, and the CSR unit sends traps and `xret`s to the traced target.
+  All other exception sources (TLB, PMP, CSR permission, misalignment) are silenced,
+  so the RTL traps exactly where the trace did. Interrupts, and the jump from the
+  reset vector to the first traced PC, are force-jump records that pass through the
   pipeline like a trapping instruction.
+- **Memory access.** Load, store and AMO units take the traced VA and PA. The TLBs
+  still look up, miss and walk, so translation latency is kept, but the translated
+  address comes from the trace's VA→PA map, and the page walker reads PTEs from a page
+  table built from that map. Translation and PMP/PMA faults are disabled.
+- **Data-dependent latency.** Div and fdiv/fsqrt take their source operands from the
+  trace, so their latency matches the real program.
 
-Every redirect carries the `traceInfo` of the instruction that caused it. The trace
-reader then **rewinds** to the right instruction:
+Finally, since there is no reference model, the trace is also the reference. Every
+cycle the C++ runtime checks that the ROB commits exactly the traced instructions in
+order, and reports the run as stuck if nothing commits for 15000 cycles. A run that
+commits the whole trace (or reaches `-I`) exits with 0; a failed check prints the
+recent trace and DUT history and exits with 1.
 
-- to `InstID` if the redirect re-executes the instruction itself (a load replay, for
-  example);
-- otherwise to `InstID + 1`.
+The module map and how the Scala and C++ sides fit together are described in
+[design/implementation.md](design/implementation.md).
 
-### 3.3 Memory from the trace
-
-- **Addresses.** Load, store and AMO units take the traced VA and PA instead of
-  computing them.
-- **Translation.** The TLBs still perform their lookups, misses and page walks, so
-  translation latency is kept. The translated address comes from the trace's own
-  VA→PA map. The page walker reads PTEs from a page table that the runtime builds
-  from that map (or loads from a `--tracept-file`).
-- **Faults.** Translation and PMP/PMA faults are disabled.
-
-### 3.4 Checking the replay instead of difftest
-
-There is no reference model. The trace is the reference, and the C++ runtime checks
-three things every cycle:
-
-- **commit check:** every instruction the ROB commits must be the next one in the
-  trace;
-- **drive check:** every instruction the IBuffer sends to decode must be the next one
-  the frontend was given;
-- **progress check:** if nothing commits for 15000 cycles, the run is reported as
-  stuck.
-
-A run that commits the whole trace (or reaches `-I`) ends with `TraceRTL Dump` and
-exit code 0. A failed check prints the recent trace and DUT history and exits with 1.
-
-### 3.5 Keeping execution mode unchanged
-
-TraceRTL is selected at elaboration by `--trace-rtl`. Every hook is gated:
-
-- through `TraceRTLChoose(default, trace)` or `TraceRTLDontCareValue(x)`;
-- through `traceInfo` fields that are `Option`s and are absent in execution mode;
-- or through a plain `if (env.TraceRTLMode)`.
-
-Without the flag, the generated Verilog is the same as mainline.
-
-## 4. Usage
+## 2. Usage
 
 ### Build
 
@@ -197,9 +111,9 @@ Performance counters are printed at the end, as in a normal run.
   It also runs CoreMark on an exec emu built with the same flags, and fails if the
   TraceRTL IPC drifts too far from the exec IPC.
 
-## 5. Known limitations
+## 3. Known limitations
 
-- Wrong-path instructions are not executed (see 3.1). Their effects on the backend
+- Wrong-path instructions are not executed (see §1). Their effects on the backend
   and on the data caches are therefore not modelled.
 - NEMU's interrupt records are not replayed yet.
 - CSR state that a program loads from memory is not modelled, since there is no
