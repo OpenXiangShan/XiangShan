@@ -201,6 +201,11 @@ class FltRegionImp(
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
       iq.in.resps.ex0 := issuePipes(i).map(_.out.ex0Resp)
+      iq.in.fdivReadyAhead3Cycle.foreach { ready =>
+        ready.zip(issuePipes(i)).foreach { case (sink, pipe) =>
+          sink := pipe.out.fdivReadyAhead3Cycle.getOrElse(true.B)
+        }
+      }
       iq.in.resps.ex1 := issuePipes(i).map(_.out.ex1Resp)
       iq.in.resps.ex0RespFailLat1 := ex0RespFailLat1
       iq.in.wakeup.fpWbM2Vec := fpWbM2WakeUp

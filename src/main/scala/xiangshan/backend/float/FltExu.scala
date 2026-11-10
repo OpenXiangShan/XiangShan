@@ -7,6 +7,7 @@ import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.wrapper.FDivSqrtFlt
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.vector.fu._
 import xiangshan.backend.vector.ExuParam
@@ -27,6 +28,10 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
   val bypass: FltBypassNetwork = Module(new FltBypassNetwork()(param, p))
   val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
   private val nonFixedLatFus: Seq[FltNonFixedLatFunc] = fus.collect { case fu: FltNonFixedLatFunc => fu }
+
+  out.fdivReadyAhead3Cycle.foreach { ready =>
+    ready := fus.collect { case fu: FDivSqrtFlt => fu.startReadyAhead3Cycle }.head
+  }
 
   val ex: Vec[ValidIO[Exu.ExStage]] = RegInit(
     VecInit.fill(numOfEx)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
@@ -201,5 +206,6 @@ object FltExu {
     val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
     val outFuWakeUp = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, new FltWakeUpBundle(backendParams.fpPregParams)))
     val outFuBusy = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Bool()))
+    val fdivReadyAhead3Cycle = Option.when(param.fuConfigs.exists(_.isFdiv))(Bool())
   }
 }
