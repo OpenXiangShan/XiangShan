@@ -17,7 +17,6 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
 
   class PerfHarness extends Module {
     val io = IO(new Bundle {
-      val inRoi = Input(Bool())
       val clean = Input(Bool())
       val dump = Input(Bool())
       val observed = Output(new LogPerfControl)
@@ -25,7 +24,6 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
     val control = WireInit(0.U.asTypeOf(new LogPerfControl))
     control.timer := 123.U
     control.logEnable := true.B
-    control.inRoi := io.inRoi
     control.clean := io.clean
     control.dump := io.dump
     LogPerfControl.setSource(control)
@@ -33,13 +31,11 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
     io.observed := sink.io
   }
 
-  it should "wire measurement control across modules without coupling it to counter dumps" in {
+  it should "wire the existing performance controls across modules" in {
     simulate(new PerfHarness) { dut =>
-      for (roi <- Seq(false, true); clean <- Seq(false, true); dump <- Seq(false, true)) {
-        dut.io.inRoi.poke(roi.B)
+      for (clean <- Seq(false, true); dump <- Seq(false, true)) {
         dut.io.clean.poke(clean.B)
         dut.io.dump.poke(dump.B)
-        dut.io.observed.inRoi.expect(roi.B)
         dut.io.observed.clean.expect(clean.B)
         dut.io.observed.dump.expect(dump.B)
         dut.io.observed.timer.expect(123.U)
@@ -50,6 +46,7 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
 
   it should "conserve time, separate censored intervals and reset gaps across disabled windows" in {
     simulate(new TeaCycleStats) { dut =>
+      dut.io.clean.poke(false.B)
       dut.io.dump.poke(false.B)
       var cycle = 0
       def drive(enabled: Boolean, state: Int, retired: Int = 0): Unit = {
@@ -104,20 +101,27 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
     }
   }
 
-  it should "exclude warmup and include the final measured cycle in a requested snapshot" in {
+  it should "discard accumulated warmup on clean and include the final measured cycle" in {
     simulate(new TeaCycleStats) { dut =>
-      dut.io.enable.poke(false.B)
-      dut.io.dump.poke(true.B)
+      dut.io.clean.poke(false.B)
+      dut.io.enable.poke(true.B)
+      dut.io.dump.poke(false.B)
       dut.io.state.poke(TeaState.computing)
       dut.io.retired.poke(4.U)
       dut.io.gapThreshold.poke(128.U)
       for (cycle <- 0 until 10) {
         dut.io.cycle.poke(cycle.U)
-        dut.io.summary.valid.expect(false.B)
+        if (cycle == 9) {
+          dut.io.clean.poke(true.B)
+          dut.io.dump.poke(true.B)
+          dut.io.summary.bits.states(0).expect(10.U)
+          dut.io.summary.bits.retired.expect(40.U)
+          dut.io.summary.bits.cleared.expect(true.B)
+        }
         dut.io.interval.valid.expect(false.B)
         dut.clock.step()
       }
-      dut.io.enable.poke(true.B)
+      dut.io.clean.poke(false.B)
       dut.io.dump.poke(false.B)
       dut.io.cycle.poke(10.U)
       dut.io.state.poke(TeaState.stalled)
@@ -144,6 +148,7 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
 
   it should "include the current cycle in periodic summaries and preserve an open gap" in {
     simulate(new TeaCycleStats) { dut =>
+      dut.io.clean.poke(false.B)
       dut.io.enable.poke(true.B)
       dut.io.dump.poke(false.B)
       dut.io.retired.poke(0.U)
@@ -162,4 +167,48 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
       }
     }
   }
+  it should "close a gap on clean without charging its pre-clean cycles again" in {
+    simulate(new TeaCycleStats) { dut =>
+      dut.io.enable.poke(true.B)
+      dut.io.clean.poke(false.B)
+      dut.io.dump.poke(false.B)
+      dut.io.state.poke(TeaState.stalled)
+      dut.io.retired.poke(0.U)
+      dut.io.gapThreshold.poke(128.U)
+      for (cycle <- 0 until 4) {
+        dut.io.cycle.poke(cycle.U)
+        dut.io.clean.poke((cycle == 3).B)
+        if (cycle == 3) {
+          dut.io.summary.valid.expect(true.B)
+          dut.io.summary.bits.states(1).expect(4.U)
+          dut.io.summary.bits.censoredGaps.expect(1.U)
+          dut.io.summary.bits.pending.expect(0.U)
+          dut.io.interval.valid.expect(true.B)
+          dut.io.interval.bits.start.expect(0.U)
+          dut.io.interval.bits.endCycle.expect(4.U)
+          dut.io.interval.bits.states(0).expect(4.U)
+          dut.io.interval.bits.rightCensored.expect(true.B)
+        }
+        dut.clock.step()
+      }
+      dut.io.clean.poke(false.B)
+      dut.io.cycle.poke(4.U)
+      dut.io.summary.bits.states(1).expect(1.U)
+      dut.clock.step(2)
+      dut.io.cycle.poke(6.U)
+      dut.io.state.poke(TeaState.computing)
+      dut.io.retired.poke(2.U)
+      dut.io.dump.poke(true.B)
+      dut.io.summary.bits.states(0).expect(1.U)
+      dut.io.summary.bits.states(1).expect(2.U)
+      dut.io.summary.bits.retired.expect(2.U)
+      dut.io.summary.bits.cleared.expect(false.B)
+      dut.io.interval.valid.expect(true.B)
+      dut.io.interval.bits.start.expect(4.U)
+      dut.io.interval.bits.endCycle.expect(6.U)
+      dut.io.interval.bits.leftCensored.expect(true.B)
+      dut.io.interval.bits.rightCensored.expect(false.B)
+    }
+  }
+
 }

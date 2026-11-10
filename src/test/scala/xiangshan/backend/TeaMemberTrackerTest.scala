@@ -79,7 +79,7 @@ class TeaMemberTrackerTest extends XSTester {
     port.bits.psv.poke(psv.U)
   }
 
-  it should "discard warmup history and leave pre-window members untracked" in {
+  it should "discard history on reset and leave earlier members untracked" in {
     simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.reset.poke(true.B)
