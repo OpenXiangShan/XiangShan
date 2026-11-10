@@ -48,7 +48,7 @@ class TeaMemberTrackerIO(writebackPorts: Int, eventPorts: Int)(implicit p: Param
   val commits = Input(Vec(2 * CommitWidth, Valid(new RobPtr)))
   val head = Input(new RobPtr)
   val readPtr = Input(Vec(2, new RobPtr))
-  val read = Output(Vec(2, Valid(new TeaMemberResult)))
+  val read = Output(Vec(2, new TeaFlushCause))
   val stalled = Output(Valid(new TeaTarget))
   val markStalled = Input(Bool())
   val committed = Output(Vec(CommitWidth * RenameWidth, Valid(new TeaMemberResult)))
@@ -100,7 +100,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
     ptr(x.bits)
   }
 
-  private val outputWords = 2 * 6 + 4 + CommitWidth * RenameWidth * 6 + RenameWidth * 9
+  private val outputWords = 2 * 3 + 4 + CommitWidth * RenameWidth * 6 + RenameWidth * 9
   private val helper = Module(new TeaMemberTrackerNative(
     RobSize, RenameWidth, CommitWidth, writebackPorts, eventPorts, p(XSCoreParamsKey).HartId,
     inputs.size, outputWords))
@@ -126,7 +126,8 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
   }
   io.read.foreach { x =>
     x.valid := get()(0)
-    result(x.bits)
+    x.pc := get()
+    x.psv := get()
   }
   io.stalled.valid := get()(0)
   target(io.stalled.bits)

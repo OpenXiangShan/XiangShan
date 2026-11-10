@@ -36,7 +36,7 @@ python3 scripts/tea_visualize.py reports/tea-members-on/tea.db \
 测量区间没有选中 TEA 样本的输入会被拒绝。区间、指令数和周期数写入汇总，
 不能与 `--cycle-range` 同用。PC 排除仍由 `--spec-checkpoint` 单独控制。
 日志含 `teaSamplePeriod0` 时，还会报告原始采样行数、期望边界数、重复、偏离周期、
-内部缺样和端点缺样数量。此检查按从 cycle 0 开始、持续开启的固定周期采样计算，
+内部缺样和端点缺样数量。此检查以首个正式窗口快照确定固定周期采样的相位，
 不改变归因权重，也不自动补齐或截断端点；端点差异需结合仿真退出和最终 PERF dump 检查。
 
 所有输入均有已验证的 SPEC 日志和采样周期时，另生成 `sampled_costs.png/pdf/csv`，
@@ -71,8 +71,8 @@ python3 scripts/tea_visualize.py /path/to/checkpoint/simulator.db \
 
 归因规则：
 
-- Computing：展开实际退休的所有架构指令，每条获得 `1/N`。PC 过滤在
-  分母计算之后执行，不把被过滤指令的权重转移给其他指令。
+- Computing：按实际架构退休数 N 分摊，每条获得 `1/N`。窗口前分配的成员没有
+  历史，其份额保留为未知。PC 过滤在分母计算之后执行，不把权重转移给其他指令。
 - Stalled：按 allocationCycle、robIndex、rank 关联采样时锁定的最老未完成成员。
   这是适应 ROB 压缩的扩展口径，不是严格关键路径判定。
 - Drained：关联边界之后第一个实际提交的首条架构指令。
@@ -108,4 +108,4 @@ ST_TLB 等执行期签名会在指令存活期间累积；Stalled 关联的是�
 新增的低开销模式与四表导出见[实现文档第 11 节](../docs/tea-implementation.md#11-低开销周期统计与队首上下文)。
 `head_context.csv` 随样本的 ROI/PC 过滤；`cycle_summary.json` 与 `no_commit_intervals.csv`
 独立报告全部采集窗口，不随这些过滤变化。精确计数只覆盖 JSON 中 observed_end 之前的启用周期，
-collection_closed=false 时不得声称覆盖完整运行。旧数据库仍支持原来的图表分析。
+collection_closed=false 表示未观察到采集关闭，是否覆盖完整正式窗口须核对最终 PERF dump。

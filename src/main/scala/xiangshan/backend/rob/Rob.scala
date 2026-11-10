@@ -2087,10 +2087,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     teaSelector.io.samplePeriod := teaSamplePeriod
     teaSelector.io.state := TeaState.classify(isEmpty, state === s_walk || in.redirect.valid,
       hasTeaCommit, teaVisibleCause.valid)
-    teaSelector.io.commitMask := 0.U
-    teaSelector.io.commitPc := 0.U.asTypeOf(teaSelector.io.commitPc)
-    teaSelector.io.commitPsv := 0.U.asTypeOf(teaSelector.io.commitPsv)
-    teaSelector.io.stalledTarget := 0.U.asTypeOf(teaSelector.io.stalledTarget)
     teaSelector.io.flushCause := teaVisibleCause
 
     val tracker = withReset(teaReset) {
@@ -2102,11 +2098,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     tracker.io.redirect := in.redirect
     tracker.io.readPtr(0) := teaRedirectPtr
     tracker.io.readPtr(1) := teaFlushPtr
-    teaRedirectPc := tracker.io.read(0).bits.pc
-    teaRedirectPsv := tracker.io.read(0).bits.psv
+    teaRedirectPc := tracker.io.read(0).pc
+    teaRedirectPsv := tracker.io.read(0).psv
     teaRedirectKnown := tracker.io.read(0).valid
-    teaExceptionPc := tracker.io.read(1).bits.pc
-    teaExceptionPsv := tracker.io.read(1).bits.psv
+    teaExceptionPc := tracker.io.read(1).pc
+    teaExceptionPsv := tracker.io.read(1).psv
     teaExceptionKnown := tracker.io.read(1).valid
     // Keep the helper input independent of its read-valid outputs used by state classification.
     tracker.io.markStalled := teaSelector.io.sampleValid && !isEmpty &&
@@ -2181,9 +2177,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.commitBlockMask := VecInit(Seq(misPredBlock, lastCycleFlush, hasWFI,
       in.redirect.valid, deqNeedFlush && !deqHasFlushed, deqFlushBlock,
       criticalErrorState, traceBlock, state === s_walk)).asUInt
-    sample.context.headValid := !isEmpty
     sample.context.headReady := !isEmpty && robEntries(deqPtr.value).isWritebacked
-    sample.context.head := deqPtr
     sample.context.headReasonValid := !isEmpty && !hasTeaCommit && out.debugRobHeadStall.get.valid
     sample.context.headReason := Mux(sample.context.headReasonValid, out.debugRobHeadStall.get.bits, 0.U)
 
