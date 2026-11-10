@@ -29,6 +29,12 @@ class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XS
   val setMask = UInt(flagWidth.W)
 }
 
+/** Consume selected sticky flags from one surviving architectural slot. */
+class RobSetFlagTakeReq(val flagWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val robIdx = new RobPtr
+  val mask = UInt(flagWidth.W)
+}
+
 /** Tracks the oldest in-flight setter for each bit of a sticky ROB flag. */
 class RobSetFlagTracker(
   val width: Int,
@@ -66,6 +72,8 @@ class RobSetFlagTracker(
     val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
     val redirect = Input(Valid(new Redirect))
     val commitSetMask = Output(UInt(width.W))
+    val takeSlot = Input(Valid(new RobSetFlagTakeReq(width)))
+    val takenSetMask = Output(UInt(width.W))
   })
 
   private def selectOldest(candidates: Seq[(Bool, RobPtr)]): (Bool, RobPtr) = {
@@ -109,19 +117,33 @@ class RobSetFlagTracker(
     }
   }
 
+  private val taken = Wire(Vec(width, Bool()))
+  private val takeEnabled = io.takeSlot.valid && !reset.asBool
+  io.takenSetMask := taken.asUInt
+
   io.commitSetMask := VecInit((0 until width).map { bit =>
     val pendingNeedsFlush = pendingRobIdx(bit).needFlush(io.redirect)
-    val pendingCommits = pendingValid(bit) && !io.redirect.valid && io.commit.map { commit =>
+    val pendingCommits = pendingValid(bit) && !reset.asBool && !io.redirect.valid && io.commit.map { commit =>
       commit.valid && commit.bits.isSameEntry(pendingRobIdx(bit))
     }.reduce(_ || _) && !pendingNeedsFlush
+    val takeBit = takeEnabled && io.takeSlot.bits.mask(bit)
+    val pendingTaken = takeBit && pendingValid(bit) && !pendingNeedsFlush &&
+      pendingRobIdx(bit).isSameSlot(io.takeSlot.bits.robIdx)
+    // Include accepted setters in this cycle, even if the same entry also
+    // commits. A consumed update must not be reinserted into pending state.
+    val updateTaken = io.update.zipWithIndex.map { case (update, index) =>
+      candidatesByFlag(bit).contains(index).B && takeBit && update.valid && !updateNeedsFlush(index) && update.bits.setMask(bit) &&
+        update.bits.robIdx.isSameSlot(io.takeSlot.bits.robIdx)
+    }
+    taken(bit) := pendingTaken || updateTaken.reduce(_ || _)
 
     val updateCandidates = candidatesByFlag(bit).map { index =>
       val update = io.update(index)
-      val valid = commonUpdateValid(index) && update.bits.setMask(bit)
+      val valid = commonUpdateValid(index) && update.bits.setMask(bit) && !updateTaken(index)
       (valid, update.bits.robIdx)
     }
     val pendingCandidate = (
-      pendingValid(bit) && !pendingCommits && !pendingNeedsFlush,
+      pendingValid(bit) && !pendingCommits && !pendingNeedsFlush && !pendingTaken,
       pendingRobIdx(bit)
     )
     val updateWinner = if (orderedUpdatePorts) {
@@ -140,6 +162,7 @@ class RobSetFlagTracker(
       pendingRobIdx(bit) := next._2
     }
 
-    pendingCommits
+    // A sticky bit uses only one delivery path when take and commit coincide.
+    pendingCommits && !taken(bit)
   }).asUInt
 }
