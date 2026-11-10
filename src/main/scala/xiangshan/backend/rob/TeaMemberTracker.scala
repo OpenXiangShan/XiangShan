@@ -37,6 +37,7 @@ class TeaCompletion(implicit p: Parameters) extends XSBundle {
 }
 
 class TeaMemberTrackerIO(writebackPorts: Int, eventPorts: Int)(implicit p: Parameters) extends XSBundle {
+  val enable = Input(Bool())
   val cycle = Input(UInt(64.W))
   val addrTransType = Input(new AddrTransType)
   val alloc = Input(Vec(RenameWidth, Valid(new TeaRenameMember)))
@@ -48,6 +49,7 @@ class TeaMemberTrackerIO(writebackPorts: Int, eventPorts: Int)(implicit p: Param
   val commits = Input(Vec(2 * CommitWidth, Valid(new RobPtr)))
   val head = Input(new RobPtr)
   val readPtr = Input(Vec(2, new RobPtr))
+  val readPc = Input(Vec(2, UInt(XLEN.W)))
   val read = Output(Vec(2, new TeaFlushCause))
   val stalled = Output(Valid(new TeaTarget))
   val markStalled = Input(Bool())
@@ -59,7 +61,7 @@ class TeaMemberTrackerIO(writebackPorts: Int, eventPorts: Int)(implicit p: Param
 class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new TeaMemberTrackerIO(writebackPorts, eventPorts))
   private val phase = RegInit(false.B)
-  phase := !phase
+  when(io.enable) { phase := !phase }
 
   private val inputs = scala.collection.mutable.ArrayBuffer.empty[UInt]
   private def put(fields: Data*): Unit = fields.foreach { x =>
@@ -71,7 +73,10 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
   put(io.cycle, io.markStalled)
   ptr(io.head)
   io.slotReady(io.head.value).foreach(x => put(x))
-  io.readPtr.foreach(ptr)
+  io.readPtr.zip(io.readPc).foreach { case (pointer, pc) =>
+    ptr(pointer)
+    put(pc)
+  }
   put(io.redirect.valid)
   ptr(io.redirect.bits.robIdx)
   put(io.redirect.bits.flushItself())
@@ -104,9 +109,9 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
   private val helper = Module(new TeaMemberTrackerNative(
     RobSize, RenameWidth, CommitWidth, writebackPorts, eventPorts, p(XSCoreParamsKey).HartId,
     inputs.size, outputWords))
-  helper.io.reset := reset.asBool
+  helper.io.reset := reset.asBool || !io.enable
   helper.io.phase := phase
-  helper.io.in := VecInit(inputs.toSeq).asUInt
+  helper.io.in := Mux(io.enable, VecInit(inputs.toSeq).asUInt, 0.U)
   private val outputs = helper.io.out.asTypeOf(Vec(outputWords, UInt(64.W)))
   private var position = 0
   private def get(): UInt = {

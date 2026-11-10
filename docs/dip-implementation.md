@@ -25,7 +25,7 @@ Dispatch 宽度为 `RenameWidth`，单位为 uop；每个样本中每个槽位�
 
 ```bash
 NOOP_HOME="$PWD" proxychains -q make gsim GSIM=1 CONFIG=DefaultConfig NUM_CORES=1 \
-  EMU_THREADS=1 WITH_TEA=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j48
+  EMU_THREADS=1 WITH_TEA=1 WITH_DIP=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j48
 ```
 
 Verilator 使用 `make emu`，其余功能开关相同。需要 DRAMsim3 时增加 `WITH_DRAMSIM3=1 DRAMSIM3_HOME=...`。
@@ -39,7 +39,7 @@ enableTea0 1
 teaSamplePeriod0 1
 ```
 
-`enableDip` 独立于 `enableTea`；两者共用 `WITH_TEA=1` 的 elaboration 开关。周期为 1 可作逐周期验证，默认周期为 256。关闭采样后，已采目标继续跟踪并输出必要事件，以便已有样本定案。
+`enableDip` 独立于 `enableTea`；DIP 使用 `WITH_DIP=1`，TEA 使用 `WITH_TEA=1`。DIP-only 构建不生成 TEA 成员 tracker、selector 或周期统计；两者共用前端 PSV sideband。周期为 1 可作逐周期验证，默认周期为 256。关闭采样后，已采目标继续跟踪并输出必要事件，以便已有样本定案。
 
 CI 中设置 `enable_dip=true`、`cst_file=scripts/ci/dip-period1000.cst`，保持 `enable_tea`、`enable_db`、`enable_rolling` 为 false，即只导出 `Dip_0` 和 `DipDelayedFinal_0`。同时选择 `enable_tea` 时导出 DIP 和四张 TEA 表，并在 CST 中启用两种采样器；选择 `enable_db` 或 `enable_rolling` 时导出全部可用表。
 

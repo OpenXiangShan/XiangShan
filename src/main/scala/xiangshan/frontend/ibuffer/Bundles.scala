@@ -54,7 +54,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt   = UInt(MemPredPCWidth.W)
   val isRvc:            Bool   = Bool()
   val predTaken:        Bool   = Bool()
-  val teaPsv:           UInt   = UInt(TeaEvent.width.W)
+  val teaPsv:           UInt   = UInt((if (backendParams.teaPsvEn) xiangshan.TeaEvent.width else 0).W)
   val ftqPtr:           FtqPtr = new FtqPtr
   val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
   val triggered:        UInt   = TriggerAction()
@@ -125,7 +125,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:             UInt          = UInt(MemPredPCWidth.W)
   val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
-  val teaPsv:             UInt          = UInt(TeaEvent.width.W)
+  val teaPsv:             UInt          = UInt((if (backendParams.teaPsvEn) xiangshan.TeaEvent.width else 0).W)
   val ftqPtr:             FtqPtr        = new FtqPtr
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()

@@ -326,7 +326,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
-  val teaPsv:         UInt                  = UInt(TeaEvent.width.W)
+  val teaPsv:         UInt                  = UInt((if (backendParams.teaPsvEn) xiangshan.TeaEvent.width else 0).W)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
 

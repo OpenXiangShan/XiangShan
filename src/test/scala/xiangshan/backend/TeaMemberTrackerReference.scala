@@ -142,7 +142,8 @@ class TeaMemberTrackerReference(writebackPorts: Int, eventPorts: Int)(implicit p
     val ptr = io.readPtr(port)
     val mask = VecInit((0 until RenameWidth).map(rank =>
       live(ptr.value)(rank) && flags(ptr.value) === ptr.flag &&
-        members(ptr.value)(rank).isFormer === ptr.isFormer))
+        members(ptr.value)(rank).isFormer === ptr.isFormer &&
+        members(ptr.value)(rank).pc === io.readPc(port)))
     io.read(port).valid := mask.asUInt.orR
     val member = result(ptr.value, PriorityEncoder(mask))
     io.read(port).pc := member.pc

@@ -27,6 +27,7 @@ import xiangshan.backend.rob._
 class TeaMemberTrackerDifferential(implicit p: Parameters) extends TeaMemberTracker(3, 2) {
   val check = IO(Input(Bool()))
   private val reference = Module(new TeaMemberTrackerReference(3, 2))
+  reference.io.enable := io.enable
   reference.io.cycle := io.cycle
   reference.io.addrTransType := io.addrTransType
   reference.io.alloc := io.alloc
@@ -38,6 +39,7 @@ class TeaMemberTrackerDifferential(implicit p: Parameters) extends TeaMemberTrac
   reference.io.commits := io.commits
   reference.io.head := io.head
   reference.io.readPtr := io.readPtr
+  reference.io.readPc := io.readPc
   reference.io.markStalled := io.markStalled
   when(check) {
     assert(io.read.asUInt === reference.io.read.asUInt, "TEA native read mismatch")
@@ -91,6 +93,8 @@ class TeaMemberTrackerDifferentialTest extends XSTester {
         a.bits.psv.poke(random.nextInt(256).U)
         a.bits.numWB.poke(random.nextInt(5).U)
       }
+      dut.io.enable.poke(true.B)
+      dut.io.readPc.foreach(_.poke("h80000000".U))
       dut.check.poke(false.B)
       dut.io.addrTransType.bare.poke(true.B)
       dut.io.addrTransType.sv39.poke(false.B)
@@ -114,6 +118,7 @@ class TeaMemberTrackerDifferentialTest extends XSTester {
         val chosen = if (random.nextBoolean()) recent(random.nextInt(recent.size)) else identity()
         ptr(dut.io.head, chosen)
         dut.io.readPtr.foreach(p => ptr(p, if (random.nextBoolean()) chosen else identity()))
+        dut.io.readPc.foreach(_.poke((0x80000000L + random.nextInt(cycle + 1) * 64L + random.nextInt(4) * 4L).U))
         dut.io.slotReady.foreach(_.foreach(_.poke(random.nextBoolean().B)))
         dut.io.markStalled.poke(random.nextBoolean().B)
         if (random.nextInt(3) != 0) {
