@@ -1,4 +1,4 @@
-"""Replay original XSCache a041 FPOP epoch inputs against native state marginals.
+"""Replay FPOP epoch inputs with a declared latency-recovery initial level.
 
 EpochRecordTable exports signed20-bit PE as UInt. States inferred from complete
 inputs and fixed reset semantics are not direct signal observations or CPU times.
@@ -15,7 +15,7 @@ from tea_dip_query_endpoint_evidence import digest
 from tea_dip_wb_protocol_micro import write
 
 
-def replay(rows, tlow):
+def replay(rows, tlow, latency_recovery_level=0):
     states = {role: (True, 0) for role in ROLES}
     previous_latency = 0
     records, counts = [], Counter()
@@ -46,7 +46,7 @@ def replay(rows, tlow):
                 counts['epoch_pfHitLagActiveCount' + role] += 1
             elif level == 0:
                 if latency_down:
-                    active, level, reason = True, 0, 'latency-drop'
+                    active, level, reason = True, latency_recovery_level, 'latency-drop'
                     counts['epoch_latencyDownActiveCount' + role] += 1
             else:
                 level, reason = level - 1, 'cooldown'
@@ -61,15 +61,15 @@ def replay(rows, tlow):
     return records, counts
 
 
-def analyze(folder, receipt_path):
+def analyze(folder, receipt_path, latency_recovery_level=0):
     native = native_evidence(folder, receipt_path)
     constants = native['runtime_constants']
-    assert constants['l2pf_controlMode0'] in [0, 2], 'Only original none/FPOP semantics are supported'
+    assert constants['l2pf_controlMode0'] in [0, 2], 'Only none/FPOP mode semantics are supported'
     with sqlite3.connect((folder / 'simulator.db').resolve().as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
         rows = [dict(row) for row in db.execute('SELECT * FROM EpochRecordTable ORDER BY ID')]
     assert rows, 'Requires a complete selected epoch table'
-    records, counts = replay(rows, constants['l2pf_tlow0'])
+    records, counts = replay(rows, constants['l2pf_tlow0'], latency_recovery_level)
     blocks = read_blocks(folder / 'simulator_err.txt')
     checks = {}
     for role in ROLES:
@@ -87,12 +87,13 @@ def analyze(folder, receipt_path):
             checks[name] = dict(replayed=counts[name], native=observed)
         assert counts['epoch_activeEpochCount' + role] + counts['epoch_inactiveEpochCount' + role] == len(rows)
     return dict(point=folder.name, source=native['source'], runtime_constants=constants,
-                records=records, native_state_marginals=checks,
+                records=records, native_state_marginals=checks, latency_recovery_level=latency_recovery_level,
                 receipt_sha256=native['receipt_sha256'], native_log_sha256=native['native_log_sha256'],
                 database_sha256=digest(folder / 'simulator.db'), tool_sha256=digest(Path(__file__)),
-                scope='Original a041 none/FPOP policy, PE20/degree2/reset active-level(true,0), complete epochs from0. '
+                scope='PE20/degree2/reset active-level(true,0), complete epochs from0 and declared latency-recovery level. '
                       'Replayed states are inferred, validated against full-window native active/inactive, recovery '
                       'and level marginals; they are not direct per-epoch gate-signal observations. '
+                      'A source policy not exercised by the trace cannot be identified by matching marginals. '
                       'Writer STAMP is not used as a CPU cycle or ROI boundary. No request-level cause, '
                       'frozen-input counterfactual speedup or full-suite gain is inferred.')
 
@@ -102,9 +103,11 @@ def main():
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--latency-recovery-level', type=int, choices=[0, 1], default=0,
+                        help='Declare the actual source policy: original0 or credit1 candidate1; never fit it from data.')
     args = parser.parse_args()
     assert not args.output.exists()
-    result = analyze(args.folder.resolve(), args.receipt.resolve())
+    result = analyze(args.folder.resolve(), args.receipt.resolve(), args.latency_recovery_level)
     write(args.output, result)
     print(json.dumps(dict(point=result['point'], records=len(result['records']),
                           verified_native_state_marginals=len(result['native_state_marginals'])), indent=2))
