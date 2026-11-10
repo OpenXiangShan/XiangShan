@@ -376,7 +376,7 @@ jobs:
             --ci coremark \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee ${PERF_HOME}/tracertl_coremark.log
-          echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
+          echo "IPC=$(grep -aoP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Exec Test - CoreMark
         id: exec_coremark
         shell: bash
@@ -388,7 +388,7 @@ jobs:
             --ci coremark \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee ${PERF_HOME}/exec_coremark.log
-          echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
+          echo "IPC=$(grep -aoP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Compare CoreMark IPC
         id: compare
         shell: bash
@@ -397,6 +397,10 @@ jobs:
         run: |
           TRACERTL=${{ steps.tracertl_coremark.outputs.IPC }}
           EXEC=${{ steps.exec_coremark.outputs.IPC }}
+          if [ -z "${TRACERTL}" ] || [ -z "${EXEC}" ]; then
+            echo "CoreMark IPC missing: TraceRTL '${TRACERTL}', exec '${EXEC}'"
+            exit 1
+          fi
           DIFF=$(awk -v t=${TRACERTL} -v e=${EXEC} 'BEGIN { printf "%+.2f", (t - e) / e * 100 }')
           echo "DIFF=${DIFF}%" >> $GITHUB_OUTPUT
           echo "CoreMark IPC: TraceRTL ${TRACERTL}, exec ${EXEC}, diff ${DIFF}% (max ${MAX_IPC_DIFF}%)"
