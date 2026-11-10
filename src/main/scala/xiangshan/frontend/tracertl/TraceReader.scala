@@ -46,9 +46,9 @@ class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQu
     !redirectTrace.hasException
 
   val traceRedirectHelper = Module(new TraceRedirectHelper)
-  traceRedirectHelper.clock               := clock
-  traceRedirectHelper.reset               := reset
-  traceRedirectHelper.enable              := redirectValid && workingState
+  traceRedirectHelper.clock  := clock
+  traceRedirectHelper.reset  := reset
+  traceRedirectHelper.enable := redirectValid && workingState
   traceRedirectHelper.InstID := Mux(
     redirectFlushItself,
     redirectTrace.InstID,
