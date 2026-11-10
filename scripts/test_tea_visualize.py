@@ -76,16 +76,16 @@ class TeaAnalysisTest(unittest.TestCase):
     def test_spec_roi_maps_the_measured_window_to_tea_cycles(self):
         directory = self.write_spec_logs("offset", 1005, 1015)
         with sqlite3.connect(self.database) as con:
-            con.execute("CREATE TABLE TeaCycleSummary_0 (CYCLE INTEGER, STATES_0 INTEGER, "
-                        "STATES_1 INTEGER, STATES_2 INTEGER, STATES_3 INTEGER)")
-            con.executemany("INSERT INTO TeaCycleSummary_0 VALUES (?,?,?,?,?)",
-                            [(1001, 0, 1, 0, 0), (1010, 0, 10, 0, 0)])
-            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (0,3,6,8)")
-            con.execute("UPDATE Tea_0 SET CYCLE = CASE WHEN CYCLE=8 THEN 1009 ELSE CYCLE+1000 END")
+            con.execute("CREATE TABLE TeaCycleSummary_0 (ID INTEGER PRIMARY KEY, CYCLE INTEGER, "
+                        "STATES_0 INTEGER, STATES_1 INTEGER, STATES_2 INTEGER, STATES_3 INTEGER, CLEARED INTEGER)")
+            con.executemany("INSERT INTO TeaCycleSummary_0 VALUES (?,?,?,?,?,?,?)",
+                            [(1, 1001, 0, 1, 0, 0, 0), (2, 1010, 0, 10, 0, 0, 0)])
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (0,3,6)")
+            con.execute("UPDATE Tea_0 SET CYCLE=CYCLE+1002")
         window, instructions, cycles = tea.read_spec_roi(directory, self.database)
         self.assertEqual((window, instructions, cycles), ((1000, 1010), 19_999_986, 10))
         coverage = tea.sampling_coverage(self.database, window, 3)
-        self.assertEqual(coverage["observed_sample_rows"], 4)
+        self.assertEqual(coverage["observed_sample_rows"], 3)
         self.assertEqual(coverage["missing_endpoint_samples"], 0)
         for change, restore in [("STATES_1=9", "STATES_1=10"), ("CYCLE=1011", "CYCLE=1010")]:
             with sqlite3.connect(self.database) as con:
@@ -204,18 +204,17 @@ class TeaAnalysisTest(unittest.TestCase):
         self.assertEqual(partial["weights"][0x10000000][0], 0.25)
         self.assertEqual(partial["weights"][None][-3], 0.75)
 
-    def test_sampling_coverage_uses_the_measured_window_start_as_phase(self):
+    def test_sampling_coverage_keeps_the_original_phase_after_warmup(self):
         with sqlite3.connect(self.database) as con:
-            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (1, 4, 7)")
-            con.execute("CREATE TABLE TeaCycleSummary_0 (CYCLE INTEGER)")
-            con.execute("INSERT INTO TeaCycleSummary_0 VALUES (2)")
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (3, 6, 8)")
+            con.execute("UPDATE Tea_0 SET CYCLE=9 WHERE CYCLE=8")
         coverage = tea.sampling_coverage(self.database, (1, 10), 3)
         self.assertEqual(coverage["expected_sample_boundaries"], 3)
         self.assertEqual(coverage["off_grid_sample_rows"], 0)
         self.assertEqual(coverage["missing_interior_samples"], 0)
         self.assertEqual(coverage["missing_endpoint_samples"], 0)
         with sqlite3.connect(self.database) as con:
-            con.execute("DELETE FROM Tea_0 WHERE CYCLE=1")
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE=3")
         self.assertEqual(tea.sampling_coverage(self.database, (1, 10), 3)["missing_endpoint_samples"], 1)
 
     def test_sampling_coverage_separates_interior_loss_duplicates_and_endpoints(self):
@@ -266,7 +265,7 @@ class TeaAnalysisTest(unittest.TestCase):
 
     def test_exact_summary_and_censored_interval_export(self):
         with sqlite3.connect(self.database) as con:
-            fields = ["ID", "CYCLE", "RETIRED", "CENSOREDGAPS", "PENDING", "CLOSED"]
+            fields = ["ID", "CYCLE", "RETIRED", "CENSOREDGAPS", "PENDING", "CLOSED", "CLEARED"]
             fields += [f"STATES_{i}" for i in range(4)] + [f"GAPS_{i}" for i in range(5)]
             con.execute("CREATE TABLE TeaCycleSummary_0 (" + ",".join(f"{f} INTEGER" for f in fields) + ")")
             row = dict.fromkeys(fields, 0)
@@ -294,6 +293,22 @@ class TeaAnalysisTest(unittest.TestCase):
         with (output / "01_fixture" / "no_commit_intervals.csv").open() as stream:
             interval, = csv.DictReader(stream)
         self.assertEqual((interval["start"], interval["end"]), ("2", "10"))
+        with sqlite3.connect(self.database) as con:
+            con.execute("UPDATE TeaCycleSummary_0 SET CLEARED=1")
+            row.update(ID=2, CYCLE=15, RETIRED=3, CENSOREDGAPS=0, CLOSED=0, CLEARED=0,
+                       STATES_0=1, STATES_1=4, STATES_2=0)
+            con.execute("INSERT INTO TeaCycleSummary_0 VALUES (" + ",".join("?" for _ in fields) + ")", list(row.values()))
+            row.update(ID=3, CYCLE=20, RETIRED=6, STATES_0=3, STATES_1=7)
+            con.execute("INSERT INTO TeaCycleSummary_0 VALUES (" + ",".join("?" for _ in fields) + ")", list(row.values()))
+        export_cycle_stats(self.database, Path(self.directory.name))
+        result = json.loads((Path(self.directory.name) / "cycle_summary.json").read_text())
+        self.assertEqual((result["cycles"], result["retired"], result["observed_end"]), (20, 10, 20))
+        self.assertEqual(result["states"], dict(Computing=5, Stalled=12, Flushed=3, Drained=0))
+        self.assertEqual(result["censored_gaps"], 1)
+        with sqlite3.connect(self.database) as con:
+            con.execute("UPDATE TeaCycleSummary_0 SET CLEARED=1 WHERE ID=3")
+        export_cycle_stats(self.database, Path(self.directory.name))
+        self.assertEqual(json.loads((Path(self.directory.name) / "cycle_summary.json").read_text()), result)
         with sqlite3.connect(self.database) as con:
             con.execute("UPDATE TeaNoCommit_0 SET ENDCYCLE=11")
         with self.assertRaisesRegex(ValueError, "inconsistent no-commit"):

@@ -2031,14 +2031,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
     val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
     val teaPerf = difftest.common.LogPerfControl()
-    val teaReset = reset.asBool || !teaPerf.inRoi
     val teaRedirectPtr = in.redirect.bits.robIdx
     val teaFlushPtr = deqExceptionRobIdx
     val teaRedirectCtrlMispred = in.redirect.valid &&
       in.redirect.bits.debugIsCtrl && in.redirect.bits.isMisPred
     val teaRedirectMemVio = in.redirect.valid && in.redirect.bits.debugIsMemVio
     val teaExceptionFlush = out.flushOut.valid && deqHasException && !intrEnable
-    val teaRobFlushEcho = withReset(teaReset) { RegNext(out.flushOut.valid, false.B) }
+    val teaRobFlushEcho = RegNext(out.flushOut.valid, false.B)
     val teaRefill = canEnqueue.asUInt.orR && !in.redirect.valid && state =/= s_walk
     val teaPsvSetSources = scala.collection.mutable.ArrayBuffer(
       TeaPsvSetSource(teaRedirectCtrlMispred, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MB)),
@@ -2068,7 +2067,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       teaCurrentCause.psv := teaExceptionPsv
     }
     val teaCauseInvalid = out.flushOut.valid || in.redirect.valid && !teaRobFlushEcho
-    val teaFlushCause = withReset(teaReset) { RegInit(0.U.asTypeOf(new TeaFlushCause)) }
+    val teaFlushCause = RegInit(0.U.asTypeOf(new TeaFlushCause))
     when (teaCurrentCause.valid) {
       teaFlushCause := teaCurrentCause
     }.elsewhen(teaCauseInvalid || teaRefill) {
@@ -2083,15 +2082,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     val teaSelector = Module(new TeaSampleSelector)
     val hasTeaCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
-    teaSelector.io.enable := enableTea.asBool && teaPerf.inRoi
+    teaSelector.io.enable := enableTea.asBool
     teaSelector.io.samplePeriod := teaSamplePeriod
     teaSelector.io.state := TeaState.classify(isEmpty, state === s_walk || in.redirect.valid,
       hasTeaCommit, teaVisibleCause.valid)
     teaSelector.io.flushCause := teaVisibleCause
 
-    val tracker = withReset(teaReset) {
-      Module(new TeaMemberTracker(in.writeback.size, teaPsvSetSources.length))
-    }
+    val tracker = Module(new TeaMemberTracker(in.writeback.size, teaPsvSetSources.length))
     tracker.io.cycle := teaSelector.io.cycle
     tracker.io.addrTransType := in.debugInstrAddrTransType
     tracker.io.head := deqPtr
@@ -2182,7 +2179,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.headReason := Mux(sample.context.headReasonValid, out.debugRobHeadStall.get.bits, 0.U)
 
     val stats = Module(new TeaCycleStats)
-    stats.io.enable := (enableTeaStats.asBool || enableTea.asBool) && teaPerf.inRoi
+    stats.io.enable := enableTeaStats.asBool || enableTea.asBool
+    stats.io.clean := teaPerf.clean
     stats.io.dump := teaPerf.dump
     stats.io.cycle := teaSelector.io.cycle
     stats.io.state := teaSelector.io.sample.state

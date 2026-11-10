@@ -36,7 +36,7 @@ python3 scripts/tea_visualize.py reports/tea-members-on/tea.db \
 测量区间没有选中 TEA 样本的输入会被拒绝。区间、指令数和周期数写入汇总，
 不能与 `--cycle-range` 同用。PC 排除仍由 `--spec-checkpoint` 单独控制。
 日志含 `teaSamplePeriod0` 时，还会报告原始采样行数、期望边界数、重复、偏离周期、
-内部缺样和端点缺样数量。此检查以首个正式窗口快照确定固定周期采样的相位，
+内部缺样和端点缺样数量。此检查沿用从仿真开始的固定采样相位，
 不改变归因权重，也不自动补齐或截断端点；端点差异需结合仿真退出和最终 PERF dump 检查。
 
 所有输入均有已验证的 SPEC 日志和采样周期时，另生成 `sampled_costs.png/pdf/csv`，
