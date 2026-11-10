@@ -337,7 +337,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }) // number of physical ROB entries allocated by the emitted uops
   val robIdxHead = RegInit(RobPtr(false.B, 0.U))
   val robIdxHeadNext = Mux(io.redirect.valid,
-      Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
+      io.redirect.bits.robIdxForFlush.addEntries(1.U).asFormer, // redirect: allocate after the retained entry
            Mux(canOut, robIdxHead.addEntries(validCount).asFormer, // instructions successfully entered next stage: increase robIdx
                       /* default */  robIdxHead)) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext

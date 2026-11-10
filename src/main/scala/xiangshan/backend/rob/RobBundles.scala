@@ -352,12 +352,29 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     ptr
   }
 
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    val flushItself = redirect.bits.flushItself() && isSameSlot(redirect.bits.robIdx)
-    redirect.valid && (flushItself || isAfterSlot(redirect.bits.robIdx))
+  def prevSlot: RobPtr = {
+    val ptr = Wire(new RobPtr(entries))
+    ptr := this
+    ptr.isFormer := !this.isFormer
+    when(this.isFormer) {
+      val wrap = this.value === 0.U
+      ptr.value := Mux(wrap, (entries - 1).U, this.value - 1.U)
+      ptr.flag := this.flag ^ wrap
+    }
+    ptr
   }
 
+  def needFlush(redirect: Valid[Redirect]): Bool =
+    redirect.valid && isAfterSlot(redirect.bits.robIdxForFlush)
+
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
+
+  // using original robidx
+  def needFlushRaw(redirect: Valid[Redirect]): Bool =
+    redirect.valid && (
+      isAfterSlot(redirect.bits.robIdx) ||
+      redirect.bits.flushItself() && isSameSlot(redirect.bits.robIdx)
+    )
 
   def lineHeadPtr(implicit p: Parameters): RobPtr = {
     val CommitWidth = p(XSCoreParamsKey).CommitWidth

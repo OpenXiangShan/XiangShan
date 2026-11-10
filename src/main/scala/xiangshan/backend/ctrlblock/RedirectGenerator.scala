@@ -31,10 +31,21 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val allRedirect: Vec[ValidIO[Redirect]] = VecInit(oldestExuRedirect, loadRedirect)
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val flushAfter = RegInit(0.U.asTypeOf(ValidIO(new Redirect)))
-  val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(flushAfter) || robFlush.valid))
+  val needFlushVec = VecInit(allRedirect.map { candidate =>
+    candidate.bits.robIdx.needFlushRaw(flushAfter) || robFlush.valid
+  })
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map { case (v, f) => v && !f }).asUInt.orR
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)
+  // Normalize the selected EXU/load redirect before registering and broadcasting it.
+  // Fold flushItself into the retained-slot boundary once, so downstream flush checks
+  // only need an age comparison and recovery logic shares the same boundary.
+  val oldestRedirectWithBoundary = WireInit(oldestRedirect.bits)
+  oldestRedirectWithBoundary.robIdxForFlush := Mux(
+    oldestRedirect.bits.flushItself(),
+    oldestRedirect.bits.robIdx.prevSlot,
+    oldestRedirect.bits.robIdx
+  )
+  val s1_redirect_bits_reg = RegEnable(oldestRedirectWithBoundary, oldestValid)
   val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)
   val s1_redirect_onehot = VecInit(oldestOneHot.map(x => GatedValidRegNext(x)))
 

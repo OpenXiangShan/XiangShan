@@ -127,8 +127,17 @@ class CtrlBlockImp(
   private val s0_robFlushPcInfo = rob.io.flushPcInfo
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
   private val s1_robFlushPcInfo = Wire(chiselTypeOf(rob.io.flushPcInfo))
+  // Normalize ROB flushes before the broadcast register, matching RedirectGenerator.
+  // Fold flushItself into one retained-slot boundary so downstream flush/recovery logic
+  // avoids repeating level/former/latter decoding on the redirect path.
+  private val s0_robFlushWithBoundary = WireInit(s0_robFlushRedirect)
+  s0_robFlushWithBoundary.bits.robIdxForFlush := Mux(
+    s0_robFlushRedirect.bits.flushItself(),
+    s0_robFlushRedirect.bits.robIdx.prevSlot,
+    s0_robFlushRedirect.bits.robIdx
+  )
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
-  s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
+  s1_robFlushRedirect.bits := RegEnable(s0_robFlushWithBoundary.bits, s0_robFlushRedirect.valid)
   s1_robFlushPcInfo := RegEnable(s0_robFlushPcInfo, s0_robFlushRedirect.valid)
 
   println(s"[CtrlBlock] pcMem read port for \"robFlush\": ${pcMemRdIndexes("robFlush").head}.")
@@ -191,7 +200,7 @@ class CtrlBlockImp(
   val vecScheNonStoreWbData = vfScheWbData.filterNot(_.bits.params.hasStoreFu)
   val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
-  private val delayedNotFlushedWriteBackNums = wbData.map(x => {
+  private val delayedNotFlushedWriteBackNums = wbData.map(x => {  // not used in ROB
     val valid = x.valid
     val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
     val killedByOlder = x.bits.robIdx.needFlush(oldestRedirect)
