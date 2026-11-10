@@ -100,19 +100,33 @@ class RobSetFlagTracker(
     }
   }
 
+  private val taken = Wire(Vec(width, Bool()))
+  private val takeEnabled = in.takeSlot.valid && !reset.asBool
+  out.takenSetMask := taken.asUInt
+
   out.commitSetMask := VecInit((0 until width).map { bit =>
     val pendingNeedsFlush = pendingRobIdx(bit).needFlush(in.redirect)
-    val pendingCommits = pendingValid(bit) && !in.redirect.valid && in.commit.map { commit =>
+    val pendingCommits = pendingValid(bit) && !reset.asBool && !in.redirect.valid && in.commit.map { commit =>
       commit.valid && commit.bits.isSameEntry(pendingRobIdx(bit))
     }.reduce(_ || _) && !pendingNeedsFlush
+    val takeBit = takeEnabled && in.takeSlot.bits.mask(bit)
+    val pendingTaken = takeBit && pendingValid(bit) && !pendingNeedsFlush &&
+      pendingRobIdx(bit).isSameSlot(in.takeSlot.bits.robIdx)
+    // Include accepted setters in this cycle, even if the same entry also
+    // commits. A consumed update must not be reinserted into pending state.
+    val updateTaken = in.update.zipWithIndex.map { case (update, index) =>
+      candidatesByFlag(bit).contains(index).B && takeBit && update.valid && !updateNeedsFlush(index) && update.bits.setMask(bit) &&
+        update.bits.robIdx.isSameSlot(in.takeSlot.bits.robIdx)
+    }
+    taken(bit) := pendingTaken || updateTaken.reduce(_ || _)
 
     val updateCandidates = candidatesByFlag(bit).map { index =>
       val update = in.update(index)
-      val valid = commonUpdateValid(index) && update.bits.setMask(bit)
+      val valid = commonUpdateValid(index) && update.bits.setMask(bit) && !updateTaken(index)
       (valid, update.bits.robIdx)
     }
     val pendingCandidate = (
-      pendingValid(bit) && !pendingCommits && !pendingNeedsFlush,
+      pendingValid(bit) && !pendingCommits && !pendingNeedsFlush && !pendingTaken,
       pendingRobIdx(bit)
     )
     val updateWinner = if (orderedUpdatePorts) {
@@ -131,7 +145,8 @@ class RobSetFlagTracker(
       pendingRobIdx(bit) := next._2
     }
 
-    pendingCommits
+    // A sticky bit uses only one delivery path when take and commit coincide.
+    pendingCommits && !taken(bit)
   }).asUInt
 }
 
@@ -143,6 +158,9 @@ object RobSetFlagTracker {
     // Retired setter identities.
     val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
 
+    // Surviving setter consumed with a trap.
+    val takeSlot = Input(Valid(new RobSetFlagTakeReq(width)))
+
     // Recovery boundary.
     val redirect = Input(Valid(new Redirect))
   }
@@ -150,11 +168,18 @@ object RobSetFlagTracker {
   class Out(width: Int, numUpdatePorts: Int, numCommitPorts: Int)(implicit p: Parameters) extends XSBundle {
     // Architectural flag updates.
     val commitSetMask = Output(UInt(width.W))
+    val takenSetMask = Output(UInt(width.W))
   }
 
   /** A set-only flag update tagged with the inst robIdx that generated it. */
   class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
     val setMask = UInt(flagWidth.W)
+  }
+
+  /** Consume selected sticky flags from one surviving architectural slot. */
+  class RobSetFlagTakeReq(val flagWidth: Int)(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val mask = UInt(flagWidth.W)
   }
 }
