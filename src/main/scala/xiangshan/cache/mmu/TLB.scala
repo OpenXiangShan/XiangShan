@@ -503,8 +503,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPf = (ldPermFail || pf) && isLd
     val stPf = (stPermFail || pf) && isSt
     val instrPf = (instrPermFail || pf) && isInst
-    val isFakePte = !perm.v && !perm.pf && !perm.af && !onlyS2
-    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
+    val isFakePte = !perm.v && !perm.pf && !onlyS2
+    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf
+    val s1_pmp_af = perm.af && !perm.v && !onlyS2
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // mptcheck val
@@ -530,7 +531,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val fault_valid = s1_valid || s2_valid
 
     // when pf and gpf can't happens simultaneously
-    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !s1_pmp_af && !isFakePte && !isNonLeaf
     when (RegNext(prepf || pregpf || preaf)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
@@ -561,23 +562,23 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       // Ref: The RISC-V Instruction Set Manual: Volume II: Privileged Architecture - 19.6.3. Transformed Instruction or Pseudoinstruction for mtinst or htinst
       val isForVSnonLeafPTE = isNonLeaf || isFakePte
       resp(idx).bits.isForVSnonLeafPTE := isForVSnonLeafPTE
-      resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-      resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-      resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-      // NOTE: pf need && with !af, page fault has higher priority than access fault
-      // but ptw may also have access fault, then af happens, the translation is wrong.
-      // In this case, pf has lower priority than af
+      resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !s1_pmp_af && !isFakePte && !isNonLeaf
+      resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !s1_pmp_af && !isFakePte && !isNonLeaf
+      resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !s1_pmp_af && !isFakePte && !isNonLeaf
+      // NOTE: Page fault has higher priority than ppn_af (PTE with PPN bits above physical address width).
+      // Only PTW memory access fault (pmp_af, where no valid PTE was fetched) has higher priority than pf.
 
-      resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
-      resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
-      resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
+      val hasGpf_cur = (ldGpf || g_ldUpdate || stGpf || g_stUpdate || instrGpf || g_instrUpdate) && s2_valid && !hasPf
+      resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !s1_pmp_af && !hasPf
+      resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !s1_pmp_af && !hasPf
+      resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !s1_pmp_af && !hasPf
 
-      resp(idx).bits.excp(nDups).af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
+      resp(idx).bits.excp(nDups).af.ld := (af && TlbCmd.isRead(cmd) && fault_valid && !hasPf && !hasGpf_cur) ||
         (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
       // Mpt always on and valid, even if s1 s2 in bare mode
-      resp(idx).bits.excp(nDups).af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
+      resp(idx).bits.excp(nDups).af.st := (af && TlbCmd.isWrite(cmd) && fault_valid && !hasPf && !hasGpf_cur) ||
         (if (HasMptCheck) ((mptWf.get || (mptAf.get && TlbCmd.isWrite(cmd))) && mptValid.get) else false.B)
-      resp(idx).bits.excp(nDups).af.instr := (af && TlbCmd.isExec(cmd) && fault_valid) ||
+      resp(idx).bits.excp(nDups).af.instr := (af && TlbCmd.isExec(cmd) && fault_valid && !hasPf && !hasGpf_cur) ||
         (if (HasMptCheck) ((mptInstf.get || (mptAf.get && TlbCmd.isExec(cmd))) && mptValid.get) else false.B)
       // mptAf is af
 
