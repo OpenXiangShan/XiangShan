@@ -377,8 +377,17 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   def isForVSnonLeafPTE: Bool          = exceptionEntry.isForVSnonLeafPTE
 }
 
-class WayLookupWriteBundle(implicit p: Parameters) extends WayLookupBundle {
-  val ftqIdx: FtqPtr = new FtqPtr
+// one fetch block to be written into ICacheWayLookup
+class WayLookupWriteBlock(implicit p: Parameters) extends ICacheBundle {
+  val entry:  WayLookupEntry = new WayLookupEntry
+  val ftqIdx: FtqPtr         = new FtqPtr
+}
+
+// one enqueue request of ICachePrefetchPipe: up to FetchPorts fetch blocks, but only one exception entry,
+// as the fetch blocks have the same exception and only the first one is stored
+class WayLookupWriteBundle(implicit p: Parameters) extends ICacheBundle {
+  val exceptionEntry: WayLookupExceptionEntry         = new WayLookupExceptionEntry
+  val blocks:         Vec[Valid[WayLookupWriteBlock]] = Vec(FetchPorts, Valid(new WayLookupWriteBlock))
 }
 
 /* ***** Miss ***** */
