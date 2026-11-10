@@ -386,7 +386,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
                                        )
-  io.tlb.req.bits.isPrefetch         := s0_sel_src.prf
+  io.tlb.req.bits.fromHwPrefetch     := s0_hw_prf_select
   io.tlb.req.bits.vaddr              := s0_tlb_vaddr
   io.tlb.req.bits.fullva             := s0_tlb_fullva
   io.tlb.req.bits.checkfullva        := s0_src_select_vec(vec_iss_idx) || s0_src_select_vec(int_iss_idx)
@@ -950,7 +950,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.debugInfo.tlbRespTime := GTimer()
   }
 
-  io.tlb.req_kill   := s1_kill || s1_dly_err
+  // Software prefetches never replay to complete getGpa after a cached GPF hit
+  // Kill their TLB-side request when fastMiss is false: successful hits need no walk,
+  // and GPF hits must not start getGpa; true TLB misses keep walking
+  // Avoid the late s1_tlb_miss signal on the req_kill feedback path
+  val s1_sw_prf_gpa_kill = s1_sw_prf && !s1_tlb_fast_miss
+  io.tlb.req_kill   := s1_kill || s1_dly_err || s1_sw_prf_gpa_kill
   io.tlb.req.bits.pmp_addr := s1_in.paddr
   io.tlb.resp.ready := true.B
 

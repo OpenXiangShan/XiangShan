@@ -567,8 +567,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       // cause llptw will trigger bitmapcheck
       // add a coniditonal logic
       // (s2x_info =/= allStage || ishptw)
-      hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw) && !hitWayData.onlypf(pte_index), ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 1.U, ParallelOR(hitVec))
-      when (bitmapEnable && (s2x_info =/= allStage || ishptw) && !hitWayData.onlypf(pte_index) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U) {
+      hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw), ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 1.U, ParallelOR(hitVec))
+      when (bitmapEnable && (s2x_info =/= allStage || ishptw) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U) {
         jmp_bitmap_check := true.B
       }
     } else {
@@ -600,13 +600,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l0HitPPN = l0HitData.ppns
   val l0HitPbmt = l0HitData.pbmts
   val l0HitPerm = l0HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL0SectorSize, new PtePermBundle)))
-  val l0HitValid = VecInit(l0HitData.onlypf.map(!_))
+  val l0SectorValid = l0HitData.vs
   val l0Ptes = WireInit(VecInit(Seq.fill(tlbcontiguous)(0.U(XLEN.W)))) // L0 lavel Page Table Entry Vector
   val l0cfs = WireInit(VecInit(Seq.fill(tlbcontiguous)(false.B))) // L0 lavel Bitmap Check Failed Vector
   if (HasBitmapCheck) {
     for (i <- 0 until tlbcontiguous) {
       // in l0 "n" is always false
-      l0Ptes(i) := Cat(0.U(pteNLen.W), l0HitData.pbmts(i).asUInt, 0.U(pteResLen.W), 0.U((ppnHignLen+ppnLen-gvpnLen).W), l0HitPPN(i), 0.U(pteRswLen.W),l0HitPerm(i).asUInt,l0HitValid(i).asUInt)
+      l0Ptes(i) := Cat(0.U(pteNLen.W), l0HitData.pbmts(i).asUInt, 0.U(pteResLen.W), 0.U((ppnHignLen+ppnLen-gvpnLen).W), l0HitPPN(i), 0.U(pteRswLen.W),l0HitPerm(i).asUInt,l0SectorValid(i).asUInt)
       l0cfs(i) := !l0BitmapCheckResult(i)
     }
 
@@ -689,7 +689,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   check_res.l3.map(_.apply(l3Hit.get, l3Pre.get, l3HitPPN.get, l3HitPbmt.get))
   check_res.l2.apply(l2Hit, l2Pre, l2HitPPN, l2HitPbmt)
   check_res.l1.apply(l1Hit, l1Pre, l1HitPPN, l1HitPbmt, ecc = l1eccError)
-  check_res.l0.apply(l0Hit, l0Pre, l0HitPPN, l0HitPbmt, l0HitPerm, l0eccError, valid = l0HitValid, jmp_bitmap_check = l0JmpBitmapCheck, hitway = l0HitWay, ptes = l0Ptes, cfs = l0cfs)
+  check_res.l0.apply(l0Hit, l0Pre, l0HitPPN, l0HitPbmt, l0HitPerm, l0eccError, valid = l0SectorValid, jmp_bitmap_check = l0JmpBitmapCheck, hitway = l0HitWay, ptes = l0Ptes, cfs = l0cfs)
   check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitData.pbmt, spHitData.n.getOrElse(0.U), spHitPerm, false.B, spHitLevel, spValid, spJmpBitmapCheck, spPte)
 
   val resp_res = Reg(new PageCacheRespBundle)
@@ -952,7 +952,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(l2Refill, p"[l2 refill] l2v:${Binary(l2v)}->${Binary(l2v | l2RfOH)} l2g:${Binary(l2g)}->${Binary((l2g & ~l2RfOH) | Mux(memPte(2).perm.g, l2RfOH, 0.U))}\n")
 
   // L1 refill
-  val l1Refill = !flush_dup(1) && refill.levelOH.l1
+  val l1Refill =
+    !flush_dup(1) &&
+    refill.levelOH.l1 &&
+    !memPte(1).isLeaf() &&
+    memPte(1).canRefill(refill.level_dup(1), refill.req_info_dup(1).s2xlate, pbmte, io.csr_dup(1).hgatp.mode)
   val l1RefillIdx = genPtwL1SetIdx(refill.req_info_dup(1).vpn).suggestName(s"l1_refillIdx")
   val l1VictimWay = replaceWrapper(getl1vSet(refill.req_info_dup(1).vpn), ptwl1replace.way(l1RefillIdx)).suggestName(s"l1_victimWay")
   val l1VictimWayOH = UIntToOH(l1VictimWay).suggestName(s"l1_victimWayOH")
@@ -995,7 +999,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(l1Refill, p"[l1 refill] l1g:${Binary(l1g)} -> ${Binary(l1g & ~l1RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, l1RfvOH, 0.U))}\n")
 
   // L0 refill
-  val l0Refill = !flush_dup(0) && refill.levelOH.l0 && !memPte(0).isNapot(refill.level_dup(0))
+  val l0Refill =
+    !flush_dup(0) &&
+    refill.levelOH.l0 &&
+    memPte(0).isLeaf() &&
+    memPte(0).canRefill(refill.level_dup(0), refill.req_info_dup(0).s2xlate, pbmte, io.csr_dup(0).hgatp.mode) &&
+    !memPte(0).isNapot(refill.level_dup(0))
   val l0RefillIdx = genPtwL0SetIdx(refill.req_info_dup(0).vpn).suggestName(s"l0_refillIdx")
   val l0VictimWay = replaceWrapper(getl0vSet(refill.req_info_dup(0).vpn), ptwl0replace.way(l0RefillIdx)).suggestName(s"l0_victimWay")
   val l0VictimWayOH = UIntToOH(l0VictimWay).asUInt.suggestName(s"l0_victimWayOH")
@@ -1048,8 +1057,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spRefill =
     !flush_dup(0) &&
     (refill.levelOH.sp || (refill.levelOH.l0 && memPte(0).isNapot(refill.level_dup(0)))) &&
-    ((memPte(0).isLeaf() && memPte(0).canRefill(refill.level_dup(0), refill.req_info_dup(0).s2xlate, pbmte, io.csr_dup(0).hgatp.mode)) ||
-    memPte(0).onlyPf(refill.level_dup(0), refill.req_info_dup(0).s2xlate, pbmte))
+    memPte(0).isLeaf() &&
+    memPte(0).canRefill(refill.level_dup(0), refill.req_info_dup(0).s2xlate, pbmte, io.csr_dup(0).hgatp.mode)
   val spRefillIdx = spreplace.way.suggestName(s"sp_refillIdx") // LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
   val spRfOH = UIntToOH(spRefillIdx).asUInt.suggestName(s"sp_rfOH")
   when (spRefill) {
@@ -1060,7 +1069,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       memSelData(0),
       refill.level_dup(0),
       refill_prefetch_dup(0),
-      !memPte(0).onlyPf(refill.level_dup(0), refill.req_info_dup(0).s2xlate, pbmte),
+      true.B,
       s2xlate = refill.req_info_dup(0).s2xlate
     )
     spreplace.access(spRefillIdx)
