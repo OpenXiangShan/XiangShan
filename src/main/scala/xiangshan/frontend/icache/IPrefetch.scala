@@ -245,9 +245,12 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
    *       for port(i), its base gpaddr is actually (gpaddr - i * blocksize)
    *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
    *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
+   * Note: if is for VS non-leaf PTE, the gpaddr points to the PTE (instead of the fetch block), we should keep the original
    */
   private val s1_req_gpaddr = PriorityMuxDefault(
-    s1_itlb_exception_gpf zip (0 until PortNumber).map(i => s1_req_gpaddr_tmp(i) - (i << blockOffBits).U),
+    s1_itlb_exception_gpf zip (0 until PortNumber).map { i =>
+      Mux(s1_req_isForVSnonLeafPTE_tmp(i), s1_req_gpaddr_tmp(i), s1_req_gpaddr_tmp(i) - (i << blockOffBits).U)
+    },
     0.U.asTypeOf(s1_req_gpaddr_tmp(0))
   )
 
