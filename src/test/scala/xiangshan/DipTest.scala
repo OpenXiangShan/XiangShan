@@ -63,7 +63,7 @@ class DipTest extends XSTester {
     dut.io.rob.flush.bits.cause.poke(1.U)
   }
 
-  it should "leave collection idle during warmup and start with fresh retirement and recovery history" in {
+  it should "keep collection idle during reset and restart retirement and recovery history" in {
     simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.reset.poke(true.B)

@@ -58,14 +58,16 @@ def read_spec_roi(directory, database):
             and 19_900_000 <= instructions < 20_100_000):
         raise ValueError(f"{directory}: counters do not match the default SPEC 20M warmup / 40M total window")
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
         if con.execute("SELECT 1 FROM sqlite_master WHERE name='TeaCycleSummary_0'").fetchone():
             first = con.execute("SELECT min(CYCLE) FROM TeaCycleSummary_0").fetchone()[0]
             if first is not None and first > 1:
                 # TEA starts after warmup in the ROB reset domain; PERF uses the top-level timer.
                 start, end = first - 1, first - 1 + final[1]
-                last = con.execute("SELECT CYCLE, STATES_0, STATES_1, STATES_2, STATES_3 "
-                                   "FROM TeaCycleSummary_0 ORDER BY CYCLE DESC LIMIT 1").fetchone()
-                if last[0] != end or sum(last[1:]) != final[1]:
+                snapshots = cycle_summary_snapshots(con)
+                last = snapshots[-1]
+                cycles = sum(row[f"STATES_{i}"] for row in snapshots for i in range(4))
+                if last["CYCLE"] != end or cycles != final[1]:
                     raise ValueError(f"{database}: TEA summary does not match the SPEC measured window")
     return (start, end), instructions, final[1]
 
@@ -73,12 +75,8 @@ def read_spec_roi(directory, database):
 def sampling_coverage(path, cycle_range, sample_period):
     start, end = cycle_range
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
-        # The first summary includes the first measured cycle; preserve that sampling phase.
+        # Sampling continues across warmup and counter clean boundaries.
         phase = 0
-        if con.execute("SELECT 1 FROM sqlite_master WHERE name='TeaCycleSummary_0'").fetchone():
-            first_summary = con.execute("SELECT min(CYCLE) FROM TeaCycleSummary_0").fetchone()[0]
-            if first_summary is not None:
-                phase = (first_summary - 1) % sample_period
         first = start + (phase - start) % sample_period
         expected = max(0, (end - 1 - first) // sample_period + 1)
         rows, unique, off_grid, grid_unique, low, high = con.execute(
@@ -264,6 +262,13 @@ def write_csv(path, rows, fields):
         writer.writerows(rows)
 
 
+def cycle_summary_snapshots(con):
+    return con.execute(
+        "SELECT * FROM TeaCycleSummary_0 WHERE CLEARED != 0 OR ID = "
+        "(SELECT ID FROM TeaCycleSummary_0 ORDER BY CYCLE DESC, ID DESC LIMIT 1) "
+        "ORDER BY CYCLE, ID").fetchall()
+
+
 def export_cycle_stats(path, directory):
     """Export exact cumulative counters separately from PC/cycle-filtered samples."""
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
@@ -271,23 +276,27 @@ def export_cycle_stats(path, directory):
         tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "TeaCycleSummary_0" not in tables:
             return
-        row = con.execute("SELECT * FROM TeaCycleSummary_0 ORDER BY CYCLE DESC, ID DESC LIMIT 1").fetchone()
-        if row is None:
+        snapshots = cycle_summary_snapshots(con)
+        if not snapshots:
             (directory / "cycle_summary.json").write_text(json.dumps(dict(
                 available=False, reason="No snapshot: collection was disabled or the table was not captured"),
                 indent=2) + "\n")
         else:
-            states = {state: row[f"STATES_{i}"] for i, state in enumerate(STATES)}
-            cycles, retired = sum(states.values()), row["RETIRED"]
+            row = snapshots[-1]
+            fields = ("RETIRED", "CENSOREDGAPS", *(f"STATES_{i}" for i in range(4)),
+                      *(f"GAPS_{i}" for i in range(5)))
+            totals = {field: sum(snapshot[field] for snapshot in snapshots) for field in fields}
+            states = {state: totals[f"STATES_{i}"] for i, state in enumerate(STATES)}
+            cycles, retired = sum(states.values()), totals["RETIRED"]
             result = dict(available=True, scope="All enabled cycles through observed_end; not PC/cycle filtered",
                           observed_end=row["CYCLE"], collection_closed=bool(row["CLOSED"]),
                           cycles=cycles, retired=retired, states=states,
                           ipc=retired / cycles if cycles else None,
                           cycles_per_kinst={state: count * 1000 / retired if retired else None
                                             for state, count in states.items()},
-                          complete_gap_histogram={name: row[f"GAPS_{i}"] for i, name in
+                          complete_gap_histogram={name: totals[f"GAPS_{i}"] for i, name in
                                                   enumerate(("1-7", "8-31", "32-127", "128-511", "512+"))},
-                          censored_gaps=row["CENSOREDGAPS"], pending_gap_cycles=row["PENDING"])
+                          censored_gaps=totals["CENSOREDGAPS"], pending_gap_cycles=row["PENDING"])
             (directory / "cycle_summary.json").write_text(json.dumps(result, indent=2) + "\n")
         if "TeaNoCommit_0" in tables:
             def intervals():
