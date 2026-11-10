@@ -129,7 +129,7 @@ PSV_new = PSV_old OR 新增事件 mask
 
 采样间隔按周期推进，不等待先前目标退休。从未启用 `enableTea` 时，成员 helper 保持复位，输入置零。首次启用后，关闭新采样时 debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
 
-恢复原因 PC 直接来自 redirect 事件或异常对应的 debug PC。成员 PSV 按 Slot 和完整 PC 匹配；没有匹配历史时保留事件原因 bit，不使用 Slot 中其他成员的 PSV。
+恢复原因 PC 来自 redirect 事件或异常对应的 debug PC；控制流事件携带取指块首地址，需要加上事件的 `getPcOffset()`，内存 redirect 已经携带指令 PC。成员 PSV 按 Slot 和完整 PC 匹配；没有匹配历史时保留事件原因 bit，不使用 Slot 中其他成员的 PSV。
 
 状态分类优先级如下，其中“恢复原因”指当前可见的原因：
 
