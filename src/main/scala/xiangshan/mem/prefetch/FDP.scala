@@ -34,7 +34,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermission
 import xiangshan.backend.rob.RobDebugRollingIO
 import utils._
 import utility._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.XSCoreParamsKey
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import utility.{CircularQueuePtr}
 import xiangshan.cache._

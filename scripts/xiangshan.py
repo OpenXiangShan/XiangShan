@@ -539,6 +539,14 @@ class XiangShan(object):
         zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return zcb_test
 
+    def __get_ci_reritest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/reri_test"
+        workloads = [
+            "reri_test-riscv64-xs.bin"
+        ]
+        reri_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return reri_test
+
     def __get_ci_iopmptest(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads/iopmp"
         workloads = [
@@ -667,6 +675,7 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
+            "reri-test": self.__get_ci_reritest,
             "iopmp-test": self.__get_ci_iopmptest,
             "frontend-misc-test": self.__get_ci_frontend_misc_test,
         }
@@ -700,6 +709,7 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
+            "reri-test": self.__get_ci_reritest,
             "iopmp-test": self.__get_ci_iopmptest,
             "frontend-misc-test": self.__get_ci_frontend_misc_test,
         }

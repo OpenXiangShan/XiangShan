@@ -17,6 +17,9 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import device.reri.ErrorSource
+import device.reri.RERIErrorInfo
+import device.reri.SeverityLevel
 import difftest.DiffRefillEvent
 import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
@@ -25,7 +28,6 @@ import utility.DataHoldBypass
 import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
@@ -64,8 +66,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
     val toIfu: MainPipeToIfuIO = new MainPipeToIfuIO
-    // backend/Beu
-    val error: Valid[L1CacheErrorInfo] = Output(ValidIO(new L1CacheErrorInfo))
+    // RERI error reporting
+    val error: Valid[RERIErrorInfo] = Output(Valid(new RERIErrorInfo))
 
     val perf: MainPipePerfInfo = Output(new MainPipePerfInfo)
   }
@@ -557,17 +559,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     println("Warn: ICache corrupt re-fetch is being rewritten, not working now")
   }
 
-  // BEU supports only 1 error report per cycle, so here we just select the first port in the first req
+  // RERI accepts one ICache event per cycle, so select the first corrupt port.
   private val s2_firstCorruptPortInfo = PriorityMux(s2_firstCorruptReqInfo.map(info => info.valid -> info))
-  io.error.valid              := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
-  io.error.bits.report_to_beu := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
-  io.error.bits.paddr         := getPAddrFromPTag(s2_firstCorruptPortInfo.bits.vAddr, s2_pTag).toUInt
-  io.error.bits.source        := DontCare
-  io.error.bits.source.tag    := s2_firstCorruptPortInfo.bits.isMeta
-  io.error.bits.source.data   := s2_firstCorruptPortInfo.bits.isData
-  io.error.bits.source.l2     := false.B
-  io.error.bits.opType        := DontCare
-  io.error.bits.opType.fetch  := true.B
+  io.error.valid           := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
+  io.error.bits.severity   := Mux(io.error.valid, SeverityLevel.UEC, SeverityLevel.NONE)
+  io.error.bits.errorPaddr := getPAddrFromPTag(s2_firstCorruptPortInfo.bits.vAddr, s2_pTag).toUInt
+  io.error.bits.errorSource :=
+    Mux(s2_firstCorruptPortInfo.bits.isMeta, ErrorSource.addressError, ErrorSource.dataError)
 
   s2_flush := io.flush
 

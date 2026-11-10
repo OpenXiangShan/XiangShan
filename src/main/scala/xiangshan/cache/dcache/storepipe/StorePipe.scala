@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
-import xiangshan.L1CacheErrorInfo
+import device.reri.RERIErrorInfo
 
 class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
@@ -81,11 +81,11 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     val replace_way = new ReplacementWayReqIO
 
     // ecc error
-    val error = Output(ValidIO(new L1CacheErrorInfo))
+    val error = Output(Valid(new RERIErrorInfo))
   })
 
   // TODO: error
-  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
+  io.error := 0.U.asTypeOf(io.error)
 
 /** S0:
   *   send tag and meta read req
