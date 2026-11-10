@@ -2057,7 +2057,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       teaCommits(slot).bits.isFormer := (slot % 2 == 0).B
     }
     // Recovery events identify the instruction; a compressed slot pointer alone does not.
-    val teaRedirectPc = in.debugInstrAddrTransType.extend(in.redirect.bits.pc(VAddrBits - 1, 0), XLEN)
+    // Control redirects carry the fetch-block PC; memory redirects already carry the instruction PC.
+    val teaRedirectInstrPc = in.redirect.bits.pc +
+      Mux(in.redirect.bits.debugIsCtrl, SignExt(in.redirect.bits.getPcOffset(), GuardedVAddrBits), 0.U)
+    val teaRedirectPc = in.debugInstrAddrTransType.extend(teaRedirectInstrPc(VAddrBits - 1, 0), XLEN)
     val teaExceptionPc = in.debugInstrAddrTransType.extend(exceptionDebug.pc, XLEN)
     val teaRedirectPsvDefault = Mux(teaRedirectCtrlMispred, TeaEvent.bit(TeaEvent.FL_MB),
       Mux(teaRedirectMemVio, TeaEvent.bit(TeaEvent.FL_MO), TeaPsvOps.empty))
