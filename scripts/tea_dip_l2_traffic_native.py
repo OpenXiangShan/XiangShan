@@ -125,6 +125,8 @@ def analyze(folder, receipt_path):
                       'prefetch matching an MSHR OR request-buffer entry. Neither measures CPU waiting. '
                       'Controller-active epochs do not prove local issueEnable. Local auto-disable includes teacher, '
                       'student and issue-gate decisions; student takeover is a training event, not a sent request. '
+                      'Score-table phase totals count s_idle observations and can include startup idle; '
+                      'they do not directly count phaseEndPulse or reconstruct issue-confidence updates. '
                       'Student/local-disable overlap bounds use their common atomic training population, not CPU-loss cycles. '
                       'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets.')
 
