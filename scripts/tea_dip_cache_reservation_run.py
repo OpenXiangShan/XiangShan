@@ -20,7 +20,7 @@ from tea_dip_query_endpoint_evidence import TABLES, endpoint
 from tea_dip_wb_protocol_micro import digest, write
 
 
-def closed_budget(folder, result):
+def closed_budget(folder, result, *, exact_endpoint=True):
     assert result['original_process_closed'] and result['difftest_passed']
     process = result['process']
     stat = Path('/proc', str(process['pid']), 'stat')
@@ -75,7 +75,7 @@ def closed_budget(folder, result):
     assert abs(sum(tea.values()) - cpi) < 1e-9 and abs(sum(dip_budget.values()) - cpi) < 1e-9
     return dict(native_cycles=cycles, native_retired=retired, native_CPI=cpi, actual_seed=actual_seed, table_rows=table_rows,
                 sampled_TEA_CPI=tea, DIP_CPI=dip_budget,
-                exact_TEA=endpoint(folder) if len(blocks) == 2 else None,
+                exact_TEA=endpoint(folder) if len(blocks) == 2 and exact_endpoint else None,
                 memory=memory_evidence(folder, receipt) if len(blocks) == 2 else None,
                 prefetch_traffic=traffic_evidence(folder, receipt) if len(blocks) == 2 else None,
                 scope='Each native denominator retained. Sampled budgets are rescaled to native CPI; closure does not prove representative sampling, dynamic-prefix identity or unique causal attribution.')
