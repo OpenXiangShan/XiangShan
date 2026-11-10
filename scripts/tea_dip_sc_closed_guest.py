@@ -26,6 +26,30 @@ NATIVE = [*OUTCOMES.values(), 't1_use_sc', 't1_not_use_sc']
 
 
 
+def training_handshake(blocks):
+    """Keep actual valid training stalls separate from the ungated SC bank predicate."""
+    phases = []
+    labels = ['warmup', 'ROI'] if len(blocks) == 2 else ['coremark']
+    for label, (stamp, block) in zip(labels, blocks):
+        counters = unique_counters(block)
+
+        def get(suffix):
+            value, = [v for k, v in counters.items() if k.endswith(suffix)]
+            return value
+
+        blocked = get('.bpu.train_stall')
+        conflict = get('.sc.t0_writeConflict')
+        phases.append(dict(phase=label, native_print_stamp=stamp,
+                           accepted_packets=get('.bpu.train_total'), blocked_valid_cycles=blocked,
+                           sc_bank_conflict_condition_cycles=conflict,
+                           SC_conditions_without_pending_train_lower_bound=max(0, conflict-blocked)))
+    return dict(phases=phases,
+                scope='BPU train_stall is valid && !ready; SC t0_writeConflict is a bank predicate without '
+                      'train.valid gating. Their difference gives only a lower bound on SC conditions when '
+                      'no train packet is pending. Global stalls include other predictors; neither count '
+                      'is exclusive CPU loss or uniquely saved cycles.')
+
+
 def final_tage_outcome(row):
     valid, provider = row['TAGEFINALVALID'], row['TAGEUSEPROVIDER']
     source = 'provider' if provider else 'alternate' if valid else 'invalid'
@@ -186,6 +210,7 @@ def analyze(folder, receipt_path):
                       'Path/global/bias responses are old training-time entries, not prediction-time weights. '
                       'When trace_phase_cohorts is present, dedicated trace-valid native totals validate ordinal '
                       'training phases; this does not calibrate private STAMP to TEA or establish prediction accuracy.')
+    data['training_handshake'] = training_handshake(blocks)
     if exact_phases is not None:
         data['trace_phase_cohorts'] = exact_phases
     if has_final_tage:
