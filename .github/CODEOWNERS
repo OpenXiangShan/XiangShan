@@ -7,20 +7,20 @@ src/main/scala/xiangshan/frontend/ifu/ @ngc7331 @my-mayfly @Yan-Muzi
 src/main/scala/xiangshan/frontend/instruncache/ @ngc7331 @Yan-Muzi
 
 src/main/scala/xiangshan/backend/ @Lemover
-src/main/scala/xiangshan/backend/Region.scala @xiaofeibao-xjtu @Lemover
+src/main/scala/xiangshan/backend/Region.scala @Lemover
 src/main/scala/xiangshan/backend/CtrlBlock.scala @wissygh @Lemover
 src/main/scala/xiangshan/backend/ctrlblock/ @wissygh @Lemover
-src/main/scala/xiangshan/backend/datapath/ @xiaofeibao-xjtu @Lemover
+src/main/scala/xiangshan/backend/datapath/ @Lemover
 src/main/scala/xiangshan/backend/decode/ @HeiHuDie @Lemover
-src/main/scala/xiangshan/backend/dispatch/ @xiaofeibao-xjtu @Lemover
+src/main/scala/xiangshan/backend/dispatch/ @Lemover
 src/main/scala/xiangshan/backend/exu/ @sinceforYy @Lemover
 src/main/scala/xiangshan/backend/fu/ @sinceforYy @Lemover
 src/main/scala/xiangshan/backend/fu/NewCSR/ @huxuan0307 @Lemover
-src/main/scala/xiangshan/backend/issue/ @xiaofeibao-xjtu @Lemover
-src/main/scala/xiangshan/backend/regcache/ @xiaofeibao-xjtu @Lemover
-src/main/scala/xiangshan/backend/regfile/ @xiaofeibao-xjtu @Lemover
+src/main/scala/xiangshan/backend/issue/ @Lemover
+src/main/scala/xiangshan/backend/regcache/ @Lemover
+src/main/scala/xiangshan/backend/regfile/ @Lemover
 src/main/scala/xiangshan/backend/rename/ @Tang-Haojin @Lemover
-src/main/scala/xiangshan/backend/rob/ @NewPaulWalker @xiaofeibao-xjtu @Lemover
+src/main/scala/xiangshan/backend/rob/ @Lemover
 src/main/scala/xiangshan/backend/trace/ @wissygh @Lemover
 
 src/main/scala/xiangshan/cache/ @linjuanZ
