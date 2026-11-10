@@ -10,7 +10,6 @@ import xiangshan.AddrTransType
 
 
 class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV, _.MDT, _.SDT))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val debugMode = ValidIO(Bool())
@@ -53,7 +52,6 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.debugMode.valid       := valid
   out.privState.valid       := valid
-  out.dcsr.valid            := valid
   out.mstatus.valid         := valid
   out.vsstatus.valid        := valid
   out.debugIntrEnable.valid := valid
