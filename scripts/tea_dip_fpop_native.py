@@ -54,9 +54,23 @@ def analyze(folder, receipt_path):
                                PE_overflow_events=scalar(PREFIX + 'other_peOverflowCount' + role),
                                proxy_positive_sum=positive, proxy_negative_sum=negative,
                                proxy_balance=positive - negative)
+        top = '.l2cache.prefetcher.'
+        training = {}
+        for role in ['VBOP', 'PBOP']:
+            generator = role.lower()
+            training[role] = dict(
+                buffer_accepted=scalar(top + generator + '_train_accept'),
+                buffer_drop_valid_cycles=scalar(top + generator + '_train_drop'),
+                learner_consumed=scalar(top + generator + '.bop_train'),
+                generated_requests=scalar(top + generator + '.bop_req'),
+                table_not_ready_cycles=scalar(top + generator + '.bop_train_stall_for_st_not_ready'),
+                student_not_ready_cycles=scalar(top + generator + '.bop_train_stall_for_stu_not_ready'),
+                feedback_zero_s1_valid_cycles=scalar(top + generator + '.bop_l2_feedback_control_drop'))
         frames.append(dict(phase=label, native_print_stamp=stamp,
                            native_cycles=scalar('.rob.clock_cycle'), native_retired=scalar('.rob.commitInstr'),
-                           epoch_end_events=scalar(PREFIX + 'epochCount'), roles=roles))
+                           epoch_end_events=scalar(PREFIX + 'epochCount'), roles=roles,
+                           BOP_training=dict(incoming_valid_cycles=scalar(top + 'prefetch_train_valid'),
+                                             generators=training)))
     return dict(point=folder.name, source=receipt['source'], runtime_constants=constants, frames=frames,
                 receipt_sha256=digest(receipt_path), native_log_sha256=digest(folder / 'simulator_err.txt'),
                 stdout_sha256=digest(folder / 'simulator_out.txt'), tool_sha256=digest(Path(__file__)),
@@ -67,6 +81,11 @@ def analyze(folder, receipt_path):
                       'PE resets, pipeline timing, overflow and history prevent reconstructing decisions from '
                       'whole-window sums. Epoch end and active/inactive counters use different pipeline enables; '
                       'their equality is not assumed. Active epochs do not prove the feedback mode was enabled. '
+                      'BOP buffer acceptance, input-drop conditions and learner-consumed events are separate stages. '
+                      'The total incoming train-valid population may include inputs filtered before BOP; '
+                      'it is not assumed to partition into either generator buffer acceptance and drops. '
+                      'Table/student not-ready conditions omit other downstream blockers. '
+                      'Feedback-zero s1-valid counts are condition cycles, not unique dropped requests. '
                       'No request-level causality, full-suite gain or live database read is inferred.')
 
 
