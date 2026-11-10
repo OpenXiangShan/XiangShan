@@ -55,12 +55,12 @@ class RasStack(implicit p: Parameters) extends RasModule
       val meta:     RasInternalMeta = Input(new RasInternalMeta)
     }
 
-    val spec:     RasSpecIO     = new RasSpecIO
+    val spec:     RasSpecIO              = new RasSpecIO
     val s2SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
     val s3SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
-    val commit:   RasCommitIO   = new RasCommitIO
-    val redirect: RasRedirectIO = new RasRedirectIO
-    val specRead: ReadRetAddr   = new ReadRetAddr
+    val commit:   RasCommitIO            = new RasCommitIO
+    val redirect: RasRedirectIO          = new RasRedirectIO
+    val specRead: ReadRetAddr            = new ReadRetAddr
     // Whether the speculative top (`spec.popAddr`) can be used to predict a return.
     val topRetAddrValid: Bool            = Output(Bool())
     val meta:            RasInternalMeta = Output(new RasInternalMeta)
@@ -73,9 +73,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     val inSpec: Bool   = Bool()
   }
   class RestoreEntry(implicit p: Parameters) extends RasBundle {
-    val magicNum:     UInt     = UInt(log2Ceil(RestoreDepth).W)
-    val nosEntry:     NosEntry = new NosEntry
-    val nextNosEntry: NosEntry = new NosEntry
+    val magicNum:     UInt      = UInt(log2Ceil(RestoreDepth).W)
+    val nosEntry:     NosEntry  = new NosEntry
+    val nextNosEntry: NosEntry  = new NosEntry
     val topAddr:      GuardedPc = GuardedPc()
     val nextTopAddr:  GuardedPc = GuardedPc()
   }
@@ -101,12 +101,12 @@ class RasStack(implicit p: Parameters) extends RasModule
   private val tosrInSpec = RegInit(false.B)
   private val nosInSpec  = RegInit(false.B)
 
-  private val magicNum   = RegInit(0.U(log2Ceil(RestoreDepth).W))
+  private val magicNum = RegInit(0.U(log2Ceil(RestoreDepth).W))
 
   private val s2_rasMeta = RegInit(0.U.asTypeOf(new RasInternalMeta))
   private val s3_rasMeta = RegInit(0.U.asTypeOf(new RasInternalMeta))
   private val timingTop  = RegInit(0.U.asTypeOf(new RasEntry))
-  when(io.spec.fire){
+  when(io.spec.fire) {
     s2_rasMeta.tosw       := tosw
     s2_rasMeta.tosr       := tosr
     s2_rasMeta.nos        := nos
@@ -114,7 +114,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     s2_rasMeta.nosInSpec  := nosInSpec
     s2_rasMeta.ssp        := ssp
   }
-  when(io.s2SpecIn.valid){
+  when(io.s2SpecIn.valid) {
     s3_rasMeta := s2_rasMeta
   }
 
@@ -136,27 +136,27 @@ class RasStack(implicit p: Parameters) extends RasModule
   def getCommitTop(currSsp: UInt): RasEntry = commitStack(commitStackIdx(currSsp))
 
   def getNextNos(
-    currMagicNum:   UInt,
-    currNos:        RasPtr,
-    currTosr:       RasPtr,
-    currTosw:       RasPtr,
-    currTosrInSpec: Bool,
-    currNosInSpec:  Bool,
-    allowBypass:    Boolean
+      currMagicNum:   UInt,
+      currNos:        RasPtr,
+      currTosr:       RasPtr,
+      currTosw:       RasPtr,
+      currTosrInSpec: Bool,
+      currNosInSpec:  Bool,
+      allowBypass:    Boolean
   ): NosEntry = {
     val ret = Wire(new NosEntry)
     if (allowBypass) {
-      val hitVec = Wire(Vec(2, Bool()))
+      val hitVec          = Wire(Vec(2, Bool()))
       val restoreEntryVec = Wire(Vec(2, new RestoreEntry))
       restoreEntryVec(0) := s2_restoreEntry.bits
       restoreEntryVec(1) := s3_restoreEntry.bits
-      hitVec(0) := s2_restoreEntry.valid && (currMagicNum === s2_restoreEntry.bits.magicNum)
-      hitVec(1) := s3_restoreEntry.valid && (currMagicNum === s3_restoreEntry.bits.magicNum)
+      hitVec(0)          := s2_restoreEntry.valid && (currMagicNum === s2_restoreEntry.bits.magicNum)
+      hitVec(1)          := s3_restoreEntry.valid && (currMagicNum === s3_restoreEntry.bits.magicNum)
       val hit = hitVec.reduce(_ || _)
       when(hit) {
         val restore = Wire(new RestoreEntry)
         restore := Mux1H(hitVec, restoreEntryVec)
-        ret := restore.nosEntry
+        ret     := restore.nosEntry
       }.elsewhen(tosrInRange(currTosr, currTosw, currTosrInSpec) && tosrInRange(currNos, currTosw, currNosInSpec)) {
         ret := specNosList(currNos.value)
       }.otherwise {
@@ -180,18 +180,18 @@ class RasStack(implicit p: Parameters) extends RasModule
       currInSpec:   Bool,
       allowBypass:  Boolean
   ): RasEntry = {
-    val ret     = Wire(new RasEntry)
+    val ret = Wire(new RasEntry)
     if (allowBypass) {
-      val hitVec = Wire(Vec(2, Bool()))
+      val hitVec          = Wire(Vec(2, Bool()))
       val restoreEntryVec = Wire(Vec(2, new RestoreEntry))
       restoreEntryVec(0) := s2_restoreEntry.bits
       restoreEntryVec(1) := s3_restoreEntry.bits
-      hitVec(0) := s2_restoreEntry.valid && (currMagicNum === s2_restoreEntry.bits.magicNum)
-      hitVec(1) := s3_restoreEntry.valid && (currMagicNum === s3_restoreEntry.bits.magicNum)
+      hitVec(0)          := s2_restoreEntry.valid && (currMagicNum === s2_restoreEntry.bits.magicNum)
+      hitVec(1)          := s3_restoreEntry.valid && (currMagicNum === s3_restoreEntry.bits.magicNum)
       val hit = hitVec.reduce(_ || _)
       when(hit) {
         val restore = Wire(new RestoreEntry)
-        restore := Mux1H(hitVec, restoreEntryVec)
+        restore     := Mux1H(hitVec, restoreEntryVec)
         ret.retAddr := restore.topAddr
       }.elsewhen(tosrInRange(currTosr, currTosw, currInSpec)) {
         ret := specQueue(currTosr.value)
@@ -219,14 +219,14 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   def specPop(
-    currSsp:        UInt,
-    currTosr:       RasPtr,
-    currTosw:       RasPtr,
-    currTopNos:     RasPtr,
-    currNosInSpec:  Bool,
-    currTosrInSpec: Bool,
-    nextNos:        RasPtr,
-    nextNosInSpec:  Bool
+      currSsp:        UInt,
+      currTosr:       RasPtr,
+      currTosw:       RasPtr,
+      currTopNos:     RasPtr,
+      currNosInSpec:  Bool,
+      currTosrInSpec: Bool,
+      nextNos:        RasPtr,
+      nextNosInSpec:  Bool
   ): Unit = {
     // tosr is only maintained when spec queue is not empty
     when(tosrInRange(currTosr, currTosw, currTosrInSpec)) {
@@ -250,15 +250,15 @@ class RasStack(implicit p: Parameters) extends RasModule
       allowBypass = false
     )
 
-  private val nextTopAddr   = getTop(magicNum - 1.U, ptrDec(ssp), nos, tosw, nosInSpec, allowBypass = true)
-  private val nextNosEntry  = getNextNos(magicNum - 1.U, nos, tosr, tosw, tosrInSpec, nosInSpec, allowBypass = true)
+  private val nextTopAddr  = getTop(magicNum - 1.U, ptrDec(ssp), nos, tosw, nosInSpec, allowBypass = true)
+  private val nextNosEntry = getNextNos(magicNum - 1.U, nos, tosr, tosw, tosrInSpec, nosInSpec, allowBypass = true)
   private val s2_realPushAddr =
     getCfiPcFromPosition(GuardedPcInit(io.s2SpecIn.bits.startPc), io.s2SpecIn.bits.cfiPosition) + 2.U
   private val s3_realPushAddr =
     getCfiPcFromPosition(GuardedPcInit(io.s3SpecIn.bits.startPc), io.s3SpecIn.bits.cfiPosition) + 2.U
 
   // 指针更新
-  when(io.redirect.valid){
+  when(io.redirect.valid) {
     tosr       := io.redirect.meta.tosr
     tosw       := io.redirect.meta.tosw
     nos        := io.redirect.meta.nos
@@ -282,12 +282,12 @@ class RasStack(implicit p: Parameters) extends RasModule
       )
     }
   }.elsewhen(io.s3SpecIn.valid && io.s3SpecIn.bits.hasOverride) {
-    tosr    := s3_rasMeta.tosr
-    tosw    := s3_rasMeta.tosw
-    nos     := s3_rasMeta.nos
-    ssp     := s3_rasMeta.ssp
-    tosrInSpec  := s3_rasMeta.tosrInSpec
-    nosInSpec   := s3_rasMeta.nosInSpec
+    tosr       := s3_rasMeta.tosr
+    tosw       := s3_rasMeta.tosw
+    nos        := s3_rasMeta.nos
+    ssp        := s3_rasMeta.ssp
+    tosrInSpec := s3_rasMeta.tosrInSpec
+    nosInSpec  := s3_rasMeta.nosInSpec
 
     when(io.s3SpecIn.bits.attribute.isCall) {
       specPush(s3_rasMeta.ssp, s3_rasMeta.tosr, s3_rasMeta.tosrInSpec, s3_rasMeta.tosw)
@@ -305,12 +305,12 @@ class RasStack(implicit p: Parameters) extends RasModule
       )
     }
   }.elsewhen(io.s2SpecIn.valid && io.s2SpecIn.bits.hasOverride) {
-    tosr    := s2_rasMeta.tosr
-    tosw    := s2_rasMeta.tosw
-    nos     := s2_rasMeta.nos
-    ssp     := s2_rasMeta.ssp
-    tosrInSpec  := s2_rasMeta.tosrInSpec
-    nosInSpec   := s2_rasMeta.nosInSpec
+    tosr       := s2_rasMeta.tosr
+    tosw       := s2_rasMeta.tosw
+    nos        := s2_rasMeta.nos
+    ssp        := s2_rasMeta.ssp
+    tosrInSpec := s2_rasMeta.tosrInSpec
+    nosInSpec  := s2_rasMeta.nosInSpec
 
     when(io.s2SpecIn.bits.attribute.isCall) {
       specPush(s2_rasMeta.ssp, s2_rasMeta.tosr, s2_rasMeta.tosrInSpec, s2_rasMeta.tosw)
@@ -342,9 +342,9 @@ class RasStack(implicit p: Parameters) extends RasModule
       timingTop.retAddr := io.redirect.callAddr
     }.elsewhen(io.redirect.isRet) {
       // getTop using redirect Nos as tosr
-      val nextReadSsp  = Wire(UInt(StackPtrWidth.W))
-      val nextReadTosr = io.redirect.meta.nos
-      val nextReadTosw = io.redirect.meta.tosw
+      val nextReadSsp        = Wire(UInt(StackPtrWidth.W))
+      val nextReadTosr       = io.redirect.meta.nos
+      val nextReadTosw       = io.redirect.meta.tosw
       val nextReadTosrInSpec = io.redirect.meta.nosInSpec
       nextReadSsp := ptrDec(io.redirect.meta.ssp)
       timingTop := getTop(
@@ -357,9 +357,9 @@ class RasStack(implicit p: Parameters) extends RasModule
       )
     }.otherwise {
       // Neither call nor ret
-      val nextReadSsp  = io.redirect.meta.ssp
-      val nextReadTosr = io.redirect.meta.tosr
-      val nextReadTosw = io.redirect.meta.tosw
+      val nextReadSsp        = io.redirect.meta.ssp
+      val nextReadTosr       = io.redirect.meta.tosr
+      val nextReadTosw       = io.redirect.meta.tosw
       val nextReadTosrInSpec = io.redirect.meta.tosrInSpec
       timingTop := getTop(
         currMagicNum = 0.U, // DontCare
@@ -372,7 +372,10 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }.elsewhen(io.s3SpecIn.valid && io.s3SpecIn.bits.hasOverride) {
     when(io.s3SpecIn.bits.attribute.isCall) {
-      timingTop.retAddr := getCfiPcFromPosition(GuardedPcInit(io.s3SpecIn.bits.startPc), io.s3SpecIn.bits.cfiPosition) + 2.U
+      timingTop.retAddr := getCfiPcFromPosition(
+        GuardedPcInit(io.s3SpecIn.bits.startPc),
+        io.s3SpecIn.bits.cfiPosition
+      ) + 2.U
     }.elsewhen(io.s3SpecIn.bits.attribute.isReturn) {
       timingTop.retAddr := s3_restoreEntry.bits.nextTopAddr
     }.otherwise {
@@ -380,7 +383,10 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }.elsewhen(io.s2SpecIn.valid && io.s2SpecIn.bits.hasOverride) {
     when(io.s2SpecIn.bits.attribute.isCall) {
-      timingTop.retAddr := getCfiPcFromPosition(GuardedPcInit(io.s2SpecIn.bits.startPc), io.s2SpecIn.bits.cfiPosition) + 2.U
+      timingTop.retAddr := getCfiPcFromPosition(
+        GuardedPcInit(io.s2SpecIn.bits.startPc),
+        io.s2SpecIn.bits.cfiPosition
+      ) + 2.U
     }.elsewhen(io.s2SpecIn.bits.attribute.isReturn) {
       timingTop.retAddr := s2_restoreEntry.bits.nextTopAddr
     }.otherwise {
@@ -390,9 +396,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     when(io.spec.pushValid) {
       timingTop.retAddr := io.spec.pushAddr
     }.elsewhen(io.spec.popValid) {
-      val nextReadSsp  = ptrDec(ssp)
-      val nextReadTosr = nos
-      val nextReadTosw = tosw
+      val nextReadSsp        = ptrDec(ssp)
+      val nextReadTosr       = nos
+      val nextReadTosw       = tosw
       val nextReadTosrInSpec = nosInSpec
       timingTop := getTop(
         currMagicNum = magicNum - 1.U,
@@ -403,9 +409,9 @@ class RasStack(implicit p: Parameters) extends RasModule
         allowBypass = true
       )
     }.otherwise {
-      val nextReadSsp  = ssp
-      val nextReadTosr = tosr
-      val nextReadTosw = tosw
+      val nextReadSsp        = ssp
+      val nextReadTosr       = tosr
+      val nextReadTosw       = tosw
       val nextReadTosrInSpec = tosrInSpec
       // timingTop := timingTop
       // 添加一个测试比较，当RAS不为空的时候。
@@ -413,58 +419,58 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   when(io.s2SpecIn.valid) {
-    s3_restoreEntry   := s2_restoreEntry
+    s3_restoreEntry := s2_restoreEntry
   }
 
   // 备份的更新操作
   when(io.redirect.valid) {
-    magicNum := 0.U
+    magicNum              := 0.U
     s2_restoreEntry.valid := false.B
     s3_restoreEntry.valid := false.B
   }.elsewhen(io.s3SpecIn.valid && io.s3SpecIn.bits.hasOverride) {
     when(io.s3SpecIn.bits.attribute.isCall) {
-      magicNum := s3_restoreEntry.bits.magicNum + 1.U
+      magicNum              := s3_restoreEntry.bits.magicNum + 1.U
       s2_restoreEntry.valid := false.B
       s3_restoreEntry.valid := false.B
     }.elsewhen(io.s3SpecIn.bits.attribute.isReturn) {
-      magicNum := s3_restoreEntry.bits.magicNum - 1.U
+      magicNum              := s3_restoreEntry.bits.magicNum - 1.U
       s2_restoreEntry.valid := false.B
       s3_restoreEntry.valid := false.B
     }.otherwise {
-      magicNum  := s3_restoreEntry.bits.magicNum
+      magicNum              := s3_restoreEntry.bits.magicNum
       s2_restoreEntry.valid := false.B
       s3_restoreEntry.valid := false.B
     }
   }.elsewhen(io.s2SpecIn.valid && io.s2SpecIn.bits.hasOverride) {
     when(io.s2SpecIn.bits.attribute.isCall) {
-      magicNum := s2_restoreEntry.bits.magicNum + 1.U
+      magicNum              := s2_restoreEntry.bits.magicNum + 1.U
       s2_restoreEntry.valid := false.B
       s3_restoreEntry       := s2_restoreEntry
       s3_restoreEntry.valid := true.B
     }.elsewhen(io.s2SpecIn.bits.attribute.isReturn) {
-      magicNum  := s2_restoreEntry.bits.magicNum - 1.U
+      magicNum              := s2_restoreEntry.bits.magicNum - 1.U
       s2_restoreEntry.valid := false.B
       s3_restoreEntry       := s2_restoreEntry
       s3_restoreEntry.valid := false.B
     }.otherwise {
-      magicNum  := s2_restoreEntry.bits.magicNum
+      magicNum              := s2_restoreEntry.bits.magicNum
       s2_restoreEntry.valid := false.B
       s3_restoreEntry       := s2_restoreEntry
       s3_restoreEntry.valid := false.B
     }
   }.elsewhen(io.spec.fire) {
-    s2_restoreEntry.bits.topAddr      := timingTop.retAddr
-    s2_restoreEntry.bits.nextTopAddr  := nextTopAddr.retAddr
-    s2_restoreEntry.bits.nosEntry.nos := nos
-    s2_restoreEntry.bits.nosEntry.inSpec  := nosInSpec
-    s2_restoreEntry.bits.nextNosEntry := nextNosEntry
-    s2_restoreEntry.bits.magicNum     := magicNum
+    s2_restoreEntry.bits.topAddr         := timingTop.retAddr
+    s2_restoreEntry.bits.nextTopAddr     := nextTopAddr.retAddr
+    s2_restoreEntry.bits.nosEntry.nos    := nos
+    s2_restoreEntry.bits.nosEntry.inSpec := nosInSpec
+    s2_restoreEntry.bits.nextNosEntry    := nextNosEntry
+    s2_restoreEntry.bits.magicNum        := magicNum
     when(io.spec.pushValid) {
       s2_restoreEntry.valid := true.B
-      magicNum := magicNum + 1.U
+      magicNum              := magicNum + 1.U
     }.elsewhen(io.spec.popValid) {
       s2_restoreEntry.valid := false.B
-      magicNum := magicNum - 1.U
+      magicNum              := magicNum - 1.U
     }.otherwise {
       s2_restoreEntry.valid := false.B
     }
@@ -488,8 +494,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.tosw, s3_rasMeta.tosw),
     io.s3SpecIn.valid || (io.redirect.valid && io.redirect.isCall)
   )
-  private val realPush = RegNext(io.s3SpecIn.valid && io.s3SpecIn.bits.attribute.isCall && !io.redirect.valid, init = false.B) ||
-    RegNext(io.redirect.valid && io.redirect.isCall, init = false.B)
+  private val realPush =
+    RegNext(io.s3SpecIn.valid && io.s3SpecIn.bits.attribute.isCall && !io.redirect.valid, init = false.B) ||
+      RegNext(io.redirect.valid && io.redirect.isCall, init = false.B)
   when(realPush) {
     specQueue(realWriteAddr.value)   := realWriteEntry
     specNosList(realWriteAddr.value) := realNosEntry

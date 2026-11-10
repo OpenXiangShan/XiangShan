@@ -130,5 +130,5 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
 }
 
 class RasPipeLineInfo(implicit p: Parameters) extends RasSpecInfo {
-  val hasOverride:  Bool      = Bool()
+  val hasOverride: Bool = Bool()
 }
