@@ -73,6 +73,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
   private val isFetchBkpt    = isBpExcp && (TriggerAction.isFetch(in.trigger) || in.trigger === TriggerAction.Ebreak)
   private val isMemBkpt      = isBpExcp && TriggerAction.isMem(in.trigger)
+  private val isOtherBkpt    = isBpExcp && in.trigger === TriggerAction.OtherTrigger
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
@@ -80,7 +81,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
-  private val isFetchMalAddrExcp = (isFetchExcp || isFetchGuestExcp) && isFetchMalAddr
+  private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
@@ -141,9 +142,9 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
                                     Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.scause.bits.Interrupt     := isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
-  out.stval.bits.ALL            := Mux(satpFlushFirstFetchFault,
-                                    tval,
-                                    Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
+  out.stval.bits.ALL            := Mux(isOtherBkpt, 0.U,
+                                    Mux(satpFlushFirstFetchFault, tval,
+                                      Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)))
   out.htval.bits.ALL            := Mux(satpFlushFirstFetchFault, tval2FromSatpFlush >> 2, tval2 >> 2)
   out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
 

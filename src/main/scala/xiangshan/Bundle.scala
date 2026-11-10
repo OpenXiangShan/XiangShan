@@ -37,6 +37,7 @@ import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
+import xiangshan.backend.fu.NewCSR.Tdata1Type
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobCommitEntryBundle
@@ -821,7 +822,9 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: Tdata2Bundle): MatchTriggerIO = {
     val mcontrol6 = Wire(new Mcontrol6)
-    mcontrol6 := tdata1.DATA.asUInt
+    // A disabled or icount slot must also break any stale address-trigger chain.
+    // In particular, icount.COUNT[1] occupies the mcontrol6.CHAIN bit position.
+    mcontrol6 := Mux(tdata1.TYPE === Tdata1Type.Mcontrol6, tdata1.DATA.asUInt, 0.U)
     this.matchType := mcontrol6.MATCH.asUInt
     this.select    := mcontrol6.SELECT.asBool
     this.timing    := false.B

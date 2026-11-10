@@ -143,6 +143,7 @@ object Bundles {
 
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
+    val debugSerial = Bool()
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val satpFlushFirstFetchFault = Bool()
@@ -236,6 +237,7 @@ object Bundles {
   }
 
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
+    val debugSerial = Bool()
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val satpFlushFirstFetchFault = Bool()

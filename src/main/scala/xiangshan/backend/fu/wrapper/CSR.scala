@@ -164,7 +164,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.valid := true.B  // Todo: valid control signal
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
-  csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+  csrMod.io.icountEvent := csrIn.icountEvent
+  csrOut.icountResponse := RegNext(csrMod.io.status.icount, 0.U.asTypeOf(new IcountResponse))
 
   csrMod.io.fromRename.diffVl.zip(csrIn.vpu.diffVl).foreach { case (sink, source) =>
     sink := source

@@ -106,7 +106,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val cannotCompressVec = VecInit(io.in.zip(isVectorInstrVec).map { case (x, isVectorInstr) =>
     // All vector instructions retain the mainline retirement/exception path.
     // Split instructions also keep its firstUop/lastUop allocation semantics.
-    x.valid && (x.bits.waitForward || x.bits.blockBackward ||
+    x.valid && (x.bits.debugSerial || x.bits.waitForward || x.bits.blockBackward ||
       isVectorInstr ||
       !x.bits.firstUop || !x.bits.lastUop)
   })
