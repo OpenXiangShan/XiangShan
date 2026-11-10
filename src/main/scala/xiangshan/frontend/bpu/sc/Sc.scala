@@ -897,6 +897,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   }
 
+  XSPerfAccumulate("diag_sc_cond_trace_events", PopCount(scTraceVec.map(_.valid)))
+
   private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
     ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, basicDB = true)
   }
