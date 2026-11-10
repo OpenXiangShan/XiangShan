@@ -100,6 +100,8 @@ def analyze(folder, receipt_path):
                       'identify all trace-event phase boundaries; private STAMP is not calibrated to TEA. '
                       'Training excludes correct agreeing useSc events. Per-PC and provider-CTR outcomes are selected '
                       'training counts, not overall branch accuracy, causal overrides or predicted saved cycles. '
+                      'Native TAGE outcome names refer to the raw longest-history provider, not the final '
+                      'UseAltOnNa-selected TAGE prediction. '
                       'Path/global/bias responses are old training-time entries, not prediction-time weights.')
 
 
