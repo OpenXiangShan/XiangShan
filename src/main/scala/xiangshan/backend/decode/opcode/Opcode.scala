@@ -17,6 +17,7 @@ object Opcode {
   def main(args: Array[String]): Unit = {
     val opcodes = Seq(
       AluOpcodes,
+      SscheckOpcodes,
       BruOpcodes,
       LinkOpcodes,
       JmpOpcodes,
@@ -215,6 +216,7 @@ object Opcode {
     val xorzexth   = Value(bb"110_0101")
     val orcblsb    = Value(bb"110_0110")
     val orcbzexth  = Value(bb"110_0111")
+
     // for xstrap
     val xstrap     = IntIType(bb"111_1111") + BlockBack // CustomTrapPattern
 
@@ -271,6 +273,11 @@ object Opcode {
     def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
 
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
+  }
+
+  object SscheckOpcodes extends Opcodes {
+    // Internal shadow-stack compare: equal returns the RV64 stack step, otherwise zero.
+    val sscheck = IntRType(bb"000_0000")
   }
 
   object BruOpcodes extends Opcodes {
@@ -442,6 +449,14 @@ object Opcode {
 
   trait LduOpcodes extends Opcodes with LsuTrait with DataType {
     protected val uopPrefetch = bb"1"
+    // Internal POP load; the ALU0 sscheck FU compares the returned data.
+    val sspopchk = IntIType(SCALAR1, nonH, nonX, sign, D, bb"0")
+    // Internal SSPUSH check: executes in LDU with shadow-stack store permissions.
+    val sspushchk = IntIType(SCALAR3, nonH, nonX, sign, D, bb"0")
+    def isSspushCheck(op: UInt): Bool = op === sspushchk.encode
+    def isSspopchk(op: UInt): Bool = op === sspopchk.encode
+    def isShadowStackLoad(op: UInt): Bool = isSspopchk(op) || isSspushCheck(op)
+
     protected val uopLoad = bb"0"
 
     // normal load
@@ -584,6 +599,9 @@ object Opcode {
   }
 
   trait StuOpcodes extends Opcodes with LsuTrait with DataType {
+    val sspush = IntBSType(SCALAR2, nonH, nonX, sign, D, bb"0")
+    def isShadowStackStore(op: UInt): Bool = op === sspush.encode
+
     protected val uopStore = bb"0"
     protected val uopCbo = bb"1"
 
@@ -698,6 +716,7 @@ object Opcode {
       val lr   = bb"000"
       val sc   = bb"001"
       val swap = bb"100"
+      val sswap = bb"110"
       val cas  = bb"101"
     }
 
@@ -711,6 +730,10 @@ object Opcode {
       val minu = bb"110"
       val maxu = bb"111"
     }
+
+    val ssamoswap_w = IntRType(SCALAR, NoALU.sswap, W, noALU) + NoSpec + BlockBack
+    val ssamoswap_d = IntRType(SCALAR, NoALU.sswap, D, noALU) + NoSpec + BlockBack
+    def isShadowStackAmo(op: UInt): Bool = getAmoOp(op) === AmoOp.sswap
 
     // atomics
     //                       4b        3b        3b   1b
@@ -797,6 +820,7 @@ object Opcode {
       val lr   = NoALU.lr     ## noALU
       val sc   = NoALU.sc     ## noALU
       val swap = NoALU.swap   ## noALU
+      val sswap = NoALU.sswap ## noALU
       val cas  = NoALU.cas    ## noALU
       val add  = WithALU.add  ## withALU
       val xor  = WithALU.xor  ## withALU
@@ -840,6 +864,7 @@ object Opcode {
       AmoOp.lr   -> DifftestOpcode.lr,
       AmoOp.sc   -> DifftestOpcode.sc,
       AmoOp.swap -> DifftestOpcode.amoswap,
+      AmoOp.sswap -> DifftestOpcode.amoswap,
       AmoOp.cas  -> DifftestOpcode.amocas,
       AmoOp.add  -> DifftestOpcode.amoadd,
       AmoOp.xor  -> DifftestOpcode.amoxor,

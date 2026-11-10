@@ -55,7 +55,10 @@ object FuType extends ChiselOHEnum {
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
 
-  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  // Internal ALU0 co-executor for the shadow-stack return-address check.
+  val sscheck = addType(name = "sscheck")
+
+  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, sscheck, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {

@@ -18,6 +18,7 @@ class UopBufferCtrlDecoder(
   uopWidth        : Int,
   uopBufferLength : Int,
   numM2M4M8Channel: (Int, Int, Int),
+  scalarSplitCounts: Seq[Int] = Seq.empty,
 ) extends Module with HasVectorSettings {
   val MaxM2UopIdx = numM2M4M8Channel._1
   val MaxM4UopIdx = numM2M4M8Channel._2
@@ -38,7 +39,7 @@ class UopBufferCtrlDecoder(
     val selForBufffer = Vec(uopBufferLength, new UopSelectBundle(mopWidth))
   }))
 
-  val alluops: ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = genUopNumPatterns2(mopWidth, numM2M4M8Channel)
+  val alluops: ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = genUopNumPatterns2(mopWidth, numM2M4M8Channel, scalarSplitCounts)
 
   val patternsForUopSel: Seq[Seq[UopNumWithChannelUopNum]] = alluops.zipWithIndex.map {
     case (uopPatterns: ArrayBuffer[ArrayBuffer[Int]], uopIdx) =>
@@ -94,9 +95,9 @@ class UopBufferCtrlDecoder(
   out.uopBufferNum := decodeResult(uopBufferNumField)
   for (i <- out.acceptVec.indices) {
     out.acceptVec(i) := acceptVec(i) &&
-      ((i < MaxM2UopIdx).B || (i >= MaxM2UopIdx).B && !in.channelUopNum(i)(1)) &&
-      ((i < MaxM4UopIdx).B || (i >= MaxM4UopIdx).B && !in.channelUopNum(i)(2)) &&
-      ((i < MaxM8UopIdx).B || (i >= MaxM8UopIdx).B && !in.channelUopNum(i)(3))
+      ((i < MaxM2UopIdx).B || (i >= MaxM2UopIdx).B && in.channelUopNum(i) <= 1.U) &&
+      ((i < MaxM4UopIdx).B || (i >= MaxM4UopIdx).B && in.channelUopNum(i) <= 2.U) &&
+      ((i < MaxM8UopIdx).B || (i >= MaxM8UopIdx).B && in.channelUopNum(i) <= 4.U)
   }
 
   for (i <- 0 until uopWidth) {

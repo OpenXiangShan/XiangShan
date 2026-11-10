@@ -11,6 +11,7 @@ import top.ArgParser
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
+import xiangshan.backend.decode.isa.Instructions.{MOP_R_N, MOP_RR_N, SSPUSH_X1, SSPUSH_X5, SSPOPCHK_X1, SSPOPCHK_X5, SSRDP}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, CsrOpcodes, JmpOpcodes, LduOpcodes, Opcode, VSetOpcodes}
@@ -25,16 +26,15 @@ import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
-import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.decode.ImmUnion
-
+import xiangshan.HasXSParameter
 import scala.collection.SeqMap
 import scala.language.implicitConversions
 
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
-)(implicit val p: Parameters) extends Module with HasVectorSettings {
+)(implicit val p: Parameters) extends Module with HasXSParameter {
   import PseudoDecodeChannel._
 
   @public
@@ -63,11 +63,23 @@ class PseudoDecodeChannel(
     canRobCompressField,
     isJField,
     isJrField,
+    isMoveField,
   )
 
   val table = new DecodeTable(patterns, fields)
 
   val bundle = table.decode(in.rawInst)
+
+  // Scala selection omits the SS-specific decode logic when the hardware is disabled.
+  val suppressMopFallback = if (HasShadowStack) {
+    val zicfissMopTable = new DecodeTable(zicfissMopPatterns, Seq(legalField))
+    val ssrdpTable = new DecodeTable(Seq(SSRDP_PATTERN), Seq(legalField))
+    val isAllocatedZicfissMop = zicfissMopTable.decode(in.rawInst)(legalField) ||
+      (ssrdpTable.decode(in.rawInst)(legalField) && instBitFields.RD =/= 0.U)
+    isAllocatedZicfissMop && in.fromCSR.enableZicfiss.getOrElse(false.B)
+  } else {
+    false.B
+  }
 
   val selImm = Wire(ValidIO(DecodeSelImm()))
   val imm = Wire(UInt(32.W))
@@ -84,15 +96,16 @@ class PseudoDecodeChannel(
     )
   )
 
-  out.valid := bundle(legalField)
+  // Pseudo has priority; only yield allocated SS encodings when SSE is enabled.
+  out.valid := bundle(legalField) && !suppressMopFallback
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
   out.bits.src1RenType := bundle(src1Field)
   out.bits.src2RenType := bundle(src2Field)
-  out.bits.lsrc1 := instBitFields.RS1
+  out.bits.lsrc1 := Mux(bundle(isMoveField), 0.U, instBitFields.RS1)
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
-  out.bits.gpWen := bundle(gpWenField) && instBitFields.RD =/= 0.U
+  out.bits.gpWen := bundle(gpWenField) && (out.bits.ldest =/= 0.U)
   out.bits.fpWen := bundle(fpWenField)
   out.bits.noSpec := bundle(noSpecField)
   out.bits.blockBack := bundle(blockBackField)
@@ -103,6 +116,7 @@ class PseudoDecodeChannel(
   out.bits.canRobCompress := bundle(canRobCompressField)
   out.bits.isJ := bundle(isJField)
   out.bits.isJr := bundle(isJrField)
+  out.bits.isMove := bundle(isMoveField) && out.bits.ldest =/= 0.U
   out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
 
@@ -149,6 +163,7 @@ object PseudoDecodeChannel {
     val canRobCompress = Bool()
     val isJ = Bool()
     val isJr = Bool()
+    val isMove = Bool()
     val exceptionII = Bool()
   }
 
@@ -179,7 +194,17 @@ object PseudoDecodeChannel {
 
     val J            = PseudoInstPattern(PseudoInstructions.J)
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+    val MOP_R        = PseudoInstPattern(MOP_R_N)
+    val MOP_RR       = PseudoInstPattern(MOP_RR_N)
   }
+
+  val zicfissMopPatterns = Seq(
+    PseudoInstPattern(SSPUSH_X1),
+    PseudoInstPattern(SSPUSH_X5),
+    PseudoInstPattern(SSPOPCHK_X1),
+    PseudoInstPattern(SSPOPCHK_X5),
+  )
+  val SSRDP_PATTERN = PseudoInstPattern(SSRDP)
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
     gen: => D,
@@ -211,6 +236,8 @@ object PseudoDecodeChannel {
     PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
+    MOP_R         -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
+    MOP_RR        -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
   ) ++
     SeqMap.from[InstPattern, Opcode](CSRR_CR_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
     SeqMap.from[InstPattern, Opcode](CSRR_CI_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
@@ -236,6 +263,7 @@ object PseudoDecodeChannel {
     (op: InstPattern) => {
       val fuType = uopTable(op).factory match {
         case _: Opcode.AluOpcodes.type => FuType.alu.U
+        case _: Opcode.SscheckOpcodes.type => FuType.sscheck.U
         case _: Opcode.BruOpcodes.type => ???
         case _: Opcode.LinkOpcodes.type => ???
         case _: Opcode.JmpOpcodes.type => FuType.jmp.U
@@ -362,6 +390,15 @@ object PseudoDecodeChannel {
 
   def makeCSRRallBitPat(csrno: Int): BitPat = {
     new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_?1?_?????_1110011")
+  }
+
+  val isMoveField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == MOP_R || op == MOP_RR).toBitPat,
+  )
+
+  def makeCSRRBitPat(csrno: Int): BitPat = {
+    new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_010_?????_1110011")
   }
 
   /**

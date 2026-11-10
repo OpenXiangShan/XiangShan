@@ -53,6 +53,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasShadowStack: Boolean = false,
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
@@ -90,7 +91,7 @@ case class XSCoreParameters
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
   frontendParameters: FrontendParameters = FrontendParameters(),
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IntLogicRegs: Int = 32,
+  IntLogicRegsBase: Int = 32,
   FpLogicRegs: Int = 32,
   VecStdLogicRegs: Int = 32,
   VecInnerLogicRegs: Int = 15,
@@ -303,21 +304,30 @@ case class XSCoreParameters
   hartIDDmodeWidth: Int = -1, // only for Customization
   enableResetMtvec: Boolean = false, // only for Customization
 ){
+  // Zicfiss split uops use two hidden logical registers for SSP and return-address/step values.
+  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 2 else 0)
+
   def ISABase = "rv64i"
-  def ISAExtensions = Seq(
-    // single letter extensions, in canonical order
-    "i", "m", "a", "f", "d", "c", "b", "v", "h",
-    // multi-letter extensions, sorted alphanumerically
-    "sdext", "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
-    "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
-    "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
-    "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zama16b", "zawrs", "zba",
-    "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
-    "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccamoc", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
-    "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
-    "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
-  )
+  def ISAExtensions = {
+    // Keep the device-tree extension list canonical, but only advertise Zicfiss
+    // when the corresponding hardware is present.
+    val zicfiss = if (HasShadowStack) Seq("zicfiss") else Seq.empty[String]
+    Seq(
+      // single letter extensions, in canonical order
+      "i", "m", "a", "f", "d", "c", "b", "v", "h",
+      // multi-letter extensions, sorted alphanumerically
+      "sdext", "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
+      "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
+      "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
+      "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
+      "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zama16b", "zawrs", "zba",
+      "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
+      "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccamoc", "ziccif", "zicclsm", "ziccrse"
+    ) ++ zicfiss ++ Seq(
+      "zicntr", "zicond", "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
+      "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
+    )
+  }
 
   def vlWidth = log2Up(VLEN) + 1
 
@@ -345,7 +355,14 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
+        ExeUnitParams(
+          "ALU0",
+          Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg) ++ (if (HasShadowStack) Seq(SscheckCfg) else Seq.empty),
+          Seq(IntWB(port = 0, 0)),
+          Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))),
+          true,
+          2,
+        ),
         ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
@@ -393,7 +410,7 @@ case class XSCoreParameters
           v0WB = V0WB(4, 0),
           v0RD = V0RD(4, 0),
         ),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
+      ), numEntries = (if (HasShadowStack) 16 else 20), numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "LDU1",
@@ -583,7 +600,7 @@ case class XSCoreParameters
 
   val backendParams: BackendParams = backend.BackendParams(
     Map(
-      IntScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.intSchdParams else intSchdParams),
+      IntScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.intSchdParams(HasShadowStack) else intSchdParams),
       FpScheduler()  -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.fpSchdParams else fpSchdParams),
       VecScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.vecSchdParams else vecSchdParams),
     ),
@@ -668,6 +685,7 @@ trait HasXSParameter {
   def enableResetMtvec = coreParams.enableResetMtvec
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
+  def HasShadowStack = coreParams.HasShadowStack
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
   def HasBitmapCheck = coreParams.HasBitmapCheck
 

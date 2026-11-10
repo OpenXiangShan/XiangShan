@@ -27,6 +27,7 @@ class FuTypeField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[Ins
       try
         uop.factory match {
           case _: Opcode.AluOpcodes.type => FuType.alu.U
+          case _: Opcode.SscheckOpcodes.type => FuType.sscheck.U
           case _: Opcode.BruOpcodes.type => FuType.brh.U
           case _: Opcode.LinkOpcodes.type => FuType.link.U
           case _: Opcode.JmpOpcodes.type => FuType.jmp.U

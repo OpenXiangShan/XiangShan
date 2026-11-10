@@ -82,7 +82,6 @@ class LoadPipeBundle(
   val mask = UInt((VLEN/8).W)
   val paddr = Option.when(param.hasAddrTrans || param.hasPAddr)(UInt(PAddrBits.W))
   val noQuery = Option.when(param.hasNoQuery)(Bool())
-
   // unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())

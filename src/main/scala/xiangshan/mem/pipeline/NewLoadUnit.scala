@@ -212,7 +212,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
-
   // 7. low-confidence prefetch
   prefetchLoConf.valid := io.prefetchReq.valid
   prefetchLoConf.bits := prefetch
@@ -405,15 +404,28 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.vaddr := tlbVAddr
   io.tlbReq.bits.fullva := tlbFullva
   io.tlbReq.bits.checkfullva := tlbCheckFullva
-  io.tlbReq.bits.cmd := TlbCmd.read
+  // PUSH must check D at both translation stages, just like the real store.
+  // POP remains a read: it must not acquire a dirty-bit requirement.
+  io.tlbReq.bits.cmd := (if (HasShadowStack) {
+    Mux(LSUOpType.isSspushCheck(tlbFuOpType), TlbCmd.write, TlbCmd.read)
+  } else TlbCmd.read)
   io.tlbReq.bits.hyperinst := tlbHlv
   io.tlbReq.bits.hlvx := tlbHlvx
   io.tlbReq.bits.size := DontCare
+  if (HasShadowStack) {
+    when (LSUOpType.isShadowStackLoad(tlbFuOpType)) {
+      // Match the real XLEN-wide store's PMP range, including boundary checks.
+      io.tlbReq.bits.size := LSUOpType.size(tlbFuOpType)
+    }
+  }
   io.tlbReq.bits.kill := noQuery
   io.tlbReq.bits.memidx.is_ld := true.B
   io.tlbReq.bits.memidx.is_st := false.B
   io.tlbReq.bits.memidx.idx := uop.lqIdx.value
   io.tlbReq.bits.isPrefetch := isPrefetch
+  if(HasShadowStack) {
+    io.tlbReq.bits.shadowStackUser.get := LSUOpType.isShadowStackLoad(uop.fuOpType)
+  }
   io.tlbReq.bits.no_translate := noQuery
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq
   // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
@@ -573,6 +585,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   val fuOpType = uop.fuOpType
   val vaddr = in.vaddr
   val mask = in.mask
+  val isShadowStackLoad = if (HasShadowStack) LSUOpType.isShadowStackLoad(fuOpType) else false.B
+  val shadowStackMisaligned = isShadowStackLoad && !in.align.get
 
   val isSwInstrPrefetch = accessType.isSwPrefetch() && accessType.isInstrPrefetch()
 
@@ -614,9 +628,30 @@ class LoadUnitS1(param: ExeUnitParams)(
   val gpaddr = tlbResp.bits.gpaddr(0)
   val fullva = tlbResp.bits.fullva
 
-  val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
-  val af = tlbHit && tlbResp.bits.excp.head.af.ld
-  val gpf = tlbHit && tlbResp.bits.excp.head.gpf.ld
+  val pf = if(HasShadowStack) (
+    tlbHit && Mux(
+    isShadowStackLoad,
+    tlbResp.bits.excp.head.pf.st,
+    tlbHit && tlbResp.bits.excp.head.pf.ld
+  ) && !shadowStackMisaligned) else (
+    tlbHit && tlbResp.bits.excp.head.pf.ld
+  )
+  val af = if(HasShadowStack) (
+    (tlbHit && Mux(
+    isShadowStackLoad,
+    tlbResp.bits.excp.head.af.st,
+    tlbHit && tlbResp.bits.excp.head.af.ld
+  )) || shadowStackMisaligned) else (
+    tlbHit && tlbResp.bits.excp.head.af.ld
+  )
+  val gpf = if(HasShadowStack) (
+    tlbHit && Mux(
+    isShadowStackLoad,
+    tlbResp.bits.excp.head.gpf.st,
+    tlbHit && tlbResp.bits.excp.head.gpf.ld
+  ) && !shadowStackMisaligned ) else (
+    tlbHit && tlbResp.bits.excp.head.gpf.ld
+  )
   val tlbException = pf || af || gpf
 
   val killDCache = kill || tlbMiss || tlbException || specialRequest
@@ -628,6 +663,17 @@ class LoadUnitS1(param: ExeUnitParams)(
     */
   val loadTrigger = Module(new MemTrigger(MemType.LOAD))
   loadTrigger.io.fromCsrTrigger.tdataVec := io.csrTrigger.tdataVec
+  if (HasShadowStack) {
+    // The internal PUSH load observes SSPUSH's STORE address triggers. All
+    // other loads (including POP) continue to observe LOAD address triggers.
+    for (i <- 0 until TriggerNum) {
+      loadTrigger.io.fromCsrTrigger.tdataVec(i).load := Mux(
+        LSUOpType.isSspushCheck(fuOpType),
+        io.csrTrigger.tdataVec(i).store,
+        io.csrTrigger.tdataVec(i).load
+      )
+    }
+  }
   loadTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
@@ -653,7 +699,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   /**
     * Unalign tail inject to s0
     */
-  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get
+  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get && !isShadowStackLoad
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := LoadEntrance.unalignTail.U
@@ -701,9 +747,14 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.specialModeRequest := specialRequest
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := bp
-  stageInfo.uop.exceptionVec(loadPageFault) := pf
-  stageInfo.uop.exceptionVec(loadAccessFault) := af
-  stageInfo.uop.exceptionVec(loadGuestPageFault) := gpf
+  stageInfo.uop.exceptionVec(loadPageFault) := (if(HasShadowStack) pf && !isShadowStackLoad else pf)
+  stageInfo.uop.exceptionVec(loadAccessFault) := (if(HasShadowStack) af && !isShadowStackLoad else af)
+  stageInfo.uop.exceptionVec(loadGuestPageFault) := (if(HasShadowStack) gpf && !isShadowStackLoad else gpf)
+  if (HasShadowStack) {
+    stageInfo.uop.exceptionVec(storePageFault) := pf && isShadowStackLoad
+    stageInfo.uop.exceptionVec(storeAccessFault) := af && isShadowStackLoad
+    stageInfo.uop.exceptionVec(storeGuestPageFault) := gpf && isShadowStackLoad
+  }
   stageInfo.uop.perfDebugInfo.tlbRespTime := Mux(
     pipeIn.valid && paddrEffective,
     GTimer(),
@@ -893,6 +944,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
+  val isShadowStackLoad = if (HasShadowStack) LSUOpType.isShadowStackLoad(uop.fuOpType) else false.B
   val isStoreSetHit = uop.storeSetHit
   val waitSqIdx = uop.waitSqIdx
 
@@ -920,11 +972,14 @@ class LoadUnitS2(param: ExeUnitParams)(
   val tlbHit = TlbAccessResult.isHit(tlbAccessResult)
   val tlbMiss = TlbAccessResult.isMiss(tlbAccessResult)
   val tlbNotMiss = TlbAccessResult.isNotMiss(tlbAccessResult)
-  val tlbUnaccessable = uop.exceptionVec(loadAccessFault) ||
-    uop.exceptionVec(loadPageFault) ||
-    uop.exceptionVec(loadGuestPageFault)
+  val tlbUnaccessable = Mux(
+    isShadowStackLoad,
+    uop.exceptionVec(storeAccessFault) || uop.exceptionVec(storePageFault) || uop.exceptionVec(storeGuestPageFault),
+    uop.exceptionVec(loadAccessFault) || uop.exceptionVec(loadPageFault) || uop.exceptionVec(loadGuestPageFault)
+  )
   val tlbAccessable = !tlbUnaccessable
-  val pmpUnaccessable = (pmp.ld || pmp.instr && LSUOpType.isHlvx(uop.fuOpType)) && tlbHit
+  val pmpUnaccessable = (pmp.ld || pmp.instr && LSUOpType.isHlvx(uop.fuOpType) ||
+    (isShadowStackLoad && pmp.st)) && tlbHit
 
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
@@ -932,24 +987,33 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isVector  = accessType.isVector()
 
   // load access fault
-  val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
+  val afUnaccessable = Mux(
+    isShadowStackLoad,
+    uop.exceptionVec(storeAccessFault),
+    uop.exceptionVec(loadAccessFault)
+  ) || pmpUnaccessable
   val afVectorUncache = accessType.isVector() && isUncache
   val afUnalignMMIO = !in.align.get && isMMIO
+  val afShadowStackNonIdempotent = Option.when(HasShadowStack) (isShadowStackLoad && isMMIO)
   val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cache_error_enable
   val afForwardDenied = Wire(Bool())
   val afBypassDenied = Wire(Bool())
-  val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afTagError || afForwardDenied || afBypassDenied
+  val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afShadowStackNonIdempotent.getOrElse(false.B) ||
+    afTagError || afForwardDenied || afBypassDenied
   // load address misaligned
-  val am = !in.align.get && accessType.isScalar() && isNC && !pmpUnaccessable
+  val am = !in.align.get && accessType.isScalar() && isNC && !pmpUnaccessable && !isShadowStackLoad
   // hardware error
   val hweForwardCorrupt = Wire(Bool())
   val hweBypassCorrupt = Wire(Bool())
   val hwe = uop.exceptionVec(hardwareError) || hweForwardCorrupt || hweBypassCorrupt
 
-  val exceptionVec = uop.exceptionVec.selectByFu(LduCfg)
+  val exceptionVec = uop.exceptionVec.selectByFu(lduExceptionCfg)
   val exception = TriggerAction.isDmode(uop.trigger) || exceptionVec.orR
   exceptionVec(loadAddrMisaligned) := am
-  exceptionVec(loadAccessFault) := af
+  exceptionVec(loadAccessFault) := af && !isShadowStackLoad
+  if (HasShadowStack) {
+    exceptionVec(storeAccessFault) := uop.exceptionVec(storeAccessFault) || af && isShadowStackLoad
+  }
   exceptionVec(hardwareError) := hwe
 
   /**
@@ -1319,6 +1383,8 @@ class LoadUnitS3(param: ExeUnitParams)(
     val rrBankConflictFastReplayFire = Output(Bool())
     val rrBankConflictFastReplayDenied = Output(Bool())
 
+    // The internal PUSH check returns the SSP pointer step to the dependent ALU uop.
+    val shadowStackWb = Option.when(HasShadowStack)(Output(ValidIO(UInt(XLEN.W))))
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
     val revokeLastCycle, revokeLastLastCycle = Output(Bool())
@@ -1396,7 +1462,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val s4HeadValid = io.unalignConcat.valid
   val s4Head = io.unalignConcat.bits
-  val s4HeadExceptionVec = s4Head.uop.exceptionVec.selectByFu(LduCfg)
+  val s4HeadExceptionVec = s4Head.uop.exceptionVec.selectByFu(lduExceptionCfg)
   val s4HeadVAddr = s4Head.vaddr
   val s4HeadMask = s4Head.mask
   val s4HeadPAddr = s4Head.paddr.get
@@ -1428,7 +1494,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     * Noted that exception can affect control signals for wakeup and writeback
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
-  val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
+  val s3ExceptionVec = uop.exceptionVec.selectByFu(lduExceptionCfg)
   val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
   val exceptionVec = ExceptSparseVec.mux2(
     s4HeadValid && s4HeadHasException,
@@ -1448,7 +1514,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     s4Head.tlbException.get.vaNeedExt,
     in.tlbException.get.vaNeedExt
   )
-
   val s3ShouldWakeup = in.shouldWakeup.get && !dcacheError
   val s3ShouldWriteback = in.shouldWriteback.get || dcacheError
   val shouldWakeup = s3ShouldWakeup && (!s4HeadValid || s4HeadShouldWakeup)
@@ -1457,7 +1522,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     s4HeadAlwaysWriteback || s4HeadWritebackDependOnTail && s3ShouldWriteback,
     s3ShouldWriteback
   )
-
   s3ExceptionVec(hardwareError) := uop.exceptionVec(hardwareError) || dcacheError
 
   /**
@@ -1505,11 +1569,28 @@ class LoadUnitS3(param: ExeUnitParams)(
   val rollbackValid = pipeIn.valid && (rarViolation || matchInvalid) && endPipe
   val rollbackLevel = Mux(matchInvalid, RedirectLevel.flush, RedirectLevel.flushAfter)
 
+  // PUSH checks return -XLEN/8 on success, or zero on a terminal fault.
+  // POP loads return memory data only on success; faults/replays must not wake
+  // the dependent ALU check or CSR writer.
+  val isSspushCheck = if (HasShadowStack) LSUOpType.isSspushCheck(uop.fuOpType) else false.B
+  val isSspopchk = if (HasShadowStack) LSUOpType.isSspopchk(uop.fuOpType) else false.B
+  val shadowStackLoadSuccess = pipeIn.valid && !kill && endPipe &&
+    !exception && shouldWakeup && !matchInvalid && !shouldReplay
+  val shadowStackSuccess = isSspushCheck && shadowStackLoadSuccess
+  val shadowStackTerminalFault = isSspushCheck && pipeIn.valid && !kill && endPipe && exception
+  val shadowStackWbValid = shadowStackSuccess || shadowStackTerminalFault
+  if (HasShadowStack) {
+    io.shadowStackWb.get.valid := shadowStackWbValid
+    io.shadowStackWb.get.bits := Mux(shadowStackSuccess, 0.U(XLEN.W) - (XLEN / 8).U, 0.U(XLEN.W))
+  }
+  val effectiveWakeup = Mux(isSspushCheck, shadowStackWbValid,
+    Mux(isSspopchk, shadowStackLoadSuccess, shouldWakeup))
+
   /**
     * Load cancel
     */
   // For unaligned head (endPipe = 0), always cancel, because the unaligned head needs to be combined with tail.
-  val cancel = pipeIn.valid && (!endPipe || !shouldWakeup && isScalar)
+  val cancel = pipeIn.valid && (!endPipe || !effectiveWakeup && isScalar)
 
   /**
     * Writeback to Backend / LQ / VLMergeBuffer
@@ -1518,7 +1599,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val ldoutValid = pipeIn.valid && shouldWriteback && !uop.vecWen && endPipe
   val ldout = Wire(new MemWriteBack(param))
   ldout.toIntRf.foreach { case port =>
-    port.valid := uop.rfWen && pipeIn.valid && endPipe && shouldWakeup
+    port.valid := uop.rfWen && pipeIn.valid && endPipe && effectiveWakeup
     port.bits := DontCare // assign data from LoadUnitDataPath
     port.bits.pdest := uop.pdest
     port.bits.isFromLoadUnit.get := true.B
@@ -2198,7 +2279,14 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2DCacheResp.valid := io.dcache.resp.valid
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits
   io.ldout.toFpRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.data.getWidth - 1, 0))
-  io.ldout.toIntRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.data.getWidth - 1, 0))
+  io.ldout.toIntRf.foreach { port =>
+    val normalLoadData = dataPath.io.s3ShiftAndExtData(port.bits.data.getWidth - 1, 0)
+    port.bits.data := (if (HasShadowStack) {
+      Mux(s3.io.shadowStackWb.get.valid, s3.io.shadowStackWb.get.bits, normalLoadData)
+    } else {
+      normalLoadData
+    })
+  }
   io.vldout.toVecRf.foreach(_.bits := dataPath.io.s3ShiftData)
   io.vldout.toV0Rf.foreach(_.bits := dataPath.io.s3ShiftData)
 
@@ -2263,6 +2351,7 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
     Some(IO(DecoupledIO(new LoadStageIO)))
   } else None
 
+  val lduExceptionCfg = LduCfg
   def <>(that: LoadUnitStage): Unit = {
     this.io_pipeIn.foreach(_ <> that.io_pipeOut.get)
   }
@@ -2297,7 +2386,8 @@ trait HasNewLoadHelper { this: XSModule =>
     dataFu = data => ZeroExt(data(31, 0), XLEN)
   )
   val LD = RdataType(
-    selFu = (fuOpType, fpWen) => fuOpType === LSUOpType.ld || fuOpType === LSUOpType.hlvd,
+    selFu = (fuOpType, fpWen) => fuOpType === LSUOpType.ld || fuOpType === LSUOpType.hlvd ||
+      LSUOpType.isShadowStackLoad(fuOpType),
     dataFu = data => data(63, 0)
   )
   val LB = RdataType(

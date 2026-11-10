@@ -3,13 +3,14 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
+import xiangshan.HasXSParameter
 import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.decode.isa.CSRs
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
 
-class CSRPermitModule(implicit p: Parameters) extends Module {
+class CSRPermitModule(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new CSRPermitIO)
 
   val xRetPermitMod = Module(new XRetPermitModule)
@@ -61,6 +62,26 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
     io.in.csrAccess.wen,
   )
 
+  // The ssp CSR is URW, but its accessibility is additionally controlled by xenvcfg.SSE.
+  private val (ssp_EX_II, ssp_EX_VI) = if (HasShadowStack) {
+    val privState = io.in.privState
+    val csrIsSsp = io.in.csrAccess.addr === CSRs.ssp.U
+    val menvcfgSSE = io.in.xenvcfg.menvcfg(3)
+    val henvcfgSSE = io.in.xenvcfg.henvcfg(3)
+    val senvcfgSSE = io.in.xenvcfg.senvcfg.get(3)
+
+    val illegal = csrIsSsp && (
+      (!privState.isModeM && !menvcfgSSE) ||
+      (privState.isModeHU && menvcfgSSE && !senvcfgSSE)
+    )
+    val virtual = csrIsSsp && menvcfgSSE && (
+      (privState.isModeVS && !henvcfgSSE) ||
+      (privState.isModeVU && (!henvcfgSSE || !senvcfgSSE))
+    )
+    (illegal, virtual)
+  } else {
+    (false.B, false.B)
+  }
   private val csrAccess = WireInit(ren || wen)
 
   val mPermit_EX_II = mLevelPermitMod.io.out.mLevelPermit_EX_II
@@ -76,14 +97,15 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   val indirectPermit_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
   val indirectPermit_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
-  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_II || vPermit_EX_VI
+  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI ||
+    vPermit_EX_II || vPermit_EX_VI || ssp_EX_II || ssp_EX_VI
 
   val csrAccess_EX_II = csrAccess && (
-    (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II) ||
+    (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II || ssp_EX_II) ||
     (!directPermit_illegal && indirectPermit_EX_II)
   )
   val csrAccess_EX_VI = csrAccess && (
-    (pPermit_EX_VI || vPermit_EX_VI) ||
+    (pPermit_EX_VI || vPermit_EX_VI || ssp_EX_VI) ||
     (!directPermit_illegal && indirectPermit_EX_VI)
   )
 
@@ -159,7 +181,7 @@ class XRetPermitModule extends Module {
   io.out.hasLegalDret  := dret  && !dretIllegal
 }
 
-class MLevelPermitModule extends Module {
+class MLevelPermitModule(implicit val p: Parameters) extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO
@@ -547,13 +569,15 @@ class xcounterenIO extends Bundle {
   val scounteren = UInt(32.W)
 }
 
-class xenvcfgIO extends Bundle {
+class xenvcfgIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   // Machine environment configuration register.
   // Accessing stimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
   val menvcfg = UInt(64.W)
   // Hypervisor environment configuration register.
   // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
   val henvcfg = UInt(64.W)
+  // Supervisor environment configuration register, used by lower-level CSR access checks.
+  val senvcfg = Option.when(HasShadowStack)(UInt(64.W))
 }
 
 class xstateenIO extends Bundle {
@@ -577,7 +601,7 @@ class aiaIO extends Bundle {
   val hvictlVTI = Bool()
 }
 
-class CSRPermitIO extends Bundle {
+class CSRPermitIO(implicit val p: Parameters) extends Bundle {
   val in = Input(new Bundle {
     val csrAccess = new csrAccessIO
     val privState = new PrivState

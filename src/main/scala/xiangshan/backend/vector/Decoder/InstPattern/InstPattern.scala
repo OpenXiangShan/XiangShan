@@ -93,8 +93,6 @@ object IntRTypePattern {
   def apply()(implicit rawInst: BitPat): IntRTypePattern = new IntRTypePattern
 }
 
-case class MopInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
-
 sealed class IntITypePattern(implicit rawInst: BitPat) extends IntInstPattern
 
 sealed class IntSTypePattern(implicit rawInst: BitPat) extends IntInstPattern
@@ -126,6 +124,11 @@ case class SfenceOtherInstPattern()(implicit rawInst: BitPat) extends SystemInst
 case class HfenceGVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
 case class HfenceVVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+
+case class SspushInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SspopchkInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SsrdpInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SsamoswapInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
 
 case class MfenceInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
@@ -402,6 +405,7 @@ object InstPattern {
       case CUSTOM_1 => null
       case AMO =>
         funct5.rawString match {
+          case "01001" => SsamoswapInstPattern()
           case "00010" => AmoLrInstPattern()
           case "00101" => AmocasInstPattern()
           case _ => AmoInstPattern()
@@ -466,11 +470,11 @@ object InstPattern {
               case s if rawStringMatches(s, "1011111?????") => MfenceInstPattern()
               case _ => PrivInstPattern()
             }
+          case "100" if rawInst == Instructions.SSPUSH_X1 || rawInst == Instructions.SSPUSH_X5 => SspushInstPattern()
+          case "100" if rawInst == Instructions.SSPOPCHK_X1 || rawInst == Instructions.SSPOPCHK_X5 => SspopchkInstPattern()
+          case "100" if rawInst == Instructions.SSRDP => SsrdpInstPattern()
           case "100" =>
             func7(0).rawString match {
-              case _ if rawInst.rawString == Instructions.MOP_R_N.rawString ||
-                        rawInst.rawString == Instructions.MOP_RR_N.rawString =>
-                MopInstPattern()
               case "0" => HyperLoadInstPattern()
               case "1" => HyperStoreInstPattern()
             }

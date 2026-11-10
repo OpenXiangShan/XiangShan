@@ -222,7 +222,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.predTaken := robEnq.predTaken
     robEntry.needVTB := robEnq.isVset
     robEntry.vls := isVectorMemory(robEnq)
-    robEntry.rfWen := robEnq.rfWen
+    // Zicfiss uses internal integer registers for the split SSPUSH/SSPOPCHK
+    // sequence; those writes must not be exposed as architectural ROB writes.
+    robEntry.rfWen := robEnq.rfWen &&
+      (if (p(XSCoreParamsKey).HasShadowStack) robEnq.ldest < 32.U else true.B)
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace

@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.{BitPat, Cat, Fill, Mux1H, MuxCase, ValidIO}
+import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
@@ -67,8 +68,21 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val scounteren = Module(new CSRModule("Scounteren", new Counteren))
     .setAddr(CSRs.scounteren)
 
-  val senvcfg = Module(new CSRModule("Senvcfg", new SEnvCfg))
-    .setAddr(CSRs.senvcfg)
+  val senvcfg: CSRModule[SEnvCfg] = (if (HasShadowStack) {
+    Module(new CSRModule("Senvcfg", new SEnvCfg) with HasShadowStackEnvBundle {
+      // menvcfg.SSE=0 makes senvcfg.SSE read-only zero at every lower level.
+      // In a virtual mode, henvcfg.SSE=0 imposes the same rule on the guest's
+      // view of senvcfg.SSE. Keep the stored bit unchanged in those states so
+      // a CSR write cannot take effect behind the upper-level gate.
+      val sseAccessible = menvcfg.SSE && (!privState.isVirtual || henvcfg.SSE)
+      when(!sseAccessible) {
+        reg.SSE := reg.SSE
+        regOut.SSE := 0.U
+      }
+    })
+  } else {
+    Module(new CSRModule("Senvcfg", new SEnvCfg))
+  }).setAddr(CSRs.senvcfg)
 
   val scountinhibit = Module(new CSRModule("Scountinhibit", new McountinhibitBundle) with HasMcounterenBundle {
     private val delegMask = Cat(mcounteren.HPM.asUInt, mcounteren.IR.asUInt, 0.U(1.W), mcounteren.CY.asUInt)
@@ -267,7 +281,7 @@ class ScontextBundle extends CSRBundle {
   val ALL = RW(31, 0).withReset(0.U).withDescription("Supervisor trigger context value.")
 }
 
-class SEnvCfg extends EnvCfg
+class SEnvCfg(implicit p: Parameters) extends EnvCfg
 
 class SipToMip extends IpValidBundle {
   this.SSIP.bits.setRW()
