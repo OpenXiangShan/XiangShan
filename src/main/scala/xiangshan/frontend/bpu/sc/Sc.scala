@@ -869,7 +869,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val diagTageMeta           = io.train.meta.tage.entries
   private val t1_diagTageUseProvider = RegEnable(VecInit(diagTageMeta.map(_.useProvider)), t0_fire)
   private val t1_diagTageFinalValid  = RegEnable(VecInit(diagTageMeta.map(m => m.useProvider || m.hasAlt)), t0_fire)
-  private val t1_diagTageFinalTaken  = RegEnable(
+  private val t1_diagTageFinalTaken = RegEnable(
     VecInit(diagTageMeta.map(m => Mux(m.useProvider, m.providerTakenCtr.isPositive, m.altTakenCtr.isPositive))),
     t0_fire
   )
