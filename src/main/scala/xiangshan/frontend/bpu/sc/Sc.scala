@@ -898,7 +898,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
-    ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, EnableScTrace)
+    ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, basicDB = true)
   }
   scTraceDBTables.zip(scTraceVec).foreach { case (dbTable, condTrace) =>
     dbTable.log(
