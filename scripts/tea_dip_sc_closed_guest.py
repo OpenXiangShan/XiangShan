@@ -1,0 +1,120 @@
+"""Audit selected SC training records from one closed guest; keep ROI uncertainty explicit."""
+from collections import Counter, defaultdict
+from pathlib import Path
+import argparse
+import json
+import re
+import sqlite3
+
+from native_perf import read_blocks, unique_counters
+from tea_dip_query_endpoint_evidence import digest, verify
+
+COLUMNS = ['ID', 'SCCORRECT', 'SCWRONG', 'SCWRONGTAGEWRONG', 'SCCORRECTTAGECORRECT',
+           'SCWRONGTAGECORRECT', 'SCCORRECTTAGEWRONG', 'MISPREDICT', 'ACTUALTAKEN',
+           'USESC', 'SCPRED', 'SUMABOVETHRES', 'BIASRESP', 'GLOBALRESP_0', 'GLOBALRESP_1',
+           'PATHRESP_0', 'PATHRESP_1', 'PROVIDERCTR', 'PROVIDERTAKEN', 'PROVIDERVALID',
+           'CFIPC', 'STARTPC_ADDR', 'STAMP', 'SITE']
+BOOLS = COLUMNS[1:12] + ['PROVIDERTAKEN', 'PROVIDERVALID']
+OUTCOMES = dict(SCCORRECTTAGEWRONG='sc_correct_tage_wrong',
+                SCWRONGTAGECORRECT='sc_wrong_tage_correct',
+                SCCORRECTTAGECORRECT='sc_correct_tage_correct',
+                SCWRONGTAGEWRONG='sc_wrong_tage_wrong')
+NATIVE = [*OUTCOMES.values(), 't1_use_sc', 't1_not_use_sc']
+
+
+def analyze(folder, receipt_path):
+    receipt = json.loads(receipt_path.read_text())
+    result = json.loads((folder / 'result.json').read_text())
+    assert receipt['ready'] and not receipt['original_process_live'] and receipt['point'] == folder.name
+    assert result['original_process_closed'] and result['exitcode'] == 0 and result['difftest_passed']
+    assert all(result['sampler_flags'].values())
+    assert result['source'] == receipt['source'] and result['process'] == receipt['process']
+    verify(folder, receipt['files'])
+    command = json.loads((folder / 'command.json').read_text())
+    selected = set(command[command.index('--dump-select-db') + 1].split())
+    tables = ['scCondTrace_' + str(i) for i in range(8)]
+    assert selected.issuperset(tables)
+    blocks = sorted(read_blocks(folder / 'simulator_err.txt').items())
+    assert len(blocks) == (2 if '-W' in command else 1)
+    phases = []
+    for label, (stamp, block) in zip(['warmup', 'ROI'] if len(blocks) == 2 else ['coremark'], blocks):
+        counters = unique_counters(block)
+        groups = {}
+        for name in NATIVE:
+            group = {int(match[1]): value for key, value in counters.items()
+                     if (match := re.search(r'\.sc\.' + name + r'(\d+)$', key))}
+            assert group and set(group) == set(range(len(group))), name
+            groups[name] = group
+        assert len({len(group) for group in groups.values()}) == 1
+        retired, = [value for key, value in counters.items() if key.endswith('.rob.commitInstr')]
+        phases.append(dict(phase=label, native_print_stamp=stamp, native_retired=retired,
+                           native_way_counters=groups))
+    native = {name: sum(sum(p['native_way_counters'][name].values()) for p in phases) for name in NATIVE}
+    pcs = defaultdict(Counter)
+    ctrs = defaultdict(Counter)
+    totals, table_counts = Counter(), {}
+    with sqlite3.connect((folder / 'simulator.db').resolve().as_uri() + '?mode=ro', uri=True) as db:
+        db.row_factory = sqlite3.Row
+        for table in tables:
+            assert [r['name'] for r in db.execute('PRAGMA table_info(' + table + ')')] == COLUMNS
+            previous_stamp, count = -1, 0
+            for ordinal, row in enumerate(db.execute('SELECT * FROM ' + table + ' ORDER BY ID'), 1):
+                assert row['ID'] == ordinal and row['STAMP'] >= previous_stamp
+                previous_stamp, count = row['STAMP'], ordinal
+                assert all(row[name] in [0, 1] for name in BOOLS)
+                assert row['PROVIDERVALID'] == 1 and 0 <= row['PROVIDERCTR'] <= 7
+                assert row['PROVIDERTAKEN'] == int(row['PROVIDERCTR'] >= 4)
+                totals['rows'] += 1
+                pc = hex(row['CFIPC'])
+                pcs[pc]['rows'] += 1
+                if row['USESC']:
+                    sc = row['SCPRED'] == row['ACTUALTAKEN']
+                    tage = row['PROVIDERTAKEN'] == row['ACTUALTAKEN']
+                    flags = dict(SCCORRECT=sc, SCWRONG=not sc,
+                                 SCCORRECTTAGEWRONG=sc and not tage,
+                                 SCWRONGTAGECORRECT=not sc and tage,
+                                 SCCORRECTTAGECORRECT=sc and tage,
+                                 SCWRONGTAGEWRONG=not sc and not tage)
+                    assert all(row[name] == int(value) for name, value in flags.items())
+                    assert not (sc and tage), 'Excluded by the selected training predicate'
+                    totals['useSc'] += 1
+                    pcs[pc]['useSc'] += 1
+                    for field, name in OUTCOMES.items():
+                        totals[name] += row[field]
+                        pcs[pc][name] += row[field]
+                        ctrs[row['PROVIDERCTR']][name] += row[field]
+                else:
+                    assert all(row[name] == 0 for name in ['SCCORRECT', 'SCWRONG', *OUTCOMES])
+            table_counts[table] = count
+    assert totals['useSc'] == native['t1_use_sc']
+    assert all(totals[name] == native[name] for name in OUTCOMES.values())
+    trace_not_use = totals['rows'] - totals['useSc']
+    return dict(passed=True, point=receipt['point'], source=receipt['source'], tables=table_counts,
+                totals=dict(totals), by_provider_ctr={str(k): dict(v) for k, v in sorted(ctrs.items())},
+                by_pc={k: dict(v) for k, v in sorted(pcs.items(), key=lambda item: int(item[0], 16))},
+                native_phases=phases, selected_native_margins_match=True,
+                non_use_cohort=dict(trace_rows=trace_not_use, native_way_counts=native['t1_not_use_sc'],
+                                    difference=trace_not_use-native['t1_not_use_sc']),
+                source_sha256={str(p): digest(p) for p in [receipt_path, Path(__file__)]},
+                scope='Whole recorded selected-training cohort, including warmup. Existing native way counts do not '
+                      'identify all trace-event phase boundaries; private STAMP is not calibrated to TEA. '
+                      'Training excludes correct agreeing useSc events. Per-PC and provider-CTR outcomes are selected '
+                      'training counts, not overall branch accuracy, causal overrides or predicted saved cycles. '
+                      'Path/global/bias responses are old training-time entries, not prediction-time weights.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--folder', type=Path, required=True)
+    parser.add_argument('--receipt', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    assert not args.output.exists()
+    data = analyze(args.folder.resolve(), args.receipt.resolve())
+    args.output.write_text(json.dumps(data, indent=2) + '\n')
+    print(json.dumps(dict(passed=True, point=data['point'], totals=data['totals'],
+                          non_use_cohort=data['non_use_cohort']), indent=2))
+
+
+if __name__ == '__main__':
+    main()
