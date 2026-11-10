@@ -168,7 +168,9 @@ class MainBtbAlignBank(
       // filter out branches before alignedInstOffset
       // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
       val hit = rawHit && e.position >= s1_alignedInstOffset && !s1_crossPage
-      pred.valid            := hit && io.enable
+      // Do not gate with io.enable: it is already high on the first enabled cycle,
+      // so stale data must be rejected at s2 via s2_valid (and s2_hitMask).
+      pred.valid            := hit
       pred.bits.cfiPosition := Cat(s1_posHigherBits, e.position)
       pred.bits.target      := getFullTarget(s1_startPc, e.targetLowerBits, e.targetCarry)
       pred.bits.attribute   := e.attribute
@@ -186,7 +188,29 @@ class MainBtbAlignBank(
    * send resp to top
    * generate metadata for training
    */
-  private val s2_fire             = io.stageCtrl.s2_fire
+  private val s2_fire = io.stageCtrl.s2_fire
+
+  // redirect/override flushing is handled by Bpu top-level valid; only the
+  // io.enable 0 -> 1 freeze needs local tracking (stale s2 prediction).
+  private val s1_valid = RegInit(false.B)
+  private val s2_valid = RegInit(false.B)
+
+  when(!io.enable) {
+    s1_valid := false.B
+  }.elsewhen(s0_fire) {
+    s1_valid := true.B
+  }.elsewhen(s1_fire) {
+    s1_valid := false.B
+  }
+
+  when(!io.enable) {
+    s2_valid := false.B
+  }.elsewhen(s1_fire) {
+    s2_valid := s1_valid
+  }.elsewhen(s2_fire) {
+    s2_valid := false.B
+  }
+
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   // Only the positions are needed in s2 for MainBtb/VBTB duplicate detection.
@@ -201,7 +225,13 @@ class MainBtbAlignBank(
   private val s2_setIdx = getSetIndex(s2_startPc)
 
   // send resp
-  r.resp.predictions := VecInit(s2_predictions :+ s2_vbtbPrediction)
+  private val s2_gatedPredictions = VecInit((s2_predictions :+ s2_vbtbPrediction).map { prediction =>
+    val gated = Wire(Valid(new Prediction))
+    gated.valid := prediction.valid && s2_valid
+    gated.bits  := prediction.bits
+    gated
+  })
+  r.resp.predictions := s2_gatedPredictions
 
   r.resp.metas.take(NumWay).zipWithIndex.foreach { case (meta, i) =>
     meta.rawHit    := s2_rawHitMask(i) && io.enable
@@ -213,7 +243,7 @@ class MainBtbAlignBank(
   r.resp.metas.last := s2_vbtbMeta
 
   // Keep the hit mask aligned directly with the MainBtb predictions.
-  private val s2_hitMask = VecInit(s2_predictions.map(_.valid))
+  private val s2_hitMask = VecInit(s2_predictions.map(_.valid && s2_valid))
   victimBtb.io.s2_mainBtbHitMask   := s2_hitMask
   victimBtb.io.s2_mainBtbPositions := s2_rawPositions
 
