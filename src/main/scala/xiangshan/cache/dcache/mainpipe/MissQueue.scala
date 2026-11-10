@@ -412,7 +412,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       0.U(memChannelBits.W)
     }
   }
-  io.channel_sel := Mux(RegNext(io.req.fire), selectChannel(req.address), 0.U)
+  io.channel_sel := Mux(state === s_sreq, selectChannel(req.address), 0.U)
 
   io.req.ready := state === s_idle
 
