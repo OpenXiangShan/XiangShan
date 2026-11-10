@@ -84,7 +84,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
 
   private def getVerilog: String = {
     // DPI outputs are written in an always block, so go through logic variables.
-    def port(i: Int, name: String) = s"insts_${i}_${name}"
+    def port(i:  Int, name: String) = s"insts_${i}_${name}"
     def logic(i: Int, name: String) = s"logicInsts_${i}_${name}"
     val lanes = (0 until width).map(i => portWidths.map { case (name, w) => (i, name, w) })
     val calls = (0 until width).map { i =>
@@ -101,7 +101,9 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
     }
     val dpiArgs = portWidths.map { case (name, w) => s"  output ${TraceDpiType.sv(w)} $name," } :+ "  input  byte idx"
     // field-major, like the Chisel ports
-    val ports   = portWidths.flatMap { case (name, w) => (0 until width).map(i => s"  output [${w - 1}:0] ${port(i, name)},") }
+    val ports = portWidths.flatMap { case (name, w) =>
+      (0 until width).map(i => s"  output [${w - 1}:0] ${port(i, name)},")
+    }
     val logics  = lanes.flatten.map { case (i, name, w) => s"  logic [${w - 1}:0] ${logic(i, name)};" }
     val assigns = lanes.flatten.map { case (i, name, _) => s"  assign ${port(i, name)} = ${logic(i, name)};" }
 
@@ -192,7 +194,9 @@ abstract class TraceCollectHelperBase(width: Int, func: String, args: Seq[(Strin
     s"""
        |void $desiredName(
        |  uint8_t reset,
-       |${params.flatMap { case (name, w) => (0 until width).map(i => s"  ${TraceDpiType.cpp(w)} ${name}_$i") }.mkString(",\n")}
+       |${params.flatMap { case (name, w) =>
+        (0 until width).map(i => s"  ${TraceDpiType.cpp(w)} ${name}_$i")
+      }.mkString(",\n")}
        |) {
        |${(0 until width).map(i => s"  if (!reset && enable_$i) $func(${callArgs(i)});").mkString("\n")}
        |}
