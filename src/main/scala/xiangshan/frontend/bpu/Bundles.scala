@@ -156,8 +156,8 @@ class BpuPredictionSource extends Bundle {
   def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
   def s1Abtb:        Bool = s1Source === BpuPredictionSource.Stage1.Abtb
   def s1Fallthrough: Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
-  def s1UbtbUras:    Bool = s1Source === BpuPredictionSource.Stage1.UbtbUras
-  def s1AbtbUras:    Bool = s1Source === BpuPredictionSource.Stage1.AbtbUras
+  def s1UbtbRas:     Bool = s1Source === BpuPredictionSource.Stage1.UbtbRas
+  def s1AbtbRas:     Bool = s1Source === BpuPredictionSource.Stage1.AbtbRas
   def s2Tage:        Bool = s2Source === BpuPredictionSource.Stage2.Tage
   def s2Mbtb:        Bool = s2Source === BpuPredictionSource.Stage2.Mbtb
   def s2Fallthrough: Bool = s2Source === BpuPredictionSource.Stage2.Fallthrough
@@ -176,9 +176,9 @@ object BpuPredictionSource {
     def UbtbUtage:   UInt = 2.U(width.W) // now utage must work with abtb, so this is unused and reserved
     def AbtbUtage:   UInt = 3.U(width.W)
     def Fallthrough: UInt = 4.U(width.W)
-    // The BTB supplies the branch; micro-RAS supplies its return target.
-    def UbtbUras: UInt = 5.U(width.W)
-    def AbtbUras: UInt = 6.U(width.W)
+    // The BTB supplies the branch; the RAS supplies its return target.
+    def UbtbRas: UInt = 5.U(width.W)
+    def AbtbRas: UInt = 6.U(width.W)
   }
   object Stage2 extends EnumUInt(3) {
     def Tage:        UInt = 0.U(width.W)

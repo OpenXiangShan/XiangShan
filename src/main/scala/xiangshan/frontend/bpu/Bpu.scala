@@ -241,7 +241,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.s3SpecIn.bits.cfiPosition := s3_prediction.cfiPosition
   ras.io.specRead.req              := io.fromFtq.specReadReq
   io.toFtq.specRead                := ras.io.specRead.retAddr(1)
-  private val s1_canUseRas  = ras.io.topRetAddrValid
+  private val s1_canUseRas  = ras.io.enable && ras.io.topRetAddrValid
   private val s2_canUseRas  = RegEnable(s1_canUseRas, s1_fire)
   private val s3_canUseRas  = RegEnable(s2_canUseRas, s2_fire)
   private val s1_rasTopAddr = ras.io.topRetAddr
@@ -356,9 +356,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val debug_s1UseUbtb      = s1_taken && !useAbtb
   private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_abtbUseUtage
   private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_abtbUseUtage
-  // Both BTB paths select the micro-RAS target for a return when it is available.
+  // Both BTB paths select the RAS target for a return when it is available.
   // Check the selected S1 prediction so an unused BTB return cannot claim the target.
-  private val debug_s1UseUras = s1_taken && s1_prediction.attribute.isReturn && uras.io.specOut.isCanUse
+  private val debug_s1UseRas = s1_taken && s1_prediction.attribute.isReturn && s1_canUseRas
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -402,11 +402,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s2_prediction       := Mux(s2_taken, s2_firstTakenBranch.bits, s2_fallThroughPrediction)
   s2_prediction.taken := s2_taken
-  when(s2_prediction.attribute.isReturn && s2_canUseRas) {
+  // The RAS enable is checked here as well because `s2_canUseRas` is sampled with the entry in S1.
+  when(s2_prediction.attribute.isReturn && s2_canUseRas && ras.io.enable) {
     s2_prediction.target := s2_rasTopAddr
   }
 
-  // S2 does not compare targets to avoid incorrectly overriding the S1 uRAS target with the MBTB target.
+  // S2 does not compare targets to avoid incorrectly overriding the S1 RAS target with the MBTB target.
   s2_override := {
     // Precompute the override assuming each candidate is the first taken branch.
     val overrideCandidates = mbtb.io.result.map { entry =>
@@ -461,6 +462,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
   // tage, ittage, etc.'s `hit` is gated by `enable` so no extra `&& .enable` is required.
   // ras has no `hit`, so gate it with `enable` and additionally require a non-empty stack.
+  // `s3_canUseRas` is sampled with this entry in S1, so `ras.io.enable` here also rejects an entry that
+  // was predicted before the RAS was (re-)enabled.
   private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable && s3_canUseRas
   private val s3_useIttage = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
@@ -604,18 +607,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val trainFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
 
-  private val s1_ubtbPredWithURas = WireInit(ubtb.io.prediction)
-  when(s1_ubtbPredWithURas.valid && s1_ubtbPredWithURas.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
-    s1_ubtbPredWithURas.bits.target := uras.io.specOut.retTarget
-  }
-
-  private val s1_abtbPredWithURas = WireInit(abtb.io.result.entries)
-  s1_abtbPredWithURas.foreach {
-    case p => when(p.valid && p.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
-        p.bits.target := uras.io.specOut.retTarget
-      }
-  }
-
   phr.io.train.s0_stall         := s0_stall
   phr.io.train.stageCtrl        := stageCtrl
   phr.io.train.redirect         := redirect
@@ -696,13 +687,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
         debug_s1UseUbtb -> Mux(
-          debug_s1UseUras,
-          BpuPredictionSource.Stage1.UbtbUras,
+          debug_s1UseRas,
+          BpuPredictionSource.Stage1.UbtbRas,
           BpuPredictionSource.Stage1.Ubtb
         ),
         debug_s1UseAbtb -> Mux(
-          debug_s1UseUras,
-          BpuPredictionSource.Stage1.AbtbUras,
+          debug_s1UseRas,
+          BpuPredictionSource.Stage1.AbtbRas,
           BpuPredictionSource.Stage1.Abtb
         ),
         debug_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
@@ -825,18 +816,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s1_use",
     s1PredictionFire,
     Seq(
-      ("ubtb", debug_s1UseUbtb && !debug_s1UseUras),
-      ("abtb", debug_s1UseAbtb && !debug_s1UseUras),
+      ("ubtb", debug_s1UseUbtb && !debug_s1UseRas),
+      ("abtb", debug_s1UseAbtb && !debug_s1UseRas),
       ("abtb_utage", debug_s1UseAbtbUtage),
-      ("ubtb_uras", debug_s1UseUbtb && debug_s1UseUras),
-      ("abtb_uras", debug_s1UseAbtb && debug_s1UseUras),
+      ("ubtb_ras", debug_s1UseUbtb && debug_s1UseRas),
+      ("abtb_ras", debug_s1UseAbtb && debug_s1UseRas),
       ("fallThrough", !s1_taken)
     )
   )
   XSPerfAccumulate("s3_use_ras", s3_fire && s3_taken && s3_useRas)
   XSPerfAccumulate(
     "s3_use_ras_invalid",
-    s3_fire && s3_taken && s3_firstTakenBranch.bits.attribute.isReturn && !ras.io.topRetAddrValid
+    s3_fire && s3_taken && s3_firstTakenBranch.bits.attribute.isReturn && !s3_canUseRas
   )
   XSPerfAccumulate("s3_use_ittage", s3_fire && s3_taken && !s3_useRas && s3_useIttage)
   XSPerfAccumulate("s3_use_mbtb_tage", s3_fire && s3_prediction.attribute.isConditional)
