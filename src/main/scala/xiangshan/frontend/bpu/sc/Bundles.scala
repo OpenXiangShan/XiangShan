@@ -102,6 +102,10 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   val providerValid: Bool = Bool()
   val providerTaken: Bool = Bool()
   val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
+  // Final TAGE component choice replayed from prediction metadata; taken requires valid.
+  val tageUseProvider: Bool = Bool()
+  val tageFinalValid:  Bool = Bool()
+  val tageFinalTaken:  Bool = Bool()
   // sc resp
   val pathResp:   Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
   val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))

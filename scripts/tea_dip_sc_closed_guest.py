@@ -16,6 +16,8 @@ COLUMNS = ['ID', 'SCCORRECT', 'SCWRONG', 'SCWRONGTAGEWRONG', 'SCCORRECTTAGECORRE
            'PATHRESP_0', 'PATHRESP_1', 'PROVIDERCTR', 'PROVIDERTAKEN', 'PROVIDERVALID',
            'CFIPC', 'STARTPC_ADDR', 'STAMP', 'SITE']
 BOOLS = COLUMNS[1:12] + ['PROVIDERTAKEN', 'PROVIDERVALID']
+FINAL_FIELDS = ['TAGEFINALTAKEN', 'TAGEFINALVALID', 'TAGEUSEPROVIDER']
+FINAL_COLUMNS = COLUMNS[:17] + FINAL_FIELDS + COLUMNS[17:]
 OUTCOMES = dict(SCCORRECTTAGEWRONG='sc_correct_tage_wrong',
                 SCWRONGTAGECORRECT='sc_wrong_tage_correct',
                 SCCORRECTTAGECORRECT='sc_correct_tage_correct',
@@ -24,7 +26,20 @@ NATIVE = [*OUTCOMES.values(), 't1_use_sc', 't1_not_use_sc']
 
 
 
-def trace_phases(db, blocks):
+def final_tage_outcome(row):
+    valid, provider = row['TAGEFINALVALID'], row['TAGEUSEPROVIDER']
+    source = 'provider' if provider else 'alternate' if valid else 'invalid'
+    counts = Counter(rows=1, useSc=row['USESC'])
+    if valid and row['USESC']:
+        sc = row['SCPRED'] == row['ACTUALTAKEN']
+        tage = row['TAGEFINALTAKEN'] == row['ACTUALTAKEN']
+        counts.update(dict(sc_correct_tage_wrong=int(sc and not tage),
+                           sc_wrong_tage_correct=int(not sc and tage),
+                           both_correct=int(sc and tage), both_wrong=int(not sc and not tage)))
+    return source, counts
+
+
+def trace_phases(db, blocks, has_final_tage=False):
     """Use the dedicated producer event count; legacy way counters cannot supply cuts."""
     names = {key for _, block in blocks for key in block
              if key.endswith('.sc.diag_sc_cond_trace_events')}
@@ -45,6 +60,7 @@ def trace_phases(db, blocks):
         counters = unique_counters(block)
         amount = counters[name]
         observed = Counter()
+        choices = defaultdict(Counter)
         first = last = None
         for _ in range(amount):
             assert pending is not None, 'Native event count exceeds actual SC records'
@@ -53,6 +69,9 @@ def trace_phases(db, blocks):
             last = cycle
             pending = next(merged, None)
             observed['useSc'] += row['USESC']
+            if has_final_tage:
+                source, counts = final_tage_outcome(row)
+                choices[source].update(counts)
             for field, key in OUTCOMES.items():
                 observed[key] += row[field]
         for key in ['useSc', *OUTCOMES.values()]:
@@ -65,6 +84,8 @@ def trace_phases(db, blocks):
         phases.append(dict(phase=label, native_print_stamp=stamp, trace_events=amount,
                            first_private_stamp=first, last_private_stamp=last,
                            selected_raw_provider_outcomes=dict(observed)))
+        if has_final_tage:
+            phases[-1]['final_tage_choice'] = {k: dict(v) for k, v in sorted(choices.items())}
     assert pending is None, 'SC records remain after all native event counts'
     return phases
 
@@ -100,10 +121,15 @@ def analyze(folder, receipt_path):
     pcs = defaultdict(Counter)
     ctrs = defaultdict(Counter)
     totals, table_counts = Counter(), {}
+    final_choices = defaultdict(Counter)
+    final_pcs = defaultdict(lambda: defaultdict(Counter))
     with sqlite3.connect((folder / 'simulator.db').resolve().as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
+        columns = [r['name'] for r in db.execute('PRAGMA table_info(' + tables[0] + ')')]
+        assert columns in [COLUMNS, FINAL_COLUMNS]
+        has_final_tage = columns == FINAL_COLUMNS
         for table in tables:
-            assert [r['name'] for r in db.execute('PRAGMA table_info(' + table + ')')] == COLUMNS
+            assert [r['name'] for r in db.execute('PRAGMA table_info(' + table + ')')] == columns
             previous_stamp, count = -1, 0
             for ordinal, row in enumerate(db.execute('SELECT * FROM ' + table + ' ORDER BY ID'), 1):
                 assert row['ID'] == ordinal and row['STAMP'] >= previous_stamp
@@ -114,6 +140,13 @@ def analyze(folder, receipt_path):
                 totals['rows'] += 1
                 pc = hex(row['CFIPC'])
                 pcs[pc]['rows'] += 1
+                if has_final_tage:
+                    assert all(row[name] in [0, 1] for name in FINAL_FIELDS)
+                    if row['TAGEUSEPROVIDER']:
+                        assert row['TAGEFINALVALID'] and row['TAGEFINALTAKEN'] == row['PROVIDERTAKEN']
+                    source, counts = final_tage_outcome(row)
+                    final_choices[source].update(counts)
+                    final_pcs[pc][source].update(counts)
                 if row['USESC']:
                     sc = row['SCPRED'] == row['ACTUALTAKEN']
                     tage = row['PROVIDERTAKEN'] == row['ACTUALTAKEN']
@@ -133,7 +166,7 @@ def analyze(folder, receipt_path):
                 else:
                     assert all(row[name] == 0 for name in ['SCCORRECT', 'SCWRONG', *OUTCOMES])
             table_counts[table] = count
-        exact_phases = trace_phases(db, blocks)
+        exact_phases = trace_phases(db, blocks, has_final_tage)
     assert totals['useSc'] == native['t1_use_sc']
     assert all(totals[name] == native[name] for name in OUTCOMES.values())
     trace_not_use = totals['rows'] - totals['useSc']
@@ -155,6 +188,14 @@ def analyze(folder, receipt_path):
                       'training phases; this does not calibrate private STAMP to TEA or establish prediction accuracy.')
     if exact_phases is not None:
         data['trace_phase_cohorts'] = exact_phases
+    if has_final_tage:
+        data['final_tage_choice'] = dict(
+            totals={k: dict(v) for k, v in sorted(final_choices.items())},
+            by_pc={pc: {k: dict(v) for k, v in sorted(choices.items())}
+                   for pc, choices in sorted(final_pcs.items(), key=lambda item: int(item[0], 16))},
+            scope='Prediction metadata selects provider or alternate; invalid TAGE is excluded from outcome '
+                  'comparisons. This remains a selected training cohort, not full prediction accuracy or '
+                  'a causal count of SC overrides. Private STAMP remains uncalibrated to TEA.')
     return data
 
 

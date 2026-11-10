@@ -864,6 +864,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
   /* *** Sc Trace *** */
+  // SC and TAGE use the lowest matching MBTB metadata index. Reuse prediction
+  // metadata for diagnostics without widening ScMeta or changing training.
+  private val diagTageMeta           = io.train.meta.tage.entries
+  private val t1_diagTageUseProvider = RegEnable(VecInit(diagTageMeta.map(_.useProvider)), t0_fire)
+  private val t1_diagTageFinalValid  = RegEnable(VecInit(diagTageMeta.map(m => m.useProvider || m.hasAlt)), t0_fire)
+  private val t1_diagTageFinalTaken  = RegEnable(
+    VecInit(diagTageMeta.map(m => Mux(m.useProvider, m.providerTakenCtr.isPositive, m.altTakenCtr.isPositive))),
+    t0_fire
+  )
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
     val predWayIdx  = t1_branchesScIdxVec(i)
@@ -872,9 +881,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     trace.bits.startPc := t1_startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
-    trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
-    trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
-    trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
+    trace.bits.providerValid   := t1_meta.tagePredValid(predWayIdx)
+    trace.bits.providerTaken   := t1_meta.tagePred(predWayIdx)
+    trace.bits.providerCtr     := t1_meta.tageCtr(predWayIdx)
+    trace.bits.tageUseProvider := t1_diagTageUseProvider(predWayIdx)
+    trace.bits.tageFinalValid  := t1_diagTageFinalValid(predWayIdx)
+    trace.bits.tageFinalTaken  := t1_diagTageFinalTaken(predWayIdx)
 
     trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(tableWayIdx).asUInt))
     trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(tableWayIdx).asUInt))
