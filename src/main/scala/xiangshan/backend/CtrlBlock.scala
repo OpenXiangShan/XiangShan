@@ -801,7 +801,7 @@ class CtrlBlockImp(
   rob.io.teaMembers.foreach { members =>
     members := RegEnable(teaDispatchMembers.get, dispatch.io.enqRob.req.map(_.valid).reduce(_ || _))
   }
-  if (backendParams.teaEn) {
+  if (backendParams.dipEn) {
     val hartId = p(XSCoreParamsKey).HartId
     val dip = Module(new DipSampler)
     dip.io.enable := Constantin.createRecord(s"enableDip$hartId", false).asBool
@@ -828,6 +828,10 @@ class CtrlBlockImp(
     dip.io.finals.zipWithIndex.foreach { case (event, lane) =>
       finalTable.log(event, s"event$lane", clock, reset)
     }
+  } else {
+    val hartId = p(XSCoreParamsKey).HartId
+    val enableDip = Constantin.createRecord(s"enableDip$hartId", false)
+    assert(!enableDip.asBool, "DIP was not elaborated; rebuild with WITH_DIP=1")
   }
 
   dispatch.io.stallReason <> rename.io.stallReason.out

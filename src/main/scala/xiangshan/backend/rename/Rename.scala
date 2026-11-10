@@ -80,8 +80,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vlReadPorts  = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new RenameOutUop))
-    val dipStall = Option.when(backendParams.teaEn)(Output(UInt(DipCause.width.W)))
-    val teaMembers = Option.when(backendParams.teaEn)(Output(Vec(RenameWidth, Valid(new TeaRenameMember))))
+    val dipStall = Option.when(backendParams.dipEn)(Output(UInt(DipCause.width.W)))
+    val teaMembers = Option.when(backendParams.teaTrackerEn)(Output(Vec(RenameWidth, Valid(new TeaRenameMember))))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
@@ -524,7 +524,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     })).asFormer
     uops(i).robIdx.isFormer := slotIsFormer(i)
     uops(i).chanelIdx := i.U
-    uops(i).debug.foreach(_.perfDebugInfo.teaMemberRank := PopCount(compressMaskVec(i) & ((BigInt(1) << i) - 1).U(RenameWidth.W)))
+    if (backendParams.teaTrackerEn) {
+      uops(i).debug.foreach(_.perfDebugInfo.teaMemberRank := PopCount(compressMaskVec(i) & ((BigInt(1) << i) - 1).U(RenameWidth.W)))
+    }
     uops(i).firstUop := io.in(i).bits.firstUop && isEntryHeadLane(i)
     uops(i).lastUop := io.in(i).bits.lastUop && isEntryTailLane(i)
     val formerMask = formerSlotMaskVec(i)

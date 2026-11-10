@@ -412,8 +412,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
   private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
   private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
-  private val s1_teaPsv               = RegEnable(io.fromICache.req.bits.teaPsv, s0_fire)
-  private val s2_teaPsv               = RegEnable(s1_teaPsv, s1_fire)
+  private val s2_teaPsv = if (backendParams.teaPsvEn) {
+    val s1 = RegEnable(io.fromICache.req.bits.teaPsv, s0_fire)
+    RegEnable(s1, s1_fire)
+  } else 0.U
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 

@@ -283,7 +283,8 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         env:
-          WITH_TEA: ${{ (inputs.enable_tea || inputs.enable_dip) && '1' || '0' }}
+          WITH_TEA: ${{ inputs.enable_tea && '1' || '0' }}
+          WITH_DIP: ${{ inputs.enable_dip && '1' || '0' }}
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

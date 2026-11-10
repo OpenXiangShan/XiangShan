@@ -48,6 +48,8 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   private def init(dut: TeaMemberTracker): Unit = {
+    dut.io.enable.poke(true.B)
+    dut.io.readPc.foreach(_.poke("h80001000".U))
     dut.io.cycle.poke(10.U)
     dut.io.addrTransType.bare.poke(true.B)
     dut.io.addrTransType.sv39.poke(false.B)
@@ -77,6 +79,45 @@ class TeaMemberTrackerTest extends XSTester {
     port.bits.numWB.poke(numWB.U)
     port.bits.pc.poke((0x80001000L + 4 * rank).U)
     port.bits.psv.poke(psv.U)
+  }
+
+  it should "select the cause PC within a shared slot and reject an absent PC" in {
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
+      init(dut)
+      alloc(dut, 0, psv = 1 << TeaEvent.DR_L1)
+      alloc(dut, 1, psv = 1 << TeaEvent.DR_TLB)
+      dut.clock.step()
+      dut.io.alloc.foreach(_.valid.poke(false.B))
+      dut.io.readPc(0).poke("h80001004".U)
+      dut.io.read(0).valid.expect(true.B)
+      dut.io.read(0).pc.expect("h80001004".U)
+      dut.io.read(0).psv.expect((1 << TeaEvent.DR_TLB).U)
+      dut.io.readPc(0).poke("h80001008".U)
+      dut.io.read(0).valid.expect(false.B)
+    }
+  }
+
+  it should "ignore allocations while disabled and start with no stale members" in {
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
+      init(dut)
+      dut.io.enable.poke(false.B)
+      alloc(dut, 0)
+      dut.clock.step(5)
+      dut.io.read.foreach(_.valid.expect(false.B))
+      dut.io.stalled.valid.expect(false.B)
+      dut.io.alloc.foreach(_.valid.poke(false.B))
+      dut.io.enable.poke(true.B)
+      dut.clock.step()
+      dut.io.read.foreach(_.valid.expect(false.B))
+      alloc(dut, 0)
+      dut.clock.step()
+      dut.io.alloc.foreach(_.valid.poke(false.B))
+      dut.io.read(0).valid.expect(true.B)
+      dut.io.enable.poke(false.B)
+      dut.clock.step()
+      dut.io.enable.poke(true.B)
+      dut.io.read(0).valid.expect(false.B)
+    }
   }
 
   it should "discard history on reset and leave earlier members untracked" in {
@@ -173,6 +214,7 @@ class TeaMemberTrackerTest extends XSTester {
       dut.io.enqPsv(0).valid.poke(false.B)
       dut.io.events(0).bits.mask.poke((1 << TeaEvent.FL_EX).U)
       ptr(dut.io.readPtr(0), former = false)
+      dut.io.readPc(0).poke("h80001004".U)
       val latterPsv = (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB) | (1 << TeaEvent.FL_EX)
       dut.io.read(0).psv.expect(latterPsv.U)
       dut.io.read(1).psv.expect((1 << TeaEvent.DR_L1).U)
@@ -233,6 +275,7 @@ class TeaMemberTrackerTest extends XSTester {
       ptr(dut.io.readPtr(0), flag = true)
       ptr(dut.io.readPtr(1), former = false)
       dut.io.readPtr(1).value.poke(1.U)
+      dut.io.readPc(1).poke("h80001004".U)
       dut.io.read(0).psv.expect(((1 << TeaEvent.DR_L1) | (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB)).U)
       dut.io.read(1).psv.expect(((1 << TeaEvent.ST_L1) | (1 << TeaEvent.DR_TLB)).U)
       dut.io.read(1).pc.expect("h80001004".U)
@@ -288,6 +331,8 @@ class TeaMemberTrackerTest extends XSTester {
       dut.io.alloc(0).bits.pc.poke("h7f80001000".U)
       dut.clock.step()
       dut.io.alloc(0).valid.poke(false.B)
+      dut.io.readPc(0).poke("hffffffff80001000".U)
+      dut.io.read(0).valid.expect(true.B)
       dut.io.read(0).pc.expect("hffffffff80001000".U)
 
       dut.io.commits(0).valid.poke(true.B)
@@ -302,6 +347,8 @@ class TeaMemberTrackerTest extends XSTester {
       ptr(dut.io.readPtr(0), flag = true)
       dut.clock.step()
       dut.io.alloc(0).valid.poke(false.B)
+      dut.io.readPc(0).poke("h0000007f80001000".U)
+      dut.io.read(0).valid.expect(true.B)
       dut.io.read(0).pc.expect("h0000007f80001000".U)
     }
   }
