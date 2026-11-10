@@ -47,7 +47,7 @@ trait HasRasParameters extends HasBpuParameters {
   // detection needs no extra disambiguation bit. The only aliased endpoint (a fully saturated
   // +SpecQueueSize push window) always has its top inside the spec queue and is masked there.
   def StackPtrWidth: Int = log2Up(CommitStackSize + SpecQueueSize)
-  def RestoreDepth: Int = 2
+  def RestoreDepth:  Int = 2
 
   // A single FTQ entry drives at most one RAS spec op (BPU S3), so the number of
   // outstanding speculative pushes is bounded by FtqSize. SpecQueueSize must be at

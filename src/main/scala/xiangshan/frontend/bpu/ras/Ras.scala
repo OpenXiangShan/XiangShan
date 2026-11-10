@@ -40,13 +40,14 @@ import xiangshan.frontend.bpu.BpuCommit
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.HalfAlignHelper
 
-class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters with HalfAlignHelper with HasCircularQueuePtrHelper {
+class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters with HalfAlignHelper
+    with HasCircularQueuePtrHelper {
   class RasIO(implicit p: Parameters) extends BasePredictorIO {
-    val specIn:   Valid[RasSpecInfo] = Flipped(Valid(new RasSpecInfo))
+    val specIn:   Valid[RasSpecInfo]     = Flipped(Valid(new RasSpecInfo))
     val s2SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
     val s3SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
-    val commit:   Valid[BpuCommit]   = Flipped(Valid(new BpuCommit))
-    val redirect: Valid[BpuRedirect] = Flipped(Valid(new BpuRedirect))
+    val commit:   Valid[BpuCommit]       = Flipped(Valid(new BpuCommit))
+    val redirect: Valid[BpuRedirect]     = Flipped(Valid(new BpuRedirect))
 
     val topRetAddr:      GuardedPc       = Output(GuardedPc())
     val topRetAddrValid: Bool            = Output(Bool())

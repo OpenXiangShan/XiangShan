@@ -223,26 +223,26 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   uras.io.s3OverrideData.bits.cfiPosition := s3_prediction.cfiPosition
   uras.io.fullRetAddr                     := ras.io.topRetAddr
 
-  ras.io.redirect                := redirect
-  ras.io.commit                  := commit
-  ras.io.specIn.valid            := s1_fire
-  ras.io.specIn.bits.startPc     := s1_startPc.get.toUInt
-  ras.io.specIn.bits.attribute   := s1_prediction.attribute
-  ras.io.specIn.bits.cfiPosition := s1_prediction.cfiPosition
-  ras.io.s2SpecIn.valid              := s2_fire
-  ras.io.s2SpecIn.bits.hasOverride   := s2_override
-  ras.io.s2SpecIn.bits.startPc       := s2_startPc.get.toUInt
-  ras.io.s2SpecIn.bits.attribute     := s2_prediction.attribute
-  ras.io.s2SpecIn.bits.cfiPosition   := s2_prediction.cfiPosition
-  ras.io.s3SpecIn.valid              := s3_fire
-  ras.io.s3SpecIn.bits.hasOverride   := s3_override
-  ras.io.s3SpecIn.bits.startPc       := s3_startPc.get.toUInt
-  ras.io.s3SpecIn.bits.attribute     := s3_prediction.attribute
-  ras.io.s3SpecIn.bits.cfiPosition   := s3_prediction.cfiPosition
-  ras.io.specRead.req            := io.fromFtq.specReadReq
-  io.toFtq.specRead              := ras.io.specRead.retAddr(1)
-  private val s1_canUseRas     = ras.io.topRetAddrValid
-  private val s2_canUseRas     = RegEnable(s1_canUseRas, s1_fire)
+  ras.io.redirect                  := redirect
+  ras.io.commit                    := commit
+  ras.io.specIn.valid              := s1_fire
+  ras.io.specIn.bits.startPc       := s1_startPc.get.toUInt
+  ras.io.specIn.bits.attribute     := s1_prediction.attribute
+  ras.io.specIn.bits.cfiPosition   := s1_prediction.cfiPosition
+  ras.io.s2SpecIn.valid            := s2_fire
+  ras.io.s2SpecIn.bits.hasOverride := s2_override
+  ras.io.s2SpecIn.bits.startPc     := s2_startPc.get.toUInt
+  ras.io.s2SpecIn.bits.attribute   := s2_prediction.attribute
+  ras.io.s2SpecIn.bits.cfiPosition := s2_prediction.cfiPosition
+  ras.io.s3SpecIn.valid            := s3_fire
+  ras.io.s3SpecIn.bits.hasOverride := s3_override
+  ras.io.s3SpecIn.bits.startPc     := s3_startPc.get.toUInt
+  ras.io.s3SpecIn.bits.attribute   := s3_prediction.attribute
+  ras.io.s3SpecIn.bits.cfiPosition := s3_prediction.cfiPosition
+  ras.io.specRead.req              := io.fromFtq.specReadReq
+  io.toFtq.specRead                := ras.io.specRead.retAddr(1)
+  private val s1_canUseRas  = ras.io.topRetAddrValid
+  private val s2_canUseRas  = RegEnable(s1_canUseRas, s1_fire)
   private val s3_canUseRas  = RegEnable(s2_canUseRas, s2_fire)
   private val s1_rasTopAddr = ras.io.topRetAddr
   private val s2_rasTopAddr = RegEnable(s1_rasTopAddr, s1_fire)
@@ -402,7 +402,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s2_prediction       := Mux(s2_taken, s2_firstTakenBranch.bits, s2_fallThroughPrediction)
   s2_prediction.taken := s2_taken
-  when (s2_prediction.attribute.isReturn && s2_canUseRas) {
+  when(s2_prediction.attribute.isReturn && s2_canUseRas) {
     s2_prediction.target := s2_rasTopAddr
   }
 
@@ -489,8 +489,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   private val s3_rasTargetDiff = Mux(
     s3_s2Override,
-    ras.io.topRetAddr =/= s3_s2Prediction.target,
-    ras.io.topRetAddr =/= s3_s1Prediction.target
+    s3_rasTopAddr =/= s3_s2Prediction.target,
+    s3_rasTopAddr =/= s3_s1Prediction.target
   )
 
   s3_override := {
@@ -499,7 +499,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       // Also detects an S2 prediction with no taken branch, whose one-hot mask is zero.
       val firstTakenBranchDiff = !s3_s2FirstTakenBranchOH(i)
 
-      val useRas    = entry.bits.attribute.isReturn && ras.io.enable
+      val useRas    = entry.bits.attribute.isReturn && ras.io.enable && s3_canUseRas
       val useIttage = entry.bits.attribute.needIttage && ittage.io.prediction.hit
 
       // An S2 override already uses the MBTB target; changing candidates is detected above.
