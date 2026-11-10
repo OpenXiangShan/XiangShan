@@ -911,6 +911,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   val exceptionIsFormer = deqExceptionIsFormer
+  val takeFormerFs = exceptionHappen && CompressType.isNotNORMAL(deqPtrEntry.entryPairType) &&
+    !exceptionIsFormer && !intrEnable && formerNotFlush
+  val formerFsDirty = Wire(Bool())
   val exceptionUop = deqExceptionUop
   val exceptionDebug = debugMeta(exceptionUop)
   io.exception.valid := RegNext(exceptionHappen)
@@ -920,6 +923,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(exceptionUop.commitType, exceptionHappen)
   io.exception.bits.isFormer := RegEnable(exceptionIsFormer, exceptionHappen)
+  io.exception.bits.formerFsDirty := RegEnable(formerFsDirty, exceptionHappen)
   io.exception.bits.isStore := RegEnable(FuType.isStore(exceptionUop.fuType), exceptionHappen)
   io.exception.bits.exceptionVec extendFrom RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   io.exception.bits.satpFlushFirstFetchFault := RegEnable(exceptionDataRead.bits.satpFlushFirstFetchFault && deqHasException, exceptionHappen)
@@ -1014,6 +1018,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       update.bits.setMask := Cat(req.bits.dirtyVs, req.bits.dirtyFs || req.bits.fflagsWen)
   }
   enqFlagTracker.io.redirect := io.redirect
+  // A latter trap is irreversible here, while ordinary retirement waits for
+  // walk. Transfer only the surviving former's FS setter with that trap.
+  enqFlagTracker.io.takeSlot.valid := takeFormerFs
+  enqFlagTracker.io.takeSlot.bits.robIdx := deqPtrFormer
+  enqFlagTracker.io.takeSlot.bits.mask := 1.U
+  formerFsDirty := enqFlagTracker.io.takenSetMask(0)
+  when(takeFormerFs) {
+    assert(deqPtrEntry.commit_w)
+    assert(!(io.commits.isCommit && io.commits.commitValid.head),
+      "A surviving former cannot retire and transfer its FS effect with a trap in the same cycle")
+  }
   enqFlagTracker.io.commit.zip(io.commits.commitValid).zip(io.commits.robIdx).foreach {
     case ((commit, valid), robIdx) =>
       commit.valid := io.commits.isCommit && valid
@@ -1062,6 +1077,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
   writebackFlagTracker.io.redirect := io.redirect
+  writebackFlagTracker.io.takeSlot := 0.U.asTypeOf(writebackFlagTracker.io.takeSlot)
   writebackFlagTracker.io.commit.zip(io.commits.commitValid).zip(io.commits.robIdx).foreach {
     case ((commit, valid), robIdx) =>
       commit.valid := io.commits.isCommit && valid

@@ -153,6 +153,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
         val isFormer = Bool()
+        val formerFsDirty = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -276,6 +277,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   val redirectFlush = io.in.bits.redirectFlush
 
   val hasTrap = io.fromRob.trap.valid
+  // The surviving former precedes this trap architecturally. Consume its FS
+  // effect with the trap, while V still describes the pre-trap context.
+  val formerFsDirty = hasTrap && io.fromRob.trap.bits.formerFsDirty
+  when(formerFsDirty) {
+    assert(!io.fromRob.trap.bits.isFormer && !io.fromRob.trap.bits.isInterrupt,
+      "Only a latter exception can carry a surviving former's FS effect")
+  }
   val trapVec = io.fromRob.trap.bits.trapVec
   val trapPC = io.fromRob.trap.bits.pc
   val trapPCGPA = io.fromRob.trap.bits.pcGPA
@@ -661,7 +669,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         for (i <- 0 until 5) {
           m.robCommit.fflags(i)  := RegNext(io.fromRob.commit.fflags(i), false.B)
         }
-        m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty)
+        m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty) || formerFsDirty
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
         m.robCommit.vxsat   := RegNext(io.fromRob.commit.vxsat, false.B)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)

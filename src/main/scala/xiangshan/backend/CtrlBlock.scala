@@ -28,6 +28,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo,
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
+import xiangshan.backend.fu.NewCSR.CSRExceptionPath
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
@@ -861,10 +862,9 @@ class CtrlBlockImp(
   io.toTop.cpuWfi := DelayN(rob.io.cpu_wfi, 5)
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
-  io.robio.exception := rob.io.exception
+  io.robio.exception := CSRExceptionPath.withPc(rob.io.exception, s1_robFlushPcAdjusted)
   io.robio.diffCommitForTrap.zip(rob.io.diffCommitForTrap).foreach { case (sink, source) => sink := source }
   rob.io.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
-  io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
   // wfi

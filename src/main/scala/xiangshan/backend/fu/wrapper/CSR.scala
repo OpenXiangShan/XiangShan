@@ -126,23 +126,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.oldVsatpMode := satpFlushMod.out.oldVsatpMode
   csrMod.io.oldPrivState := satpFlushMod.out.oldPrivState
 
-  csrMod.io.fromRob.trap.valid := csrIn.exception.valid
-  csrMod.io.fromRob.trap.bits.pc := csrIn.exception.bits.pc
-  csrMod.io.fromRob.trap.bits.instr := csrIn.exception.bits.instr
-  csrMod.io.fromRob.trap.bits.pcGPA := csrIn.exception.bits.gpaddr
-  // Todo: shrink the width of trap vector.
-  // We use 64bits trap vector in CSR, and 24 bits exceptionVec in exception bundle.
-  csrMod.io.fromRob.trap.bits.trapVec := csrIn.exception.bits.exceptionVec.asUInt
-  csrMod.io.fromRob.trap.bits.isFetchBkpt := csrIn.exception.bits.isPcBkpt
-  csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
-  csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
-  csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
-  csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
-  csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
-  csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
-  csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
-  csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
-  csrMod.io.fromRob.trap.bits.isFormer := csrIn.exception.bits.isFormer
+  CSRExceptionPath.connect(csrMod, csrIn.exception)
   csrMod.io.fromRob.diffCommitForTrap.zip(csrIn.diffCommitForTrap).foreach { case (sink, source) =>
     sink := source
   }
