@@ -2,6 +2,7 @@
 from collections import Counter, defaultdict
 from pathlib import Path
 import argparse
+import heapq
 import json
 import re
 import sqlite3
@@ -20,6 +21,52 @@ OUTCOMES = dict(SCCORRECTTAGEWRONG='sc_correct_tage_wrong',
                 SCCORRECTTAGECORRECT='sc_correct_tage_correct',
                 SCWRONGTAGEWRONG='sc_wrong_tage_wrong')
 NATIVE = [*OUTCOMES.values(), 't1_use_sc', 't1_not_use_sc']
+
+
+
+def trace_phases(db, blocks):
+    """Use the dedicated producer event count; legacy way counters cannot supply cuts."""
+    names = {key for _, block in blocks for key in block
+             if key.endswith('.sc.diag_sc_cond_trace_events')}
+    if not names:
+        return None
+    assert len(names) == 1
+    name, = names
+
+    def rows(lane):
+        for row in db.execute('SELECT * FROM scCondTrace_' + str(lane) + ' ORDER BY ID'):
+            yield row['STAMP'], lane, row
+
+    merged = iter(heapq.merge(*[rows(i) for i in range(8)]))
+    pending = next(merged, None)
+    phases = []
+    labels = ['warmup', 'ROI'] if len(blocks) == 2 else ['coremark']
+    for label, (stamp, block) in zip(labels, blocks):
+        counters = unique_counters(block)
+        amount = counters[name]
+        observed = Counter()
+        first = last = None
+        for _ in range(amount):
+            assert pending is not None, 'Native event count exceeds actual SC records'
+            cycle, lane, row = pending
+            first = cycle if first is None else first
+            last = cycle
+            pending = next(merged, None)
+            observed['useSc'] += row['USESC']
+            for field, key in OUTCOMES.items():
+                observed[key] += row[field]
+        for key in ['useSc', *OUTCOMES.values()]:
+            native = 't1_use_sc' if key == 'useSc' else key
+            expected = sum(v for k, v in counters.items()
+                           if re.search(r'\.sc\.' + native + r'\d+$', k))
+            assert observed[key] == expected, (label, key, observed[key], expected)
+        if pending is not None and last is not None:
+            assert last < pending[0], 'Native phase cut splits simultaneous trace lanes'
+        phases.append(dict(phase=label, native_print_stamp=stamp, trace_events=amount,
+                           first_private_stamp=first, last_private_stamp=last,
+                           selected_raw_provider_outcomes=dict(observed)))
+    assert pending is None, 'SC records remain after all native event counts'
+    return phases
 
 
 def analyze(folder, receipt_path):
@@ -86,10 +133,11 @@ def analyze(folder, receipt_path):
                 else:
                     assert all(row[name] == 0 for name in ['SCCORRECT', 'SCWRONG', *OUTCOMES])
             table_counts[table] = count
+        exact_phases = trace_phases(db, blocks)
     assert totals['useSc'] == native['t1_use_sc']
     assert all(totals[name] == native[name] for name in OUTCOMES.values())
     trace_not_use = totals['rows'] - totals['useSc']
-    return dict(passed=True, point=receipt['point'], source=receipt['source'], tables=table_counts,
+    data = dict(passed=True, point=receipt['point'], source=receipt['source'], tables=table_counts,
                 totals=dict(totals), by_provider_ctr={str(k): dict(v) for k, v in sorted(ctrs.items())},
                 by_pc={k: dict(v) for k, v in sorted(pcs.items(), key=lambda item: int(item[0], 16))},
                 native_phases=phases, selected_native_margins_match=True,
@@ -102,7 +150,12 @@ def analyze(folder, receipt_path):
                       'training counts, not overall branch accuracy, causal overrides or predicted saved cycles. '
                       'Native TAGE outcome names refer to the raw longest-history provider, not the final '
                       'UseAltOnNa-selected TAGE prediction. '
-                      'Path/global/bias responses are old training-time entries, not prediction-time weights.')
+                      'Path/global/bias responses are old training-time entries, not prediction-time weights. '
+                      'When trace_phase_cohorts is present, dedicated trace-valid native totals validate ordinal '
+                      'training phases; this does not calibrate private STAMP to TEA or establish prediction accuracy.')
+    if exact_phases is not None:
+        data['trace_phase_cohorts'] = exact_phases
+    return data
 
 
 def main():
