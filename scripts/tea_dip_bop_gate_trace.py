@@ -24,10 +24,15 @@ def audit_rows(rows):
         assert row['GATEBEFORE'] == int(before < threshold)
         assert row['GATEAFTER'] == int(after < threshold)
         if previous is not None:
+            assert row['ID'] == previous['ID'] + 1, 'missing confidence-update row'
             assert row['STAMP'] > previous['STAMP']
             assert before == previous['CONFAFTER'], 'confidence continuity lost between logged updates'
         previous = row
-    return dict(updates=len(rows), closed_before=sum(not r['GATEBEFORE'] for r in rows),
+    pairs = max(0, len(rows) - 1)
+    matches = sum(current['TEACHERDISABLED'] != prior['COMMITTEDTEACHERENABLED']
+                  for prior, current in zip(rows, rows[1:]))
+    return dict(previous_phase_feedback=dict(compared_pairs=pairs, matches=matches, mismatches=pairs-matches),
+                updates=len(rows), closed_before=sum(not r['GATEBEFORE'] for r in rows),
                 closed_after=sum(not r['GATEAFTER'] for r in rows),
                 opened_on_update=sum(not r['GATEBEFORE'] and r['GATEAFTER'] for r in rows),
                 closed_on_update=sum(r['GATEBEFORE'] and not r['GATEAFTER'] for r in rows),
@@ -64,6 +69,8 @@ def analyze(folder, receipt_path):
                 scope='Each row is an actual phaseEndPulse confidence update. The first recorded confidence may '
                       'be nonzero after warmup filtering. STAMP is the writer local counter, not ROB TEACYCLE '
                       'or native print time; no offset, native-window assignment or causal saved cycles inferred. '
+                      'Adjacent row IDs must be contiguous even when confidence is saturated or zero. '
+                      'Previous-phase feedback compares adjacent committed qualities; the first row has no prior observation. '
                       'Native score-table idle counts remain separate from pulse counts. Snapshot consistency '
                       'does not prove observation neutrality, request-level attribution or full-suite coverage.')
 

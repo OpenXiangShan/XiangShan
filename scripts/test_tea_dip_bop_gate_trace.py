@@ -39,6 +39,22 @@ class PhaseTraceTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             audit_rows(rows)
 
+    def test_previous_phase_feedback_relation_is_reported(self):
+        # Actual MCF six-update feedback/committed-quality sequence.
+        rows = events(0, [1, 0, 0, 1, 1, 1], 4)
+        for row, enabled in zip(rows, [1, 1, 0, 0, 0, 0]):
+            row['COMMITTEDTEACHERENABLED'] = enabled
+        self.assertEqual(audit_rows(rows)['previous_phase_feedback'],
+                         dict(compared_pairs=5, matches=5, mismatches=0))
+        rows[1]['COMMITTEDTEACHERENABLED'] = 0
+        self.assertEqual(audit_rows(rows)['previous_phase_feedback']['mismatches'], 1)
+
+    def test_missing_update_at_zero_confidence_is_rejected(self):
+        rows = events(0, [0, 0, 0], 4)
+        del rows[1]
+        with self.assertRaises(AssertionError):
+            audit_rows(rows)
+
 
 if __name__ == '__main__':
     unittest.main()
