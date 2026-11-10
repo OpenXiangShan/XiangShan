@@ -432,6 +432,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
   val nmi = intrMod.io.out.nmi
+  // Latched with the interrupt number, as debug, irToHS and irToVS are: whether the interrupt being taken is an NMI,
+  // even if the NMI input has dropped since it was requested.
+  val nmiLatched = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)
+  val isNmiTrap = nmi || (trapIsInterrupt && nmiLatched)
   val virtualInterruptIsHvictlInject = intrMod.io.out.virtualInterruptIsHvictlInject
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
@@ -847,10 +851,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
-  trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
-  trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
-  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
-  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
+  trapEntryMNEvent.valid  := ((hasTrap && isNmiTrap) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
+  trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !isNmiTrap && mnstatus.regOut.NMIE
+  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && !isNmiTrap && mnstatus.regOut.NMIE
+  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && !isNmiTrap && mnstatus.regOut.NMIE
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -1680,7 +1684,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val hartId = io.fromTop.hartId
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
-    val hasNMI = nmi && hasTrap
+    val hasNMI = isNmiTrap && hasTrap
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
     val isSv39: Bool =
