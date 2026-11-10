@@ -4,13 +4,16 @@
 
 ## 目录
 
-- [贡献前须知](#贡献前须知)
-- [Bug 报告](#bug-报告)
-- [功能请求](#功能请求)
-- [Pull Request](#pull-request)
-- [编译与使用问题](#编译与使用问题)
-- [其余疑问](#其余疑问)
-- [AI 使用](#ai-使用)
+- [XiangShan 贡献指南](#xiangshan-贡献指南)
+  - [目录](#目录)
+  - [贡献前须知](#贡献前须知)
+  - [Bug 报告](#bug-报告)
+    - [部分已知问题说明](#部分已知问题说明)
+  - [功能请求](#功能请求)
+  - [Pull Request](#pull-request)
+  - [编译与使用问题](#编译与使用问题)
+  - [其余疑问](#其余疑问)
+  - [AI 使用](#ai-使用)
 
 ## 贡献前须知
 
@@ -98,8 +101,8 @@ This commit fixes that by doing blabla.
 Fixes #123456
 
 Link: url.to.related.information
+Assisted-by: Some-AI-Agent:Model-Version Some-MCP-TOOL
 Co-authored-by: Another Author <another.author@example.com>
-Assisted-by: Some-AI-Agent:Model-Version
 ```
 
 建议优先创建 `Draft Pull Request`，待 rebase 到最新主线、自测结果符合预期、CI 通过后再转为 `Ready for review`。来自外部贡献者的 PR 可能无法自动触发 CI；您可以参考 [CODEOWNERS](.github/CODEOWNERS) 文件，`@` 相应维护者协助手动触发。PR 进入 ready 状态后，我们会开始 review；在此之前，您仍可继续完善内容。
@@ -130,6 +133,10 @@ Assisted-by: Some-AI-Agent:Model-Version
 
 - 使用 AI 做翻译、语言润色、行内补全等简单辅助性工作时，无需额外说明。
 - 使用 AI 生成完整的 Bug 报告等文本内容时，请在 issue 正文中说明。
-- 使用 AI 生成完整代码时，请参考 [Linux kernel](https://docs.kernel.org/process/coding-assistants.html#attribution) 的要求，在 commit message 尾部使用 `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` 标签标明：
-  - `AGENT_NAME`：AI 工具/框架/agent 名称，如 Claude、Copilot
-  - `MODEL_VERSION`：AI 工具的模型及版本，如 GPT-4、GPT-3.5
+- 使用 AI 生成完整代码时，请在 commit message 尾部使用 `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` 标签标明：
+  - `AGENT_NAME`：AI 工具/框架/agent 名称，如 Claude、Copilot。
+  - `MODEL_VERSION`：AI 模型及版本，如 GPT-4、GPT-3.5。
+  - `[TOOL]`：额外使用的工具（例如 MCP，skills），如未使用则留空。
+    - 上面的`[]`符号表示此项可选，不应该实际出现在 commit message 中。
+    - 注意，不应该包括 Agent 框架的内置功能或工具如 `exec_command`、`apply_patch` 或 `web_search` 等，也不应该包括构建工具链如 `make`、`mill`、`clang` 或 `verilator` 等。
+  - 例：`Assisted-by: Codex:GPT-6.1-Sol-xhigh github-mcp-server`。

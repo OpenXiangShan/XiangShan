@@ -4,13 +4,16 @@ English | [中文](CONTRIBUTING.zh-cn.md)
 
 ## Table of Contents
 
-- [Before contributing](#before-contributing)
-- [Bug Report](#bug-report)
-- [Feature Request](#feature-request)
-- [Pull Request](#pull-request)
-- [Build and Usage Problems](#build-and-usage-problems)
-- [Other Question](#other-question)
-- [AI Use](#ai-use)
+- [Contributing to XiangShan](#contributing-to-xiangshan)
+  - [Table of Contents](#table-of-contents)
+  - [Before contributing](#before-contributing)
+  - [Bug Report](#bug-report)
+    - [Known issues](#known-issues)
+  - [Feature Request](#feature-request)
+  - [Pull Request](#pull-request)
+  - [Build and Usage Problems](#build-and-usage-problems)
+  - [Other Question](#other-question)
+  - [AI Use](#ai-use)
 
 ## Before contributing
 
@@ -97,9 +100,9 @@ This commit fixes that by doing blabla.
 
 Fixes #123456
 
-Assisted-by: Some-AI-Agent:Model-Version
-Co-authored-by: Another Author <another.author@example.com>
 Link: url.to.related.information
+Assisted-by: Some-AI-Agent:Model-Version Some-MCP-TOOL
+Co-authored-by: Another Author <another.author@example.com>
 ```
 
 We recommend creating a `Draft Pull Request` first, and converting it to `Ready for review` only after rebasing onto the latest mainline, completing self-testing, and getting CI to pass. PRs from external contributors may not be able to trigger CI automatically. In that case, you can refer to [CODEOWNERS](.github/CODEOWNERS) and `@` the relevant maintainers for help triggering it manually. Once the PR is marked ready, we will start the review process; until then, you can continue refining it.
@@ -131,6 +134,10 @@ In addition, please disclose the use and scope of AI in the following situations
 
 - No extra disclosure is needed when AI is only used for simple auxiliary tasks such as translation, language polishing, or inline completion.
 - If AI is used to generate a complete bug report or similar textual content, please state that in the issue body.
-- If AI is used to generate complete code, please follow the [Linux kernel](https://docs.kernel.org/process/coding-assistants.html#attribution) guidance and add an `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` tag at the end of the commit message:
+- If AI is used to generate complete code, please add an `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` tag at the end of the commit message:
   - `AGENT_NAME`: the AI tool, framework, or agent name, such as Claude or Copilot.
   - `MODEL_VERSION`: the model name and version, such as GPT-4 or GPT-3.5.
+  - `[TOOL]`: extra tools used (e.g. MCP, skills), leave empty if not used.
+    - The `[]` symbol above indicates this is optional and should not need to be included in the commit message.
+    - Note this should not include built-in features/tools like `exec_command`, `apply_patch`、`web_search` etc., also should not include the build toolchain like `make`, `mill`, `clang` or `verilator` etc..
+  - Example: `Assisted-by: Codex:GPT-6.1-Sol-xhigh github-mcp-server`.
