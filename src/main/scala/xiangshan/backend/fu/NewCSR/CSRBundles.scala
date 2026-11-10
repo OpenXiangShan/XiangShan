@@ -77,7 +77,7 @@ object CSRBundles {
     val CBIE  = EnvCBIE( 5,  4, wNoFilter).withReset(EnvCBIE.Inval).withDescription("Enable cache-block invalidate operations from the Zicbom extension.")
     val SSE   =      RO(     3)           .withReset(0.U).withDescription("Enable the Zicfiss shadow-stack extension below M-mode.")
     val LPE   =      RO(     2)           .withReset(0.U).withDescription("Enable the Zicfilp landing-pad extension.")
-    val FIOM  =      RO(     0)           .withReset(0.U).withDescription("Fence of I/O implies memory ordering.")
+    val FIOM  =      RW(     0)           .withReset(0.U).withDescription("Fence of I/O implies memory ordering.")
   }
 
   class PrivState extends Bundle { self =>
