@@ -379,12 +379,29 @@ trait MachineLevel { self: NewCSR =>
 
   val minstret = Module(new CSRModule("Minstret", new CounterValueBundle("Machine retired-instruction counter value.")) with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle with HasSiregCounterBundle {
     toSireg := regOut.asUInt
+    val written = RegInit(false.B)
+
+    when(robCommit.instNum.valid) {
+      written := false.B
+    }
+
     when(w.wen) {
       reg := w.wdata
+      written := true.B
     }.elsewhen(fromSireg.valid) {
       reg := fromSireg.bits
+      written := true.B
     }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid && countingEn) {
-      reg := reg.ALL.asUInt + robCommit.instNum.bits
+      val commitInstNum = robCommit.instNum.bits
+      when(written) {
+        when(commitInstNum > 1.U) {
+          reg := reg.ALL.asUInt + (commitInstNum - 1.U)
+        }.otherwise {
+          reg := reg
+        }
+      }.otherwise {
+        reg := reg.ALL.asUInt + commitInstNum
+      }
     }.otherwise {
       reg := reg
     }
