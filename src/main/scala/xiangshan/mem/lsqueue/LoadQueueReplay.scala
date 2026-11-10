@@ -1153,6 +1153,35 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }).asUInt.orR
   }
 
+  // Observe the same unreleased scalar ROB-head entries in mutually exclusive replay states.
+  // Count entry-cycles: several entries can belong to one ROB instruction, so these are not CPU cycles.
+  // Use the actual candidate mask, including this-cycle fast TLB wakeup, rather than the old blocking bit.
+  val robHeadReplayStateNames = Seq(
+    "total", "waiting", "scheduled", "ready_selected", "ready_bank_blocked", "ready_arbitration"
+  )
+  val robHeadReplayStateEvents = (0 until LoadQueueReplaySize).map { entryIdx =>
+    val port = entryIdx % LoadPipelineWidth
+    val resident = scalarUnreleasedRobHeadEntries(entryIdx)
+    val eligible = s0_loadNormalReplaySelMask(entryIdx)
+    val selected = s0_oldestSel(port).valid && s0_oldestSel(port).bits(entryIdx)
+    Seq(
+      resident,
+      resident && !scheduled(entryIdx) && !eligible,
+      resident && scheduled(entryIdx),
+      resident && eligible && s1_can_go(port) && selected,
+      resident && eligible && !s1_can_go(port),
+      resident && eligible && s1_can_go(port) && !selected
+    )
+  }
+  val robHeadReplayStateCounts = robHeadReplayStateNames.indices.map { stateIdx =>
+    PopCount(robHeadReplayStateEvents.map(_(stateIdx)))
+  }
+  assert(robHeadReplayStateCounts.head === robHeadReplayStateCounts.tail.reduce(_ +& _),
+    "ROB-head replay entry states must partition resident entry-cycles")
+  robHeadReplayStateNames.zip(robHeadReplayStateCounts).foreach { case (name, count) =>
+    XSPerfAccumulate(s"diag_lrqh_${name}_entry_cycles", count)
+  }
+
   io.enq.zipWithIndex.foreach { case (enq, w) =>
     val schedIndex = enq.bits.schedIndex
     when (normalRelease(w)) {
