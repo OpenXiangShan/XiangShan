@@ -102,8 +102,8 @@ class TeaMemberTrackerTest extends XSTester {
       dut.clock.step()
       dut.io.alloc.foreach(_.valid.poke(false.B))
       dut.io.read(0).valid.expect(true.B)
-      dut.io.read(0).bits.target.allocationCycle.expect(100.U)
-      dut.io.read(0).bits.psv.expect((1 << TeaEvent.DR_L1).U)
+      dut.io.stalled.bits.allocationCycle.expect(100.U)
+      dut.io.read(0).psv.expect((1 << TeaEvent.DR_L1).U)
     }
   }
 
@@ -174,8 +174,8 @@ class TeaMemberTrackerTest extends XSTester {
       dut.io.events(0).bits.mask.poke((1 << TeaEvent.FL_EX).U)
       ptr(dut.io.readPtr(0), former = false)
       val latterPsv = (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB) | (1 << TeaEvent.FL_EX)
-      dut.io.read(0).bits.psv.expect(latterPsv.U)
-      dut.io.read(1).bits.psv.expect((1 << TeaEvent.DR_L1).U)
+      dut.io.read(0).psv.expect(latterPsv.U)
+      dut.io.read(1).psv.expect((1 << TeaEvent.DR_L1).U)
       dut.io.redirect.valid.poke(true.B)
       ptr(dut.io.redirect.bits.robIdx)
       dut.io.redirect.bits.level.poke(false.B) // flush after former, preserving it
@@ -233,9 +233,9 @@ class TeaMemberTrackerTest extends XSTester {
       ptr(dut.io.readPtr(0), flag = true)
       ptr(dut.io.readPtr(1), former = false)
       dut.io.readPtr(1).value.poke(1.U)
-      dut.io.read(0).bits.psv.expect(((1 << TeaEvent.DR_L1) | (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB)).U)
-      dut.io.read(1).bits.psv.expect(((1 << TeaEvent.ST_L1) | (1 << TeaEvent.DR_TLB)).U)
-      dut.io.read(1).bits.pc.expect("h80001004".U)
+      dut.io.read(0).psv.expect(((1 << TeaEvent.DR_L1) | (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB)).U)
+      dut.io.read(1).psv.expect(((1 << TeaEvent.ST_L1) | (1 << TeaEvent.DR_TLB)).U)
+      dut.io.read(1).pc.expect("h80001004".U)
     }
   }
 
@@ -288,7 +288,7 @@ class TeaMemberTrackerTest extends XSTester {
       dut.io.alloc(0).bits.pc.poke("h7f80001000".U)
       dut.clock.step()
       dut.io.alloc(0).valid.poke(false.B)
-      dut.io.read(0).bits.pc.expect("hffffffff80001000".U)
+      dut.io.read(0).pc.expect("hffffffff80001000".U)
 
       dut.io.commits(0).valid.poke(true.B)
       dut.clock.step()
@@ -302,7 +302,7 @@ class TeaMemberTrackerTest extends XSTester {
       ptr(dut.io.readPtr(0), flag = true)
       dut.clock.step()
       dut.io.alloc(0).valid.poke(false.B)
-      dut.io.read(0).bits.pc.expect("h0000007f80001000".U)
+      dut.io.read(0).pc.expect("h0000007f80001000".U)
     }
   }
 }

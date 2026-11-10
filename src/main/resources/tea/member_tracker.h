@@ -215,7 +215,7 @@ public:
         sampledEntry = {};
         previousValid = false;
       }
-      std::memset(out, 0, (16 + CommitWidth * RenameWidth * 6 + RenameWidth * 9) * sizeof(uint64_t));
+      std::memset(out, 0, (10 + CommitWidth * RenameWidth * 6 + RenameWidth * 9) * sizeof(uint64_t));
       return;
     }
     Frame in;
@@ -235,7 +235,8 @@ public:
         }
       }
       *out++ = e.members[rank].live && e.flag == p.flag && e.members[rank].former == p.former;
-      result(in, p.index, rank, out);
+      *out++ = e.members[rank].pc;
+      *out++ = merged(in, ptr(p.index, rank), rank, e.members[rank].psv);
     }
     const int stalled = unfinished(in);
     const int rank = stalled < 0 ? RenameWidth - 1 : stalled;
