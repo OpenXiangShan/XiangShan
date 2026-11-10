@@ -587,6 +587,51 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   XSPerfAccumulate("ittage_train_read_stall_cycles", perf_t0ReadStall)
   XSPerfAccumulate("ittage_train_read_stall_cycles_exclusive", perf_t0ExclusiveReadStall)
 
+  // Compare prediction-time provider identity with the actual training snapshot.
+  // Same table does not imply unchanged counters/target or the same entry lifetime.
+  private val perf_oldProvider = t2_train.meta.ittage.provider
+  private val perf_providerTransitions = Seq(
+    "provider_same"    -> (perf_oldProvider.valid && t2_hasProvider && perf_oldProvider.bits === t2_provider),
+    "provider_changed" -> (perf_oldProvider.valid && t2_hasProvider && perf_oldProvider.bits =/= t2_provider),
+    "provider_lost"    -> (perf_oldProvider.valid && !t2_hasProvider),
+    "provider_new"     -> (!perf_oldProvider.valid && t2_hasProvider),
+    "provider_absent"  -> (!perf_oldProvider.valid && !t2_hasProvider)
+  )
+  perf_providerTransitions.foreach { case (name, cond) =>
+    XSPerfAccumulate(s"ittage_train_read_${name}", t2_updateValid && t2_needRead && cond)
+    XSPerfSeqAccumulate(
+      s"ittage_train_read_${name}",
+      t2_updateValid && t2_needRead && cond,
+      Seq(
+        ("entry_change", perf_entryChange),
+        ("allocate", needAllocate && t2_allocateValid),
+        ("stall_cycles", true.B, perf_t2StallCycles),
+        ("stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles)
+      )
+    )
+  }
+
+  // Logarithmic, exhaustive bins retain long waits without a large linear histogram.
+  private def readWaitHistogram(name: String, valid: Bool, cycles: UInt): Unit = {
+    val bins = Seq("0" -> (cycles === 0.U), "1" -> (cycles === 1.U)) ++
+      (1 until 6).map { i =>
+        s"${1 << i}_${(1 << (i + 1)) - 1}" -> (cycles >= (1 << i).U && cycles < (1 << (i + 1)).U)
+      } ++ Seq("ge_64" -> (cycles >= 64.U))
+    XSPerfSeqAccumulate(name, valid, bins)
+  }
+  readWaitHistogram("ittage_train_read_wait", t2_updateValid && t2_needRead, perf_t2StallCycles)
+  readWaitHistogram("ittage_train_read_wait_exclusive", t2_updateValid && t2_needRead, perf_t2ExclusiveStallCycles)
+  readWaitHistogram(
+    "ittage_train_read_noop_correct_wait",
+    t2_updateValid && t2_needRead && perf_readNoop && !t2_updateMisPred,
+    perf_t2StallCycles
+  )
+  readWaitHistogram(
+    "ittage_train_read_noop_correct_wait_exclusive",
+    t2_updateValid && t2_needRead && perf_readNoop && !t2_updateMisPred,
+    perf_t2ExclusiveStallCycles
+  )
+
   XSPerfSeqAccumulate(
     "ittage_train_read",
     t2_updateValid && t2_needRead,

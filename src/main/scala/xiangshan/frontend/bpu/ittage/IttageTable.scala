@@ -22,6 +22,7 @@ import scala.math.min
 import utility.ParallelXOR
 import utility.XSDebug
 import utility.XSPerfAccumulate
+import utility.XSPerfSeqAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import xiangshan.frontend.Pc
@@ -268,6 +269,22 @@ class IttageTable(
     // Forget the old write record only after SRAM has actually changed.
     writeBuffer.io.invalidate.get.valid := usefulResetFire
     writeBuffer.io.invalidate.get.bits  := usefulResetSet
+
+    val predictionRead = io.req.fire && s0_bankMask(bankIdx)
+    val trainingRead   = trainReqValid && trainBankMask(bankIdx)
+    XSPerfSeqAccumulate(
+      s"ittage_table_bank${bankIdx}",
+      true.B,
+      Seq(
+        ("prediction_read", predictionRead),
+        ("train_read", trainingRead),
+        ("prediction_read_block_update", predictionRead && readPort.valid),
+        ("train_read_block_update", trainingRead && readPort.valid),
+        ("prediction_read_block_useful_reset", predictionRead && !readPort.valid && usefulResetCandidate),
+        ("train_read_block_useful_reset", trainingRead && !readPort.valid && usefulResetCandidate),
+        ("update_overwrite", writeBuffer.io.overwrite.head)
+      )
+    )
 
     // Ordinary writes after WriteBuffer filtering/merging, separate from clears.
     XSPerfAccumulate(s"ittage_table_bank${bankIdx}_update_write", bank.io.w.req.fire && readPort.valid)
