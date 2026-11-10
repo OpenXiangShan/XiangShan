@@ -59,7 +59,8 @@ case class SoCParameters
   PMAConfigs: Seq[PMAConfigEntry] = Seq(
     PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
     PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
-    PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x80000000L, a = 1),
+    PMAConfigEntry(0x50000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x3A000000L, a = 1),
     PMAConfigEntry(0x39002000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x39000000L, a = 1, w = true, r = true),
@@ -69,7 +70,7 @@ case class SoCParameters
     PMAConfigEntry(0x30050000L, a = 1, w = true, r = true), // FIXME: GPU space is cacheable?
     PMAConfigEntry(0x30010000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x20000000L, a = 1, x = true, w = true, r = true),
-    PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x10000000L, a = 1),
     PMAConfigEntry(0)
   ),
   TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
