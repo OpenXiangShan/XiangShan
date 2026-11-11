@@ -941,7 +941,10 @@ class KeyExtender(implicit p: Parameters) extends MemEncryptModule{
     reg_tweak_round_keys(reg_count_round) := data_after_round(31, 0)
     keyTable.io.write_req.keyid_valid := false.B
   }.otherwise {
-    keyTable.io.write_req.keyid_valid := current
+    // A mode0 (close) request never enters keyExpansion, so also assert
+    // keyid_valid when it is accepted to reach the KeyTable close branch.
+    keyTable.io.write_req.keyid_valid := (current === keyExpansion) ||
+                                         (io.keyextend_req.fire && !io.keyextend_req.bits.enc_mode)
   }
   io.tweak_round_keys := reg_tweak_round_keys
 }
