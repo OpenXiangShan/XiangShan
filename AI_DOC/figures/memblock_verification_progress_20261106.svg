@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#152238" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .title { font: 700 48px 'Noto Serif CJK SC', sans-serif; fill: #152238; }
+      .date { font: 400 19px 'Noto Serif CJK SC', sans-serif; fill: #647185; }
+      .metricNum { font: 700 37px 'Noto Serif CJK SC', sans-serif; fill: #152238; }
+      .metricLabel { font: 500 16px 'Noto Serif CJK SC', sans-serif; fill: #647185; }
+      .sectionTitle { font: 700 25px 'Noto Serif CJK SC', sans-serif; fill: #ffffff; }
+      .blockTitle { font: 700 20px 'Noto Serif CJK SC', sans-serif; fill: #1d2b40; }
+      .body { font: 400 15px 'Noto Serif CJK SC', sans-serif; fill: #4f5e71; }
+      .bodyStrong { font: 600 16px 'Noto Serif CJK SC', sans-serif; fill: #27364a; }
+      .small { font: 400 13px 'Noto Serif CJK SC', sans-serif; fill: #718094; }
+      .white { font: 500 15px 'Noto Serif CJK SC', sans-serif; fill: #eef3f8; }
+      .percent { font: 700 39px 'Noto Serif CJK SC', sans-serif; fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1200" fill="#f4f6f9"/>
+  <rect width="1800" height="125" fill="#ffffff"/>
+  <rect y="121" width="1800" height="4" fill="#2f6b9a"/>
+  <text x="70" y="66" class="title">MemBlock验证工作进展</text>
+  <text x="72" y="101" class="date">2026-10-23 — 2026-11-06</text>
+
+  <!-- Summary metrics -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="151" width="300" height="104" rx="8" fill="#ffffff"/>
+    <rect x="395" y="151" width="300" height="104" rx="8" fill="#ffffff"/>
+    <rect x="720" y="151" width="300" height="104" rx="8" fill="#ffffff"/>
+    <rect x="1045" y="151" width="300" height="104" rx="8" fill="#ffffff"/>
+    <rect x="1370" y="151" width="360" height="104" rx="8" fill="#ffffff"/>
+  </g>
+  <rect x="70" y="151" width="8" height="104" rx="4" fill="#2f6b9a"/>
+  <rect x="395" y="151" width="8" height="104" rx="4" fill="#c77b30"/>
+  <rect x="720" y="151" width="8" height="104" rx="4" fill="#b94a5a"/>
+  <rect x="1045" y="151" width="8" height="104" rx="4" fill="#2a8c7b"/>
+  <rect x="1370" y="151" width="8" height="104" rx="4" fill="#8a5da8"/>
+  <text x="104" y="199" class="metricNum">17</text><text x="104" y="229" class="metricLabel">测试框架Bug修复</text>
+  <text x="429" y="199" class="metricNum">4</text><text x="429" y="229" class="metricLabel">参考模型Bug修复</text>
+  <text x="754" y="199" class="metricNum">1</text><text x="754" y="229" class="metricLabel">确认DUT/RTL缺陷</text>
+  <text x="1079" y="199" class="metricNum">90%</text><text x="1079" y="229" class="metricLabel">向量测试支持完成度</text>
+  <text x="1404" y="199" class="metricNum">17.8% → 68%</text><text x="1404" y="229" class="metricLabel">DTLB功能覆盖率</text>
+
+  <!-- Framework section -->
+  <g filter="url(#shadow)"><rect x="70" y="286" width="820" height="590" rx="8" fill="#ffffff"/></g>
+  <rect x="70" y="286" width="820" height="58" rx="8" fill="#2f6b9a"/>
+  <text x="98" y="324" class="sectionTitle">01  测试框架与参考模型</text>
+
+  <text x="98" y="383" class="blockTitle">测试框架：修复17项Bug</text>
+  <rect x="98" y="403" width="360" height="45" rx="6" fill="#edf3f8"/>
+  <rect x="478" y="403" width="360" height="45" rx="6" fill="#edf3f8"/>
+  <rect x="98" y="462" width="360" height="45" rx="6" fill="#edf3f8"/>
+  <rect x="478" y="462" width="360" height="45" rx="6" fill="#edf3f8"/>
+  <text x="116" y="432" class="bodyStrong">Owner/Redirect/Barrier生命周期：8项</text>
+  <text x="496" y="432" class="bodyStrong">配置、参数与回归矩阵：5项</text>
+  <text x="116" y="491" class="bodyStrong">地址生成与定向场景：3项</text>
+  <text x="496" y="491" class="bodyStrong">并行回归退出竞态：1项</text>
+
+  <text x="98" y="548" class="blockTitle">新增AMO支持</text>
+  <text x="112" y="580" class="body">• AMO、LR/SC和AMOCAS指令激励</text>
+  <text x="112" y="609" class="body">• LSQ Admission与Atomic Owner管理</text>
+  <text x="112" y="638" class="body">• STA/STD乱序发射与Slot管理</text>
+  <text x="462" y="580" class="body">• LR/SC配对、非对齐地址控制</text>
+  <text x="462" y="609" class="body">• 异常Redirect及重新入队发射</text>
+  <text x="462" y="638" class="body">• AMOCAS.W/D/Q Compare Prefill</text>
+
+  <line x1="98" y1="671" x2="838" y2="671" stroke="#d8dee7" stroke-width="1.5"/>
+  <text x="98" y="710" class="blockTitle">参考模型：修复4项Bug</text>
+  <text x="112" y="744" class="body">1. PBMT-NC/IO异常类型判断错误</text>
+  <text x="112" y="775" class="body">2. PMA/PMP动态CSR消费断链</text>
+  <text x="462" y="744" class="body">3. Later-split响应来源关联错误</text>
+  <text x="462" y="775" class="body">4. 首段异常终止后仍检查第二页</text>
+
+  <rect x="98" y="810" width="740" height="42" rx="6" fill="#fdebed"/>
+  <text x="116" y="838" class="bodyStrong">DUT：确认1项NC返回跨Redirect产生旧LDA写回的RTL缺陷</text>
+
+  <!-- Vector section -->
+  <g filter="url(#shadow)"><rect x="920" y="286" width="810" height="590" rx="8" fill="#ffffff"/></g>
+  <rect x="920" y="286" width="810" height="58" rx="8" fill="#2a8c7b"/>
+  <text x="948" y="324" class="sectionTitle">02  向量测试支持</text>
+  <rect x="1510" y="297" width="190" height="92" rx="8" fill="#237467"/>
+  <text x="1605" y="337" class="percent" text-anchor="middle">90%</text>
+  <text x="1605" y="370" class="white" text-anchor="middle">当前完成度</text>
+
+  <text x="948" y="398" class="blockTitle">核心链路完成</text>
+  <rect x="948" y="419" width="754" height="70" rx="6" fill="#e9f4f1"/>
+  <text x="970" y="450" class="bodyStrong">激励生成 → LSQ入队 → RTL执行 → 写回更新状态</text>
+  <text x="970" y="476" class="small">已完成向量发射、L2TLB/Cache复用、结果采集与恢复的主要开发</text>
+
+  <text x="948" y="535" class="blockTitle">支持场景</text>
+  <rect x="948" y="556" width="230" height="44" rx="6" fill="#edf5f3"/>
+  <rect x="1190" y="556" width="230" height="44" rx="6" fill="#edf5f3"/>
+  <rect x="1432" y="556" width="270" height="44" rx="6" fill="#edf5f3"/>
+  <rect x="948" y="612" width="230" height="44" rx="6" fill="#edf5f3"/>
+  <rect x="1190" y="612" width="230" height="44" rx="6" fill="#edf5f3"/>
+  <rect x="1432" y="612" width="270" height="44" rx="6" fill="#edf5f3"/>
+  <text x="1063" y="584" class="bodyStrong" text-anchor="middle">双路发射</text>
+  <text x="1305" y="584" class="bodyStrong" text-anchor="middle">跨页访问</text>
+  <text x="1567" y="584" class="bodyStrong" text-anchor="middle">异常注入</text>
+  <text x="1063" y="640" class="bodyStrong" text-anchor="middle">Store重发</text>
+  <text x="1305" y="640" class="bodyStrong" text-anchor="middle">FOF tail</text>
+  <text x="1567" y="640" class="bodyStrong" text-anchor="middle">普通Redirect</text>
+
+  <text x="948" y="705" class="blockTitle">仿真验证</text>
+  <rect x="948" y="728" width="174" height="85" rx="7" fill="#26374d"/>
+  <rect x="1138" y="728" width="174" height="85" rx="7" fill="#315f5a"/>
+  <rect x="1328" y="728" width="174" height="85" rx="7" fill="#755a34"/>
+  <rect x="1518" y="728" width="184" height="85" rx="7" fill="#5d476d"/>
+  <text x="1035" y="765" class="percent" text-anchor="middle">41</text>
+  <text x="1035" y="794" class="white" text-anchor="middle">条宏指令</text>
+  <text x="1225" y="765" class="percent" text-anchor="middle">80</text>
+  <text x="1225" y="794" class="white" text-anchor="middle">个DATA uop</text>
+  <text x="1415" y="765" class="percent" text-anchor="middle">80</text>
+  <text x="1415" y="794" class="white" text-anchor="middle">次真实写回</text>
+  <text x="1610" y="765" class="percent" text-anchor="middle">20</text>
+  <text x="1610" y="794" class="white" text-anchor="middle">次异常写回</text>
+  <text x="948" y="846" class="bodyStrong">VCS完整编译通过 ｜ 完成1万条标量与向量混合指令静态生成检查</text>
+
+  <!-- Coverage section -->
+  <g filter="url(#shadow)"><rect x="70" y="906" width="1660" height="244" rx="8" fill="#ffffff"/></g>
+  <rect x="70" y="906" width="1660" height="56" rx="8" fill="#8a5da8"/>
+  <text x="98" y="943" class="sectionTitle">03  功能覆盖率建设</text>
+
+  <rect x="98" y="990" width="500" height="128" rx="7" fill="#f1ecf5"/>
+  <rect x="620" y="990" width="500" height="128" rx="7" fill="#f1ecf5"/>
+  <rect x="1142" y="990" width="560" height="128" rx="7" fill="#f1ecf5"/>
+  <text x="122" y="1026" class="blockTitle">DTLB覆盖提升</text>
+  <text x="122" y="1067" class="metricNum">17.8% → 68%</text>
+  <text x="122" y="1098" class="small">完成功能点补充及成功/失败用例分析</text>
+  <text x="644" y="1026" class="blockTitle">StoreUnit测试点</text>
+  <text x="644" y="1063" class="bodyStrong">完成测试点分解和覆盖率模型初版</text>
+  <text x="644" y="1094" class="small">待结合RTL进一步理解与评审</text>
+  <text x="1166" y="1026" class="blockTitle">覆盖率工具建设</text>
+  <text x="1166" y="1063" class="bodyStrong">完成功能覆盖率面板Skill初版</text>
+  <text x="1166" y="1094" class="small">持续优化数据汇总、结果展示和问题定位能力</text>
+
+  <text x="70" y="1182" class="small">说明：向量测试剩余工作包括ROB提交、异常收尾、资源回收、参考模型及完整生命周期验证。</text>
+</svg>
