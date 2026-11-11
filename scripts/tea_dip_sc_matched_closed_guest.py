@@ -7,7 +7,6 @@ import json
 import sqlite3
 from native_perf import read_blocks, unique_counters
 from tea_dip_query_endpoint_evidence import digest, verify
-from tea_dip_sc_table_selection import selected_tables
 
 COLUMNS = ['ID', 'TRAININGELIGIBLE', 'MISPREDICT', 'ACTUALTAKEN', 'USESC', 'SCPRED',
            'SUMABOVETHRES', 'TAGEFINALTAKEN', 'TAGEFINALVALID', 'TAGEUSEPROVIDER',
@@ -57,8 +56,8 @@ def analyze(folder, receipt_path):
     verify(folder, receipt['files'])
     command = json.loads((folder / 'command.json').read_text())
     selection = set(command[command.index('--dump-select-db') + 1].split())
-    tables = selected_tables(selection, 'scMatchedConditional_')
-    assert selection.issuperset('scCondTrace_' + str(i) for i in range(len(tables)))
+    tables = ['scMatchedConditional_' + str(i) for i in range(8)]
+    assert selection.issuperset(tables + ['scCondTrace_' + str(i) for i in range(8)])
     blocks = sorted(read_blocks(folder / 'simulator_err.txt').items())
     assert len(blocks) == (2 if '-W' in command else 1)
     cohorts = defaultdict(Counter)
@@ -93,7 +92,7 @@ def analyze(folder, receipt_path):
                 yield row['STAMP'], lane, row
             assert next(selected, None) is None, 'Old selected SC records are missing from matched trace'
 
-        merged = iter(heapq.merge(*[rows(i) for i in range(len(tables))]))
+        merged = iter(heapq.merge(*[rows(i) for i in range(8)]))
         pending = next(merged, None)
         phases = []
         labels = ['warmup', 'ROI'] if len(blocks) == 2 else ['coremark']
@@ -135,8 +134,7 @@ def analyze(folder, receipt_path):
                 cohorts=plain(cohorts), native_training_phases=phases,
                 by_pc={pc: plain(value) for pc, value in sorted(pcs.items(), key=lambda item: int(item[0], 16))},
                 selected_metadata_all_rows_joined=True,
-                source_sha256={str(p): digest(p) for p in [receipt_path, Path(__file__),
-                             Path(__file__).with_name('tea_dip_sc_table_selection.py')]},
+                source_sha256={str(p): digest(p) for p in [receipt_path, Path(__file__)]},
                 scope='All accepted conditional MBTB/provider-hit metadata in this recorded cohort, including '
                       'SC training exclusions. The eligible subset joins every old selected trace by lane, '
                       'private STAMP and common metadata. Invalid TAGE is excluded from direction comparisons. '

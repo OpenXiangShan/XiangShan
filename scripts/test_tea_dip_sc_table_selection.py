@@ -1,44 +1,30 @@
-"""Exercise a real table/native merge with an event above the old eight-slot limit."""
+"""Lock the actual emitted8/8/10 family widths and reject incomplete generated lists."""
 from pathlib import Path
-import sqlite3
 import tempfile
 import unittest
 
-from tea_dip_sc_closed_guest import OUTCOMES, trace_phases
-from tea_dip_sc_table_selection import FAMILIES, generated_sc_tables, selected_tables
+from tea_dip_sc_table_selection import FAMILIES, generated_sc_tables
 
 
 class ScTableSelectionTests(unittest.TestCase):
-    def test_native_cohort_includes_an_event_in_slot_nine(self):
-        with sqlite3.connect(':memory:') as db:
-            db.row_factory = sqlite3.Row
-            fields = ['ID', 'STAMP', 'USESC', *OUTCOMES]
-            for i in range(10):
-                db.execute('CREATE TABLE scCondTrace_' + str(i) + ' (' +
-                           ','.join(name + ' INT' for name in fields) + ')')
-            db.execute('INSERT INTO scCondTrace_9 VALUES (1,10,1,1,0,0,0)')
-            native = {'Top.sc.diag_sc_cond_trace_events': [1], 'Top.sc.t1_use_sc0': [1]}
-            native.update({'Top.sc.' + name + '0': [int(name == 'sc_correct_tage_wrong')]
-                           for name in OUTCOMES.values()})
-            phases = trace_phases(db, [(20, native)])
-            self.assertEqual(phases[0]['trace_events'], 1)
-            self.assertEqual(phases[0]['selected_raw_provider_outcomes']['useSc'], 1)
-
-    def test_generated_table_list_keeps_all_ten_slots_and_all_families(self):
+    def test_prediction_slots_eight_and_nine_are_not_dropped(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'chisel_db.cpp'
-            expected = [prefix + str(i) for prefix in FAMILIES for i in range(10)]
+            expected = [prefix + str(i) for prefix, width in zip(FAMILIES, [8, 8, 10]) for i in range(width)]
             path.write_text('\n'.join('void init_db_' + name + '() {}' for name in expected))
             self.assertEqual(generated_sc_tables(path), expected)
-            path.write_text(path.read_text().replace('void init_db_scMatchedConditional_9() {}', ''))
-            with self.assertRaises(AssertionError):
-                generated_sc_tables(path)
+            old_selection = {prefix + str(i) for prefix in FAMILIES for i in range(8)}
+            self.assertEqual(set(generated_sc_tables(path)) - old_selection,
+                             {'scPredictionOpposition_8', 'scPredictionOpposition_9'})
 
-    def test_selected_table_holes_are_rejected_and_numeric_order_is_retained(self):
-        names = ['other', *['scCondTrace_' + str(i) for i in reversed(range(10))]]
-        self.assertEqual(selected_tables(names, 'scCondTrace_'), ['scCondTrace_' + str(i) for i in range(10)])
-        with self.assertRaises(AssertionError):
-            selected_tables(['scCondTrace_0', 'scCondTrace_9'], 'scCondTrace_')
+    def test_missing_family_or_interior_slot_is_not_silently_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'chisel_db.cpp'
+            names = [prefix + str(i) for prefix, width in zip(FAMILIES, [8, 8, 10]) for i in range(width)]
+            for excluded in [{'scPredictionOpposition_3'}, set(n for n in names if n.startswith('scCondTrace_'))]:
+                path.write_text('\n'.join('void init_db_' + name + '() {}' for name in names if name not in excluded))
+                with self.assertRaises(AssertionError):
+                    generated_sc_tables(path)
 
 
 if __name__ == '__main__':

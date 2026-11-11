@@ -9,7 +9,6 @@ import sqlite3
 
 from native_perf import read_blocks, unique_counters
 from tea_dip_query_endpoint_evidence import digest, verify
-from tea_dip_sc_table_selection import selected_tables
 
 COLUMNS = ['ID', 'SCCORRECT', 'SCWRONG', 'SCWRONGTAGEWRONG', 'SCCORRECTTAGECORRECT',
            'SCWRONGTAGECORRECT', 'SCCORRECTTAGEWRONG', 'MISPREDICT', 'ACTUALTAKEN',
@@ -77,9 +76,7 @@ def trace_phases(db, blocks, has_final_tage=False):
         for row in db.execute('SELECT * FROM scCondTrace_' + str(lane) + ' ORDER BY ID'):
             yield row['STAMP'], lane, row
 
-    tables = selected_tables([row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")],
-                             'scCondTrace_')
-    merged = iter(heapq.merge(*[rows(i) for i in range(len(tables))]))
+    merged = iter(heapq.merge(*[rows(i) for i in range(8)]))
     pending = next(merged, None)
     phases = []
     labels = ['warmup', 'ROI'] if len(blocks) == 2 else ['coremark']
@@ -127,7 +124,8 @@ def analyze(folder, receipt_path):
     verify(folder, receipt['files'])
     command = json.loads((folder / 'command.json').read_text())
     selected = set(command[command.index('--dump-select-db') + 1].split())
-    tables = selected_tables(selected, 'scCondTrace_')
+    tables = ['scCondTrace_' + str(i) for i in range(8)]
+    assert selected.issuperset(tables)
     blocks = sorted(read_blocks(folder / 'simulator_err.txt').items())
     assert len(blocks) == (2 if '-W' in command else 1)
     phases = []
@@ -202,8 +200,7 @@ def analyze(folder, receipt_path):
                 native_phases=phases, selected_native_margins_match=True,
                 non_use_cohort=dict(trace_rows=trace_not_use, native_way_counts=native['t1_not_use_sc'],
                                     difference=trace_not_use-native['t1_not_use_sc']),
-                source_sha256={str(p): digest(p) for p in [receipt_path, Path(__file__),
-                             Path(__file__).with_name('tea_dip_sc_table_selection.py')]},
+                source_sha256={str(p): digest(p) for p in [receipt_path, Path(__file__)]},
                 scope='Whole recorded selected-training cohort, including warmup. Existing native way counts do not '
                       'identify all trace-event phase boundaries; private STAMP is not calibrated to TEA. '
                       'Training excludes correct agreeing useSc events. Per-PC and provider-CTR outcomes are selected '
