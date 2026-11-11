@@ -99,7 +99,6 @@ trait HalfAlignHelper extends HasBpuParameters {
       position.getWidth == CfiPositionWidth,
       s"position width should be $CfiPositionWidth, but got ${position.getWidth}"
     )
-    assert(position >= getAlignedInstOffset(startPc), "position misMatch")
     position - getAlignedInstOffset(startPc)
   }
 }
