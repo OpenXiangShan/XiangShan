@@ -66,16 +66,6 @@ on:
         required: false
         type: boolean
         default: false
-      enable_tea:
-        description: Collect TEA tables (TEA CST required); enable_db or enable_rolling requests full DB
-        required: false
-        type: boolean
-        default: false
-      enable_dip:
-        description: Collect DIP tables (DIP CST required); enable_db or enable_rolling requests full DB
-        required: false
-        type: boolean
-        default: false
       enable_rolling:
         description: Enable rolling DB dump, which implies enable_db (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -118,8 +108,6 @@ jobs:
         cst_file: ${{ github.event.inputs.cst_file }}
         disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
-        enable_tea: ${{ fromJSON(github.event.inputs.enable_tea) }}
-        enable_dip: ${{ fromJSON(github.event.inputs.enable_dip) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}

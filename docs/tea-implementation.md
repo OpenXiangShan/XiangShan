@@ -334,8 +334,6 @@ TEA、DIP 均关闭时，PSV sideband 宽度为零，不生成专用 miss/Dispat
 
 Summary-only 仅导出 `TeaCycleSummary_0 TeaNoCommit_0`，使用 `scripts/tea_visualize.py` 的 `export_cycle_stats` 函数生成精确统计；PICS 命令需要采样表。
 
-GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用现有 GSIM utility 接口和显式采样周期。
-
 ### 统计口径与边界
 
 - `TeaCycleSummary` 在统计 enable 开启/关闭边界、每 4096 个连续启用周期及性能 dump 时写一条累计快照。
