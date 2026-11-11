@@ -94,6 +94,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   lazy val io = IO(new IssueQueueIO())
+  private val perfTimer = Option.when(backendParams.debugEn)(GTimer())
 
   io.enq.foreach { case enq =>
     enq.bits.debug.foreach(x => PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
@@ -354,6 +355,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.payload.og1Payload.uopIdx.foreach(_              := s0_enqBits(enqIdx).uopIdx.get)
       enq.bits.payload.og1Payload.lastUop.foreach(_             := s0_enqBits(enqIdx).lastUop.get)
       enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
+      enq.bits.payload.debug.foreach(_.perfDebugInfo.enqRsTime := perfTimer.get)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp
@@ -883,8 +885,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
     deq.bits.perfDebugInfo.foreach(_ := deqEntryVec(i).bits.payload.debug.get.perfDebugInfo)
     deq.bits.debug_seqNum.foreach(_ := deqEntryVec(i).bits.payload.debug.get.debug_seqNum)
-    deq.bits.perfDebugInfo.foreach(_.selectTime := GTimer())
-    deq.bits.perfDebugInfo.foreach(_.issueTime := GTimer() + 1.U)
+    deq.bits.perfDebugInfo.foreach(_.selectTime := perfTimer.get)
+    deq.bits.perfDebugInfo.foreach(_.issueTime := perfTimer.get + 1.U)
   }
 
   val busyTableI2F = RegInit(0.U(3.W))
