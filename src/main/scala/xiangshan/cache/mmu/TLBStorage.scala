@@ -100,6 +100,9 @@ class TLBFA(
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
+  val multiHits = Wire(Vec(ports, Valid(UInt(nWays.W))))
+  val multiHitMask = ParallelMux(multiHits.map(hit => hit.valid -> hit.bits))
+  io.multiHit := ParallelOR(multiHits.map(_.valid))
 
   for (i <- 0 until ports) {
     val req = io.r.req(i)
@@ -123,11 +126,25 @@ class TLBFA(
     hitVec.suggestName("hitVec")
 
     val hitVecReg = RegEnable(hitVec, req.fire)
+    for (way <- 0 until nWays) {
+      when (multiHitMask(way)) {
+        hitVecReg(way) := false.B
+      }
+    }
+    // Each node carries (hasOne, hasTwo) for its group of ways
+    // A merged node has two hits if either child has two hits or both children have one hit
+    val (anyHit, multiHit) = ParallelOperation(
+      hitVecReg.map(hit => (hit, false.B)),
+      (a: (Bool, Bool), b: (Bool, Bool)) =>
+        (a._1 || b._1, a._2 || b._2 || (a._1 && b._1))
+    )
     // Sector tlb may trigger multi-hit, see def "wbhit"
-    XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
+    XSPerfAccumulate(s"port${i}_multi_hit", resp.valid && multiHit)
+    multiHits(i).valid := resp.valid && multiHit
+    multiHits(i).bits := hitVecReg.asUInt
 
     resp.valid := RegNext(req.valid)
-    resp.bits.hit := Cat(hitVecReg).orR
+    resp.bits.hit := anyHit && !multiHit
     val reqVpn   = RegNext(vpn)
     val pbmt     = entries.map(_.pbmt)
     val gpbmt    = entries.map(_.g_pbmt)
@@ -155,7 +172,7 @@ class TLBFA(
     }
 
     access.sets := get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), nSets) // no use
-    access.touch_ways.valid := resp.valid && Cat(hitVecReg).orR
+    access.touch_ways.valid := resp.valid && resp.bits.hit
     access.touch_ways.bits := OHToUInt(hitVecReg)
 
     resp.bits.hit.suggestName("hit")
@@ -172,7 +189,7 @@ class TLBFA(
   }
   // write assert, should not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
-  XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
+  XSError(io.w.valid && (w_hit_vec.asUInt & ~multiHitMask).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
   val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
@@ -275,6 +292,12 @@ class TLBFA(
     }
   }
 
+  for (i <- 0 until nWays) {
+    when (multiHitMask(i)) {
+      v(i) := false.B
+    }
+  }
+
   XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt))
 
@@ -304,6 +327,7 @@ class TLBFakeFA(
            )(implicit p: Parameters) extends TlbModule with HasCSRConst{
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
+  io.multiHit := false.B
   io.r.req.map(_.ready := true.B)
   val mode = if (useDmode) io.csr.priv.dmode else io.csr.priv.imode
   val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
@@ -391,6 +415,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     useDmode = q.useDmode,
     SoftTLB = coreParams.softTLB
   )
+  io.multiHit := page.multiHit
 
   for (i <- 0 until ports) {
     page.r_req_apply(
