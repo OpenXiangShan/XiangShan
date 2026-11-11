@@ -138,15 +138,15 @@ class IttageTable(
   private val s1_valid            = RegNext(io.req.fire, init = false.B)
 
   // Training reads use the same hash as prediction reads.
-  private val trainUnhashedIdx = getUnhashedIdx(io.trainReq.bits.startPc)
-  private val (trainBankIdx, trainSetIdx, trainTag) =
-    computeTagAndHash(trainUnhashedIdx, io.trainReq.bits.foldedHist)
-  private val trainBankMask = UIntToOH(trainBankIdx, NumBanks)
-  private val trainReqValid = io.trainReq.valid && !powerOnResetState
+  private val t0_unhashedIdx = getUnhashedIdx(io.trainReq.bits.startPc)
+  private val (t0_bankIdx, t0_setIdx, t0_tag) =
+    computeTagAndHash(t0_unhashedIdx, io.trainReq.bits.foldedHist)
+  private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
+  private val t0_reqValid = io.trainReq.valid && !powerOnResetState
 
-  private val trainTagReg      = RegEnable(trainTag, trainReqValid)
-  private val trainBankMaskReg = RegEnable(trainBankMask, trainReqValid)
-  private val trainValidReg    = RegNext(trainReqValid, init = false.B)
+  private val t1_tag      = RegEnable(t0_tag, t0_reqValid)
+  private val t1_bankMask = RegEnable(t0_bankMask, t0_reqValid)
+  private val t1_valid    = RegNext(t0_reqValid, init = false.B)
 
   // Each bank is a single-port SRAM slice; banking lets predict/read and commit/update touch different banks concurrently.
   private val tables = Seq.tabulate(NumBanks) { bankIdx =>
@@ -173,11 +173,11 @@ class IttageTable(
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
     val predictionRead = io.req.fire && s0_bankMask(idx)
-    val trainRead      = trainReqValid && trainBankMask(idx)
+    val trainRead      = t0_reqValid && t0_bankMask(idx)
     // The top-level trainReady prevents prediction/training bank conflicts.
     assert(!(predictionRead && trainRead), s"read conflict in ittage_table_${tableIdx}_bank_${idx}")
     bank.io.r.req.valid       := predictionRead || trainRead
-    bank.io.r.req.bits.setIdx := Mux(predictionRead, s0_setIdx, trainSetIdx)
+    bank.io.r.req.bits.setIdx := Mux(predictionRead, s0_setIdx, t0_setIdx)
   }
 
   private val tableReadData =
@@ -191,11 +191,11 @@ class IttageTable(
   io.resp.bits.targetOffset := tableReadData.targetOffset
 
   private val trainReadData =
-    Mux1H(trainBankMaskReg, tables.map(_.io.r.resp.data.head))
+    Mux1H(t1_bankMask, tables.map(_.io.r.resp.data.head))
   private val trainReadHit = trainReadData.valid &&
-    (if (tagLen != 0) trainReadData.tag === trainTagReg else true.B)
+    (if (tagLen != 0) trainReadData.tag === t1_tag else true.B)
 
-  io.trainResp.valid             := trainReadHit && trainValidReg
+  io.trainResp.valid             := trainReadHit && t1_valid
   io.trainResp.bits.cnt          := trainReadData.confidenceCnt
   io.trainResp.bits.usefulCnt    := trainReadData.usefulCnt
   io.trainResp.bits.targetOffset := trainReadData.targetOffset

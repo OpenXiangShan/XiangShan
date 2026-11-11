@@ -72,9 +72,9 @@ class RegionWays(implicit p: Parameters) extends IttageModule {
     io.respRegion(i) := regions(io.reqPointer(i)).region
   }
 
-  for (i <- io.trainReqPointer.indices) {
-    io.trainRespHit(i)    := regions(io.trainReqPointer(i)).valid
-    io.trainRespRegion(i) := regions(io.trainReqPointer(i)).region
+  io.trainReqPointer.zipWithIndex.foreach { case (ptr, i) =>
+    io.trainRespHit(i)    := regions(ptr).valid
+    io.trainRespRegion(i) := regions(ptr).region
   }
 
   for (i <- 0 until RegionPorts) {

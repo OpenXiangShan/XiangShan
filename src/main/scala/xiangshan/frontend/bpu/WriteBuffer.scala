@@ -36,12 +36,12 @@ import xiangshan.XSModule
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
  * @param numWays The number of ways for each entry, used when hasWayMask is true
+ * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasWayMask Whether the write request bundle has wayMask and wayData fields,
  * used to update the entry's wayMask and wayData when hit the same entry
- * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
- * @param nameSuffix Suffix of name, used for clearer logging
  * @param hasInvalidate Whether external SRAM writes can invalidate clean shadows by set index
+ * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
     gen:           T,
@@ -51,8 +51,8 @@ class WriteBuffer[T <: WriteReqBundle](
     hasCnt:        Boolean = false,
     hasWayMask:    Boolean = false,
     hasFlush:      Boolean = false,
-    nameSuffix:    String = "",
-    hasInvalidate: Boolean = false
+    hasInvalidate: Boolean = false,
+    nameSuffix:    String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)

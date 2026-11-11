@@ -100,8 +100,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val s3_provided     = RegEnable(s2_provided, s2_fire)
   private val s3_provider     = RegEnable(s2_provider, s2_fire)
 
-  private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
-  io.meta := ittageMeta
+  private val s3_ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
+  io.meta := s3_ittageMeta
 
   // Predict
   tables.foreach { t =>
@@ -198,9 +198,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   XSDebug(s2_fire, p"hit_taken_jalr:")
 
-  ittageMeta.provider.valid := s3_provided
-  ittageMeta.provider.bits  := s3_provider
-  ittageMeta.debug_predCycle.foreach(_ := GTimer())
+  s3_ittageMeta.provider.valid := s3_provided
+  s3_ittageMeta.provider.bits  := s3_provider
+  s3_ittageMeta.debug_predCycle.foreach(_ := GTimer())
 
   /* *** train/update pipeline *** */
   // Select the indirect branch used by ITTAGE training before issuing a
@@ -295,8 +295,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val t2_hasAltProvider  = RegEnable(t1_hasAltProvider, false.B, t1_fire)
   private val t2_allocatableMask = RegEnable(t1_allocatableMask, t1_fire)
   // Keep the allocation random sample aligned with the response transaction.
-  private val allocLFSR    = random.LFSR(width = 15)(NumTables - 1, 0)
-  private val t2_allocLFSR = RegEnable(allocLFSR, t1_fire)
+  private val t1_allocLFSR = random.LFSR(width = 15)(NumTables - 1, 0)
+  private val t2_allocLFSR = RegEnable(t1_allocLFSR, t1_fire)
 
   private val t2_updateStartPc   = t2_train.startPc
   private val t2_updateFoldedPhr = t2_trainFoldedPhr
@@ -338,9 +338,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
   private val t2_trainBranchIdx: UInt = PriorityEncoder(t2_trainBranchMask)
 
-  // Use aliases for clarity
-  private val t2_updateValid = t2_fire
-
   private val t2_updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val t2_updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val t2_updateResetUsefulCnt  = WireInit(false.B)
@@ -348,7 +345,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val t2_updateAlloc           = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val t2_updateOldCnt          = WireInit(0.U.asTypeOf(Vec(NumTables, ConfidenceCounter())))
   private val t2_updateUsefulCnt       = WireInit(0.U.asTypeOf(Vec(NumTables, UsefulCounter())))
-  private val t2_updateTargetOffset    = WireInit(0.U.asTypeOf(Vec(NumTables, new IttageOffset)))
   private val t2_updateOldTargetOffset = WireInit(0.U.asTypeOf(Vec(NumTables, new IttageOffset)))
 
   // Use the misprediction bits from the training bundle so allocation and
@@ -359,7 +355,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val t2_updateRealTarget       = t2_train.branches(t2_trainBranchIdx).bits.target
   private val t2_updatePCRegion         = targetGetRegion(t2_train.startPc)
   private val t2_updateRealTargetRegion = targetGetRegion(t2_updateRealTarget)
-  private val t2_updateRealTargetOffset = WireInit(0.U.asTypeOf(new IttageOffset))
+  private val t2_updateRealTargetOffset = Wire(new IttageOffset)
   t2_updateRealTargetOffset.offset := targetGetOffset(t2_updateRealTarget)
   private val t2_updateRealUsePCRegion = t2_updateRealTargetRegion === t2_updatePCRegion
   // A zero-confidence provider/alternate replaces its target just like an
@@ -377,8 +373,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val t2_provider    = t2_providerInfo.tableIdx
   private val t2_altProvider = t2_altProviderInfo.tableIdx
-  private val t2_useAltPred = t2_hasAltProvider && t2_providerInfo.cnt.isSaturateNegative
-  when(t2_updateValid) {
+  private val t2_useAltPred  = t2_hasAltProvider && t2_providerInfo.cnt.isSaturateNegative
+  when(t2_fire) {
     when(t2_hasProvider) {
       when(t2_useAltPred && t2_updateMisPred) { // Train the freshly selected alternate.
         t2_updateMask(t2_altProvider)            := true.B
@@ -386,7 +382,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
         t2_updateCorrect(t2_altProvider)         := t2_altProviderTarget === t2_updateRealTarget
         t2_updateOldCnt(t2_altProvider)          := t2_altProviderInfo.cnt
         t2_updateAlloc(t2_altProvider)           := false.B
-        t2_updateTargetOffset(t2_altProvider)    := t2_updateRealTargetOffset
         t2_updateOldTargetOffset(t2_altProvider) := t2_altProviderInfo.targetOffset
       }
 
@@ -401,16 +396,15 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       t2_updateCorrect(t2_provider)         := t2_providerTarget === t2_updateRealTarget
       t2_updateOldCnt(t2_provider)          := t2_providerInfo.cnt
       t2_updateAlloc(t2_provider)           := false.B
-      t2_updateTargetOffset(t2_provider)    := t2_updateRealTargetOffset
       t2_updateOldTargetOffset(t2_provider) := t2_providerInfo.targetOffset
     }
   }
   XSDebug(
-    t2_updateValid && t2_hasProvider,
+    t2_fire && t2_hasProvider,
     p"t2_train provider $t2_provider, pred cycle ${t2_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
   )
   XSDebug(
-    t2_updateValid && t2_hasProvider && t2_useAltPred && t2_updateMisPred,
+    t2_fire && t2_hasProvider && t2_useAltPred && t2_updateMisPred,
     p"t2_train altprovider $t2_altProvider, pred cycle ${t2_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
   )
 
@@ -425,7 +419,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     t2_altProviderTarget === t2_updateRealTarget,
     providerCorrect
   )
-  private val needAllocate = t2_updateValid && t2_updateMisPred && !t2_updatePredictionCorrect &&
+  private val needAllocate = t2_fire && t2_updateMisPred && !t2_updatePredictionCorrect &&
     !(providerCorrect && providerUnconf)
 
   when(needAllocate) {
@@ -436,7 +430,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       t2_updateAlloc(t2_allocateIdx)         := true.B
       t2_updateUsefulCntMask(t2_allocateIdx) := true.B
       t2_updateUsefulCnt(t2_allocateIdx)     := UsefulCounter.SaturateNegative
-      t2_updateTargetOffset(t2_allocateIdx)  := t2_updateRealTargetOffset
     }
   }
 
@@ -450,15 +443,13 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     t2_updateResetUsefulCnt := true.B
   }
 
-  // The t1-to-t2 registers already isolate the SRAM response path. Tables
-  // accept these requests directly into their per-bank write buffers.
   for (i <- 0 until NumTables) {
     tables(i).io.update.valid           := t2_updateMask(i)
     tables(i).io.update.resetUsefulCnt  := t2_updateResetUsefulCnt
     tables(i).io.update.correct         := t2_updateCorrect(i)
     tables(i).io.update.alloc           := t2_updateAlloc(i)
     tables(i).io.update.oldCnt          := t2_updateOldCnt(i)
-    tables(i).io.update.targetOffset    := t2_updateTargetOffset(i)
+    tables(i).io.update.targetOffset    := t2_updateRealTargetOffset
     tables(i).io.update.oldTargetOffset := t2_updateOldTargetOffset(i)
 
     tables(i).io.update.usefulCntValid := t2_updateUsefulCntMask(i)
@@ -467,8 +458,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     tables(i).io.update.foldedHist     := t2_updateFoldedPhr
   }
 
-  // Prediction-time coverage and selection within ITTAGE. These counters do
-  // not imply that the BPU ultimately used the ITTAGE target.
   private def predPerf(name: String, cond: Bool): Unit =
     XSPerfAccumulate(s"ittage_${name}_at_pred", cond && s2_fire)
 
@@ -493,7 +482,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // training-time table state, not the accuracy of the original prediction.
   // Transactions without a training read have no table state to classify.
   private def trainPerf(name: String, cond: Bool): Unit =
-    XSPerfAccumulate(s"ittage_${name}_at_train", cond && t2_updateValid && t2_needRead)
+    XSPerfAccumulate(s"ittage_${name}_at_train", cond && t2_fire && t2_needRead)
 
   private val perf_altProviderCorrect = t2_hasAltProvider && t2_altProviderTarget === t2_updateRealTarget
   trainPerf("provided", t2_hasProvider)
@@ -518,7 +507,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // stays unchanged. Background useful-counter clears are counted separately.
   XSPerfSeqAccumulate(
     "ittage_train",
-    t2_updateValid,
+    t2_fire,
     Seq(
       ("update", t2_updateMask.asUInt.orR),
       ("update_provider", t2_hasProvider && t2_updateMask(t2_provider)),
@@ -551,15 +540,15 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     }
   }
   XSDebug(
-    t2_updateValid,
+    t2_fire,
     p"pc: ${Hexadecimal(t2_updateStartPc.toUInt)}, target: ${Hexadecimal(t2_train.branches(t2_trainBranchIdx).bits.target.toUInt)}\n"
   )
   XSDebug(
-    t2_updateValid,
+    t2_fire,
     p"pvdr(v:$t2_hasProvider num:$t2_provider ctr:${t2_providerInfo.cnt} " +
       p"u:${t2_providerInfo.usefulCnt} tar:${Hexadecimal(t2_providerTarget.toUInt)}), " +
       p"altpvdr(v:$t2_hasAltProvider num:$t2_altProvider ctr:${t2_altProviderInfo.cnt} " +
       p"tar:${Hexadecimal(t2_altProviderTarget.toUInt)})\n"
   )
-  XSDebug(t2_updateValid, p"correct(${!t2_updateMisPred})\n")
+  XSDebug(t2_fire, p"correct(${!t2_updateMisPred})\n")
 }
