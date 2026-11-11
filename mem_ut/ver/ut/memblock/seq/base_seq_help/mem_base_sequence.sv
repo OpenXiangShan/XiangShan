@@ -131,9 +131,38 @@ class mem_access_base_sequence extends uvm_sequence;
 
     // 中文注释：每条记录对应一个不可变的 source generation。A.fire 建立
     // pending，D.fire 填 d_sample 后追加到每个 owner 的完成历史；clean 也必须记录。
+    typedef enum bit [1:0] {
+        UNCACHE_ACCESS_LOAD = 0, UNCACHE_ACCESS_MMIO_STORE = 1,
+        UNCACHE_ACCESS_NC_STORE = 2, UNCACHE_ACCESS_CMO_ZERO = 3
+    } uncache_access_kind_e;
+
+    // 中文注释：写接受与响应报错分别记录；写token在入batch时分配，真正提交后再置committed。
+    typedef struct packed {
+        bit valid;
+        longint unsigned token;
+        mem_addr_t address;
+        bit [7:0] mask;
+        longint unsigned accept_sample;
+        longint unsigned commit_sample;
+        longint unsigned accept_time;
+        longint unsigned commit_time;
+        bit committed;
+    } uncache_write_fact_t;
+
     typedef struct {
         bit                         valid;
         bit                         is_load;
+        uncache_access_kind_e        access_kind;
+        longint unsigned            token;
+        longint unsigned            reset_epoch;
+        bit                         response_frozen;
+        bit                         nc;
+        bit [7:0]                   mask;
+        bit                         backend_denied;
+        bit                         backend_corrupt;
+        bit                         backend_write_accepted;
+        longint unsigned            write_event_token;
+        bit [63:0]                  request_data;
         bit [3:0]                   source;
         longint unsigned            generation;
         mem_addr_t                  address;
@@ -162,6 +191,7 @@ class mem_access_base_sequence extends uvm_sequence;
 
     typedef struct {
         mem_addr_t                addr;
+        longint unsigned          write_event_token;
         mem_line_mask_t           byte_mask;
         mem_line_data_t           store_data;
     } shared_mem_write_event_t;
@@ -244,6 +274,18 @@ class mem_access_base_sequence extends uvm_sequence;
     static longint unsigned             uncache_d_error_active_generation[16];
     static uncache_d_error_record_q_t   uncache_d_error_history_by_owner[uncache_d_error_owner_key_t];
     static uncache_d_error_pending_q_t  uncache_d_error_pending_by_owner[uncache_d_error_owner_key_t];
+    // 中文注释：包含Store的唯一协议历史，先A冻结，D完成后更新；owner关联由被动observer独立保存。
+    typedef bit [131:0] uncache_accept_key_t;
+    static uncache_d_error_record_t uncache_response_history_by_token[longint unsigned];
+    static longint unsigned uncache_token_by_accept[uncache_accept_key_t];
+    static longint unsigned uncache_active_token[16];
+    static longint unsigned uncache_next_token = 1;
+    static longint unsigned uncache_reset_epoch = 0;
+    static longint unsigned uncache_history_sample_watermark = 0;
+    static uncache_write_fact_t uncache_write_fact_by_token[longint unsigned];
+    static longint unsigned uncache_next_write_token = 1;
+    static longint unsigned last_uncache_write_token = 0;
+
 
     `uvm_object_utils(mem_access_base_sequence)
 
@@ -314,6 +356,13 @@ class mem_access_base_sequence extends uvm_sequence;
         input uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS],
         output longint unsigned       generation
     );
+    extern static function void freeze_uncache_response_record(input uncache_d_error_record_t record);
+    extern static function bit read_uncache_response_at_accept(input longint unsigned sample,
+        input bit [3:0] source, output uncache_d_error_record_t record);
+    extern static function bit read_uncache_response_by_token(input longint unsigned token,
+        output uncache_d_error_record_t record);
+    extern static function bit read_uncache_write_fact(input longint unsigned token,
+        output uncache_write_fact_t fact);
     extern static function void commit_uncache_d_error_record(
         input uncache_d_error_record_t record,
         input longint unsigned         d_sample
@@ -514,6 +563,15 @@ function void mem_access_base_sequence::clear_shared_memory_state();
 
     uncache_d_error_history_by_owner.delete();
     uncache_d_error_pending_by_owner.delete();
+    uncache_response_history_by_token.delete();
+    uncache_token_by_accept.delete();
+    uncache_write_fact_by_token.delete();
+    uncache_next_token = 1;
+    uncache_next_write_token = 1;
+    last_uncache_write_token = 0;
+    uncache_reset_epoch = 0;
+    uncache_history_sample_watermark = 0;
+    foreach (uncache_active_token[i]) uncache_active_token[i] = 0;
     uncache_d_error_source_active = '0;
     uncache_d_error_ledger_ready = 1'b0;
     foreach (uncache_d_error_next_generation[source]) begin
@@ -792,6 +850,15 @@ endfunction:make_uncache_d_error_owner_key
 function void mem_access_base_sequence::reset_uncache_d_error_ledger();
     uncache_d_error_history_by_owner.delete();
     uncache_d_error_pending_by_owner.delete();
+    uncache_response_history_by_token.delete();
+    uncache_token_by_accept.delete();
+    uncache_write_fact_by_token.delete();
+    uncache_next_token = 1;
+    uncache_next_write_token = 1;
+    last_uncache_write_token = 0;
+    uncache_reset_epoch = 0;
+    uncache_history_sample_watermark = 0;
+    foreach (uncache_active_token[i]) uncache_active_token[i] = 0;
     uncache_d_error_source_active = '0;
     foreach (uncache_d_error_next_generation[source]) begin
         uncache_d_error_next_generation[source] = 1;
@@ -815,6 +882,8 @@ function void mem_access_base_sequence::abort_uncache_d_error_pending(input stri
                       uncache_d_error_pending_by_owner.num()),
             UVM_LOW);
     end
+    uncache_reset_epoch++;
+    foreach (uncache_active_token[i]) uncache_active_token[i] = 0;
     uncache_d_error_source_active = '0;
     foreach (uncache_d_error_active_generation[source]) begin
         uncache_d_error_active_generation[source] = 0;
@@ -868,6 +937,32 @@ function bit mem_access_base_sequence::begin_uncache_d_error_record(
     uncache_d_error_next_generation[source]++;
     uncache_d_error_source_active[source] = 1'b1;
     uncache_d_error_active_generation[source] = generation;
+    begin
+        uncache_d_error_record_t record;
+        uncache_accept_key_t accept_key;
+        record = '{default:'0};
+        record.valid = 1;
+        record.is_load = is_load;
+        record.access_kind = is_load ? UNCACHE_ACCESS_LOAD : UNCACHE_ACCESS_MMIO_STORE;
+        record.token = uncache_next_token++;
+        record.reset_epoch = uncache_reset_epoch;
+        record.source = source;
+        record.generation = generation;
+        record.address = address;
+        record.size = size;
+        record.a_sample = a_sample;
+        record.owner_count = owner_count;
+        foreach (record.owners[i]) record.owners[i] = owners[i];
+        accept_key = {uncache_reset_epoch,a_sample,source};
+        if (record.token == 0 || uncache_token_by_accept.exists(accept_key)) begin
+            report_l2_d_error_fatal("duplicate Uncache A identity or token wrap");
+            return 0;
+        end
+        uncache_active_token[source] = record.token;
+        uncache_token_by_accept[accept_key] = record.token;
+        uncache_response_history_by_token[record.token] = record;
+    end
+
 
     for (int unsigned idx = 0; idx < owner_count; idx++) begin
         if (!owners[idx].valid) begin
@@ -892,6 +987,51 @@ function bit mem_access_base_sequence::begin_uncache_d_error_record(
     return 1'b1;
 endfunction:begin_uncache_d_error_record
 
+// 抽象职责：A接受已分配token后冻结后端及注入结果，后续调度/hold只读此快照。
+function void mem_access_base_sequence::freeze_uncache_response_record(input uncache_d_error_record_t record);
+    uncache_d_error_record_t previous_record;
+    if (!record.valid || !uncache_response_history_by_token.exists(record.token)) begin
+        report_l2_d_error_fatal("Uncache freeze missing A token"); return;
+    end
+    previous_record = uncache_response_history_by_token[record.token];
+    if (record.source != previous_record.source || record.generation != previous_record.generation ||
+        record.reset_epoch != previous_record.reset_epoch || record.a_sample != previous_record.a_sample ||
+        record.d_sample != 0 || previous_record.response_frozen || !record.response_frozen ||
+        record.is_load != (record.access_kind == UNCACHE_ACCESS_LOAD)) begin
+        report_l2_d_error_fatal("Uncache response freeze identity mismatch"); return;
+    end
+    uncache_response_history_by_token[record.token] = record;
+    uvm_pkg::uvm_report_info("UNCACHE_RESPONSE_IDENTITY",$sformatf(
+        "freeze token=%0d reset=%0d source=%0d generation=%0d A_sample=%0d addr=0x%0h raw=%0d/%0d write_token=%0d",
+        record.token,record.reset_epoch,record.source,record.generation,record.a_sample,
+        record.address,record.denied,record.corrupt,record.write_event_token),UVM_HIGH);
+endfunction:freeze_uncache_response_record
+
+function bit mem_access_base_sequence::read_uncache_response_at_accept(input longint unsigned sample,
+    input bit [3:0] source, output uncache_d_error_record_t record);
+    uncache_accept_key_t key;
+    record = '{default:'0}; key = {uncache_reset_epoch,sample,source};
+    if (!uncache_d_error_ledger_ready || !uncache_token_by_accept.exists(key)) return 0;
+    record = uncache_response_history_by_token[uncache_token_by_accept[key]];
+    return record.valid;
+endfunction:read_uncache_response_at_accept
+
+function bit mem_access_base_sequence::read_uncache_response_by_token(input longint unsigned token,
+    output uncache_d_error_record_t record);
+    record = '{default:'0};
+    if (!uncache_d_error_ledger_ready || !uncache_response_history_by_token.exists(token)) return 0;
+    record = uncache_response_history_by_token[token];
+    return record.valid && record.reset_epoch == uncache_reset_epoch;
+endfunction:read_uncache_response_by_token
+
+function bit mem_access_base_sequence::read_uncache_write_fact(input longint unsigned token,
+    output uncache_write_fact_t fact);
+    fact = '0;
+    if (!uncache_write_fact_by_token.exists(token)) return 0;
+    fact = uncache_write_fact_by_token[token];
+    return fact.valid;
+endfunction:read_uncache_write_fact
+
 // 抽象职责：在D.fire时按source+generation精确消费pending，并把包括clean在内
 // 的固定payload追加到每个A.fire owner的历史。redirect之后不重新解析owner。
 function void mem_access_base_sequence::commit_uncache_d_error_record(
@@ -899,6 +1039,7 @@ function void mem_access_base_sequence::commit_uncache_d_error_record(
     input longint unsigned         d_sample
 );
     uncache_d_error_record_t completed_record;
+    uncache_d_error_record_t frozen_record;
     uncache_d_error_owner_key_t owner_key;
     bit pending_found;
 
@@ -928,7 +1069,25 @@ function void mem_access_base_sequence::commit_uncache_d_error_record(
     end
 
     completed_record = record;
+    if (!uncache_response_history_by_token.exists(completed_record.token) ||
+        uncache_active_token[record.source] != completed_record.token ||
+        completed_record.reset_epoch != uncache_reset_epoch || !completed_record.response_frozen) begin
+        report_l2_d_error_fatal("Uncache completion token/reset mismatch"); return;
+    end
+    frozen_record = uncache_response_history_by_token[completed_record.token];
+    if (frozen_record.d_sample != 0 || !frozen_record.response_frozen ||
+        completed_record.generation != frozen_record.generation ||
+        completed_record.source != frozen_record.source || completed_record.address != frozen_record.address ||
+        completed_record.size != frozen_record.size || completed_record.a_sample != frozen_record.a_sample ||
+        completed_record.denied != frozen_record.denied || completed_record.corrupt != frozen_record.corrupt ||
+        completed_record.nc != frozen_record.nc || completed_record.mask != frozen_record.mask ||
+        completed_record.backend_write_accepted != frozen_record.backend_write_accepted ||
+        completed_record.write_event_token != frozen_record.write_event_token) begin
+        report_l2_d_error_fatal("Uncache frozen response changed before D.fire"); return;
+    end
     completed_record.d_sample = d_sample;
+    uncache_response_history_by_token[completed_record.token] = completed_record;
+    uncache_active_token[record.source] = 0;
     for (int unsigned owner_idx = 0; owner_idx < record.owner_count; owner_idx++) begin
         owner_key = make_uncache_d_error_owner_key(
             record.owners[owner_idx].uid,
@@ -1445,6 +1604,12 @@ function void mem_access_base_sequence::commit_shared_mem_write_batch();
     foreach (uncache_write_batch[i]) begin
         apply_shared_mem_write(uncache_write_batch[i]);
         observe_uncache_write_committed(uncache_write_batch[i]);
+        if (uncache_write_batch[i].write_event_token != 0) begin
+            uncache_write_fact_by_token[uncache_write_batch[i].write_event_token].committed = 1;
+            uncache_write_fact_by_token[uncache_write_batch[i].write_event_token].commit_sample =
+                memblock_sync_pkg::peek_current_dut_global_sample();
+            uncache_write_fact_by_token[uncache_write_batch[i].write_event_token].commit_time = $time;
+        end
     end
     uncache_write_batch.delete();
 endfunction:commit_shared_mem_write_batch
@@ -1611,6 +1776,7 @@ task mem_access_base_sequence::shared_mem_access_task(
         end
     end
     if (is_store) begin
+        write_event = '{default:'0};
         write_event.addr        = addr;
         write_event.byte_mask   = byte_mask;
         write_event.store_data  = store_data;
@@ -1619,7 +1785,20 @@ task mem_access_base_sequence::shared_mem_access_task(
                 dcache_write_batch.push_back(write_event);
                 observe_dcache_write_enqueued(write_event);
             end
-            SHARED_MEM_WRITE_UNCACHE: uncache_write_batch.push_back(write_event);
+            SHARED_MEM_WRITE_UNCACHE: begin
+                uncache_write_fact_t fact;
+                fact = '0;
+                fact.valid = 1;
+                fact.token = uncache_next_write_token++;
+                fact.address = addr;
+                fact.mask = byte_mask[7:0];
+                fact.accept_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+                fact.accept_time = $time;
+                write_event.write_event_token = fact.token;
+                last_uncache_write_token = fact.token;
+                uncache_write_fact_by_token[fact.token] = fact;
+                uncache_write_batch.push_back(write_event);
+            end
             default: begin
                 `uvm_fatal(get_type_name(), $sformatf("unsupported shared memory write owner=%0d", write_owner))
             end
@@ -4449,6 +4628,7 @@ task dcache_mem__access_base_sequence::body();
     int unsigned               response_visible_count;
     dcache_stop_prepare_state_t current_stop_prepare_state;
     bit                        stop_drain_timeout_reported;
+    longint unsigned           edge_sample;
 
     if (!uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, get_full_name(), "vif", dcache_vif) &&
         !uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, "uvm_test_top.env.u_dcache_agent_agent*", "vif", dcache_vif)) begin
@@ -4487,17 +4667,22 @@ task dcache_mem__access_base_sequence::body();
 
     forever begin
         // 中文注释：上一轮 item 已在前一个 drv_cb 边界更新到 clocking output；
-        // 当前边界先推进 shared-store 采样代次，使上一拍已确认的写即使后续没有新 memory
-        // access 也会稳定提交；随后再采样真实握手并提交下一周期 item。
+        // 当前边界先复制握手快照并等待同拍CSR锚点，再推进shared-store采样代次，
+        // 使上一拍已确认写稳定提交，之后处理本拍握手并提交下一周期item。
         @(dcache_vif.drv_cb);
-        begin_shared_mem_sample($time);
         sampled_a_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_a_valid;
         sampled_b_ready_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_b_ready;
         sampled_c_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_valid;
         sampled_d_ready_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_d_ready;
         sampled_e_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_valid;
         sampled_l2_flush_en_raw = other_ctrl_vif.mon_mp.mon_cb.io_outer_l2_flush_en;
-        reset_active    = (dcache_vif.rst_n !== 1'b1) || (memblock_sync_pkg::reset_backend_done !== 1'b1);
+        reset_active    = (dcache_vif.rst_n !== 1'b1) ||
+                          (memblock_sync_pkg::reset_backend_done !== 1'b1) ||
+                          memblock_sync_pkg::l2tlb_reset_active();
+        // 中文注释：同posedge的CSR发布者可能尚未运行；先等当前边沿锚点，不能把上一拍peek记为本拍fire。
+        // 该等待仅经过同边沿NBA/delta，不跨时钟，不改变clocking block已采样的握手payload。
+        if (!reset_active) memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time,edge_sample);
+        begin_shared_mem_sample($time);
         sampled_a_valid = (sampled_a_valid_raw === 1'b1);
         sampled_b_ready = (sampled_b_ready_raw === 1'b1);
         sampled_c_valid = (sampled_c_valid_raw === 1'b1);
@@ -4898,6 +5083,7 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         longint unsigned        generation;
         int unsigned            owner_count;
         uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS];
+        uncache_d_error_record_t error_fact;
     } uncache_response_record_t;
 
     // 中文注释：Uncache A request 的 pending handshake owner。
@@ -5017,6 +5203,9 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         output bit                    d_denied,
         output bit                    d_corrupt
     );
+    extern virtual function void validate_uncache_backend_scope(input bit nc,
+        input bit [3:0] source, input longint unsigned generation, input bit [47:0] address,
+        input bit [7:0] mask, input bit backend_denied, input bit backend_corrupt);
     extern virtual task create_uncache_response_record(
         input sbuffer_agent_agent_xaction req_xact,
         input longint unsigned            accept_cycle,
@@ -5720,78 +5909,83 @@ function void sbuffer_mem_access_base_sequence::apply_uncache_d_error_injection(
     endcase
 endfunction:apply_uncache_d_error_injection
 
+// 抽象职责：NC只支持后端已接受写后响应注错，真正后端拒绝必须在响应入队前明确终止。
+function void sbuffer_mem_access_base_sequence::validate_uncache_backend_scope(input bit nc,
+    input bit [3:0] source, input longint unsigned generation, input bit [47:0] address,
+    input bit [7:0] mask, input bit backend_denied, input bit backend_corrupt);
+    if (nc && (backend_denied || backend_corrupt))
+        `uvm_fatal("UNCACHE_NC_BACKEND_SCOPE", $sformatf(
+            "NC Store backend拒绝属于不支持配置 source=%0d generation=%0d address=0x%0h mask=0x%0h nc=%0d backend=%0d/%0d",
+            source,generation,address,mask,nc,backend_denied,backend_corrupt))
+endfunction:validate_uncache_backend_scope
+
+// 抽象职责：真实A接受先分配身份，再正常访问后端，最后冻结注入错误；注入不撤销已接受写。
 task sbuffer_mem_access_base_sequence::create_uncache_response_record(
-    input sbuffer_agent_agent_xaction req_xact,
-    input longint unsigned            accept_cycle,
-    input int unsigned                owner_count,
-    input uncache_d_error_owner_t      owners[UNCACHE_D_ERROR_MAX_OWNERS]
-);
-    bit        corrupt;
-    bit        denied;
+    input sbuffer_agent_agent_xaction req_xact, input longint unsigned accept_cycle,
+    input int unsigned owner_count, input uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS]);
+    bit corrupt, denied, nc;
     bit [63:0] load_data;
     uncache_response_kind_e response_kind;
     uncache_response_record_t response_record;
-
-    if (!has_uncache_response_capacity()) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("Uncache A.fire exceeded response capacity count=%0d max=%0d",
-                             get_uncache_response_count(),
-                             MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING))
-    end
+    uncache_d_error_record_t fact;
+    if (!has_uncache_response_capacity())
+        `uvm_fatal(get_type_name(), "Uncache A.fire exceeded response capacity")
     response_kind = decode_uncache_a_opcode(req_xact);
-    sbuffer_mem_access_task(
-        req_xact.auto_inner_buffers_out_a_bits_address,
-        response_kind == UNCACHE_RESPONSE_STORE_ACK,
-        req_xact.auto_inner_buffers_out_a_bits_mask,
-        req_xact.auto_inner_buffers_out_a_bits_data,
-        corrupt,
-        denied,
-        load_data
-    );
-
-    response_record                = '{default:'0};
-    response_record.kind           = response_kind;
+    response_record = '{default:'0};
+    response_record.kind = response_kind;
     response_record.eligible_cycle = accept_cycle + 1;
-    response_record.accept_cycle   = accept_cycle;
-    response_record.size           = req_xact.auto_inner_buffers_out_a_bits_size;
-    response_record.source         = req_xact.auto_inner_buffers_out_a_bits_source;
-    response_record.address        = req_xact.auto_inner_buffers_out_a_bits_address;
-    response_record.data           = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? '0 : load_data;
-    response_record.a_sample       = memblock_sync_pkg::peek_current_dut_global_sample();
-    if (response_kind == UNCACHE_RESPONSE_LOAD_DATA) begin
-        if (owner_count == 0) begin
-            `uvm_fatal(get_type_name(), "Uncache Load A.fire has empty armed owner snapshot")
-        end
-    end
-    else if (owner_count != 0) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("Uncache Store A.fire has Load owner count=%0d", owner_count))
-    end
+    response_record.accept_cycle = accept_cycle;
+    response_record.size = req_xact.auto_inner_buffers_out_a_bits_size;
+    response_record.source = req_xact.auto_inner_buffers_out_a_bits_source;
+    response_record.address = req_xact.auto_inner_buffers_out_a_bits_address;
+    response_record.a_sample = memblock_sync_pkg::peek_current_dut_global_sample();
     response_record.owner_count = owner_count;
-    for (int unsigned owner_idx = 0; owner_idx < owner_count; owner_idx++) begin
-        response_record.owners[owner_idx] = owners[owner_idx];
+    foreach (response_record.owners[i]) response_record.owners[i] = owners[i];
+    if (response_kind == UNCACHE_RESPONSE_LOAD_DATA && owner_count == 0)
+        `uvm_fatal(get_type_name(), "Uncache Load A.fire has empty armed owner snapshot")
+    if (response_kind == UNCACHE_RESPONSE_STORE_ACK && owner_count != 0)
+        `uvm_fatal(get_type_name(), "Uncache Store cannot borrow Load owner snapshot")
+    if (!begin_uncache_d_error_record(response_kind == UNCACHE_RESPONSE_LOAD_DATA,
+            response_record.source,response_record.address,response_record.size,response_record.a_sample,
+            owner_count,owners,response_record.generation))
+        `uvm_fatal(get_type_name(), "failed to begin Uncache provenance record")
+    if (!read_uncache_response_at_accept(response_record.a_sample,response_record.source,fact))
+        `uvm_fatal(get_type_name(), "Uncache accepted token missing")
+    nc = 0;
+    if (uncache_owner_vif != null) begin
+        if ($isunknown(uncache_owner_vif.mon_cb.uncache_top_nc[response_record.source]))
+            `uvm_fatal(get_type_name(), "Uncache source entry nc contains X/Z at A.fire")
+        nc = uncache_owner_vif.mon_cb.uncache_top_nc[response_record.source];
+    end else if (response_kind == UNCACHE_RESPONSE_STORE_ACK) begin
+        `uvm_fatal(get_type_name(), "Uncache Store A.fire缺少真实nc侧带")
     end
-    apply_uncache_d_error_injection(
-        response_kind,
-        denied,
-        corrupt,
-        response_record.denied,
-        response_record.corrupt
-    );
-    if (!begin_uncache_d_error_record(
-            response_kind == UNCACHE_RESPONSE_LOAD_DATA,
-            response_record.source,
-            response_record.address,
-            response_record.size,
-            response_record.a_sample,
-            response_record.owner_count,
-            response_record.owners,
-            response_record.generation)) begin
-        `uvm_fatal(get_type_name(), "failed to begin Uncache D-error provenance record")
+    last_uncache_write_token = 0;
+    sbuffer_mem_access_task(response_record.address,response_kind == UNCACHE_RESPONSE_STORE_ACK,
+        req_xact.auto_inner_buffers_out_a_bits_mask,req_xact.auto_inner_buffers_out_a_bits_data,
+        corrupt,denied,load_data);
+    fact.access_kind = response_kind == UNCACHE_RESPONSE_LOAD_DATA ? UNCACHE_ACCESS_LOAD :
+        (nc ? UNCACHE_ACCESS_NC_STORE : UNCACHE_ACCESS_MMIO_STORE);
+    fact.nc = nc;
+    fact.mask = req_xact.auto_inner_buffers_out_a_bits_mask;
+    fact.request_data = req_xact.auto_inner_buffers_out_a_bits_data;
+    fact.backend_denied = denied;
+    fact.backend_corrupt = corrupt;
+    fact.backend_write_accepted = response_kind == UNCACHE_RESPONSE_STORE_ACK && !(denied || corrupt);
+    fact.write_event_token = fact.backend_write_accepted ? last_uncache_write_token : 0;
+    if (response_kind == UNCACHE_RESPONSE_STORE_ACK) begin
+        validate_uncache_backend_scope(nc,response_record.source,response_record.generation,
+            response_record.address,fact.mask,denied,corrupt);
+        if (fact.backend_write_accepted && fact.write_event_token == 0)
+            `uvm_fatal(get_type_name(), "Uncache backend接受写但缺少独立write-event token")
     end
-    note_uncache_source_accept(response_record.source,
-                               response_record.address,
-                               accept_cycle);
+    response_record.data = response_kind == UNCACHE_RESPONSE_STORE_ACK ? 0 : load_data;
+    apply_uncache_d_error_injection(response_kind,denied,corrupt,response_record.denied,response_record.corrupt);
+    fact.denied = response_record.denied;
+    fact.corrupt = response_record.corrupt;
+    fact.response_frozen = 1;
+    response_record.error_fact = fact;
+    freeze_uncache_response_record(fact);
+    note_uncache_source_accept(response_record.source,response_record.address,accept_cycle);
     uncache_rsp_q.push_back(response_record);
 endtask:create_uncache_response_record
 
@@ -5949,7 +6143,7 @@ function void sbuffer_mem_access_base_sequence::process_uncache_d_fire();
     if (!current_d_valid) begin
         `uvm_fatal(get_type_name(), "Uncache D.fire observed without a current response record")
     end
-    completed_record = '{default:'0};
+    completed_record = current_d_record.error_fact;
     completed_record.valid       = 1'b1;
     completed_record.is_load     = current_d_record.kind == UNCACHE_RESPONSE_LOAD_DATA;
     completed_record.source      = current_d_record.source;
@@ -6012,6 +6206,7 @@ task sbuffer_mem_access_base_sequence::body();
     bit d_fire;
     common_data_transaction data;
     int unsigned response_visible_count;
+    longint unsigned edge_sample;
     sbuffer_stop_prepare_state_t current_stop_prepare_state;
 
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
@@ -6028,6 +6223,10 @@ task sbuffer_mem_access_base_sequence::body();
         `uvm_fatal(get_type_name(), "failed to get common_data_transaction for SBuffer responder")
     end
     seq_csr_common::init();
+    `uvm_info("UNCACHE_D_ERROR_CAPABILITY", $sformatf(
+        "AccessAck(Store/NC/zero): denied WT=%0d, corrupt unsupported; AccessAckData(Load): denied WT=%0d corrupt WT=%0d; backend effects independent",
+        seq_csr_common::get_uncache_denied_wt(),seq_csr_common::get_uncache_denied_wt(),
+        seq_csr_common::get_uncache_corrupt_wt()),UVM_LOW)
     memblock_sync_pkg::sbuffer_responder_done = 1'b0;
     // 中文注释：legacy default topology 未经过 real-smoke vseq 时由首个 responder 兜底初始化。
     // real-smoke 已提前完成初始化时只读取静态状态，绝不重复清空 shared backing/overlay。
@@ -6046,11 +6245,14 @@ task sbuffer_mem_access_base_sequence::body();
         // 并推进 shared-store 采样代次；store overlay 只能由 a_fire 分支建立写批次，
         // 下一拍即使没有新的 memory access 也会由这里统一提交。
         @(sbuffer_vif.drv_cb);
-        begin_shared_mem_sample($time);
         sampled_a_valid_raw = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_valid;
         sampled_d_ready_raw = sbuffer_vif.drv_cb.auto_inner_buffers_out_d_ready;
         reset_active        = (sbuffer_vif.rst_n !== 1'b1) ||
-                              (memblock_sync_pkg::reset_backend_done !== 1'b1);
+                              (memblock_sync_pkg::reset_backend_done !== 1'b1) ||
+                              memblock_sync_pkg::l2tlb_reset_active();
+        // 中文注释：与被动monitor使用同一真实边沿CSR锚点；A/D及写batch的sample不能依赖delta进程先后。
+        if (!reset_active) memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time,edge_sample);
+        begin_shared_mem_sample($time);
         sampled_a_valid     = (sampled_a_valid_raw === 1'b1);
         sampled_d_ready     = (sampled_d_ready_raw === 1'b1);
         a_fire              = 1'b0;
@@ -6132,6 +6334,9 @@ task sbuffer_mem_access_base_sequence::body();
             service_uncache_d_hold_watchdog(d_fire);
             service_uncache_source_full_watchdog();
         end
+
+        if (!reset_active)
+            uncache_history_sample_watermark = edge_sample;
 
         // 中文注释：stop 前若 A.valid 已经可见但本拍没有 fire，冻结完整 payload；
         // stop 后仅允许该 owner 继续 handshake。valid 撤销时清除快照，避免把

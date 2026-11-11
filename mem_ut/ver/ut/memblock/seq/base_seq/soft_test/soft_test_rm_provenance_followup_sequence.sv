@@ -839,10 +839,10 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
                 "first split event binding or same-sample response/S2 handling failed");
     mem_access_base_sequence::reset_l2_line_history();
     publish_l2_test_error(line_addr, 0, 1, 15, 10'h22, 0);
-    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && !pending &&
-                error_view.corrupt && !error_view.denied && context_view.data_sample_seq == 22,
-                "independent pre-data corrupt did not prove low termination");
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && !pending &&
+                context_view.data_sample_seq == 22,
+                "valid low-segment access context was lost");
     // 每个不匹配条件都必须独立拒绝；不借DUT异常值产生预期。
     for (int idx = 0; idx < 16; idx++) begin
         status.first_split_access = baseline;
@@ -870,8 +870,8 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
                 status.first_split_access.response_vaddr = status.first_split_access.request_vaddr;
             end
         endcase
-        proven = ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending);
+        proven = ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending);
         expect_true(!proven && !pending, $sformatf("bad first split evidence accepted case=%0d", idx));
     end
     for (int size = 2; size <= 3; size++) begin
@@ -894,53 +894,53 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
             status.first_split_access.original_vaddr = original_va;
             status.first_split_access.request_vaddr = low_va;
             status.first_split_access.response_vaddr = low_va;
-            expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, original_va,
-                            line_addr, 40, context_view, error_view, pending), "legal downaligned split rejected");
+            expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, original_va,
+                            40, context_view, pending), "legal downaligned split rejected");
             status.first_split_access.request_vaddr++;
             status.first_split_access.response_vaddr++;
-            expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, original_va,
-                            line_addr, 40, context_view, error_view, pending), "invalid low geometry accepted");
+            expect_true(!ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, original_va,
+                            40, context_view, pending), "invalid low geometry accepted");
         end
     end
     data.main_table_by_uid[0].fuOpType = MEMBLOCK_LSUOP_LH;
     data.main_table_by_uid[0].vaddr = 64'h80001fff;
     status.first_split_access = baseline;
     data.split_observed_sample_seq = 39;
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && pending,
+    expect_true(!ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && pending,
                 "lagging consumer was treated as settled");
     status.first_split_access = '{default:'0};
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && pending,
+    expect_true(!ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && pending,
                 "context absence bypassed consumer settling");
     status.first_split_access = baseline;
     data.split_observed_sample_seq = 40;
-    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && !pending,
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && !pending,
                 "delayed consumer could not settle later");
     data.split_observed_reset_epoch++;
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && pending,
+    expect_true(!ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && pending,
                 "old reset frontier authorized termination");
     data.split_observed_reset_epoch = reset_epoch;
     mem_access_base_sequence::reset_l2_line_history();
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && !pending,
-                "clean low segment authorized termination");
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending) && !pending,
+                "clean history changed valid structural context");
     expect_true(reserve_l2_test_error(
                     line_addr, 12, 10'h23, 1, 0, 1, denied, corrupt, needs_candidate,
                     reservation_generation), "failed to reserve independent error");
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending), "reserve-only became active error");
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending), "pending choice changed valid structural context");
     publish_l2_test_error(
         line_addr, denied, corrupt, 25, 10'h23, reservation_generation);
-    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending), "post-data pre-WB activation leaked backwards");
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending), "later response changed valid structural context");
     mem_access_base_sequence::reset_l2_line_history();
     publish_l2_test_error(line_addr, 1, 1, 15, 10'h24, 0);
-    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
-                    line_addr, 40, context_view, error_view, pending) && error_view.denied,
-                "independent pre-data denied was lost");
+    expect_true(ro.try_read_first_split_access_context_for_rm(0, 7, rob_key, 64'h80001fff,
+                    40, context_view, pending),
+                "L2 error choice changed valid structural context");
     data.observe_first_split_request_sample(1, rob_key, 64'h80002000, 31, reset_epoch);
     data.observe_first_split_request_sample(1, rob_key, 64'h80001fff, 32, reset_epoch);
     expect_true(status.first_split_access.later_page_seen && status.first_split_access.data_sample_seq == 0,

@@ -111,6 +111,8 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic [15:0] uncache_lq_nc_out_valid;
     logic [15:0] uncache_lq_mmio_out_valid;
     logic [15:0] uncache_lq_free_mask;
+    // 中文注释：真实Uncache source entry的nc属性，仅用于responder后端支持范围判定。
+    logic [15:0] uncache_top_nc;
     logic [15:0] uncache_top_valid;
     logic [15:0] uncache_top_inflight;
     logic [15:0] uncache_top_wait_same;
@@ -251,6 +253,7 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
         input  uncache_lq_nc_out_valid;
         input  uncache_lq_mmio_out_valid;
         input  uncache_lq_free_mask;
+        input  uncache_top_nc;
         input  uncache_top_valid;
         input  uncache_top_inflight;
         input  uncache_top_wait_same;

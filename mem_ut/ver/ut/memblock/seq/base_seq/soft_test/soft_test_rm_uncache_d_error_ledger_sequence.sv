@@ -33,6 +33,9 @@ class soft_test_rm_uncache_d_error_ledger_sequence extends uvm_sequence;
         input longint unsigned d_sample,
         output longint unsigned generation
     );
+    extern function void complete_test_uncache_record(
+        input mem_access_base_sequence::uncache_d_error_record_t record,
+        input longint unsigned d_sample);
     extern task check_error_matrix();
     extern task check_pending_and_sample_boundary();
     extern task check_source_reuse_and_same_address();
@@ -117,8 +120,21 @@ task soft_test_rm_uncache_d_error_ledger_sequence::run_response_case(
     record.corrupt = corrupt;
     record.owner_count = 1;
     record.owners[0] = owners[0];
-    mem_access_base_sequence::commit_uncache_d_error_record(record, d_sample);
+    complete_test_uncache_record(record, d_sample);
 endtask:run_response_case
+
+// 仅软件fixture补齐已接受身份，生产completion不支持缺token的旧兼容路径。
+function void soft_test_rm_uncache_d_error_ledger_sequence::complete_test_uncache_record(
+    input mem_access_base_sequence::uncache_d_error_record_t record,input longint unsigned d_sample);
+    mem_access_base_sequence::uncache_d_error_record_t snapshot;
+    mem_access_base_sequence::uncache_d_error_record_t frozen;
+    expect_true(mem_access_base_sequence::read_uncache_response_at_accept(record.a_sample,record.source,snapshot),
+        "test completion requires accepted token");
+    frozen=record; frozen.token=snapshot.token; frozen.reset_epoch=snapshot.reset_epoch;
+    frozen.access_kind=mem_access_base_sequence::UNCACHE_ACCESS_LOAD; frozen.response_frozen=1;
+    mem_access_base_sequence::freeze_uncache_response_record(frozen);
+    mem_access_base_sequence::commit_uncache_d_error_record(frozen,d_sample);
+endfunction:complete_test_uncache_record
 
 task soft_test_rm_uncache_d_error_ledger_sequence::check_error_matrix();
     memblock_rm_readonly_api ro;
@@ -168,7 +184,7 @@ task soft_test_rm_uncache_d_error_ledger_sequence::check_pending_and_sample_boun
     record.source = 4; record.generation = generation;
     record.address = 48'h2000; record.size = 2; record.a_sample = 100;
     record.owner_count = 1; record.owners[0] = owners[0];
-    mem_access_base_sequence::commit_uncache_d_error_record(record, 101);
+    complete_test_uncache_record(record, 101);
     expect_true(ro.read_uncache_d_error_for_rm(
                     200, 3, 0, 16'd20, 0, 7'd20,
                     48'h2000, 4, 100, view) && view.not_ready,
@@ -229,7 +245,7 @@ task soft_test_rm_uncache_d_error_ledger_sequence::check_redirect_old_epoch();
     record.size = 2; record.a_sample = 300; record.denied = 1;
     record.corrupt = 1; record.owner_count = 1;
     record.owners[0] = make_owner(400, 7, 0, 16'd40, 0, 7'd40, 6);
-    mem_access_base_sequence::commit_uncache_d_error_record(record, 302);
+    complete_test_uncache_record(record, 302);
     ro = memblock_rm_readonly_api::get();
     expect_true(ro.read_uncache_d_error_for_rm(
                     400, 7, 0, 16'd40, 0, 7'd40,
@@ -244,7 +260,7 @@ task soft_test_rm_uncache_d_error_ledger_sequence::check_redirect_old_epoch();
     record.generation = new_generation; record.address = 48'h4000;
     record.size = 2; record.a_sample = 301; record.owner_count = 1;
     record.owners[0] = make_owner(400, 8, 1, 16'd41, 1, 7'd41, 7);
-    mem_access_base_sequence::commit_uncache_d_error_record(record, 303);
+    complete_test_uncache_record(record, 303);
 endtask:check_redirect_old_epoch
 
 task soft_test_rm_uncache_d_error_ledger_sequence::check_multi_owner_nc_response();
@@ -268,7 +284,7 @@ task soft_test_rm_uncache_d_error_ledger_sequence::check_multi_owner_nc_response
     record.a_sample = 500; record.denied = 1'b1;
     record.corrupt = 1'b1; record.owner_count = 2;
     record.owners[0] = owners[0]; record.owners[1] = owners[1];
-    mem_access_base_sequence::commit_uncache_d_error_record(record, 501);
+    complete_test_uncache_record(record, 501);
 
     ro = memblock_rm_readonly_api::get();
     expect_true(ro.read_uncache_d_error_for_rm(
