@@ -67,7 +67,8 @@ def analyze(folder, receipt_path):
                 assert last < pending[0], 'Native phase cut splits simultaneous prediction lanes'
             phases.append(dict(phase=label, native_print_stamp=stamp, first_private_stamp=first,
                                last_private_stamp=last, counts=dict(counts),
-                               by_location=[dict(start_pc=hex(pc), cfi_position=position, **dict(value))
+                               # DefaultConfig Pc.addr omits the low zero bit for two-byte alignment.
+                               by_location=[dict(start_pc=hex(pc << 1), cfi_position=position, **dict(value))
                                             for (pc, position), value in sorted(locations.items())]))
         assert pending is None, 'Prediction opportunities remain after all native counts'
     receipt = json.loads(receipt_path.read_text())
@@ -77,7 +78,9 @@ def analyze(folder, receipt_path):
                       'original SC confidence satisfied and opposite directions, before a policy can suppress useSc. '
                       'These are speculative prediction entries, including opportunities that never reach accepted '
                       'training. Magnitude and threshold come from the same prediction stage. Native ordinals '
-                      'define phases; private STAMP is not calibrated to TEA. No actual outcome, unique dynamic '
+                      'define phases; private STAMP is not calibrated to TEA. start_pc is the decoded byte address '
+                      'of the fetch block; cfi_position remains the raw position, not an instruction PC. '
+                      'No actual outcome, unique dynamic '
                       'prediction/training join, final BPU accuracy, wrong-path classification or CPU saving is inferred.')
 
 
