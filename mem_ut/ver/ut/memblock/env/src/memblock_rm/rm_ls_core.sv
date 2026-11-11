@@ -7,8 +7,40 @@ typedef enum int unsigned {
     RM_LS_KIND_OTHER = 0,
     RM_LS_KIND_LOAD,
     RM_LS_KIND_STORE,
-    RM_LS_KIND_ATOMIC
+    RM_LS_KIND_ATOMIC,
+    RM_LS_KIND_CMO
 } rm_ls_kind_e;
+
+// 中文注释：只保存最终操作与独立路径，不保存缓存命中/替换状态。
+typedef enum int unsigned {
+    RM_CMO_OP_NONE = 0,
+    RM_CMO_OP_ZERO,
+    RM_CMO_OP_CLEAN,
+    RM_CMO_OP_FLUSH,
+    RM_CMO_OP_INVAL
+} rm_cmo_op_e;
+
+typedef enum int unsigned {
+    RM_CMO_PATH_NONE = 0,
+    RM_CMO_PATH_CACHEABLE_ZERO,
+    RM_CMO_PATH_DCACHE_CMO,
+    RM_CMO_PATH_UNCACHE_ZERO
+} rm_cmo_path_e;
+
+function automatic rm_cmo_op_e rm_ls_decode_cmo_final_op(input bit [8:0] op);
+    case (op)
+        MEMBLOCK_LSUOP_CBO_ZERO:  return RM_CMO_OP_ZERO;
+        MEMBLOCK_LSUOP_CBO_CLEAN: return RM_CMO_OP_CLEAN;
+        MEMBLOCK_LSUOP_CBO_FLUSH: return RM_CMO_OP_FLUSH;
+        MEMBLOCK_LSUOP_CBO_INVAL: return RM_CMO_OP_INVAL;
+        default: return RM_CMO_OP_NONE;
+    endcase
+endfunction
+
+// 抽象职责：权限命令与最终Store类异常分离，只有zero检查write权限。
+function automatic bit rm_ls_cmo_permission_is_write(input rm_cmo_op_e op);
+    return op == RM_CMO_OP_ZERO;
+endfunction
 
 typedef enum int unsigned {
     RM_ATOMIC_NONE = 0,
@@ -22,7 +54,8 @@ typedef enum int unsigned {
     RM_MEMORY_EFFECT_STORE = 0,
     RM_MEMORY_EFFECT_AMO,
     RM_MEMORY_EFFECT_SC_SUCCESS,
-    RM_MEMORY_EFFECT_CAS_SUCCESS
+    RM_MEMORY_EFFECT_CAS_SUCCESS,
+    RM_MEMORY_EFFECT_CMO_ZERO
 } rm_memory_effect_kind_e;
 
 typedef enum bit {
@@ -71,7 +104,15 @@ typedef enum int unsigned {
     RM_LS_ERR_SC_RESULT_MISMATCH,
     RM_LS_ERR_SC_FAILURE_MEMORY_EFFECT,
     RM_LS_ERR_CAS_RESULT_MISMATCH,
-    RM_LS_ERR_CASQ_WB_PAIR_MISMATCH
+    RM_LS_ERR_CASQ_WB_PAIR_MISMATCH,
+    RM_LS_ERR_CMO_CLASSIFICATION,
+    RM_LS_ERR_CMO_ACTUAL_NOT_READY,
+    RM_LS_ERR_CMO_OWNER_MISMATCH,
+    RM_LS_ERR_CMO_STALE_COMPLETION,
+    RM_LS_ERR_CMO_DUPLICATE_COMPLETION,
+    RM_LS_ERR_CMO_COMPLETION_MISMATCH,
+    RM_LS_ERR_CMO_REQUEST_MISMATCH,
+    RM_LS_ERR_CMO_EFFECT_MISMATCH
 } rm_ls_error_e;
 
 function automatic bit rm_ls_decode_translation_path(
@@ -194,9 +235,14 @@ class rm_ls_program_item_t;
     // 误称为DCache错误。路径分类在commit item构建时冻结，写回比较时只读。
     bit             expected_uncache_denied;
     bit             expected_uncache_corrupt;
+    // 中文注释：仅同步MMIO写使用；NC保留既有架构提交路径，不置effect_valid。
+    bit             uncache_effect_valid;
+    bit             uncache_write_accepted;
+    bit             uncache_effect_applied;
     bit             all_pma_mmio;
     bit             all_normal_cacheable;
     bit             uncache_path;
+    bit             uncache_nc_path;
     bit             lq_flag;
     bit [MEMBLOCK_LQ_VALUE_W-1:0] lq_value;
     // 中文注释：当前 Load/Store 的任一翻译 byte 是否因 PBMT 非零且对应
@@ -224,6 +270,27 @@ class rm_ls_program_item_t;
     bit [1:0]       atomic_expected_pdest_valid;
     longint unsigned atomic_first_issue_sample;
 
+    // 中文注释：CMO身份与请求摘要由observer一次验证后冻结；不复制monitor队列。
+    bit             sq_flag;
+    bit [MEMBLOCK_SQ_VALUE_W-1:0] sq_value;
+    rm_cmo_op_e     cmo_op;
+    rm_cmo_path_e   cmo_path;
+    bit             cmo_permission_write;
+    bit             cmo_expect_flush_pipe;
+    bit             cmo_has_data_effect;
+    bit [23:0]      cmo_pre_access_exception;
+    bit             cmo_requests_validated;
+    int unsigned    cmo_request_count;
+    longint unsigned cmo_request_token;
+    longint unsigned cmo_request_watermark;
+    // 中文注释：统一错误入口验证分段/首错停止后才置effect_valid；核心不再映射raw错误。
+    bit             cmo_effect_valid;
+    bit [7:0]       cmo_segment_sent_mask;
+    bit [7:0]       cmo_segment_completed_mask;
+    bit [7:0]       cmo_segment_write_mask;
+    bit             cmo_effect_applied;
+    bit             cmo_completion_consumed;
+
     function new(int unsigned uid_i = 0);
         valid = 0; uid = uid_i; kind = RM_LS_KIND_OTHER; op = '0;
         computed_vaddr = '0; main_vaddr = '0; pa_valid_mask = '0;
@@ -234,8 +301,9 @@ class rm_ls_program_item_t;
         expected_pma_cache_path_fault = 1'b0;
         expected_dcache_denied = 1'b0; expected_dcache_corrupt = 1'b0;
         expected_uncache_denied = 1'b0; expected_uncache_corrupt = 1'b0;
+        uncache_effect_valid = 0; uncache_write_accepted = 0; uncache_effect_applied = 0;
         all_pma_mmio = 1'b0; all_normal_cacheable = 1'b0;
-        uncache_path = 1'b0; lq_flag = 1'b0; lq_value = '0;
+        uncache_nc_path = 1'b0; uncache_path = 1'b0; lq_flag = 1'b0; lq_value = '0;
         expected_pbmt_forced_s1_pf = 1'b0;
         expected_pbmt_forced_s2_gpf = 1'b0;
         dynamic_epoch = 0; access_sample = 0;
@@ -246,6 +314,14 @@ class rm_ls_program_item_t;
         expected_memory_write = 1'b0; sc_success_allowed = 1'b0;
         expected_cas_success = 1'b0; expected_atomic_wb_count = 0;
         atomic_expected_pdest_valid = '0; atomic_first_issue_sample = 0;
+        sq_flag = 0; sq_value = '0; cmo_op = RM_CMO_OP_NONE;
+        cmo_path = RM_CMO_PATH_NONE; cmo_permission_write = 0;
+        cmo_expect_flush_pipe = 0; cmo_has_data_effect = 0;
+        cmo_pre_access_exception = '0; cmo_requests_validated = 0;
+        cmo_request_count = 0; cmo_request_token = 0; cmo_request_watermark = 0;
+        cmo_effect_valid = 0; cmo_segment_sent_mask = '0;
+        cmo_segment_completed_mask = '0; cmo_segment_write_mask = '0;
+        cmo_effect_applied = 0; cmo_completion_consumed = 0;
         foreach (atomic_std_data[i]) atomic_std_data[i] = '0;
         foreach (atomic_expected_pdest[i]) atomic_expected_pdest[i] = '0;
         foreach (pa_by_byte[i]) pa_by_byte[i] = '0;
@@ -267,6 +343,59 @@ class rm_ls_program_item_t;
             pa_valid_mask[i] = 1'b1;
         end
         return 1'b1;
+    endfunction
+endclass
+
+// 抽象职责：在标量size判零和Store data读取前冻结最终CMO语义。
+function automatic bit rm_ls_assign_cmo_data_semantics(input rm_ls_program_item_t item);
+    rm_cmo_op_e decoded_op;
+    if (item == null) return 1'b0;
+    decoded_op = rm_ls_decode_cmo_final_op(item.op);
+    if (decoded_op == RM_CMO_OP_NONE) return 1'b0;
+    item.kind = RM_LS_KIND_CMO;
+    item.cmo_op = decoded_op;
+    item.cmo_permission_write = rm_ls_cmo_permission_is_write(decoded_op);
+    item.cmo_expect_flush_pipe = decoded_op != RM_CMO_OP_ZERO;
+    item.cmo_has_data_effect = decoded_op == RM_CMO_OP_ZERO;
+    item.size_bytes = 0;
+    item.store_data = '0;
+    item.store_byte_mask = '0;
+    return 1'b1;
+endfunction
+
+// 中文注释：唯一STA0最终完成快照；normal/fault终态由只读框架事实提供。
+class rm_cmo_completion_actual_t;
+    bit valid;
+    int unsigned uid;
+    rm_ls_rob_key_t rob;
+    bit sq_flag;
+    bit [MEMBLOCK_SQ_VALUE_W-1:0] sq_value;
+    int unsigned dynamic_epoch;
+    bit [8:0] fu_op_type;
+    bit source_sta0;
+    bit is_final;
+    logic flush_pipe;
+    logic [23:0] exception_vec;
+    longint unsigned sample_seq;
+    bit normal_pass;
+    bit fault_terminal;
+
+    function new();
+        valid = 0; uid = 0; rob = '{default:'0}; sq_flag = 0; sq_value = '0;
+        dynamic_epoch = 0; fu_op_type = '0; source_sta0 = 0; is_final = 0;
+        flush_pipe = 0; exception_vec = '0; sample_seq = 0;
+        normal_pass = 0; fault_terminal = 0;
+    endfunction
+
+    function void copy_from(input rm_cmo_completion_actual_t source);
+        if (source == null) return;
+        valid = source.valid; uid = source.uid; rob = source.rob;
+        sq_flag = source.sq_flag; sq_value = source.sq_value;
+        dynamic_epoch = source.dynamic_epoch; fu_op_type = source.fu_op_type;
+        source_sta0 = source.source_sta0; is_final = source.is_final;
+        flush_pipe = source.flush_pipe; exception_vec = source.exception_vec;
+        sample_seq = source.sample_seq; normal_pass = source.normal_pass;
+        fault_terminal = source.fault_terminal;
     endfunction
 endclass
 
@@ -302,7 +431,8 @@ class rm_ls_store_cache_entry_t;
         valid = 1'b0;
         if (item == null) return;
         if (!item.valid || !(item.kind inside {RM_LS_KIND_STORE,
-                                               RM_LS_KIND_ATOMIC})) return;
+                                               RM_LS_KIND_ATOMIC,
+                                               RM_LS_KIND_CMO})) return;
         valid = 1'b1;
         uid = item.uid;
         rob = item.rob;
@@ -425,6 +555,9 @@ class rm_ls_model_t;
     rm_ls_program_item_t items[int unsigned];
     rm_ls_load_actual_t pending_load_actual[int unsigned];
     rm_atomic_actual_t pending_atomic_actual[int unsigned];
+    // 中文注释：仅当前程序游标需要一笔CMO快照；上次消费owner用于去重。
+    rm_cmo_completion_actual_t pending_cmo_actual;
+    rm_cmo_completion_actual_t last_consumed_cmo_actual;
     bit                 backing_valid[longint unsigned];
     byte unsigned       backing_byte[longint unsigned];
     bit                 expected_store_valid[longint unsigned];
@@ -446,6 +579,7 @@ class rm_ls_model_t;
         consumed_commit_count = 0; error_count = 0;
         last_error = RM_LS_ERR_NONE; last_error_text = "";
         items.delete(); pending_load_actual.delete(); pending_atomic_actual.delete();
+        pending_cmo_actual = null; last_consumed_cmo_actual = null;
         backing_valid.delete(); backing_byte.delete();
         expected_store_valid.delete(); expected_store_byte.delete();
         expected_store_entries.delete(); sc_no_write_obligations.delete(); history.delete();
@@ -496,6 +630,8 @@ class rm_ls_model_t;
              item.expected_dcache_denied || item.expected_dcache_corrupt)) begin
             reservation_state = RM_RESV_NONE;
         end
+        if (item.kind == RM_LS_KIND_CMO && pending_cmo_actual != null &&
+            pending_cmo_actual.uid == item.uid) pending_cmo_actual = null;
         current_uid++;
         consumed_commit_count++;
         return 1'b1;
@@ -529,6 +665,74 @@ class rm_ls_model_t;
         if (!configured || actual == null || !actual.valid) return 0;
         pending_atomic_actual[actual.uid] = actual;
         return 1;
+    endfunction
+
+    // 抽象职责：冻结当前CMO最终完成；重复轮询同一sample无副作用，真实第二笔报错。
+    function bit push_cmo_actual(input rm_cmo_completion_actual_t actual);
+        rm_ls_program_item_t item;
+        if (!configured || actual == null || !actual.valid ||
+            !items.exists(current_uid)) begin
+            set_error(RM_LS_ERR_CMO_ACTUAL_NOT_READY, "CMO completion or current item unavailable");
+            return 1'b0;
+        end
+        item = items[current_uid];
+        if (!rm_ls_validate_cmo_owner(item, actual)) return 1'b0;
+        // 中文注释：readonly新实例到达时，仅丢弃失效本地快照，不修改框架epoch。
+        if (pending_cmo_actual != null &&
+            (pending_cmo_actual.uid != item.uid || pending_cmo_actual.rob != item.rob ||
+             pending_cmo_actual.sq_flag != item.sq_flag || pending_cmo_actual.sq_value != item.sq_value ||
+             pending_cmo_actual.dynamic_epoch != item.dynamic_epoch)) pending_cmo_actual = null;
+        if (pending_cmo_actual != null) begin
+            if (pending_cmo_actual.sample_seq == actual.sample_seq &&
+                pending_cmo_actual.exception_vec === actual.exception_vec &&
+                pending_cmo_actual.flush_pipe === actual.flush_pipe &&
+                pending_cmo_actual.fu_op_type == actual.fu_op_type &&
+                pending_cmo_actual.source_sta0 == actual.source_sta0 &&
+                pending_cmo_actual.is_final == actual.is_final &&
+                pending_cmo_actual.normal_pass == actual.normal_pass &&
+                pending_cmo_actual.fault_terminal == actual.fault_terminal)
+                return 1'b1;
+            set_error(RM_LS_ERR_CMO_DUPLICATE_COMPLETION,
+                      $sformatf("uid %0d received a second final CMO completion", item.uid));
+            return 1'b0;
+        end
+        pending_cmo_actual = new();
+        pending_cmo_actual.copy_from(actual);
+        return 1'b1;
+    endfunction
+
+    // 抽象职责：使用完整动态身份过滤旧完成；不修改框架owner或epoch。
+    function bit rm_ls_validate_cmo_owner(input rm_ls_program_item_t item,
+                                          input rm_cmo_completion_actual_t actual);
+        if (item == null || actual == null || item.kind != RM_LS_KIND_CMO ||
+            !actual.valid) begin
+            set_error(RM_LS_ERR_CMO_OWNER_MISMATCH, "CMO owner validation requires valid item and actual");
+            return 1'b0;
+        end
+        if (actual.uid == item.uid && actual.dynamic_epoch != item.dynamic_epoch) begin
+            set_error(RM_LS_ERR_CMO_STALE_COMPLETION,
+                      $sformatf("uid %0d CMO completion epoch %0d expected %0d",
+                                item.uid, actual.dynamic_epoch, item.dynamic_epoch));
+            return 1'b0;
+        end
+        if (actual.uid != item.uid || actual.rob != item.rob ||
+            actual.sq_flag != item.sq_flag || actual.sq_value != item.sq_value) begin
+            set_error(RM_LS_ERR_CMO_OWNER_MISMATCH,
+                      $sformatf("uid %0d CMO completion owner mismatch actual_uid=%0d", item.uid, actual.uid));
+            return 1'b0;
+        end
+        if (item.cmo_completion_consumed ||
+            (last_consumed_cmo_actual != null &&
+             last_consumed_cmo_actual.uid == actual.uid &&
+             last_consumed_cmo_actual.rob == actual.rob &&
+             last_consumed_cmo_actual.sq_flag == actual.sq_flag &&
+             last_consumed_cmo_actual.sq_value == actual.sq_value &&
+             last_consumed_cmo_actual.dynamic_epoch == actual.dynamic_epoch)) begin
+            set_error(RM_LS_ERR_CMO_DUPLICATE_COMPLETION,
+                      $sformatf("uid %0d CMO owner was already consumed", item.uid));
+            return 1'b0;
+        end
+        return 1'b1;
     endfunction
 
     function bit expected_store_byte_exists(longint unsigned pa);
@@ -940,6 +1144,10 @@ class rm_ls_model_t;
         bit raw_exception_match;
         bit cause_exception_match;
 
+        if (item == null || item.kind != RM_LS_KIND_STORE) begin
+            set_error(RM_LS_ERR_CMO_CLASSIFICATION, "ordinary commit_store rejects non-Store item");
+            return 1'b0;
+        end
         rec = new(); rec.uid = item.uid; rec.kind = item.kind; rec.rob = item.rob;
         rec.vaddr = item.computed_vaddr;
         if (item.pa_valid_mask[0]) rec.first_pa = item.pa_by_byte[0];
@@ -959,6 +1167,13 @@ class rm_ls_model_t;
                                 item.uid, item.expected_exception, commit_exception,
                                 select_arch_exception_cause(commit_exception, 1'b1)),
                       UVM_LOW)
+        end
+        if (item.uncache_path && item.uncache_effect_valid) begin
+            rec.compare_pass = rm_ls_apply_uncache_write_effect(item);
+            rec.error_code = rec.compare_pass ? RM_LS_ERR_NONE : last_error;
+            rec.detail = rec.compare_pass ? "MMIO Store exception and accepted effect match" : last_error_text;
+            history.push_back(rec);
+            return rec.compare_pass;
         end
         if (item.expected_exception != '0) begin
             rec.compare_pass = 1'b1; rec.error_code = RM_LS_ERR_NONE;
@@ -1227,6 +1442,219 @@ class rm_ls_model_t;
         return rec.compare_pass;
     endfunction
 
+    // 抽象职责：将已验证的zero字节集合转换为8B子效果，复用普通写底座及SC shadow。
+    // 本函数只应用确定性写mask；响应raw映射和首错停止由统一错误入口完成。
+    function bit rm_ls_apply_zero_segments(input rm_ls_program_item_t item,
+                                           input bit [7:0] write_mask);
+        rm_ls_program_item_t children[8];
+        longint unsigned line_base;
+        if (item == null || !item.valid || item.kind != RM_LS_KIND_CMO ||
+            item.cmo_op != RM_CMO_OP_ZERO || !item.cmo_has_data_effect ||
+            !item.translation_valid || !item.pa_valid_mask[0] ||
+            item.cmo_effect_applied || item.cmo_completion_consumed) begin
+            set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "invalid or duplicate CMO zero effect");
+            return 1'b0;
+        end
+        line_base = item.pa_by_byte[0] & ~64'h3f;
+        if (|item.pa_by_byte[0][63:48] || line_base > 64'h0000_ffff_ffff_ffc0) begin
+            set_error(RM_LS_ERR_BARE_PA_OUT_OF_RANGE, "CMO zero line is outside 48-bit PA range");
+            return 1'b0;
+        end
+        // 中文注释：先构造并校验整组；之后无yield调用同一底座，不会留下半行RM副作用。
+        for (int unsigned segment = 0; segment < 8; segment++) begin
+            if (!write_mask[segment]) continue;
+            children[segment] = new(item.uid);
+            children[segment].valid = 1'b1;
+            children[segment].kind = RM_LS_KIND_CMO;
+            children[segment].op = item.op;
+            children[segment].rob = item.rob;
+            children[segment].sq_flag = item.sq_flag;
+            children[segment].sq_value = item.sq_value;
+            children[segment].dynamic_epoch = item.dynamic_epoch;
+            children[segment].cmo_op = RM_CMO_OP_ZERO;
+            children[segment].computed_vaddr = (item.computed_vaddr & ~64'h3f) + segment * 8;
+            children[segment].main_vaddr = children[segment].computed_vaddr;
+            children[segment].translation_valid = 1'b1;
+            children[segment].size_bytes = 8;
+            children[segment].pa_valid_mask = 16'h00ff;
+            children[segment].store_data = '0;
+            children[segment].store_byte_mask = 16'h00ff;
+            for (int unsigned byte_index = 0; byte_index < 8; byte_index++)
+                children[segment].pa_by_byte[byte_index] = line_base + longint'(segment) * 8 + longint'(byte_index);
+        end
+        for (int unsigned segment = 0; segment < 8; segment++) begin
+            if (!write_mask[segment]) continue;
+            if (!commit_memory_effect(children[segment], RM_MEMORY_EFFECT_CMO_ZERO,
+                                      128'h0, 16'h00ff)) return 1'b0;
+        end
+        item.cmo_effect_applied = 1'b1;
+        return 1'b1;
+    endfunction
+
+    // 抽象职责：同步Uncache确定性效果唯一薄封装；值由RM给出，接受资格由observer验证。
+    // zero按已验证段集合落地；MMIO Store在backend拒绝时无效果，已接受后响应fault仍写入。
+    function bit rm_ls_apply_uncache_write_effect(input rm_ls_program_item_t item);
+        bit [15:0] required_mask;
+        if (item == null || !item.valid || !item.uncache_path) begin
+            set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "Uncache write effect requires valid path/item");
+            return 1'b0;
+        end
+        if (item.kind == RM_LS_KIND_CMO) begin
+            if (item.cmo_path != RM_CMO_PATH_UNCACHE_ZERO || !item.cmo_effect_valid) begin
+                set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "Uncache CMO effect lacks verified segment set");
+                return 1'b0;
+            end
+            return rm_ls_apply_zero_segments(item, item.cmo_segment_write_mask);
+        end
+        if (item.kind != RM_LS_KIND_STORE || !item.uncache_effect_valid ||
+            item.uncache_effect_applied) begin
+            set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "missing or duplicate synchronous Uncache Store effect");
+            return 1'b0;
+        end
+        // 中文注释：拒绝写即为空集合，不要求不存在的数据PA；外层仍已比较STA/terminal异常。
+        if (!item.uncache_write_accepted) begin
+            item.uncache_effect_applied = 1'b1;
+            return 1'b1;
+        end
+        if (!item.translation_valid || item.size_bytes == 0 || item.size_bytes > 8) begin
+            set_error(RM_LS_ERR_TRANSLATION_NOT_READY, "MMIO write effect geometry unavailable");
+            return 1'b0;
+        end
+        required_mask = 16'hffff >> (16 - item.size_bytes);
+        if (item.store_byte_mask != required_mask ||
+            (item.pa_valid_mask & required_mask) != required_mask) begin
+            set_error(RM_LS_ERR_STORE_MASK_MISMATCH, "MMIO accepted effect mask/PA mismatch");
+            return 1'b0;
+        end
+        if (!commit_memory_effect(item, RM_MEMORY_EFFECT_STORE,
+                                  item.store_data, item.store_byte_mask)) return 1'b0;
+        item.uncache_effect_applied = 1'b1;
+        return 1'b1;
+    endfunction
+
+    function bit rm_ls_apply_zero_line_effect(input rm_ls_program_item_t item);
+        if (item == null || item.cmo_path != RM_CMO_PATH_CACHEABLE_ZERO ||
+            item.expected_exception != '0 || item.cmo_pre_access_exception != '0) begin
+            set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "normal cacheable zero effect requires clean terminal");
+            return 1'b0;
+        end
+        return rm_ls_apply_zero_segments(item, 8'hff);
+    endfunction
+
+    // 抽象职责：只消费统一错误入口已经确认的Uncache分段效果，不重复预测denied/corrupt。
+    function bit rm_ls_apply_uncache_zero_effect(input rm_ls_program_item_t item);
+        if (item == null || item.cmo_path != RM_CMO_PATH_UNCACHE_ZERO ||
+            !item.cmo_effect_valid || item.cmo_pre_access_exception != '0 ||
+            ((item.cmo_segment_write_mask & ~item.cmo_segment_sent_mask) != '0) ||
+            item.cmo_segment_completed_mask != item.cmo_segment_sent_mask ||
+            (item.expected_exception == '0 &&
+             (item.cmo_segment_sent_mask != 8'hff || item.cmo_segment_write_mask != 8'hff))) begin
+            set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "Uncache zero effect lacks verified segment evidence");
+            return 1'b0;
+        end
+        return rm_ls_apply_uncache_write_effect(item);
+    endfunction
+
+    // 抽象职责：联合observer请求证明、独立错误期望和STA0终态，唯一提交当前CMO。
+    function bit rm_ls_commit_cmo(input rm_ls_program_item_t item,
+                                  input logic [23:0] commit_exception);
+        rm_ls_history_record_t rec;
+        rm_cmo_completion_actual_t actual;
+        bit raw_match;
+        bit cause_match;
+        bit fault_expected;
+        bit path_valid;
+        rec = new();
+        rec.uid = item.uid; rec.kind = item.kind; rec.rob = item.rob;
+        rec.vaddr = item.computed_vaddr; rec.first_pa = item.pa_by_byte[0];
+        rec.expected_exception = item.expected_exception; rec.actual_exception = commit_exception;
+        if (pending_cmo_actual == null) begin
+            set_error(RM_LS_ERR_CMO_ACTUAL_NOT_READY,
+                      $sformatf("uid %0d CMO final STA0 completion unavailable", item.uid));
+            return 1'b0;
+        end
+        actual = pending_cmo_actual;
+        if (!rm_ls_validate_cmo_owner(item, actual)) return 1'b0;
+        path_valid = (item.cmo_pre_access_exception != '0 && item.cmo_path == RM_CMO_PATH_NONE) ||
+                     (item.cmo_op == RM_CMO_OP_ZERO &&
+                      item.cmo_path inside {RM_CMO_PATH_CACHEABLE_ZERO, RM_CMO_PATH_UNCACHE_ZERO}) ||
+                     (item.cmo_op inside {RM_CMO_OP_CLEAN, RM_CMO_OP_FLUSH, RM_CMO_OP_INVAL} &&
+                      item.cmo_path == RM_CMO_PATH_DCACHE_CMO);
+        if (!(item.cmo_op inside {RM_CMO_OP_ZERO, RM_CMO_OP_CLEAN,
+                                  RM_CMO_OP_FLUSH, RM_CMO_OP_INVAL}) ||
+            item.cmo_op != rm_ls_decode_cmo_final_op(item.op) || !path_valid ||
+            item.cmo_permission_write != rm_ls_cmo_permission_is_write(item.cmo_op) ||
+            item.cmo_expect_flush_pipe != (item.cmo_op != RM_CMO_OP_ZERO) ||
+            item.cmo_has_data_effect != (item.cmo_op == RM_CMO_OP_ZERO) ||
+            item.store_data != '0 || item.size_bytes != 0 ||
+            (item.cmo_pre_access_exception != '0 &&
+             item.expected_exception != item.cmo_pre_access_exception)) begin
+            rec.error_code = RM_LS_ERR_CMO_CLASSIFICATION;
+            rec.detail = $sformatf("uid %0d invalid CMO final operation/data/permission/path", item.uid);
+        end else if (!actual.source_sta0 || !actual.is_final || actual.sample_seq == 0 ||
+                     actual.fu_op_type != item.op) begin
+            rec.error_code = RM_LS_ERR_CMO_COMPLETION_MISMATCH;
+            rec.detail = $sformatf("uid %0d lacks final owner-bound STA0 CMO result", item.uid);
+        end else if (!item.cmo_requests_validated ||
+                     item.cmo_request_watermark < actual.sample_seq ||
+                     (item.cmo_pre_access_exception != '0 && item.cmo_request_count != 0) ||
+                     (item.cmo_pre_access_exception == '0 &&
+                      (item.cmo_request_count == 0 || item.cmo_request_token == 0))) begin
+            rec.error_code = RM_LS_ERR_CMO_REQUEST_MISMATCH;
+            rec.detail = $sformatf("uid %0d CMO real request proof missing or inconsistent", item.uid);
+        end else if (!compare_arch_exception(item.expected_exception, actual.exception_vec,
+                                             1'b1, raw_match, cause_match) ||
+                     !compare_arch_exception(item.expected_exception, commit_exception,
+                                             1'b1, raw_match, cause_match)) begin
+            rec.error_code = RM_LS_ERR_EXCEPTION_MISMATCH;
+            rec.detail = $sformatf("uid %0d CMO exception expected=0x%0h STA0=0x%0h terminal=0x%0h",
+                                   item.uid, item.expected_exception, actual.exception_vec, commit_exception);
+        end else begin
+            fault_expected = item.expected_exception != '0;
+            if (actual.normal_pass == actual.fault_terminal ||
+                actual.fault_terminal != fault_expected ||
+                (!fault_expected && actual.flush_pipe !== item.cmo_expect_flush_pipe)) begin
+                rec.error_code = RM_LS_ERR_CMO_COMPLETION_MISMATCH;
+                rec.detail = $sformatf("uid %0d CMO normal/fault or flushPipe mismatch", item.uid);
+            end else if (item.cmo_pre_access_exception != '0) begin
+                if (item.cmo_segment_sent_mask != '0 || item.cmo_segment_write_mask != '0 ||
+                    item.cmo_segment_completed_mask != '0) begin
+                    rec.error_code = RM_LS_ERR_CMO_EFFECT_MISMATCH;
+                    rec.detail = "pre-access CMO fault cannot carry data requests/effects";
+                end
+            end else if (item.cmo_path == RM_CMO_PATH_CACHEABLE_ZERO) begin
+                if (fault_expected || item.cmo_request_count != 1 ||
+                    !rm_ls_apply_zero_line_effect(item)) begin
+                    rec.error_code = RM_LS_ERR_CMO_EFFECT_MISMATCH;
+                    rec.detail = "cacheable zero lacks one successful whole-line request";
+                end
+            end else if (item.cmo_path == RM_CMO_PATH_UNCACHE_ZERO) begin
+                if (item.cmo_request_count > 8 ||
+                    item.cmo_request_count != $countones(item.cmo_segment_sent_mask) ||
+                    !rm_ls_apply_uncache_zero_effect(item)) begin
+                    rec.error_code = RM_LS_ERR_CMO_EFFECT_MISMATCH;
+                    rec.detail = "Uncache zero lacks verified deterministic segment effects";
+                end
+            end else if (item.cmo_request_count != 1) begin
+                rec.error_code = RM_LS_ERR_CMO_REQUEST_MISMATCH;
+                rec.detail = "non-zero CMO requires one verified request chain";
+            end
+        end
+        if (rec.error_code != RM_LS_ERR_NONE) begin
+            set_error(rec.error_code, rec.detail);
+            history.push_back(rec);
+            return 1'b0;
+        end
+        item.cmo_completion_consumed = 1'b1;
+        last_consumed_cmo_actual = new();
+        last_consumed_cmo_actual.copy_from(actual);
+        pending_cmo_actual = null;
+        rec.compare_pass = 1'b1;
+        rec.detail = item.expected_exception == '0 ? "normal CMO match" : "fault CMO match with verified effects";
+        history.push_back(rec);
+        return 1'b1;
+    endfunction
+
     function bit commit(rm_ls_rob_key_t commit_rob,
                         bit [23:0] commit_exception = '0);
         rm_ls_program_item_t item;
@@ -1248,6 +1676,7 @@ class rm_ls_model_t;
             RM_LS_KIND_LOAD:   semantic_ok = compare_load(item, commit_exception);
             RM_LS_KIND_STORE:  semantic_ok = commit_store(item, commit_exception);
             RM_LS_KIND_ATOMIC: semantic_ok = commit_atomic(item, commit_exception);
+            RM_LS_KIND_CMO:    semantic_ok = rm_ls_commit_cmo(item, commit_exception);
             default: begin
                 semantic_ok = commit_exception == item.expected_exception;
                 if (!semantic_ok)
@@ -1259,8 +1688,14 @@ class rm_ls_model_t;
                         (last_error == RM_LS_ERR_LOAD_ACTUAL_NOT_READY ||
                          last_error == RM_LS_ERR_ATOMIC_WB_NOT_READY ||
                          last_error == RM_LS_ERR_TRANSLATION_NOT_READY ||
-                         last_error == RM_LS_ERR_ORIGINAL_L2_NOT_READY);
+                         last_error == RM_LS_ERR_ORIGINAL_L2_NOT_READY ||
+                         last_error == RM_LS_ERR_CMO_ACTUAL_NOT_READY ||
+                         last_error == RM_LS_ERR_CMO_OWNER_MISMATCH ||
+                         last_error == RM_LS_ERR_CMO_STALE_COMPLETION ||
+                         last_error == RM_LS_ERR_CMO_DUPLICATE_COMPLETION);
         if (wait_for_fact) return 0;
+        if (item.kind == RM_LS_KIND_CMO && pending_cmo_actual != null &&
+            pending_cmo_actual.uid == item.uid) pending_cmo_actual = null;
         current_uid++; consumed_commit_count++;
         return semantic_ok;
     endfunction
