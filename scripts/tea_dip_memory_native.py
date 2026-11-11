@@ -64,6 +64,12 @@ def analyze(folder, receipt_path):
     attempt_sum = sum(attempts.values()) if attempts else None
     if attempt_sum is not None and number(unavailable) is not None:
         assert attempt_sum <= number(unavailable), 'Main-pipe attempts exceed all non-primary-ready entry-time'
+    mainpipe = {name: scalar('.mainPipe.' + name, 'condition cycles') for name in [
+        'mainpipe_s2_miss_req', 'mainpipe_s2_block_penalty', 'mainpipe_s2_missqueue_replay',
+        'mainpipe_slot_conflict_1_2', 'mainpipe_slot_conflict_1_3', 'mainpipe_slot_conflict_2_3']}
+    for item in mainpipe.values():
+        if number(item) is not None:
+            assert 0 <= number(item) <= number(cycles), item
     ptw = {}
     for role, entry in [('load', 'load_filter_load_entry'), ('store', 'store_filter_store_entry'),
                         ('prefetch', 'prefetch_filter_prefetch_entry')]:
@@ -79,6 +85,7 @@ def analyze(folder, receipt_path):
                 ROB_head_load_wait=load_wait,
                 ROB_head_load_wait_per_retired=number(load_wait)/number(retired) if number(load_wait) is not None else None,
                 L2_sinkA_mshrFull=pressure,PTW=ptw,
+                L1_mainpipe_conditions=mainpipe,
                 L1_MQ_mainpipe_attempts=dict(entries=attempts, attempt_entry_cycles=attempt_sum,
                                              unavailable_entry_cycles=unavailable),
                 receipt_sha256=digest(receipt_path),native_log_sha256=digest(folder/'simulator_err.txt'),
@@ -91,7 +98,9 @@ def analyze(folder, receipt_path):
                       'cycles have different units. Absent/ambiguous counters remain unknown; '
                       'Main-pipe attempts count allocated-entry time after request acceptance through completion, replay or retry; '
                       'the old main_pipe_penalty is not consumed. Attempt sums are not disjoint CPU cycles '
-                      'or completed-request latency. These observations do not prove capacity, bandwidth '
+                      'or completed-request latency. S2 miss, missing-refill-info, replay and slot-conflict fields '
+                      'are overlapping condition cycles, not unique transactions or retries. These metrics '
+                      'do not observe valid-but-not-ready admission wait. These observations do not prove capacity, bandwidth '
                       'or a causal performance gain.')
 
 
