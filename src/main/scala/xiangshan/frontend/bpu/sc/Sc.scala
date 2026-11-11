@@ -321,6 +321,33 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     dontTouch(conf)
   }
 
+  // Keep speculative prediction opportunities separate from accepted training events.
+  private val scPredictionOppositionVec =
+    Wire(Vec(NumBtbResultEntries, Valid(new ScPredictionOppositionTrace(s2_totalPercsum.head.getWidth))))
+  scPredictionOppositionVec.zipWithIndex.foreach { case (trace, i) =>
+    val saturated = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
+    trace.valid := s2_fire && s2_hitMask(i) && s2_providerValid(i) && s2_sumAboveThres(i) && saturated &&
+      (s2_scPred(i) =/= s2_providerCtr(i).isPositive)
+    trace.bits.startPc       := s2_startPc
+    trace.bits.cfiPosition   := s2_mbtbResult(i).bits.cfiPosition
+    trace.bits.providerCtr   := s2_providerCtr(i).value
+    trace.bits.scPred        := s2_scPred(i)
+    trace.bits.useSc         := s2_useScPred(i)
+    trace.bits.sumMagnitude  := Mux(s2_scPred(i), s2_totalPercsum(i), -s2_totalPercsum(i)).asUInt
+    trace.bits.highThreshold := scThreshold(s2_wayIdx(i)).value >> 4
+  }
+  XSPerfAccumulate("diag_sc_prediction_opposition_events", PopCount(scPredictionOppositionVec.map(_.valid)))
+  private val scPredictionOppositionDBTables = (0 until NumBtbResultEntries).map { i =>
+    ChiselDB.createTable(
+      s"scPredictionOpposition_${i}",
+      new ScPredictionOppositionTrace(s2_totalPercsum.head.getWidth),
+      basicDB = true
+    )
+  }
+  scPredictionOppositionDBTables.zip(scPredictionOppositionVec).foreach { case (dbTable, trace) =>
+    dbTable.log(data = trace.bits, en = trace.valid, clock = clock, reset = reset)
+  }
+
   io.scTakenMask := s2_scPred
   io.scUsed      := s2_useScPred
 

@@ -144,3 +144,14 @@ class ScMatchedConditionalTrace(implicit p: Parameters) extends ScBundle with Ha
   val mispredict:       Bool = Bool()
   val trainingEligible: Bool = Bool()
 }
+
+// Prediction-stage opportunities, before any SC selection policy suppresses useSc.
+class ScPredictionOppositionTrace(sumWidth: Int)(implicit p: Parameters) extends ScBundle with HasScParameters {
+  val startPc:       Pc   = Pc()
+  val cfiPosition:   UInt = UInt(CfiPositionWidth.W)
+  val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
+  val scPred:        Bool = Bool()
+  val useSc:         Bool = Bool()
+  val sumMagnitude:  UInt = UInt(sumWidth.W)
+  val highThreshold: UInt = UInt(ThresholdWidth.W)
+}
