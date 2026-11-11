@@ -192,12 +192,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   io.mtrack.s1_valid := s1_fire && !s1_nack && !io.lsu.s1_kill
-  val s1_spec_candidate = io.specmiss.valid && io.specmiss.candidate && !io.mshr_full &&
-    s1_fire && !s1_nack && !io.lsu.s1_kill
-  io.spec_query.req.valid := s1_spec_candidate
-  io.spec_query.req.bits.vaddr := s1_vaddr
-  io.spec_query.req.bits.paddr := s1_paddr_dup_dcache
-  io.spec_query.req.bits.pc := io.lsu.s1_pc
   s1_ready := !s1_valid || s1_fire
 
   when (s0_fire) { s1_valid := true.B }
@@ -317,6 +311,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.spec_query.req.bits.grow := ClientMetadata.onReset.onAccess(s1_req.cmd)._2
   val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
+
+  // Oracle experiment: use the accurate all-way S1 tag result instead of
+  // MissTrack's prediction, ignoring timing. Preserve the original load scope
+  // and resource checks; the existing SpecMiss path only commits tag misses.
+  val s1_spec_candidate = cfg.enMissTrack.B && !s1_load128Req &&
+    s1_req.cmd === MemoryOpConstants.M_XRD && s1_req.instrtype === LOAD_SOURCE.U &&
+    !s1_tag_match_dup_dc && !io.mshr_full &&
+    s1_fire && !s1_nack && !io.lsu.s1_kill
+  io.spec_query.req.valid := s1_spec_candidate
+  io.spec_query.req.bits.vaddr := s1_vaddr
+  io.spec_query.req.bits.paddr := s1_paddr_dup_dcache
+  io.spec_query.req.bits.pc := io.lsu.s1_pc
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
