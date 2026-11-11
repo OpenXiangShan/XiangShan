@@ -9,6 +9,10 @@
 `define OTHER_CTRL_AGENT_AGENT_XACTION__SV
 
 class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
+    // 中文注释：monitor专属采样身份，不参与driver随机化；空通知批次也推进水位。
+    longint unsigned sample_seq;
+    int unsigned reset_epoch;
+    bit reset_active;
     rand bit [5:0] io_hartId           ;
     rand bit io_dcacheError_ecc_error_valid;
     rand bit [47:0] io_dcacheError_ecc_error_bits;
@@ -53,6 +57,9 @@ class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
     extern function bit compare(uvm_object rhs, uvm_comparer comparer=null);
 
     `uvm_object_utils_begin(other_ctrl_agent_agent_xaction)
+        `uvm_field_int(sample_seq, UVM_ALL_ON);
+        `uvm_field_int(reset_epoch, UVM_ALL_ON);
+        `uvm_field_int(reset_active, UVM_ALL_ON);
         `uvm_field_int(io_hartId, UVM_ALL_ON);
         `uvm_field_int(io_dcacheError_ecc_error_valid, UVM_ALL_ON);
         `uvm_field_int(io_dcacheError_ecc_error_bits, UVM_ALL_ON);

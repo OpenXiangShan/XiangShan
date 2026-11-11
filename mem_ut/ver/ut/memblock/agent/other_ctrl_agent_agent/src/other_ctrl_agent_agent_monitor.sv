@@ -92,29 +92,26 @@ task other_ctrl_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_reset_backend,io_reset_backend,1);
 
         end
-        //if(xxxTODOxxx==1'b1) begin
-        //    mon_tr = other_ctrl_agent_agent_xaction::type_id::create("mon_tr");
-        //    mon_tr.io_hartId = io_hartId;
-        //    mon_tr.io_dcacheError_ecc_error_valid = io_dcacheError_ecc_error_valid;
-        //    mon_tr.io_dcacheError_ecc_error_bits = io_dcacheError_ecc_error_bits;
-        //    mon_tr.io_uncacheError_ecc_error_valid = io_uncacheError_ecc_error_valid;
-        //    mon_tr.io_uncacheError_ecc_error_bits = io_uncacheError_ecc_error_bits;
-        //    mon_tr.io_inner_reset_vector = io_inner_reset_vector;
-        //    mon_tr.io_outer_reset_vector = io_outer_reset_vector;
-        //    mon_tr.io_outer_l2_flush_en = io_outer_l2_flush_en;
-        //    mon_tr.io_outer_power_down_en = io_outer_power_down_en;
-        //    mon_tr.io_outer_cpu_critical_error = io_outer_cpu_critical_error;
-        //    mon_tr.io_outer_msi_ack = io_outer_msi_ack;
-        //    mon_tr.io_inner_beu_errors_icache_ecc_error_valid = io_inner_beu_errors_icache_ecc_error_valid;
-        //    mon_tr.io_inner_beu_errors_icache_ecc_error_bits = io_inner_beu_errors_icache_ecc_error_bits;
-        //    mon_tr.io_outer_beu_errors_icache_ecc_error_valid = io_outer_beu_errors_icache_ecc_error_valid;
-        //    mon_tr.io_outer_beu_errors_icache_ecc_error_bits = io_outer_beu_errors_icache_ecc_error_bits;
-        //    mon_tr.io_reset_backend = io_reset_backend;
-
-        //    mon_tr.channel_id = this.cfg.channel_id;
-        //    mon_tr.unpack();
-        //    this.mon_item_port.write(mon_tr);
-        //end
+        // 中文注释：只发布Uncache通知和采样水位；同地址连续valid逐拍保留，不按地址去重。
+        mon_tr = other_ctrl_agent_agent_xaction::type_id::create("uncache_error_sample");
+        if(this.vif.rst_n===1'b1 && memblock_sync_pkg::reset_backend_done===1'b1 &&
+           ($isunknown(io_uncacheError_ecc_error_valid) ||
+            (io_uncacheError_ecc_error_valid===1'b1 && $isunknown(io_uncacheError_ecc_error_bits))))
+            `uvm_error("UNCACHE_ERROR_NOTIFICATION_XZ","Uncache通知valid或有效地址包含X/Z")
+        mon_tr.io_uncacheError_ecc_error_valid = io_uncacheError_ecc_error_valid === 1'b1;
+        mon_tr.io_uncacheError_ecc_error_bits = io_uncacheError_ecc_error_bits;
+        mon_tr.reset_active = this.vif.rst_n !== 1'b1 ||
+            memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+            memblock_sync_pkg::l2tlb_reset_active();
+        if (mon_tr.reset_active) begin
+            mon_tr.sample_seq = memblock_sync_pkg::dut_sample_seq;
+            mon_tr.io_uncacheError_ecc_error_valid = 0;
+        end else begin
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time,mon_tr.sample_seq);
+        end
+        mon_tr.reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        mon_tr.channel_id = this.cfg.channel_id;
+        this.mon_item_port.write(mon_tr);
     end
 endtask:mon_data
 

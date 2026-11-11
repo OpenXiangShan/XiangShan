@@ -14,6 +14,46 @@ package memblock_sync_pkg;
 
     import uvm_pkg::*;
 
+    // 抽象职责：保存每个真实DUT采样的错误控制输入；RM按消费时间读取，
+    // 不从最终异常反推门控。CSR monitor是唯一发布者，复位清除当前代记录。
+    typedef struct packed {
+        bit valid;
+        bit enable;
+        int unsigned reset_epoch;
+        longint unsigned sample_seq;
+    } memblock_cache_error_control_t;
+    memblock_cache_error_control_t cache_error_control_by_sample[longint unsigned];
+
+    function void reset_cache_error_control();
+        cache_error_control_by_sample.delete();
+    endfunction
+
+    function void publish_cache_error_control(input longint unsigned sample_seq,
+                                              input int unsigned reset_epoch,
+                                              input logic enable);
+        memblock_cache_error_control_t record;
+        if (sample_seq == 0 || $isunknown(enable)) begin
+            `uvm_error("RM_CACHE_ERROR_CONTROL", "cache_error_enable缺少有效采样身份或含X/Z")
+            return;
+        end
+        record = '{valid:1'b1, enable:enable, reset_epoch:reset_epoch,
+                   sample_seq:sample_seq};
+        if (cache_error_control_by_sample.exists(sample_seq) &&
+            cache_error_control_by_sample[sample_seq] !== record) begin
+            `uvm_error("RM_CACHE_ERROR_CONTROL", "同一sample错误控制输入被重复改写")
+            return;
+        end
+        cache_error_control_by_sample[sample_seq] = record;
+    endfunction
+
+    function bit read_cache_error_control(input longint unsigned sample_seq,
+                                          output memblock_cache_error_control_t record);
+        record = '0;
+        if (!cache_error_control_by_sample.exists(sample_seq)) return 0;
+        record = cache_error_control_by_sample[sample_seq];
+        return record.valid;
+    endfunction
+
     // 中文注释：跨 agent/sequence 的硬 X/Z 诊断运行时镜像。
     // 设置：seq_csr_common 在 testcase build 期冻结 plus 后写入；读取：先于 seq_pkg 编译的
     // agent 通过本包查询。为 0 时不执行非通用 xz_sw 的诊断，为 1 时统一只报告 UVM_ERROR。

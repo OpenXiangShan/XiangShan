@@ -340,6 +340,7 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             // CSR monitor owns publication of the shared L2TLB reset boundary.
             // Direct owners consume the frozen epoch later; they do not infer
             // reset from their local queue or a stale sequence item.
+            memblock_sync_pkg::reset_cache_error_control();
             memblock_sync_pkg::begin_l2tlb_runtime_reset();
             reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
             memblock_sync_pkg::reset_l2tlb_csr_runtime_state(reset_epoch);
@@ -366,6 +367,9 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             // CSR monitor is the sole writer of the DUT global sample. All
             // other same-edge producers anchor to this value and only peek.
             current_sample_seq = memblock_sync_pkg::advance_dut_global_sample($time);
+            memblock_sync_pkg::publish_cache_error_control(
+                current_sample_seq, memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+                io_ooo_to_mem_csrCtrl_cache_error_enable);
             raw_csr = memblock_sync_pkg::make_empty_raw_csr();
             raw_csr.valid             = 1'b1;
             raw_csr.satp_mode         = io_ooo_to_mem_tlbCsr_satp_mode;
