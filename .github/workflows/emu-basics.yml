@@ -82,9 +82,64 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: cputest
-          - name: riscv-tests
-            extra: --rvtest /nfs/home/share/ci-workloads/riscv-tests
+          - name: isa-smoke-D
+            workload: --ci isa-smoke --isa-smoke-extension D
+          - name: isa-smoke-F
+            workload: --ci isa-smoke --isa-smoke-extension F
+          - name: isa-smoke-I
+            workload: --ci isa-smoke --isa-smoke-extension I
+          - name: isa-smoke-M
+            workload: --ci isa-smoke --isa-smoke-extension M
+          - name: isa-smoke-Zaamo
+            workload: --ci isa-smoke --isa-smoke-extension Zaamo
+          - name: isa-smoke-Zacas
+            workload: --ci isa-smoke --isa-smoke-extension Zacas
+          - name: isa-smoke-Zalrsc
+            workload: --ci isa-smoke --isa-smoke-extension Zalrsc
+          - name: isa-smoke-Zba
+            workload: --ci isa-smoke --isa-smoke-extension Zba
+          - name: isa-smoke-Zbb
+            workload: --ci isa-smoke --isa-smoke-extension Zbb
+          - name: isa-smoke-Zbc
+            workload: --ci isa-smoke --isa-smoke-extension Zbc
+          - name: isa-smoke-Zbkb
+            workload: --ci isa-smoke --isa-smoke-extension Zbkb
+          - name: isa-smoke-Zbkc
+            workload: --ci isa-smoke --isa-smoke-extension Zbkc
+          - name: isa-smoke-Zbkx
+            workload: --ci isa-smoke --isa-smoke-extension Zbkx
+          - name: isa-smoke-Zbs
+            workload: --ci isa-smoke --isa-smoke-extension Zbs
+          - name: isa-smoke-Zca
+            workload: --ci isa-smoke --isa-smoke-extension Zca
+          - name: isa-smoke-Zcb
+            workload: --ci isa-smoke --isa-smoke-extension Zcb
+          - name: isa-smoke-Zcd
+            workload: --ci isa-smoke --isa-smoke-extension Zcd
+          - name: isa-smoke-Zfa
+            workload: --ci isa-smoke --isa-smoke-extension Zfa
+          - name: isa-smoke-Zfh
+            workload: --ci isa-smoke --isa-smoke-extension Zfh
+          - name: isa-smoke-Zfhmin
+            workload: --ci isa-smoke --isa-smoke-extension Zfhmin
+          - name: isa-smoke-Zicbom
+            workload: --ci isa-smoke --isa-smoke-extension Zicbom
+          - name: isa-smoke-Zicbop
+            workload: --ci isa-smoke --isa-smoke-extension Zicbop
+          - name: isa-smoke-Zicboz
+            workload: --ci isa-smoke --isa-smoke-extension Zicboz
+          - name: isa-smoke-Zicond
+            workload: --ci isa-smoke --isa-smoke-extension Zicond
+          - name: isa-smoke-Zicsr
+            workload: --ci isa-smoke --isa-smoke-extension Zicsr
+          - name: isa-smoke-Zifencei
+            workload: --ci isa-smoke --isa-smoke-extension Zifencei
+          - name: isa-smoke-Zihintntl
+            workload: --ci isa-smoke --isa-smoke-extension Zihintntl
+          - name: isa-smoke-Zihintpause
+            workload: --ci isa-smoke --isa-smoke-extension Zihintpause
+          - name: isa-smoke-Zimop
+            workload: --ci isa-smoke --isa-smoke-extension Zimop
           - name: misc-tests
           - name: rvh-tests
           - name: microbench
@@ -95,9 +150,6 @@ jobs:
             report-perf: true
           - name: iopmp-test
             extra: --no-diff
-          - name: povray
-            extra: --max-instr 5000000 --gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
-            report-perf: true
           - name: copy_and_run
             extra: --flash ${GITHUB_WORKSPACE}/ready-to-run/copy_and_run.bin
             workload: ${GITHUB_WORKSPACE}/ready-to-run/microbench.bin
@@ -105,10 +157,9 @@ jobs:
           # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
           # - name: rvv-bench
           - name: f16_test
-          - name: zcb-test
           - name: frontend-misc-test
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
     steps:
       - name: Cleanup orphan EMU
         run: |

@@ -23,7 +23,8 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobLsqIO
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
