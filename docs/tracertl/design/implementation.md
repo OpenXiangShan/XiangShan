@@ -25,7 +25,7 @@ TraceRTL has four parts. Arrows show who calls whom during a simulation cycle.
 ```
  XiangShan RTL (elaborated with --trace-rtl)              TraceRTL submodule (C++)
  ────────────────────────────────────────────            ─────────────────────────────────────
- frontend/tracertl/*.scala                                src/test/csrc/xiangshan/main.cpp
+ tracertl/*.scala                                         src/test/csrc/xiangshan/main.cpp
    TraceRTL (inside Ifu)                                    emu main loop: prepare_read → tick
      TraceReader ─────── TraceReaderHelper ──DPI──▶          → check_commit / check_drive
      TraceAlignParallel  TraceRedirectHelper ─DPI──▶
@@ -42,7 +42,7 @@ TraceRTL has four parts. Arrows show who calls whom during a simulation cycle.
 
 | Part | Where | Role |
 | --- | --- | --- |
-| Trace frontend | `src/main/scala/xiangshan/frontend/tracertl/` | builds IFU packets from the trace |
+| Trace frontend | `src/main/scala/xiangshan/tracertl/` | builds IFU packets from the trace |
 | Hooks | about 40 files across `frontend/`, `backend/`, `mem/`, `cache/mmu/` | carry `traceInfo` and use the traced values |
 | DPI boundary | `tracertl/TraceHelper.scala` | ExtModules with an inline SV DPI-C body (Verilator) and a C++ body (GSIM) |
 | Runtime | `TraceRTL/src/test/csrc/tracertl/` | loads the trace, serves reads and rewinds, translates addresses, checks the DUT |

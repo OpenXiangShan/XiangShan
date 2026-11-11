@@ -68,7 +68,7 @@ import xiangshan.frontend.icache.ICache
 import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
 import xiangshan.frontend.simfrontend.SimFrontendInlinedImp
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 
 class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val hartId:       UInt             = Input(UInt(hartIdLen.W))

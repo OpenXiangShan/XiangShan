@@ -21,7 +21,7 @@ import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.CSRs
-import xiangshan.frontend.tracertl.{TraceInfo, TraceRTLChoose}
+import xiangshan.tracertl.{TraceInfo, TraceRTLChoose}
 
 import scala.collection.immutable.SeqMap
 

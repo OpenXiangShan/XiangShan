@@ -44,9 +44,9 @@ import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
-import xiangshan.frontend.tracertl.TraceAlignedFetch
-import xiangshan.frontend.tracertl.TraceRTL
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceAlignedFetch
+import xiangshan.tracertl.TraceRTL
+import xiangshan.tracertl.TraceRTLChoose
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with PreDecodeHelper

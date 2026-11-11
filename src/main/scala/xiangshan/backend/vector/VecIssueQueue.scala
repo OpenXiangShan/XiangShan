@@ -18,7 +18,7 @@ import xiangshan.backend.issue.{AgeDetector, NewAgeDetector}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue._
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 import xiangshan.mem.SqPtr
 
 

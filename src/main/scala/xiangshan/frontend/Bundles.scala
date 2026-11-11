@@ -49,7 +49,7 @@ import xiangshan.frontend.icache.WayLookupBundle
 import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.tracertl.TraceInstrBundle
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)

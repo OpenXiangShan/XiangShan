@@ -35,7 +35,7 @@ import xiangshan.backend.rob.{Rob, RobPtr}
 import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
-import xiangshan.frontend.tracertl.TraceRTLDontCareValue
+import xiangshan.tracertl.TraceRTLDontCareValue
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._

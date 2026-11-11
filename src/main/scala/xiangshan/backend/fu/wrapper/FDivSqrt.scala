@@ -10,7 +10,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpNonPipedFuncUnit
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.fu.{FltFixLatFunc, FltNonFixedLatFunc, VecFuConfig}
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 import yunsuan.fpu.FloatDivider
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit(cfg) {
