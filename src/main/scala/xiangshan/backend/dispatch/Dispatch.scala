@@ -775,6 +775,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isWaitForward    = VecInit(fromRename.map(x => x.valid && x.bits.waitForward))
 
   val updatedUop = Wire(Vec(RenameWidth, new RenameOutUop))
+  private val perfTimer = Option.when(backendParams.debugEn)(GTimer())
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     fromRename(i).fire
@@ -785,6 +786,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     updatedUop(i) := fromRename(i).bits
     updatedUop(i).debug.foreach { debug => debug.perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove}
+    updatedUop(i).debug.foreach(_.perfDebugInfo.dispatchTime := perfTimer.get)
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U

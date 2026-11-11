@@ -597,7 +597,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         // Keep the first instruction metadata in each rob-half for difftest/debug.
         debug_microOp(enqIndex)(subIndex) := enqUop
         debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
-          debug.perfDebugInfo.dispatchTime := timer
+          // Preserve dispatchTime from before the registered ROB input.
           debug.perfDebugInfo.enqRsTime := timer
           debug.perfDebugInfo.selectTime := timer
           debug.perfDebugInfo.issueTime := timer
@@ -606,7 +606,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           debug.perfDebugInfo.tlbRespTime := timer
         }
         when(enqUop.robIdx.isFormer) {
-          robEntries(enqIndex).perfDebugInfo.foreach(_.dispatchTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.dispatchTime := enqUop.debug.get.perfDebugInfo.dispatchTime)
           robEntries(enqIndex).perfDebugInfo.foreach(_.enqRsTime := timer)
           robEntries(enqIndex).perfDebugInfo.foreach(_.selectTime := timer)
           robEntries(enqIndex).perfDebugInfo.foreach(_.issueTime := timer)
