@@ -506,7 +506,9 @@ class InterruptFilter extends Module {
     }
   }.reverse)
 
-  val vsMapHostIRVec = OHToUInt(vsMapHostIRVecTmp)
+  val viIsHvictlInjectWire = WireInit(false.B)
+
+  val vsMapHostIRVec = Mux(viIsHvictlInjectWire, vsIRVecTmp, OHToUInt(vsMapHostIRVecTmp))
 
   dontTouch(vsMapHostIRVec)
 
@@ -540,9 +542,10 @@ class InterruptFilter extends Module {
                          C1C5EnableReg && ((!C2C5IsZero && (iprioC1 > iprioC2C5 || (iprioC1 === iprioC2C5) && !hvictlReg.DPR.asBool)) ||
                                            (C2C5IsZero && !hvictlReg.DPR.asBool)) ||
                          C3C5EnableReg && (!C2C5IsZero || !hvictlReg.DPR.asBool)
+  viIsHvictlInjectWire := irToVS && vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
-  val intrVecReg = RegInit(0.U(8.W))
+  val intrVecReg = RegInit(0.U(12.W))
   val debugIntrReg = RegInit(false.B)
   val nmiReg = RegInit(false.B)
   val viIsHvictlInjectReg = RegInit(false.B)
@@ -551,7 +554,7 @@ class InterruptFilter extends Module {
   intrVecReg := intrVec
   debugIntrReg := enableDebugIntr
   nmiReg := io.in.nmi
-  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
+  viIsHvictlInjectReg := viIsHvictlInjectWire
   irToHSReg := irToHS
   irToVSReg := irToVS
   val delayedIntrVec = DelayN(intrVecReg, 5)
@@ -625,7 +628,7 @@ class InterruptFilterIO extends Bundle {
   val out = Output(new Bundle {
     val debug = Bool()
     val nmi = Bool()
-    val interruptVec = ValidIO(UInt(8.W))
+    val interruptVec = ValidIO(UInt(12.W))
     val mtopi  = new TopIBundle
     val stopi  = new TopIBundle
     val vstopi = new TopIBundle
