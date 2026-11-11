@@ -30,7 +30,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
-import xiangshan.frontend.tracertl.{TraceFakeDynPageTable, TraceFakeSatpPpn}
+import xiangshan.tracertl.{TraceFakeDynPageTable, TraceFakeSatpPpn}
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   override def shouldBeInlined: Boolean = false

@@ -13,26 +13,26 @@
  *
  * See the Mulan PSL v2 for more details.
  * ************************************************************************************* */
-package xiangshan.frontend.tracertl
+package xiangshan.tracertl
 
-import org.chipsalliance.cde.config.Field
+import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.DebugOptionsKey
 
-case object TraceRTLParamKey extends Field[TraceRTLParameters]
+object TraceRTLChoose {
+  // By-name so trace-only operands (e.g. traceInfo.get) are never elaborated in execution mode.
+  def apply[T <: Data](default: => T, trtl: => T)(implicit p: Parameters): T =
+    if (p(DebugOptionsKey).TraceRTLMode) trtl else default
+}
 
-case class TraceRTLParameters(
-    // Core widths
-    TracePredictWidth: Int = 32, // 64B IFU fetch block in 2-byte instruction slots
-    TraceFetchWidth:   Int = 32, // batch read size from DPI-C per refill
+object TraceRTLDontCareValue {
+  def apply[T <: Data](default: T)(implicit p: Parameters): T =
+    TraceRTLChoose(default, 0.U.asTypeOf(default))
+}
 
-    // Trace data field widths
-    TraceVAddrWidth:    Int = 50, // virtual address width
-    TracePAddrWidth:    Int = 48, // physical address width
-    TraceInstCodeWidth: Int = 32, // instruction code width
-    TraceInstIDWidth:   Int = 64, // instruction ID width
-
-    // Control flags
-    TraceOverrideTarget: Boolean = true // use trace target instead of PC+offset for branch targets
-) {
-  def TraceBufferSize = TraceFetchWidth * 4 // 64-entry circular buffer
+/** Per-instruction trace payload carried through the pipeline; absent in execution mode. */
+object TraceInfo {
+  def apply()(implicit p: Parameters): Option[TraceInstrBundle] =
+    Option.when(p(DebugOptionsKey).TraceRTLMode)(new TraceInstrBundle)
 }

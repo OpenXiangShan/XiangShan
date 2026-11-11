@@ -28,7 +28,7 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters

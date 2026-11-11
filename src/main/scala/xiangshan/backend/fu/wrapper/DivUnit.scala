@@ -7,7 +7,7 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.DIVOpType
 import xiangshan.backend.fu.{FuncUnit, MulDivCtrl, SRT16DividerDataModule}
 import xiangshan.backend.fu.FuConfig
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 
 class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 

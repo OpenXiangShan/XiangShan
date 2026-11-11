@@ -19,7 +19,7 @@ import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => Ve
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import xiangshan._
 import yunsuan.vector.Common.{SewOH, VSew, _}

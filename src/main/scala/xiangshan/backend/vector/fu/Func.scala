@@ -12,7 +12,7 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import yunsuan.vector.Common.Fflags
 

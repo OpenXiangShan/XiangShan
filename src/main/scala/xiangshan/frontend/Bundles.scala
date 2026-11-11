@@ -46,7 +46,7 @@ import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.MainPipeToIfuReq
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.tracertl.TraceInstrBundle
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)

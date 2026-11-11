@@ -31,8 +31,8 @@ import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.tracertl.TraceInfo
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInstrBundle
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes

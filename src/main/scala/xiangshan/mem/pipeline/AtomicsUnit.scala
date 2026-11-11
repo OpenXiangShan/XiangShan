@@ -34,7 +34,7 @@ import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants, TLError}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 import difftest._
 
 class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
