@@ -40,6 +40,9 @@ typedef struct packed {
     logic                debug_is_mmio;
     logic                debug_is_ncio;
     logic                debug_is_perf_cnt;
+    bit                  owner_valid;
+    memblock_uid_t       owner_uid;
+    int unsigned         owner_dynamic_epoch;
     int unsigned         sample_flush_epoch;
     longint unsigned     sample_seq;
     longint unsigned     sample_cycle;
@@ -58,6 +61,21 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
     bit running;
     bit previous_reset_backend_done;
     writeback_record_q_t writeback_history_q;
+    // STA0按ROB key索引，CMO查询不逐次扫描所有Load/Store写回历史。
+    writeback_record_q_t sta0_history_by_rob[bit [MEMBLOCK_ROB_VALUE_W:0]];
+    // 已被RM唯一消费的CMO终态摘要，仅按物理ROB key索引；复用时由live owner优先替换。
+    typedef struct packed {
+        bit valid;
+        writeback_record_t completion;
+        memblock_sq_key_t sq;
+        int unsigned sta_issue_epoch;
+        int unsigned replay_seq;
+        int unsigned instance_flush_epoch;
+        bit [8:0] fu_op_type;
+        bit late_normal_seen;
+    } cmo_terminal_audit_t;
+    cmo_terminal_audit_t cmo_terminal_by_rob[bit [MEMBLOCK_ROB_VALUE_W:0]];
+    int unsigned cmo_late_error_count;
     longint unsigned writeback_count;
     longint unsigned unknown_valid_count;
 
@@ -87,6 +105,8 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
 
     function void clear_history();
         writeback_history_q.delete();
+        sta0_history_by_rob.delete();
+        cmo_terminal_by_rob.delete(); cmo_late_error_count=0;
         writeback_count = 0;
         unknown_valid_count = 0;
     endfunction:clear_history
@@ -297,16 +317,135 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         return 1'b1;
     endfunction:sample_lane
 
+    virtual function void report_cmo_audit_error(input string detail);
+        cmo_late_error_count++;
+        `uvm_error("RM_CMO_LATE_COMPLETION",detail)
+    endfunction
+
+    // 抽象职责：仅RM成功消费后冻结终态身份；后续写回增量检查不再依赖程序cursor重访该UID。
+    function bit mark_cmo_completion_consumed(input writeback_record_t completion);
+        common_data_transaction data;
+        main_control_transaction main_tr;
+        status_transaction status_v;
+        cmo_terminal_audit_t terminal_v;
+        bit [MEMBLOCK_ROB_VALUE_W:0] key;
+        int unsigned instance_flush;
+        data=common_data_transaction::m_inst;
+        if(!completion.valid || !completion.owner_valid || completion.source_kind!=RM_WB_SOURCE_STA ||
+           completion.lane!=0 || !completion.exception_valid || !completion.rob_flag_valid || data==null ||
+           !data.is_valid_uid(completion.owner_uid)) return 0;
+        status_v=data.get_status(completion.owner_uid); main_tr=data.get_main_transaction(completion.owner_uid);
+        if(status_v==null || main_tr==null || main_tr.op_class!=MEMBLOCK_OP_CLASS_CBO ||
+           status_v.dynamic_epoch!=completion.owner_dynamic_epoch ||
+           status_v.get_rob_key()!=memblock_rob_key_t'{flag:completion.rob_flag,value:completion.rob_value}) return 0;
+        if(!status_v.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,instance_flush)) begin
+            if(!status_v.active_instance_flush_epoch_valid) return 0;
+            instance_flush=status_v.active_instance_flush_epoch;
+        end
+        key={completion.rob_flag,completion.rob_value};
+        if(cmo_terminal_by_rob.exists(key) &&
+           cmo_terminal_by_rob[key].completion.owner_uid==completion.owner_uid &&
+           cmo_terminal_by_rob[key].completion.owner_dynamic_epoch==completion.owner_dynamic_epoch) return 0;
+        terminal_v='0; terminal_v.valid=1; terminal_v.completion=completion;
+        terminal_v.sq='{flag:status_v.sqIdx_flag,value:status_v.sqIdx_value}; terminal_v.sta_issue_epoch=status_v.sta_issue_epoch;
+        terminal_v.replay_seq=status_v.replay_seq; terminal_v.instance_flush_epoch=instance_flush;
+        terminal_v.fu_op_type=main_tr.fuOpType;
+        cmo_terminal_by_rob[key]=terminal_v;
+        // 注册只发生一次：补查该ROB在RM排到此UID之前已采到的尾拍，避免程序cursor较慢漏审。
+        if(sta0_history_by_rob.exists(key)) begin
+            foreach(sta0_history_by_rob[key][i])
+                if(sta0_history_by_rob[key][i].sample_seq>completion.sample_seq)
+                    audit_cmo_sta0(sta0_history_by_rob[key][i]);
+        end
+        return 1;
+    endfunction
+
+    // 抽象职责：对已消费CMO后的真实STA0逐事件检查。fault后的唯一normal尾拍不算第二次架构完成，
+    // 但必须重用框架已有的完整终态provenance，第二fault/第二normal均报错。
+    function void audit_cmo_sta0(input writeback_record_t record);
+        common_data_transaction data;
+        cmo_terminal_audit_t terminal_v;
+        status_transaction status_v;
+        main_control_transaction main_tr;
+        memblock_uid_t live_uid;
+        memblock_rob_key_t rob_key;
+        bit [MEMBLOCK_ROB_VALUE_W:0] key;
+        int unsigned instance_flush;
+        if(!record.valid || record.source_kind!=RM_WB_SOURCE_STA || record.lane!=0 ||
+           !record.rob_flag_valid) return;
+        key={record.rob_flag,record.rob_value};
+        if(!cmo_terminal_by_rob.exists(key)) return;
+        terminal_v=cmo_terminal_by_rob[key];
+        if(record.sample_seq<=terminal_v.completion.sample_seq) return;
+        data=common_data_transaction::m_inst;
+        rob_key='{flag:record.rob_flag,value:record.rob_value};
+        if(record.owner_valid && (record.owner_uid!=terminal_v.completion.owner_uid ||
+           record.owner_dynamic_epoch!=terminal_v.completion.owner_dynamic_epoch)) begin
+            cmo_terminal_by_rob.delete(key); return;
+        end
+        if(data!=null && data.lookup_active_uid_by_rob(rob_key,live_uid)) begin
+            status_v=data.get_status(live_uid);
+            if(live_uid!=terminal_v.completion.owner_uid || status_v==null ||
+               status_v.dynamic_epoch!=terminal_v.completion.owner_dynamic_epoch) begin
+                // 真实ROB复用已明确新owner；新动态实例优先，不误判旧终态重复。
+                cmo_terminal_by_rob.delete(key); return;
+            end
+        end
+        if(terminal_v.completion.exception_vec!=0 && record.exception_valid &&
+           record.exception_vec===24'b0 && !terminal_v.late_normal_seen && data!=null &&
+           !data.lookup_active_uid_by_rob(rob_key,live_uid) &&
+           data.is_valid_uid(terminal_v.completion.owner_uid)) begin
+            status_v=data.get_status(terminal_v.completion.owner_uid);
+            main_tr=data.get_main_transaction(terminal_v.completion.owner_uid);
+            if(status_v!=null && main_tr!=null && !status_v.active && status_v.terminal_done &&
+               status_v.fault && status_v.sta_fault && status_v.sta_writeback &&
+               status_v.dynamic_epoch==terminal_v.completion.owner_dynamic_epoch &&
+               status_v.get_rob_key()==rob_key && status_v.sqIdx_flag==terminal_v.sq.flag &&
+               status_v.sqIdx_value==terminal_v.sq.value &&
+               status_v.sta_issue_epoch==terminal_v.sta_issue_epoch && status_v.replay_seq==terminal_v.replay_seq &&
+               status_v.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,instance_flush) &&
+               instance_flush==terminal_v.instance_flush_epoch && main_tr.op_class==MEMBLOCK_OP_CLASS_CBO &&
+               main_tr.fuOpType==terminal_v.fu_op_type && status_v.exception_vec!=0 &&
+               record.sample_flush_epoch>=terminal_v.completion.sample_flush_epoch &&
+               record.sample_flush_epoch==memblock_sync_pkg::dispatch_flush_epoch) begin
+                terminal_v.late_normal_seen=1; cmo_terminal_by_rob[key]=terminal_v; return;
+            end
+        end
+        report_cmo_audit_error($sformatf(
+            "已消费CMO收到非法重复STA0 uid=%0d epoch=%0d rob=%0d/%0d terminal=%0d duplicate=%0d exception=0x%0h",
+            terminal_v.completion.owner_uid,terminal_v.completion.owner_dynamic_epoch,
+            record.rob_flag,record.rob_value,terminal_v.completion.sample_seq,record.sample_seq,record.exception_vec));
+    endfunction
+
     function void sample_and_enqueue(input bit [1:0] source_kind,
                                      input int unsigned lane);
         writeback_record_t record;
+        common_data_transaction owner_data;
+        memblock_rob_map_key_t owner_key;
+        memblock_uid_t owner_uid;
         if (sample_lane(source_kind, lane, record)) begin
+            // 采样当拍冻结动态owner，ROB环绕或同flush epoch复用不能冒充旧STA0。
+            owner_data=common_data_transaction::m_inst;
+            owner_key={record.rob_flag,record.rob_value};
+            if(record.rob_valid && record.rob_flag_valid && owner_data!=null &&
+               owner_data.uid_by_active_rob.exists(owner_key)) begin
+                owner_uid=owner_data.uid_by_active_rob[owner_key];
+                if(owner_data.is_valid_uid(owner_uid) && owner_data.status_by_uid[owner_uid]!=null) begin
+                    record.owner_valid=1; record.owner_uid=owner_uid;
+                    record.owner_dynamic_epoch=owner_data.status_by_uid[owner_uid].dynamic_epoch;
+                end
+            end
+            audit_cmo_sta0(record);
             writeback_history_q.push_back(record);
+            if (record.source_kind == RM_WB_SOURCE_STA && record.lane == 0 &&
+                record.rob_valid && record.rob_flag_valid)
+                sta0_history_by_rob[{record.rob_flag, record.rob_value}].push_back(record);
             writeback_count++;
         end
     endfunction:sample_and_enqueue
 
     task run();
+        longint unsigned edge_sample;
         if (!is_bound()) begin
             `uvm_error("RM_DUT_WB_PROBE", "integer-WB monitor VIF is not bound")
             return;
@@ -317,13 +456,15 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         running = 1'b1;
         forever begin
             @(vif.mon_cb);
-            if (!memblock_sync_pkg::reset_backend_done) begin
+            if (!memblock_sync_pkg::reset_backend_done ||
+                memblock_sync_pkg::l2tlb_reset_active()) begin
                 if (previous_reset_backend_done) begin
                     clear_history();
                 end
                 previous_reset_backend_done = 1'b0;
                 continue;
             end
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time,edge_sample);
             previous_reset_backend_done = 1'b1;
             sample_and_enqueue(RM_WB_SOURCE_LDA, 0);
             sample_and_enqueue(RM_WB_SOURCE_LDA, 1);
@@ -338,6 +479,29 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
     // RM comparison performs the only selection: latest non-replay/non-flush
     // LDA record with the requested ROB key. Payload X values are retained so
     // the RM reports a value mismatch rather than a missing writeback.
+    // 抽象职责：返回同ROB及动态flush代际唯一的最终STA0；保留正常nonzero的flushPipe=1。
+    function bit read_cmo_sta0_by_rob(input memblock_rob_key_t rob_key,
+                                    input int unsigned flush_epoch,
+                                    input memblock_uid_t uid,
+                                    input int unsigned dynamic_epoch,
+                                    output writeback_record_t record,
+                                    output bit duplicate);
+        bit [MEMBLOCK_ROB_VALUE_W:0] key;
+        int unsigned match_count;
+        record='0; duplicate=0; match_count=0; key={rob_key.flag,rob_key.value};
+        if(!sta0_history_by_rob.exists(key)) return 0;
+        foreach(sta0_history_by_rob[key][i]) begin
+            if(sta0_history_by_rob[key][i].owner_valid &&
+               sta0_history_by_rob[key][i].owner_uid==uid &&
+               sta0_history_by_rob[key][i].owner_dynamic_epoch==dynamic_epoch &&
+               sta0_history_by_rob[key][i].sample_flush_epoch==flush_epoch) begin
+                record=sta0_history_by_rob[key][i]; match_count++;
+            end
+        end
+        duplicate=match_count>1;
+        return match_count==1;
+    endfunction
+
     function bit read_latest_load_by_rob(
         input memblock_rob_key_t rob_key,
         output writeback_record_t record
