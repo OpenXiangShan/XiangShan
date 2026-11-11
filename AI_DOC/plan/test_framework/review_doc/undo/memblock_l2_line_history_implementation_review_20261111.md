@@ -13,7 +13,7 @@
 | readonly / pending / lifecycle | 无副作用值查询、未完成上下文、testcase共享内存生命周期 |
 | overlay / backend / Store-origin | 期望/实际写覆盖数据、共享内存底座、Store及cacheable zero来源 |
 
-关联 plan：`AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md`。开始 hash：`b9c65cf26015d71a420b787458f0f866cc1b99f2`。本 review 只覆盖框架记录与旧接口迁移；统一错误 RM 和 CMO RM 的最终接入由各阶段独立闭环。
+关联 plan：`AI_DOC/plan/test_framework/plan/do/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md`。开始 hash：`b9c65cf26015d71a420b787458f0f866cc1b99f2`。本 review 只覆盖框架记录与旧接口迁移；统一错误 RM 和 CMO RM 的最终接入由各阶段独立闭环。
 
 状态：代码已落，等待主 agent 独立 review 与远端编译/仿真；未把检查通过或带错误 RM 支持作为既成事实。
 
@@ -714,7 +714,7 @@ RM旧日志字段由sticky_enabled改为ledger_ready，尚未把旧Load/Atomic P
 
 ## 8. 静态检查、仿真与剩余依赖
 
-已执行本阶段源码的`git diff --check`与删除项检索；尚未记录远端编译或仿真通过。主agent完成验证后更新本节和CSV，不能把仅编译当作所有路径验证。
+已执行本阶段源码的`git diff --check`、删除项检索及真实VCS编译；`memblock_l2_line_history_directed_vseq`通过，UVM_ERROR/FATAL为0，CSV已记录结果。统一错误接入及实际Load/原子/预取结果见RM集成review；不把仅编译视为所有路径通过。
 
 建议入口：`make eda_compile tc=basicTest ts=memblock_l2_line_history_directed_vseq mode=base_fun`，之后运行同入口；基础virtual_base_sequence及真实dispatch smoke按执行规则运行。
 
@@ -728,3 +728,87 @@ RM旧日志字段由sticky_enabled改为ledger_ready，尚未把旧Load/Atomic P
 原base_fun目录的旧VCS数据库损坏，故使用独立输出目录 `mode=cmo_plans_20261111`，没有修改编译脚本和RTL。首次软件用例与新增monitor复位边界问题已修正，并重新编译和运行取得上述结果。基础/真实DUT联调、统一消费observer、Uncache扩展属于同任务后续阶段，本提交不宣称三份plan均已完成，plan继续保留undo，待完整闭环后归档。
 
 基础场景 `basicTest / virtual_base_sequence` 与真实 DUT `basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_smoke` 均于同一mode、seed666666运行完成，UVM_ERROR与UVM_FATAL均0。真实smoke覆盖1条页权限fault并完成RM异常比较、terminal与responder drain，不能据此声称已覆盖普通cache命中或错误Load；这些由后续专项继续验证。
+
+## 最终协同状态（2026-11-11）
+
+前述“后续统一错误阶段”已由本轮关联方案落实：Load/Atomic使用具体实际消费来源，PA历史仅诊断；Uncache保留独立完整owner完成历史与后台通知比较。原阶段文本保留分工来源，最终实现以统一错误及CMO集成review为准。原nonzero CMO fault后完整恢复排空场景存在已复现集成阻塞，未以行选择历史或RM规则规避，见故障恢复专项分析。
+
+
+## 13. Legacy provenance 软件fixture生命周期补修（IMPLEMENTATION_DELTA，2026-11-11）
+
+功能与修改前后：legacy `memblock_rm_provenance_followup_directed_vseq` 的 source 生命周期负向case原本只捕获 responder 本地的同source重复A或无owner D fatal。新增公共 `sbuffer_uncache_*` 镜像后，测试捕获UVM_FATAL会让被测函数继续执行，因此同一次人工违规还会被公共镜像再次拒绝。`/tmp/cmo_provenance_run_20261111.log` 在265.300ns记录 `invalid A accept source=3 sample=19 last_a=19 mask=0x0008`；这不是禁止不同source同sample，实际原因是source3仍outstanding。原本第一条fatal已被预期catcher捕获，第二条公共镜像fatal没有捕获，导致软件fixture提前结束。
+
+修改后只调整software-only fixture：正向直接断言同一全局sample接受source3和7后，公共镜像与本地owner均保留两项；两个负向case分别注册严格消息匹配的本地与公共catcher，各要求恰好一次。每个case后仍调用既有clear_runtime_state同时清本地和公共状态。未修改生产note/publish函数、全局sample、RM core、真实接口或fatal拒绝契约。不同source同sample继续合法，相同source未完成复用仍被两层拒绝。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_rm_provenance_followup_sequence.sv:724`，task：`soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle()`。
+
+抽象功能描述：在legacy纯软件来源自测中验证Uncache本地owner与公共生命周期镜像一致，并完整检查预期违规的两层fatal，不以新增公共检查造成的测试提前退出代替完整断言。
+
+```systemverilog
+task soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle();
+    sbuffer_mem_access_base_sequence responder;
+    memblock_uncache_owner_expected_fatal_catcher catcher;
+    memblock_uncache_owner_expected_fatal_catcher lifecycle_catcher;
+    longint unsigned accepted_sample;
+
+    responder = sbuffer_mem_access_base_sequence::type_id::create(
+        "uncache_source_lifecycle_responder");
+    responder.clear_runtime_state();
+    // 中文注释：纯软件调用不推进全局sample；不同source同sample可同时持有独立owner。
+    accepted_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+    responder.note_uncache_source_accept(4'h3, 48'h8000_0100, 10);
+    responder.note_uncache_source_accept(4'h7, 48'h8000_0200, 11);
+    expect_true(memblock_sync_pkg::sbuffer_uncache_outstanding_mask == 16'h0088 &&
+                memblock_sync_pkg::sbuffer_uncache_last_a_sample == accepted_sample,
+                "same-sample different-source acceptance lost public lifecycle ownership");
+    expect_true(responder.uncache_source_outstanding == 16'h0088,
+                "Uncache source ledger did not retain two independent owners");
+    responder.note_uncache_source_complete(4'h7, 20);
+    expect_true(responder.uncache_source_outstanding == 16'h0008 &&
+                responder.uncache_source_a_fire_count[7] == 1 &&
+                responder.uncache_source_d_fire_count[7] == 1,
+                "out-of-order Uncache D completion released the wrong source");
+    responder.note_uncache_source_complete(4'h3, 21);
+    expect_true(responder.uncache_source_outstanding == '0 &&
+                responder.uncache_source_a_fire_count[3] == 1 &&
+                responder.uncache_source_d_fire_count[3] == 1,
+                "Uncache source ledger did not close A-to-D ownership");
+    responder.clear_runtime_state();
+    expect_true(responder.uncache_source_outstanding == '0 &&
+                responder.uncache_source_a_fire_count[3] == 0 &&
+                responder.uncache_source_d_fire_count[7] == 0,
+                "Uncache source ledger reset left stale ownership");
+
+    responder.note_uncache_source_accept(4'h3, 48'h8000_0300, 30);
+    catcher = new("uncache_source_reuse_catcher",
+                  "*Uncache source reused before D completion source=3*");
+    // 中文注释：catch本地fatal后UVM继续原函数，公共镜像也会拒绝同一违规；两层均需精确捕获并断言。
+    lifecycle_catcher = new("uncache_source_reuse_lifecycle_catcher",
+                            "invalid A accept source=3*");
+    uvm_report_cb::add(null, catcher);
+    uvm_report_cb::add(null, lifecycle_catcher);
+    responder.note_uncache_source_accept(4'h3, 48'h8000_0400, 31);
+    uvm_report_cb::delete(null, lifecycle_catcher);
+    uvm_report_cb::delete(null, catcher);
+    expect_true(catcher.caught_count == 1 && lifecycle_catcher.caught_count == 1,
+                "same-source reuse did not trigger both exact local/public owner fatals");
+
+    responder.clear_runtime_state();
+    catcher = new("uncache_no_owner_d_catcher",
+                  "*Uncache D.fire has no accepted source owner source=5*");
+    lifecycle_catcher = new("uncache_no_owner_d_lifecycle_catcher",
+                            "invalid D complete source=5*");
+    uvm_report_cb::add(null, catcher);
+    uvm_report_cb::add(null, lifecycle_catcher);
+    responder.note_uncache_source_complete(4'h5, 40);
+    uvm_report_cb::delete(null, lifecycle_catcher);
+    uvm_report_cb::delete(null, catcher);
+    expect_true(catcher.caught_count == 1 && lifecycle_catcher.caught_count == 1,
+                "ownerless D did not trigger both exact local/public lifecycle fatals");
+    responder.clear_runtime_state();
+endtask:check_uncache_source_lifecycle
+```
+
+中文伪代码：创建隔离responder并clear_runtime_state，读取既有全局sample；接受两个不同source而不人工推进sample，要求公共mask=0x0088且最后A仍是该sample，同时核对本地mask。按7、3顺序完成D以验证乱序释放和计数，清理后确认无旧owner。重复A负向先建立source3，再注册本地source复用消息与公共invalid A消息两个catcher；人工重复调用后先删公共catcher再删本地catcher，要求各捕获1条。清理后为source5无owner D分别注册两层精确消息catcher，调用并移除，同样要求各1条，最后清理。clear_runtime_state负责本地与公共镜像复位；note函数仍执行真实生产检查，catcher只在这两个无yield人工负向调用期间存在，不吞其它source或类型消息。
+
+正确性与边界：没有放宽sample单调性或source独占；global sample相等仍由原公共函数允许。两层fatal必须分别发生，少报、错source、错消息或多报都会使断言失败或保留未捕获fatal。该补修是旧fixture迁移适配，不改变三plan生产语义。新增独立场景清单：`AI_DOC/seq/memblock_rm_provenance_followup_soft_framework_testcases_20261111.csv`；主agent已以最新fixture源码完成真实VCS原入口、seed666666复测：`/tmp/cmo_provenance_run_20261111.log` 显示TEST_PASS，UVM_ERROR=0、UVM_FATAL=0；7条fatal和2条error均为各自软件负向case预期捕获，新增两层生命周期检查完整执行。3项CSV已同步通过；修复前失败日志只保留根因记录，不冒充通过。

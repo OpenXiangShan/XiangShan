@@ -29,9 +29,9 @@
 
 | 方案 | 路径 | 行数 | SHA-256 |
 |---|---|---:|---|
-| CMO RM | `AI_DOC/plan/rm_plan/undo/memblock_cmo_blackbox_rm_coding_plan_20261103.md` | 820 | `033ee6519da6a915dde7d71861d8fa40ac2db9d5b0b5adc3fc0bda88828324ab` |
-| 统一错误 | `AI_DOC/plan/rm_plan/undo/memblock_nonvector_d_error_path_classification_plan_20261110.md` | 642 | `17e6107147624df2d98b47d6d23a9c7bcaa694a43bea01293aec7107f15ccff3` |
-| 行历史 | `AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` | 473 | `4ad1005126f96ddebad293671bb39b1f5f281c5f32d6a173267375b2d311bc85` |
+| CMO RM | `AI_DOC/plan/rm_plan/do/memblock_cmo_blackbox_rm_coding_plan_20261103.md` | 820 | `033ee6519da6a915dde7d71861d8fa40ac2db9d5b0b5adc3fc0bda88828324ab` |
+| 统一错误 | `AI_DOC/plan/rm_plan/do/memblock_nonvector_d_error_path_classification_plan_20261110.md` | 642 | `17e6107147624df2d98b47d6d23a9c7bcaa694a43bea01293aec7107f15ccff3` |
+| 行历史 | `AI_DOC/plan/test_framework/plan/do/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` | 473 | `4ad1005126f96ddebad293671bb39b1f5f281c5f32d6a173267375b2d311bc85` |
 
 ## 3. 原五项修复与最小适配
 

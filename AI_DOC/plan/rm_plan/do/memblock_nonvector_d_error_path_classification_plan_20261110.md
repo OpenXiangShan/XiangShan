@@ -1,14 +1,14 @@
 # V2 非向量访存 denied/corrupt 分路径检查与框架协同方案
 
-- 状态：`UNDO`；仅方案，未修改实现代码、未运行编译或仿真。
+- 状态：`DO`；编码、文档同步及必要验证完成（2026-11-11）；保留已复现的CMO故障后完整恢复排空集成阻塞，不表示全部DUT组合验收通过。
 - 创建与修订日期：2026-11-10；按三方案评审补齐每beat消费、当前错误来源版本、SC覆盖副作用及NC后端边界。
 - 评审基线：`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_three_plan_minimal_adaptation_review_20261110.md`。
 - 适用分支与版本：`mem_ut_uvm_v2` / V2。
 - 方案归属：RM plan；框架只提供实际响应、身份、CSR 与错误通知事实，异常和结果判断由对应 RM 完成。
 - 主要 RM 源码：`mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv`、`mem_ut/ver/ut/memblock/env/src/memblock_rm/rm_ls_core.sv`。
 - 框架数据源：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`、`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_rm_readonly_api.sv`。
-- 关联行历史方案：`AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md`。
-- 关联 CMO 方案：`AI_DOC/plan/rm_plan/undo/memblock_cmo_blackbox_rm_coding_plan_20261103.md`。
+- 关联行历史方案：`AI_DOC/plan/test_framework/plan/do/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md`。
+- 关联 CMO 方案：`AI_DOC/plan/rm_plan/do/memblock_cmo_blackbox_rm_coding_plan_20261103.md`。
 - 本方案是 CBO/CMO denied/corrupt 获取、映射、比较及 Uncache zero 分段写效果的唯一实现归属；CMO RM 方案只定义接入，不复制实现。本方案不另建行选择表，也不授权 coding。
 
 ## 1. 术语、范围与职责
@@ -163,7 +163,7 @@ RM 在观察到 post-reset 配置并经过 DUT 两拍传播后，冻结当前 li
 
 复用已连接的 `other_ctrl` monitor，只发布 `io_uncacheError_ecc_error_valid=1` 的值型事件，携带地址、DUT global sample 和 reset epoch；同地址连续两拍 valid 是两条事件，不能按地址去重。
 
-从每笔实际 Uncache Store D.fire 独立构造后台通知期望：原始 denied||corrupt、对齐物理行地址及响应 sample。MemBlock 当前为两拍 DelayNWithValid，使用同一 DUT sample 域核对输出；clocking block 采样相位通过一次边界验证固定，不能用任意 `#2ns` 替代两个 DUT 周期。
+从每笔实际 Uncache 内部消费端 Store D.fire 独立构造后台通知期望：原始 denied||corrupt、对齐物理行地址及内部消费 sample。外部TL D到此端口之间存在TLBuffer，必须以source-generation/token关联真实内部消费，不从外部D固定偏移猜时间。MemBlock从内部busError开始为两拍 DelayNWithValid，使用同一 DUT sample 域核对输出；clocking block 采样相位通过一次边界验证固定，不能用任意 `#2ns` 替代两个 DUT 周期。
 
 无需 BEU 模型，也不驱动 `io_uncacheError`；这里只比较 DUT 已有输出。enable=0 时核对不应输出该通知；不影响该响应是否被记录。
 
@@ -640,3 +640,67 @@ RM 在最终STA/合法fault terminal处理该指令时验证：已发段必须�
 7. 正常数据比较与确定性写效果保持独立；Uncache zero完整分段检查、首错后停止、部分overlay及entries、后续load/最终Store-table比较必须实际支持，不能用“全行原子无变化”掩盖；CMO错误逻辑仅在本方案实现一次。
 8. 高频路径不扫描完整主表/历史；按key、独立新增记录cursor和有限事件队列处理，最终drain允许一次检查。
 9. 首beat、错误后正常refill、SC覆盖、NC scope及reqSource五项评审问题均按本方案闭环；取得独立复审无必改项后才可coding，编码后完成必要验证再登记实现通过。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA，Uncache 部分 2026-11-11）
+
+- 当前状态：Uncache 响应/写接受事实、被动请求关联、MMIO/zero效果推导及通知checker已落代码，主agent正集成与远端验证；未登记仿真通过。
+- [IMPLEMENTATION_DELTA] Producer不从Put或地址猜zero。协议历史显式区分LOAD/MMIO_STORE/NC_STORE并保留真实source entry nc；被动SQ段依独立冻结主表最终op将CMO_ZERO细分，并通过真实Uncache slot分配/merge→TL source关联同一响应token。两者分别表达协议路径与动态指令语义，不建立第二份响应真源。
+- [IMPLEMENTATION_DELTA] NC后端拒绝必须在response入队前判断。沿已有`io_mem_to_ooo_ctrl`只读旁路增加16个真实Uncache.entries_n.nc字段；responder在真实A.fire按source读取稳定entry属性。cmo_path的Uncache TL_A同时采集该nc用于独立交叉核对，不按地址/异常反推。同步zero使用实际nc=0，不套普通NC提交路径。
+- [IMPLEMENTATION_DELTA] 后端写批次为每笔Uncache写分配write-event token；接受和实际批次提交分别保存sample/time。响应token独立保存write-event引用，注入denied不撤销此前已接受写。普通reset继续既有批次提交顺序，不丢弃已接受数据；新testcase整体清空。
+- [IMPLEMENTATION_DELTA] 增加`response_frozen`校验，真实A冻结后，producer D完成必须提供原token/reset/source-generation完整快照。旧Load自测的构造补齐位于soft_test内部，不在生产完成入口保留无token兼容分支。
+- [IMPLEMENTATION_DELTA] 统一实现收敛至`rm_uncache_error_observer`，主RM仍为唯一FIFO消费者，逐拍调用`observe_batch/observe_notification/check_until`；CMO接入`validate_cmo_zero`，普通同步MMIO接入`apply_store_expectation`，前置fault及非Uncache CMO接入`validate_no_cmo_requests`。返回0后仅观察水位不足置`observation_pending=1`，水位覆盖后的证据错配立即失败。
+- [IMPLEMENTATION_DELTA] two-cycle通知门控使用Store D sample的CSR输入：MemBlock错误与CSR输入同样延迟两拍，期望输出sample=D+2；没有任意时间延迟容忍窗口。同地址连续valid保留为多事件。
+- [IMPLEMENTATION_DELTA] CMO真实STA0只读选择按采样时冻结UID/dynamic_epoch及flush代际；优先STA实例代际，fault允许同一status动态实例的active代际，不让ROB环绕旧写回伪造duplicate。
+- [IMPLEMENTATION_DELTA] 首段上下文API拆出`try_read_first_split_access_context_for_rm(uid,epoch,rob,vaddr,bound_wb,context,pending)`。上下文本身没有物理PA字段，因此不保留无效line输入；它只检查真实结构/时间/owner，错误消费由独立DCache observer按token/slot来源证明，CLEAN或后发错误不影响结构资格。
+
+- [IMPLEMENTATION_DELTA，独立源码review修复] 每个已验证CMO/MMIO owner冻结terminal sample；之后同owner任何迟到SQ→Uncache请求立即报错，防止RM已经提交后追加分段并在最终pending检查前收敛而漏检。soft用例先验证首错终态再发送迟到段，独立检出。
+
+- [IMPLEMENTATION_DELTA，独立源码review修复] SQ owner保留当前value最近真实enqueue：同拍先缓存新enqueue，旧SQ请求使用上一代快照，然后应用新enqueue并清相反flag；已接受段独立复制owner，不依赖后来SQ重用。避免长随机ROB/SQ环绕造成双flag历史伪冲突。新增同sample复用、source/reset、两NC owner合并一通知soft验证。
+- [IMPLEMENTATION_DELTA，首次运行修复] other_ctrl通知monitor将`reset_backend_done!==1`加入reset条件。t0在rst_n与L2TLB复位协调器完成初始化前不请求不存在的CSR锚点，不放宽全局sample校验。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA，DCache 消费观察，2026-11-11）
+
+以下内容来自当前 V2 生成 RTL 与实现联调，属于执行中修正，不是原始 plan 已覆盖的代码细节。
+
+1. **真实 Valid 接口。** `errorArray.io_read/io_write` 和 Atomics DCache 响应在当前产物无 `ready`，采集真实 `valid`，不补造 `fire`。被动观察统一由 `cmo_path_agent` 的同拍批次承载，外部 TL A/D 仍取真实顶层端口；不恢复两个旧 monitor 的整包 scoreboard 流量。
+2. **D 直转允许未握手广播。** 当前 DCache 直转输入由 GrantData `valid` 生成，不受 D.ready 门控。新增独立 `DCACHE_TL_D_OFFER` 探针；以冻结响应 token、source generation、当前真实 offer、关键词和该 token 已握手 beat 数证明物理半行。expected raw 来自框架独立冻结响应，不能用未来 D.fire 或 DUT 实际 raw 充当答案；MSHR/refill 仍仅使用已真实 D.fire 且覆盖访问范围的历史。
+3. **Load 分项映射。** direct、MSHR、延迟 hit 各自按 denied 优先形成 AF/HE 后再合并，不能将不同来源 raw 先合并再全局 denied 优先。例如 direct denied 与 hit corrupt-only 可同时给出 AF 和 HE。RM 使用 `query_load_exception_bits()` 的独立两位期望。
+4. **原子真实 CSR 拍。** AtomicsUnit 先在 state5 接收最终 DCache 响应，再在 state6 `s_cache_resp_latch` 使用 CSR。新增 `ATOMIC_LATCH_CONTROL`，将独立 raw 冻结到 state6，实际消费拍保留为state6 sample；MemBlock把顶层CSR束延迟2拍送入AtomicsUnit，故对外 `control_sample` 为state6 sample减2，独立读取顶层历史。真实内部enable仅交叉核对延迟连接，不作为期望答案；sample不足或顶层历史缺失明确证据FAIL。不能使用早一拍响应接受时间或未补偿延迟的当拍顶层输入。miss/replay 不发布最终事实。
+5. **跨页首段与正常分段。** LoadUnit 向 MisalignBuffer 的真实返回为 Valid 接口。保存无 replay、非 NC/MMIO 的实际段 PA/mask/S2 data sample/S3 response sample；`query_first_split_error()` 要求与 readonly 首页 context 精确匹配，并覆盖独立翻译 prefix。正常两段仅在真实 finalSplit 到达后形成完整消费事实；首段错误提前终止时保留独立首页证据，不要求第二段发生。未增加数据或 split 调度模型。
+6. **生命周期。** slot、S0 旁路和延迟写来源版本使用有界引用计数回收；S1 之后冻结纯值来源。owner 全部比较完成后由 RM 调用 `release_completed_owner()` 删除消费索引；reset 清空当前物理/owner 索引，L2 不可变 token 历史仍可供诊断。
+
+源码：`env/src/memblock_rm/rm_dcache_error_observer.sv`、`subagent/cmo_path_agent`、`tb/cmo_path_agent_connect.sv`（路径均相对 `mem_ut/ver/ut/memblock`）。独立来源软测入口为 `rm_dcache_error_observer_soft_test::run()`，详见同日 DCache implementation review 与专项 CSV。
+
+- [IMPLEMENTATION_DELTA，真实DUT最终数据验收] 静态Sv39的DISABLED control topology不能插入尾CHECK_STORE marker。新增仅覆盖check_phase的`tc_rm_cmo_uncache_final extends basicTest`，保留既有VSEQ/CSR/responder拓扑；先确认全部writer的最终item实际uncache_path、zero真实终态/效果已完成、memory responder已drain，再遍历现有expected_store_entries，沿readonly复制实际overlay并调用原`compare_overlay_store_entry`。它不放宽生产RM的cacheable读取gate，不新增数据写算法/CSR驱动或参数。正常与denied两个Uncache preset以该test完成最终整段或部分写验收；非Uncache writer或缺entry立即失败。
+
+- [IMPLEMENTATION_DELTA，真实Uncachezero采样关联修复] 首轮真实DUT在`/tmp/cmo_uncache_zero_run_20261111.log`出现部分A缺独立token及随后D缺token，根因是producer在同posedge早于CSR sample发布时peek到上一拍，而被动monitor已等待本拍锚点。两个memory responder的真实clocking边界统一先等待同拍CSR锚点再处理A/D、写batch及历史水位。等待仅同边沿NBA/delta，不跨时钟；不放宽exact sample/source/token，不降级PA匹配。reset/协调器未就绪不请求不存在锚点。
+
+### [IMPLEMENTATION_DELTA] 原子 CSR 顶层输入与内部消费拍区分（2026-11-11）
+
+当前 `MemBlock.scala` 通过 `DelayN(io.ooo_to_mem.csrCtrl, 2)` 接入 `atomicsUnit.io.csrCtrl`。因此 `ATOMIC_LATCH_CONTROL` 的state6拍只是实际消费拍，RM独立CSR答案必须读取两拍之前的顶层输入历史。`consumption_t.sample` 保留实际state6完成边界；`control_input_sample` 保存state6减2；原子query的 `control_sample` 输出后者，root既有read接口不重复减拍。probe采内部enable仅用来核对顶层历史与连接延迟，不能直接决定期望异常。软测使顶层当拍与前2拍输入相反，覆盖0→1、1→0及sample<=2下溢边界；不新增动态CSR配置模式。
+
+- [IMPLEMENTATION_DELTA，真实denied通知时序修复] 首轮真实zero denied在终表5项通过时发现通知期望181、实际184。当前V2外部Uncache D经`TLBuffer.chainNode(2) -> xbar -> TLBuffer`返回内部Uncache，外D.fire不等于Uncache消费端D.fire。新增最小内部D消费probe（source/raw、Store cmd和实际busError valid/address）；沿外D已固定token/source-generation严格关联内部消费，交叉核对raw及内部busError后，仅以内部消费sample+2和该sample CSR输入建立顶层期望。不得使用固定外D+5、拍数容差或按地址反查。zero/MMIO完成还要求相同token已经内部消费。soft加入可变buffer延迟0/3/7、双NC合并一通知与内部消费门控相反输入测试。
+
+#### IMPLEMENTATION_DELTA：原子 MainPipe 到 Unit 的一拍寄存边界
+
+当前 V2 `DCache.sv` 对 source2 的 MainPipe 原子响应寄存一拍再交给 AtomicsUnit。共享 observer 必须先冻结该拍独立 slot/refill 来源，仅下一拍 Unit 最终接受允许使用；不能要求两侧同拍，也不能跨空拍复用。Unit 后一拍 state6 再核验 owner/时序及顶层前两拍 CSR。Main miss/replay、其他 source、同拍旁路和重复 Unit 响应均不授权。该适配仅增加有限物理流水状态，不添加历史全表扫描；失败诊断逐项保留来源/owner/CSR/时序证明位。
+
+#### IMPLEMENTATION_DELTA：预取实际传输与软件同步抑制闭环
+
+软件预取保持现有 OTHER/no-data 提交语义，RM 在实际提交边界额外读取当前 ROB 的真实 LDA，用 UID/epoch/ROB/LQ 和 sample 匹配共享 Load 消费事实中的 prefetch 资格，并核对响应错误不得追加同步 bit5/19；不读 backing，不进行返回值比较。L1_PREFETCH 的真实 GrantData 则由共享 observer 逐beat按独立 token、source-generation、raw 和准确 sample 核验；硬件预取不创建 UID。软件 WB 可能早于后台 refill，因此两项核验独立服务，不绑定虚构的同一时刻，也不强求被丢弃或命中的预取产生请求。现有最终 responder/drain 边界保证后台事实服务完成。
+
+### [IMPLEMENTATION_DELTA] 验证用例与源接口最终适配（2026-11-11）
+
+- 软件预取使用实际LDA及同owner消费资格比较同步位5/19抑制，后台真实L1_PREFETCH GrantData按token/beat独立核对，不要求每条软件预取均产生下游请求。只读响应API拒绝零beat mask，首次合法01仅读取元信息，实际beat仍按01/10核对可用性；成功日志仅用于验证覆盖。
+- 实际原子gate1使用既有DISABLED静态Sv39 CSR producer；AUTO默认gate0不能通过初始随机权重宣称gate1。实际gate1下AMO denied/corrupt、LR/SC denied已与独立RM异常比较通过。
+- 实际冷目标nonzero CMO故障已命中位7/19；原包含年轻Store的恢复场景在后续flushSb排空出现停滞，保留原用例与失败记录。另加仅含年轻Load的独立隔离场景，复用现有权重、bootstrap及实际fault/first-kind覆盖检查，不更改生产恢复行为或首次选择规则。
+
+## 实施收口记录（2026-11-11）
+
+本轮按用户明确授权执行coding，并在执行前完成本地基线提交。三个方案共享的请求/响应/错误实现仅保留一套，使用subagent按首次行历史、CMO核心与真实请求、统一错误来源和通知、根RM集成顺序完成。功能分段本地提交包括`7e334444f1`、`472bceefe0`、`1c8089cb4e`、`f3f45501d1`、`4dc0fbb7b5`；最终集成与归档提交见git历史。
+
+真实VCS编译及基础/dispatch smoke通过；core920、请求/重复完成39、生产翻译权限92、Uncache103项检查通过。四种cacheable CMO、Uncache zero完整/首段及中段错误部分效果、Load响应错、原子门控与LR/SC/CAS、真实软件预取错误、isolated nonzero CMO denied/corrupt均完成对应比较。完整命令、CSV、代码差异和验证边界见`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_rm_integration_review_20261111.md`第5章。
+
+**保留未满足项：** 原四指令CMO fault后年轻Store与CHECK_STORE完整排空场景保持BLOCKED。波形已确认SQ重入及指针异常，但pendingst真实BE契约与框架撤销时序的责任仍需复核，未修改RTL，未以精简测试替代该项验收。详见`AI_DOC/analysis/testcase_flow/memblock_cmo_cboack_fault_sq_reentry_flush_stall_20261111.md`。真实Uncache zero末段首错、动态CSR及全部随机组合的多seed验证未穷举，不能计入已通过。
+
+归档仅表示本方案编码、同步文档、必要验证和源码review已完成，保留以上真实DUT集成阻塞及未覆盖项；关联review继续保留在undo。

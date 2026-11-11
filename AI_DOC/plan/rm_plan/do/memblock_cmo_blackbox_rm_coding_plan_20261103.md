@@ -1,8 +1,8 @@
 # memblock CMO 黑盒 RM Coding Plan
-- 状态：`UNDO`
+- 状态：`DO`；编码、文档同步及必要验证完成（2026-11-11）；保留已复现的CMO故障后完整恢复排空集成阻塞，不表示全部DUT组合验收通过。
 - 创建日期：2026-11-03
 - 最近修订：2026-11-10，按三方案评审修复zero写底座的SC覆盖副作用，收敛既有FIFO/reqSource复用，并接入统一错误来源版本契约。
-- 评审基线：`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_three_plan_minimal_adaptation_review_20261110.md`；本文仍为待实现方案。
+- 评审基线：`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_three_plan_minimal_adaptation_review_20261110.md`；本文原始方案段保留用于追溯；当前实现与验证状态以文末实施收口和对应review为准。
 - 适用分支：`mem_ut_uvm_v2`
 - 适用版本：V2
 - 计划类型：RM/scoreboard 参考模型 coding plan
@@ -10,7 +10,7 @@
 - 目标源码：`mem_ut/ver/ut/memblock/env/src/memblock_rm/rm_ls_core.sv`
 - 行为依据：`AI_DOC/analysis/rtl/v2/flows/cbo_instruction_memblock_backend_flow.md` 中“mem_ut RM 黑盒可观察行为约束”章节
 - 本计划包含 RM 所需被动 monitor、请求事实队列与只读关联适配，不包含测试框架激励、发射、调度、redirect 恢复、重发或资源分配设计。
-- denied/corrupt 唯一实现方案：`AI_DOC/plan/rm_plan/undo/memblock_nonvector_d_error_path_classification_plan_20261110.md`（下称“统一错误方案”）。CMO 只调用其共享入口；不得重复实现错误查询、异常位映射、Uncache zero 部分写效果或 Uncache 错误通知比较。
+- denied/corrupt 唯一实现方案：`AI_DOC/plan/rm_plan/do/memblock_nonvector_d_error_path_classification_plan_20261110.md`（下称“统一错误方案”）。CMO 只调用其共享入口；不得重复实现错误查询、异常位映射、Uncache zero 部分写效果或 Uncache 错误通知比较。
 - 配套测试框架方案：`AI_DOC/plan/test_framework/plan/undo/memblock_cmo_active_flow_coding_plan_20261103.md` 第 8、9 节；`flushAfter` 构造、exception redirect、`UID+1` 恢复和 epoch 重建均由该方案负责。
 ## 1. 术语表
 | 术语 | 含义 |
@@ -818,3 +818,47 @@ CMO plan负责最终类型、独立权限/路径、真实请求结构、owner、
 | commit后删除owner摘要 | 后续非法多发未检查 | 保留终态token/段号摘要与安全回收游标，迟到事件继续核对 |
 | fault zero一律清空写效果 | 后续load/Store-table失配 | 统一错误方案按合法接受段应用一次，前置fault与响应fault分别处理 |
 | CMO与错误方案重复实现 | 双重entry、异常或通知消费 | 本文只调用共享错误与Uncache效果入口；唯一overlay与消费账 |
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA，公用被动观察，2026-11-11）
+
+1. 当前实现以 `cmo_path_agent` 一份按全局 sample 锚定的只读批次采集 SQ/SBuffer/Uncache 以及必要外部 TL A/D，RM 是唯一 FIFO 消费者。外部请求证据仍是顶层真实 `valid && ready`，不依赖 responder 预建响应；此工程落点替代原 plan 恢复两个旧 monitor 整包发布的方式，避免产生无对端 scoreboard expected 流量。
+2. 内部 SQ→SB 的 DataBuffer 仅有 sqPtr.value。root adapter 在真实接受时调用既有 readonly SQ 映射确定完整动态 owner，不新建整张 SQ uop 镜像。SBuffer `accessIdx` 是下一拍通知，始终匹配上一拍接受。
+3. 公用 agent 还承载统一 denied/corrupt 方案的 errorArray、Load/Atomic 实际消费观察。接口为 Valid 时采真实 valid；D direct offer、原子 CSR latch 拍、Load 分项 AF/HE 和 split 消费细节仅由统一错误方案实现，CMO 核心不重复实现。
+4. fault 的 ROB commit 可能早于合法 fault terminal。实际 STA0 已捕获但 readonly `sta_fault && !terminal_done` 时等待终态事实，不提前判为 normal/fault 不匹配；RM 不发 redirect，不计算 UID+1。
+
+具体代码与验证边界见同日 DCache implementation review；统一错误接口仍由 denied/corrupt plan 唯一约束。
+
+### [IMPLEMENTATION_DELTA] CBO AUTO 定向验证的控制 bootstrap（2026-11-11）
+
+来源：真实cacheable zero专项在进入指令发射前报 `active control topology reached worker shutdown before bootstrap`。原定向builder覆盖父类 `build_main_table()` 并手工导入静态表，遗漏父类在AUTO表完成后执行的控制运行期bootstrap。
+
+实现调整：仅在 `memblock_main_dispatch_cbo_directed_sequence::build_main_table()` 的 `import_manual_main_table()` 与control policy检查完成后，active control topology调用现有 `control_barrier_service.initialize_control_runtime_bootstrap()`。它复用既有reset/action握手，不重新建表、不重启worker；DISABLED保持不调用。父VSEQ仍唯一启动CSR/SFence worker，公用service的必要fatal保持原有语义。
+
+影响范围：CBO专项builder及其源码review；无需修改公共控制服务或VSEQ fork。真实zero/clean/flush/inval需重编后复测，本条不把初次失败写为通过。
+
+## Cold CBOAck故障验收的建表与bootstrap补充
+
+普通CMO directed场景保留同line年轻Load/Store，覆盖恢复与数据交互；其年轻Load可先于CMO真实TL请求进入L2并冻结CLEAN，因此即使CBOAck权重100，也不能将该场景的无fault通过统计为CBOAck故障覆盖。
+
+独立cold故障场景使用四项表：UID0目标nonzero CMO@0x80002000、UID1不同line Load@0x80003000、UID2不同line Store@0x80004000、UID3 CHECK_STORE。使用既有AUTO拓扑，DENIED或CORRUPT的CBOAck权重分别100，真实A.fire才按现有首行规则冻结选择，不预写错误历史，不更改CLEAN永久策略。
+
+抽象功能职责：cold builder只提供静态场景和既有控制运行期初始握手；真实worker生命周期仍由父VSEQ唯一管理。
+
+实现顺序为：初始化既有dispatch helper，要求AUTO，按最终nonzero操作生成四项表，import完成主表/状态，执行check_main_table_control_policy，最后必须调用control_barrier_service.initialize_control_runtime_bootstrap。任何覆盖父类build_main_table的AUTO测试builder都必须完成这个既有bootstrap，不能只导入表却跳过初始worker握手。
+
+运行结束后必须断言实际UID0的sta_fault、terminal_done及独立期望异常命中，并只读核对首次行历史first_kind为CBOAck、状态为目标错误；否则报告测试错误。首次修复bootstrap前日志在267.8ns报告worker shutdown before bootstrap，不能作为故障功能通过记录；修改后仍需原seed真实复测。
+
+### [IMPLEMENTATION_DELTA] 完成后重复审计与独立故障验收（2026-11-11）
+
+- CMO成功提交后，readonly调用WB observer按ROB键登记已消费终态，后续每笔STA0增量审计；注册时补审该ROB已采后续记录。完整UID/epoch/ROB/SQ/STA issue/replay/instance-flush证明下，fault后唯一normal尾拍沿现有框架语义允许；第二fault或第二normal均报错，ROB复用新owner优先。该审计不生成redirect或更改框架终态。
+- 冷目标故障原场景保留年轻Store和尾CHECK_STORE，以暴露真实恢复排空问题；同文件派生isolated builder/VSEQ仅包含目标CMO和两个不同line年轻Load，手工import按3项建表，仅接受既有DISABLED topology，执行追加`+MEMBLOCK_MAIN_TRANS_NUM=3 +MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0`。零control项满足DISABLED policy，父real-smoke持有唯一既有静态Sv39 CSR，不调用AUTO bootstrap；原cold AUTO类不改。isolated无writer、不插入CHECK_STORE，仅覆盖CMO真实请求/故障及后续Load，不覆盖Store-table或flushSb排空；原失败场景不删改。覆盖guard仍要求真实fault和首访CBOAck错误，不能把未注错的PASS当覆盖。
+
+## 实施收口记录（2026-11-11）
+
+本轮按用户明确授权执行coding，并在执行前完成本地基线提交。三个方案共享的请求/响应/错误实现仅保留一套，使用subagent按首次行历史、CMO核心与真实请求、统一错误来源和通知、根RM集成顺序完成。功能分段本地提交包括`7e334444f1`、`472bceefe0`、`1c8089cb4e`、`f3f45501d1`、`4dc0fbb7b5`；最终集成与归档提交见git历史。
+
+真实VCS编译及基础/dispatch smoke通过；core920、请求/重复完成39、生产翻译权限92、Uncache103项检查通过。四种cacheable CMO、Uncache zero完整/首段及中段错误部分效果、Load响应错、原子门控与LR/SC/CAS、真实软件预取错误、isolated nonzero CMO denied/corrupt均完成对应比较。完整命令、CSV、代码差异和验证边界见`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_rm_integration_review_20261111.md`第5章。
+
+**保留未满足项：** 原四指令CMO fault后年轻Store与CHECK_STORE完整排空场景保持BLOCKED。波形已确认SQ重入及指针异常，但pendingst真实BE契约与框架撤销时序的责任仍需复核，未修改RTL，未以精简测试替代该项验收。详见`AI_DOC/analysis/testcase_flow/memblock_cmo_cboack_fault_sq_reentry_flush_stall_20261111.md`。真实Uncache zero末段首错、动态CSR及全部随机组合的多seed验证未穷举，不能计入已通过。
+
+归档仅表示本方案编码、同步文档、必要验证和源码review已完成，保留以上真实DUT集成阻塞及未覆盖项；关联review继续保留在undo。

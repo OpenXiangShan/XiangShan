@@ -1,6 +1,6 @@
 # V2 L2 全访问首次行结果冻结与 RM 只读查询方案
 
-- 状态：`UNDO`，方案阶段，尚未修改或验证实现代码。
+- 状态：`DO`；编码、文档同步及必要验证完成（2026-11-11）；保留已复现的CMO故障后完整恢复排空集成阻塞，不表示全部DUT组合验收通过。
 - 创建与修订日期：2026-11-10；按三方案最小适配评审修复首 beat、错误来源与基础分类契约。
 - 评审基线：`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_three_plan_minimal_adaptation_review_20261110.md`；复审状态由配套闭环评审记录，不以本文宣称实现通过。
 - 适用版本与分支：V2 / `mem_ut_uvm_v2`。
@@ -9,8 +9,8 @@
 - 只读接口：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_rm_readonly_api.sv`。
 - RM 协同源码：`mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv`、`mem_ut/ver/ut/memblock/env/src/memblock_rm/rm_ls_core.sv`。
 - 前置方案：`AI_DOC/plan/rm_plan/undo/memblock_rm_l2_dcache_sticky_error_ledger_plan_20260828.md`。
-- 错误注入及 RM 分流的统一方案：`AI_DOC/plan/rm_plan/undo/memblock_nonvector_d_error_path_classification_plan_20261110.md`；CMO denied/corrupt、Uncache zero 分段效果及 Uncache 通知比较由该方案唯一实现。
-- CMO 协同方案：`AI_DOC/plan/rm_plan/undo/memblock_cmo_blackbox_rm_coding_plan_20261103.md`。
+- 错误注入及 RM 分流的统一方案：`AI_DOC/plan/rm_plan/do/memblock_nonvector_d_error_path_classification_plan_20261110.md`；CMO denied/corrupt、Uncache zero 分段效果及 Uncache 通知比较由该方案唯一实现。
+- CMO 协同方案：`AI_DOC/plan/rm_plan/do/memblock_cmo_blackbox_rm_coding_plan_20261103.md`。
 - 保留当前文件路径；本次内容已由 GrantData 可选模式扩展为 L2 全访问统一行历史，取消 sticky 参数。本文取代前置方案中可关闭账本、正常行不登记、同一行后续重新抽取或升级错误的约定。
 
 ## 1. 定位、术语与抽象功能说明
@@ -480,3 +480,13 @@ RM 不生成 redirect、`UID+1` 恢复、epoch 或重发。实际实现和用例
 - [IMPLEMENTATION_DELTA] Probe 的 B/C 事实存放独立子上下文历史，只记录方向、父响应 token、每 beat sample/raw 与覆盖范围；不复制 payload，不成为第二份行选择表。E 仅沿 GrantAck 队列引用原 token。
 - [IMPLEMENTATION_DELTA] 为被动 monitor 增加只读 owner 探测 `try_read_uid_by_sq_for_rm/try_read_uid_by_rob_for_rm`。正常 map miss 返回 false 且清空 UID，不生成 UVM_ERROR；不改变正式严格查询接口。
 - 阶段依赖：PA-only readonly 查询现在仅供诊断，旧 RM 的 token/消费 provenance 接入归统一错误方案。仅权重0的基础执行与独立框架自测可用于本阶段验证；禁止把旧 first-split/带注错 RM 正向用例标记已通过。旧 soft helper 已迁移到软件测试内部的 token 构造，正向消费证明仍须对应 RM 阶段补齐。
+
+## 实施收口记录（2026-11-11）
+
+本轮按用户明确授权执行coding，并在执行前完成本地基线提交。三个方案共享的请求/响应/错误实现仅保留一套，使用subagent按首次行历史、CMO核心与真实请求、统一错误来源和通知、根RM集成顺序完成。功能分段本地提交包括`7e334444f1`、`472bceefe0`、`1c8089cb4e`、`f3f45501d1`、`4dc0fbb7b5`；最终集成与归档提交见git历史。
+
+真实VCS编译及基础/dispatch smoke通过；core920、请求/重复完成39、生产翻译权限92、Uncache103项检查通过。四种cacheable CMO、Uncache zero完整/首段及中段错误部分效果、Load响应错、原子门控与LR/SC/CAS、真实软件预取错误、isolated nonzero CMO denied/corrupt均完成对应比较。完整命令、CSV、代码差异和验证边界见`AI_DOC/plan/rm_review_doc/undo/memblock_cmo_d_error_rm_integration_review_20261111.md`第5章。
+
+**保留未满足项：** 原四指令CMO fault后年轻Store与CHECK_STORE完整排空场景保持BLOCKED。波形已确认SQ重入及指针异常，但pendingst真实BE契约与框架撤销时序的责任仍需复核，未修改RTL，未以精简测试替代该项验收。详见`AI_DOC/analysis/testcase_flow/memblock_cmo_cboack_fault_sq_reentry_flush_stall_20261111.md`。真实Uncache zero末段首错、动态CSR及全部随机组合的多seed验证未穷举，不能计入已通过。
+
+归档仅表示本方案编码、同步文档、必要验证和源码review已完成，保留以上真实DUT集成阻塞及未覆盖项；关联review继续保留在undo。

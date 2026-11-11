@@ -33,9 +33,9 @@
 
 | 方案简称 | 仓库路径 | 评审时行数 | SHA-256 |
 |---|---|---:|---|
-| CMO RM方案 | `AI_DOC/plan/rm_plan/undo/memblock_cmo_blackbox_rm_coding_plan_20261103.md` | 805 | `a11feba826f27c66b3514acab9e7c36b068752393fe68a034677b7ed694e8f70` |
-| 统一错误方案 | `AI_DOC/plan/rm_plan/undo/memblock_nonvector_d_error_path_classification_plan_20261110.md` | 536 | `e06a962480bc8897cdd58342f904a36c54f2190dfcca87ed41630a8509155951` |
-| 行历史方案 | `AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` | 463 | `0c613cff0c2d8ce1e84e0a754e4f032de55ce0d7976cac85d0a3705d52d16c46` |
+| CMO RM方案 | `AI_DOC/plan/rm_plan/do/memblock_cmo_blackbox_rm_coding_plan_20261103.md` | 805 | `a11feba826f27c66b3514acab9e7c36b068752393fe68a034677b7ed694e8f70` |
+| 统一错误方案 | `AI_DOC/plan/rm_plan/do/memblock_nonvector_d_error_path_classification_plan_20261110.md` | 536 | `e06a962480bc8897cdd58342f904a36c54f2190dfcca87ed41630a8509155951` |
+| 行历史方案 | `AI_DOC/plan/test_framework/plan/do/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` | 463 | `0c613cff0c2d8ce1e84e0a754e4f032de55ce0d7976cac85d0a3705d52d16c46` |
 
 | 优先级 | 问题 | 主要影响方案 | 功能影响 |
 |---|---|---|---|

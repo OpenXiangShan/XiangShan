@@ -71,7 +71,7 @@ flowchart TD
 ### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
-两个 responder 都在自己的 drv_cb 边界先调用 begin_shared_mem_sample：
+两个 responder 都在自己的 drv_cb 边界复制握手快照，非reset先等待同边沿CSR sample锚点，再调用 begin_shared_mem_sample：
   提交上一拍已确认的 write batch；当前拍 read 只读取上一轮 committed overlay/backing view。
 
 DCache：
@@ -265,11 +265,12 @@ responder 中模拟 Arithmetic、Logical、Hint、Acquire 或 CBO transaction。
 
 ```text
 先检查未超过 MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING；
-解码 opcode；
-STORE_ACK：以 address/mask/data 创建 Uncache write batch，record 记录 AccessAck；
+解码 opcode；先分配包含Store的唯一响应token/source-generation，Load仍要求冻结owner；
+STORE_ACK：采集真实source entry nc，以 address/mask/data 创建 Uncache write batch并记录独立write-event token；NC后端拒绝在任何响应入队/注入之前fatal；record 记录 AccessAck；
 LOAD_DATA：要求显式 owner count 大于 0，并把 frozen owner 复制进 immutable D-error ledger；
 STORE_ACK：要求 owner count 等于 0；
 LOAD_DATA：从当前 committed merged view 读取 64-bit data，record 记录 AccessAckData；
+合并后端与参数错误后设置response_frozen，协议raw与写接受事实分开；
 record.eligible_cycle = accept_cycle + 1；入 uncache_rsp_q。
 ```
 
@@ -340,8 +341,7 @@ DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还�
   有公共后端语义；
 - 新增只读 observer 与唯一 `memblock_rm_readonly_api` class：只在既有动作完成后记录 resident、
   assembly、fragment、corrupt 和 aggregate；API 仅返回 value view，不接入 RM/checker、不驱动 DUT；
-- 本 flow 已实现 D-error response snapshot，但它只驱动合法 Uncache D 字段，不接入主表、LSQ、
-  pass/fail 或 terminal。多 Probe/toB、alias、CBO closure 和完整 L2 flush 仍必须由相应专项 plan
+- 本 flow 的 D-error response snapshot 驱动合法Uncache D字段并保留独立只读历史；RM错误预测、写效果与通知比较由独立observer消费，不驱动主表、LSQ或terminal。多 Probe/toB、alias、CBO closure 和完整 L2 flush 仍必须由相应专项 plan
   在现有 response pipeline 上扩展，不能恢复旧的单 pending 状态机。
 
 ## 12. L2 首次行选择与逐 beat 历史（2026-11-11）
@@ -379,3 +379,525 @@ DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还�
 取消 `MEMBLOCK_L2_D_ERROR_STICKY_EN`、getter 和所有 cfg 入口；记录能力始终存在，四个既有 L2 错误权重仍默认0。testcase/shared-memory 初始化清空所有选择和历史；普通 DUT reset 只递增响应代际、终止未完成 source，不清首次选择。redirect、Probe、替换均不重抽。
 
 专用框架自测入口为 `basicTest / memblock_l2_line_history_directed_vseq`；真实响应驱动与 RM 带错误端到端验证由分阶段实施记录管理。
+
+## 13. Uncache Store 错误与实际写效果（2026-11-11）
+
+### 13.1 术语与职责
+
+本节的`write-event token`是后端实际写批次身份；`response_frozen`表示A阶段结果已经固定；`slot merge`是DUT真实Uncache entry合并；`notification watermark`表示实际通知monitor已完成观察的sample；`MMIO/NC/CMO_ZERO`分别为同步Store、已提交后台Store和等待响应的zero分段语义。
+
+### 13.2 后端写接受与响应完成
+
+`mem_access_base_sequence::shared_mem_access_task()`的抽象职责仍是执行真实共享内存读写。中文文字伪代码：先推进同拍视图，后端拒绝直接返回无写；正常Uncache写建立write-event并记录接受sample/time与mask，入原write batch。下一拍原批次提交入口应用数据后设置该token的committed及生效sample/time，响应注错不会删除该写。
+
+`create_uncache_response_record()`的抽象职责是冻结协议响应与后端结果。中文文字伪代码：真实A先建立唯一token/source-generation；读取同source真实entry nc；正常访问后端并保存拒绝原因、写接受及write token。NC真正后端拒绝明确fatal；MMIO/zero保留拒绝无写事实。随后按既有权重仅生成协议允许错误，AccessAck只有denied，AccessAckData可denied/corrupt。置response_frozen并发布不可变快照后才入返回队列；D.fire把完整事实存入唯一token历史，Load额外写已有owner索引。
+
+### 13.3 被动请求关联与指令比较
+
+`rm_uncache_error_observer::observe_batch()`的抽象职责是维护独立请求owner和真实传输因果链。中文文字伪代码：SQ enqueue冻结UID/epoch/ROB/SQ/finalop；SQ→Uncache接受沿完整ROB与常数两个SQ flag候选获得旧owner，即使NC提交后active map已删除仍可定位。按真实请求id匹配Uncache slot分配和merge，再将slot源集合绑定TL A source；TL D仅引用该次A保存的段列表。协议事实在生产水位覆盖后按精确A sample/source取得token，交叉检查真实payload、nc和raw。
+
+`validate_cmo_zero()`的抽象职责是推导合法分段终态与确定写效果。中文文字伪代码：等观察/producer水位，按同owner最多8段校验行首开始每次+8B、size3、maskff和零值。每段必须有实际请求、对应token/D完成及后端写事件；首错后的任何请求失败，正常必须完整8段。已接受且已生效的段进入write mask，即使报错段先写入后被注入denied也保留其效果；后端拒绝段不写。统一映射Store AF或hardwareError，交核心唯一commit应用效果。
+
+`apply_store_expectation()`的抽象职责是对普通同步MMIO Store形成错误及写效果期望。中文文字伪代码：按owner要求唯一请求/响应，独立比较item翻译PA、字节mask和主表数据，实际nc必须为0。错误映射位7/19与写接受事实分别返回，已接受写在异常终态仍应用；NC架构提交沿原逻辑且由后台服务检查通知。
+
+### 13.4 错误通知
+
+`observe_notification()`的抽象职责是采集实际通知及逐拍水位。中文文字伪代码：other_ctrl monitor只发布Uncache valid/bits和sample/reset，不恢复无关大事务；同地址连续两拍valid入两条实际事件。reset边界清未到期事件，空item只推进水位。
+
+`check_until()`的抽象职责是独立比较每个Store D.fire应产生的输出。中文文字伪代码：只处理新增A/D有限事件队列；外D仅保存已送达token；DUT内部Uncache真实D消费后，沿source同generation核对冻结raw/Store资格及busError地址，raw有错且内部消费sample独立CSR enable有效，则建立内部消费+2的行对齐地址期望。生产和实际观察水位均越过目标sample后逐条核对地址、sample、reset及次数；缺失、多余、地址或拍数错配报告错误。服务不等待当前UID，不生成BEU/中断模型。
+
+### 13.5 同边沿采样锚定
+
+`dcache_mem__access_base_sequence::body()`与`sbuffer_mem_access_base_sequence::body()`的抽象职责新增约束：真实握手、写批次和被动monitor使用同一个DUT sample身份。中文文字伪代码：clocking事件后先复制valid/ready及reset快照；reset包含backend_done及L2TLB协调器。非reset调用既有同边沿anchor等待，只经过当前边沿NBA/delta，随后处理shared batch和A/D，再以该锚点推进producer水位。不能直接peek尚未由CSR同拍更新的上一sample，也不允许用地址或相邻sample容忍窗口修补错关联。
+
+### 13.6 外D与Uncache内部消费端分离
+
+`CMO_PATH_UNCACHE_CONSUME_D`专用probe采集内部D.valid/source/raw（ready在当前V2恒1），同时采实际Store cmd和busError valid/address作交叉检查。外部D已接受后只把原source/token放入等待内部消费集合；内部消费到来必须引用同source冻结generation，不能用当前地址拼接。外部D经过3级TLBuffer，反压可改变延迟；checker不猜固定偏移，顶层通知仅从内部消费开始固定延迟2拍。独立CSR输入读取同一内部消费sample，因为CSR也延迟2拍。
+
+## 14. CMO 与统一错误 RM 的实际消费调用链（2026-11-11）
+
+### 14.1 术语、源码入口与抽象职责
+
+本章补充前述 responder 事实如何进入当前 V2 RM。下表中的身份和时间均来自被动采样或 readonly 值，不是 RM 创建的执行状态。
+
+| 英文术语 | 本章中文含义 | 代码对象或状态落点 | 典型场景 |
+|---|---|---|---|
+| `CMO / final op` | 最终已经确定的缓存维护操作 | `cmo_op`、`rm_ls_decode_cmo_final_op()` | zero/clean/flush/inval 按主表最终操作比较 |
+| `owner / dynamic epoch` | 当前动态指令的完整身份及框架提供的动态代 | UID、ROB、LQ/SQ、`item.dynamic_epoch` | 同地址、同 source 或同 ROB value 不足以关联旧响应 |
+| `origin / slot version` | 响应错误的独立来源及真实阵列槽保存的来源版本 | `origin_t`、`origin_by_version`、`committed_version` | 命中错误来自实际 errorArray 槽，而非永久物理行摘要 |
+| `direct / MSHR / hit` | Load 的 D 广播、缺失队列及阵列命中错误输入 | `forward_pending`、`hit_delay1/2` | 三项按真实有效资格分别贡献异常 |
+| `gate / state6` | 原子错误门控及 AtomicsUnit 实际消费门控的状态 | `cache_error_enable`、`CMO_PATH_ATOMIC_LATCH_CONTROL` | 独立答案取 state6 前两拍顶层 CSR 输入 |
+| `Prefetch / suppression` | 软件或硬件预取，以及响应错误的同步异常抑制 | `query_prefetch()`、`validate_prefetch_grant()` | 软件 LDA 与后台 GrantData 分别检查，不构造返回值 |
+| `expected_store_byte / expected_store_entries` | RM 期望字节覆盖及最终逐笔写效果记录 | `ls_model.expected_store_byte`、`expected_store_entries` | 后续 Load 用前者；最终 Store-table 比较遍历后者 |
+| `consumption sample / watermark` | 实际消费拍及已完整观察边界 | `fact.sample`、各 observer 的水位 | 水位未到允许等待，水位已到缺来源必须失败 |
+| `terminal / drain` | 指令最终结果及环境结束时的残留检查 | `terminal_done`、`check_phase()` | fault CMO 不能仅凭 ROB commit 提前完成比较 |
+
+源码入口位于 `mem_ut/ver/ut/memblock`：
+
+- `subagent/cmo_path_agent/src/cmo_path_agent_monitor.sv`：复制内部只读 probe 并发布逐拍批次。
+- `env/src/memblock_rm/memblock_rm.sv`：唯一消费批次，构造指令期望、采集真实写回并推进 core。
+- `env/src/memblock_rm/rm_dcache_error_observer.sv`：维护真实 DCache 错误来源及消费事实。
+- `env/src/memblock_rm/rm_cmo_request_observer.sv`：证明 CMO 请求确实经过指定 DCache 路径。
+- `env/src/memblock_rm/rm_uncache_error_observer.sv`：关联 Uncache 分段、响应、实际写效果和独立错误通知。
+- `env/src/memblock_rm/rm_ls_core.sv`：比较架构结果并唯一应用写效果。
+
+### 14.2 函数调用 Flow
+
+```mermaid
+flowchart TD
+    A["cmo_path_agent_monitor::run_phase"] --> Q["cmo_path_fifo：逐sample批次"]
+    Q --> B["memblock_rm::observer_service_path_facts"]
+    B --> D["dcache_errors.observe_batch：来源与消费事实"]
+    B --> U["uncache_errors.observe_batch：SQ/slot/source关联"]
+    B --> R["cmo_requests.observe_batch：CMO真实请求"]
+    B --> N["uncache_errors.check_until：内部D消费及通知比较"]
+    C["observer_process_current_commit：实际提交或fault终态"] --> I["observer_build_commit_item_with_observation"]
+    I --> J["observer_capture_commit_actual"]
+    J -->|Load| L["observer_apply_load_d_error_expectation"]
+    J -->|Atomic| T["observer_apply_atomic_d_error_expectation"]
+    J -->|软件Prefetch| P["observer_check_prefetch_d_error_suppression"]
+    J -->|CMO| M["observer_capture_cmo_actual"]
+    D --> L
+    D --> T
+    D --> P
+    M --> V["cmo_requests.validate / validate_no_requests"]
+    M --> W["observer_apply_cmo_d_error_expectation"]
+    R --> V
+    U --> W
+    W -->|Uncache zero| Z["uncache_errors.validate_cmo_zero"]
+    W -->|clean/flush/inval| H["query_l2_response_history：owner匹配CBOAck"]
+    L --> K["ls_model.commit"]
+    T --> K
+    P --> K
+    M --> MC["ls_model.push_cmo_actual → pending_cmo_actual"]
+    MC --> K
+    K -->|CMO| E["rm_ls_commit_cmo"]
+    E -->|cacheable zero| F["rm_ls_apply_zero_line_effect"]
+    E -->|Uncache zero| G["rm_ls_apply_uncache_zero_effect"]
+    F --> O["rm_ls_apply_zero_segments → commit_memory_effect"]
+    G --> G1["rm_ls_apply_uncache_write_effect"]
+    G1 --> O
+    O --> S["expected_store_byte + expected_store_entries"]
+    K --> X["release_completed_owner；CMO mark_consumed"]
+    Y["check_phase"] --> B
+    Y --> Y1["uncache_errors.final_check + cmo_requests.check_drained"]
+```
+
+#### 函数调用 Flow 图整体文字伪代码
+
+```text
+1. cmo_path_agent_monitor在clocking边界复制固定物理口快照：
+   正常拍等待同边沿CSR sample锚点，将整份批次写入唯一analysis FIFO；
+   reset拍清事件并发布reset代际，不等待不存在的锚点。
+2. observer_service_path_facts只取已经越过当前生产边界的批次：
+   依次调用DCache、Uncache和CMO请求observer，建立独立来源及请求因果链；
+   记录path_observed_sample，再推进Uncache通知检查。
+3. observer_process_current_commit在DUT实际提交或合法fault终态后构造item：
+   翻译、权限和PMA/PMP异常先计算；CMO使用最终op，epoch只读自框架。
+4. observer_capture_commit_actual依指令分流：
+   Load从真实LDA边界查询错误消费，原子从最终响应与state6查询raw和CSR；
+   软件Prefetch只核对LDA身份及同步错误抑制；CMO从唯一当前owner的STA0采集终态。
+   证据水位不足走有界等待；已覆盖后缺token/owner/请求直接报错。
+5. CMO先证明指定路径真实请求，再进入共享错误入口：
+   前置fault要求无数据请求；cacheable zero不注入L2响应错误；
+   non-zero查询相同owner的已完成CBOAck；Uncache zero验证连续分段与确定写效果。
+6. core commit比较期望、真实写回及框架terminal：
+   正常cacheable zero一次应用64B；Uncache zero仅应用被证明已接受并生效的段；
+   所有效果复用同一byte overlay、entry和SC覆盖底座，不逐段推进程序cursor。
+7. 成功消费后释放DCache owner查询事实，并将已完成CMO请求标记consumed；
+   check_phase再服务已到边界批次，核对协议/通知残留、请求未消费和程序游标。
+   RM不生成redirect，不执行UID+1恢复，也不创建动态epoch。
+```
+
+### 14.3 `observer_service_path_facts()`：批次唯一消费与水位
+
+抽象功能描述：本函数由 RM 轮询及结束检查调用，把被动事实交给三个 observer，并推进后台通知服务。它拥有 FIFO 出队顺序，不拥有 DUT 控制或框架恢复事件。
+
+真实逻辑摘要：
+
+```systemverilog
+if(!tr.reset_active && tr.sample_seq>=memblock_sync_pkg::dut_sample_seq) break;
+if(!cmo_path_fifo.try_get(tr)) break;
+dcache_errors.observe_batch(tr);
+uncache_errors.observe_batch(tr);
+cmo_requests.observe_batch(tr);
+path_observed_sample=tr.sample_seq;
+```
+
+文字伪代码：
+
+```text
+本函数负责同拍producer发布完成后的唯一事实消费。
+先peek FIFO首项；正常项尚在当前全局sample时停止，不抢在同拍producer前关联。
+取出一份批次，先建立DCache来源，再建立Uncache与CMO请求关联；各observer消费值副本。
+更新path水位后，调用check_until：只处理其自身producer/通知水位均允许的事件。
+FIFO项只出队一次；空批次仍推进观察边界，reset批次用于取消活跃关联。
+```
+
+### 14.4 `rm_dcache_error_observer::observe_batch()`：DCache 独立来源
+
+抽象功能描述：本函数把真实 TL、errorArray、LoadPipe、MainPipe 和 AtomicsUnit 的被动事件转成可查询的错误消费事实。它只保存来源和身份，不保存数据、不模拟 tag 查找、命中、替换或新执行。
+
+真实逻辑摘要：
+
+```systemverilog
+source.accept_sample=tr.sample_seq;
+transport_by_source[event_item.id]=source;
+// MainPipe响应先冻结，AtomicsUnit实际输入在下一拍才允许引用。
+combined.atomic_proof[0]=main_atomic_registered_valid;
+combined.atomic_proof[2]=main_atomic_registered.sample+1==tr.sample_seq;
+// 逐批次末更新，空拍不会继续保留Main响应Valid。
+main_atomic_registered_valid=has_main_atomic;
+```
+
+文字伪代码：
+
+```text
+本函数负责将物理来源沿真实流水冻结，避免source重用或新写污染旧访问。
+reset或reset代际变化先清source、slot版本、流水及owner索引；重复旧sample不重新应用。
+真实A按accept sample/source绑定不可变token；source复用只替换当前索引，旧origin保留值副本。
+当前errorArray写从已冻结Main S3 refill取得来源；S0读逐way按当前写、前拍写、已提交槽选择。
+Main首S1只冻结一次并跨stall保持；实际S2推进后才更新下一拍S3来源。
+Load S1冻结forward身份，S2分别保存direct与MSHR贡献，S3结合真实延迟hit形成owner事实。
+Main source2最终原子响应在批次末冻结一拍；miss/replay不形成最终事实。
+真实Unit最终接受只引用前一拍Main来源，state6再核对上一拍Unit及CSR输入。
+真实D.fire在最后推进已fire beat计数；Prefetch的实际GrantData逐beat核对token/raw/sample。
+所有查询来源均来自本拍之前或当拍合法消费，不引用未来D.fire；缺有效来源不能当CLEAN。
+```
+
+内部关键子调用：`select_read_origin()` 负责真实 way 的来源选择；`resolve_offer()` 允许真实 valid、尚未 ready 的直转输入；`resolve_delivered()` 只证明已经送达且覆盖目标字节的 beat。各返回值的 `proven` 决定消费事实是否可供 RM 使用。
+
+### 14.5 `observer_apply_load_d_error_expectation()`：Load 映射与数据读取边界
+
+抽象功能描述：本函数在实际 LDA 写回边界取得独立错误期望。翻译/PMA 前置异常由原逻辑负责；响应错误不能从最终 DUT 异常倒推，也不能直接查永久物理行错误摘要。
+
+真实逻辑摘要：
+
+```systemverilog
+if (item.expected_exception != '0) return 1'b1;
+if (!dcache_errors.query_load_exception_bits(
+    item.uid,item.dynamic_epoch,{item.rob.flag,item.rob.value[7:0]},
+    {item.lq_flag,item.lq_value},access_sample,
+    expected_af,expected_he,control_sample,proven,detail)) begin
+    observer_pending_evidence=1; return 0;
+end
+item.expected_exception[5] |= expected_af;
+item.expected_exception[19] |= expected_he;
+```
+
+文字伪代码：
+
+```text
+本函数负责在读数据模型前确定Load是否应有响应错误。
+先检查实际access sample；已有翻译/PMA异常则保持该期望，不附加未执行数据路径的错误。
+Uncache路径查询当前UID/epoch/ROB/LQ及地址范围的唯一响应历史；denied映射bit5，corrupt-only映射bit19。
+普通cache路径调用共享消费查询：direct、MSHR和hit各项先执行denied优先映射，再合并AF/HE。
+某项denied不会抹掉另一项corrupt-only贡献；本路径不使用原子的cache_error_enable门控。
+未到消费水位设置pending；已到水位但proven为0立即失败。
+调用者随后比较期望、LDA与terminal异常；仅三方无异常且匹配时才读取backing并比较数据。
+首页split沿既有真实mabuf context和PA/mask/sample证明已执行前缀，不能补造未执行高页。
+```
+
+### 14.6 `observer_apply_atomic_d_error_expectation()` 与 `resolve_atomic_control()`
+
+`observer_apply_atomic_d_error_expectation()` 的抽象功能描述：在最终原子 LDA 边界读取独立 raw 和有效门控，按 LR 或 Store 类形成响应异常期望；原子返回值与写效果仍由原 core 比较。
+
+真实逻辑摘要：
+
+```systemverilog
+if(!dcache_errors.query(item.uid,item.dynamic_epoch,
+    {item.rob.flag,item.rob.value[7:0]},8'b0,access_sample,1,
+    raw,control_sample,proven,detail)) begin
+    observer_pending_evidence=1; return 0;
+end
+if(control.enable) begin
+    if(raw[1]) item.expected_exception[item.atomic_kind==RM_ATOMIC_LR ? 5 : 7]=1;
+    else if(raw[0]) item.expected_exception[19]=1;
+end
+```
+
+文字伪代码：
+
+```text
+本函数负责原子响应错误类别和CSR门控。
+前置异常保持原期望；正常数据路径必须是合法cacheable原子路径且有实际写回sample。
+按UID/epoch/ROB查询最终消费raw及control_input_sample；缺证据或独立CSR历史失败则停止比较。
+门控1：denied对LR追加bit5，对SC/AMO/CAS追加bit7；否则corrupt追加bit19。
+门控0：不追加响应异常，继续原子正常返回值及实际写效果比较，不能丢弃既有写效果。
+```
+
+`resolve_atomic_control()` 的抽象功能描述：将 AtomicsUnit state6 的实际消费拍转换为独立顶层 CSR 输入拍，并检查真实内部连接是否符合两拍传播。
+
+真实逻辑摘要：
+
+```systemverilog
+if(latch_sample<=2) return 0;
+input_sample=latch_sample-2;
+if(!memblock_sync_pkg::read_cache_error_control(input_sample,control) || !control.valid)
+    return 0;
+if(control.enable!=actual_enable) begin
+    fail("RM_ATOMIC_CSR_DELAY",$sformatf(
+        "state6 sample=%0d top_input_sample=%0d expected_enable=%0d actual_enable=%0d",
+        latch_sample,input_sample,control.enable,actual_enable));
+    return 0;
+end
+```
+
+文字伪代码：
+
+```text
+本函数负责独立CSR答案的精确采样时间。
+state6 sample不足两拍时拒绝，防止无符号减法下溢。
+读取state6前2拍的顶层CSR monitor历史；实际内部enable只用于核对连接与延迟。
+顶层历史缺失或与内部采样不符均失败；query对外返回该顶层输入sample，调用者不重复减2。
+例如Main响应C0、Unit接受C1、state6消费C2：使用C0顶层CSR，而非C1或C2的latest。
+```
+
+实际门控由 CSR producer 决定。普通 AUTO topology 的默认基线与专用 initial randomizer 是不同入口；只改变随机权重不代表当前 producer 会使用该字段。既有 DISABLED topology 启动的 `memblock_mmu_sv39_csr_sequence` 明确驱动门控1。验收应检查真实内部采样与独立历史，而非按命令行名称宣称覆盖。
+
+### 14.7 Prefetch：实际传输与软件同步抑制独立服务
+
+`validate_prefetch_grant()` 的抽象功能描述：按真实 L1_PREFETCH token 逐 beat 检查 GrantData 错误传输。它服务软件及硬件预取的后台响应，不创建 UID，不要求每条软件预取都产生下游请求。
+
+真实逻辑摘要：
+
+```systemverilog
+// 底座要求非零beat mask；首次01只取record元信息，不以available决定当前beat。
+if(!mem_access_base_sequence::query_l2_response_history(source.token,
+    mem_access_base_sequence::mem_addr_t'(source.line_addr),sample,2'b01,response,available) ||
+    !response.valid) begin
+    return 0;
+end
+if(response.req_source!=MEMBLOCK_REQ_L1_PREFETCH) return 1;
+required_beats=source.fired_beats==0 ? 2'b01 : 2'b10;
+```
+
+文字伪代码：
+
+```text
+本函数负责独立验证预取真实传输。
+按source固定token以合法非零mask读取元信息；非预取来源保留原消费者通路。
+预取按已fire数选择本beat，核对source/generation、实际beat送达性、raw和准确sample。
+首查不以available推断当前beat；第二次必须检查对应01或10可用，未来beat不能授权。
+无请求的预取丢弃或命中不构造token；真实错误refill仍保存到slot来源，后续需求Load继续正常核验。
+```
+
+`observer_check_prefetch_d_error_suppression()` 的抽象功能描述：在软件预取实际终态比较真实 LDA 身份和响应错误同步抑制，保持既有无数据效果提交语义。
+
+真实逻辑摘要：
+
+```systemverilog
+if(!dcache_errors.query_prefetch(item.uid,item.dynamic_epoch,
+    {item.rob.flag,item.rob.value[7:0]},{item.lq_flag,item.lq_value},wb.sample_seq,proven,detail)) begin
+    observer_pending_evidence=1;return 0;
+end
+if(!proven || !rm_dcache_error_observer::prefetch_suppression_matches(wb.exception_vec)) begin
+    ls_model.set_error(RM_LS_ERR_EXCEPTION_MISMATCH,
+        $sformatf("软件预取响应错误抑制失败 uid=%0d sample=%0d exception=0x%h detail=%s",
+            item.uid,wb.sample_seq,wb.exception_vec,detail));return 0;
+end
+```
+
+文字伪代码：
+
+```text
+本函数负责软件预取的架构终态证据，不读取返回数据。
+先读取当前ROB真实LDA，验证source/ROB/异常采样有效、无replay/flush及非零sample。
+query_prefetch复用UID/epoch/ROB/LQ和水位检查，并要求真实终态记录带prefetch资格。
+prefetch_suppression_matches仅核对响应错误不得追加同步bit5/19；不把软件预取当普通Load比较返回值。
+软件WB可早于后台GrantData，故本检查不等待虚构的同拍响应；后台传输由上一helper继续独立服务。
+硬件预取没有软件UID，不进入本函数，也不建立伪造的架构写回期望。
+```
+
+### 14.8 `observer_capture_cmo_actual()` 与共享错误入口
+
+`observer_capture_cmo_actual()` 的抽象功能描述：冻结当前完整 owner 唯一最终 STA0，并联合真实请求链构造 core 可比较的 CMO 完成对象。
+
+真实逻辑摘要：
+
+```systemverilog
+actual.source_sta0=wb.source_kind==2 && wb.lane==0;
+actual.is_final=1; actual.flush_pipe=wb.flush_pipe;
+actual.exception_vec=wb.exception_vec; actual.sample_seq=wb.sample_seq;
+actual.normal_pass=status_v.sta_pass && !status_v.sta_fault;
+actual.fault_terminal=status_v.sta_fault && status_v.terminal_done;
+return ls_model.push_cmo_actual(actual);
+```
+
+文字伪代码：
+
+```text
+本函数负责完整owner的真实完成证据。
+readonly按UID/epoch/ROB取唯一STA0；重复、stale或缺失与普通owner错配分别处理。
+STA0接口没有replayInst字段；最终性来自真实STA0、owner以及normal/fault终态。
+Uncache zero要求DCache CMO队列无请求，再验证Uncache真实段链；
+其他路径要求没有意外Uncache请求，并验证cacheable zero或non-zero对应DCache真实请求。
+调用共享错误入口后创建actual：保存STA0来源、最终op、flushPipe、异常及normal/fault资格。
+fault必须等待terminal_done；normal与fault互斥，不能只凭ROB commit提前完成。
+```
+
+`observer_apply_cmo_d_error_expectation()` 的抽象功能描述：统一形成响应错误期望，CMO core 不另建错误表或重复异常映射。
+
+真实逻辑摘要：
+
+```systemverilog
+if(item.cmo_pre_access_exception!=0) return 1;
+if(item.cmo_path==RM_CMO_PATH_UNCACHE_ZERO) begin
+    if(!uncache_errors.validate_cmo_zero(item,access_sample,detail)) begin
+        observer_pending_evidence=uncache_errors.observation_pending();
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,detail); return 0;
+    end
+    return 1;
+end
+if(item.cmo_path==RM_CMO_PATH_CACHEABLE_ZERO) return 1;
+// non-zero完成后，以owner匹配CBOAck的独立beat形成期望。
+if(response.beat0.denied) item.expected_exception[7]=1;
+else if(response.beat0.corrupt) item.expected_exception[19]=1;
+```
+
+文字伪代码：
+
+```text
+本函数负责CMO响应错误的唯一实现入口。
+前置TLB/PMA/PMP异常不再查数据响应；相关路径validator要求没有实际数据请求。
+Uncache zero委托共享分段validator，返回连续前缀、首错、异常与实际写效果集合。
+cacheable zero属于生产端不注错类，保持正常完成及写效果；已有错误行不能绕过该限制。
+clean/flush/inval要求同UID/epoch/ROB/SQ token的CBOAck已完成，再按denied优先映射bit7/19。
+non-zero权限命令仍为read，zero为write；Store外显异常名称不改变权限查询命令。
+```
+
+### 14.9 `rm_ls_commit_cmo()`：唯一提交与两类 zero 效果
+
+抽象功能描述：本函数由 core `commit()` 的 CMO 分支调用，把独立期望、请求证明、STA0 和 terminal 联合比较，并唯一落地已经证明的写效果。它不产生 DUT 请求，也不控制 redirect 或 epoch。
+
+真实逻辑摘要：
+
+```systemverilog
+if (actual.normal_pass == actual.fault_terminal ||
+    actual.fault_terminal != fault_expected ||
+    (!fault_expected && actual.flush_pipe !== item.cmo_expect_flush_pipe)) begin
+    rec.error_code = RM_LS_ERR_CMO_COMPLETION_MISMATCH;
+end else if (item.cmo_path == RM_CMO_PATH_CACHEABLE_ZERO) begin
+    if (fault_expected || item.cmo_request_count != 1 ||
+        !rm_ls_apply_zero_line_effect(item))
+        rec.error_code = RM_LS_ERR_CMO_EFFECT_MISMATCH;
+end else if (item.cmo_path == RM_CMO_PATH_UNCACHE_ZERO) begin
+    if (item.cmo_request_count > 8 ||
+        item.cmo_request_count != $countones(item.cmo_segment_sent_mask) ||
+        !rm_ls_apply_uncache_zero_effect(item))
+        rec.error_code = RM_LS_ERR_CMO_EFFECT_MISMATCH;
+end
+```
+
+文字伪代码：
+
+```text
+本函数负责最终比较与一次性效果提交。
+先核对最终op、读写权限类别、数据归一化、路径、完整owner及STA0来源；再核对请求水位和token。
+比较expected、STA0、terminal异常，确认normal/fault互斥，正常non-zero要求flushPipe，zero不要求。
+前置fault无数据效果；cacheable zero正常完成后整行应用；Uncache zero按已验证段集合应用。
+合法non-zero只消费请求/完成，无数据效果。失败保存具体history；成功标记completion_consumed并保存最终摘要。
+外层commit只推进一次cursor；随后release_completed_owner释放Load/atomic查询索引，mark_consumed记录CMO完成。
+```
+
+`rm_ls_apply_zero_line_effect()` 的抽象功能描述：仅把合法正常 cacheable zero 转成同一行八个已验证的 8B 零写效果。
+
+真实逻辑摘要：
+
+```systemverilog
+if (item == null || item.cmo_path != RM_CMO_PATH_CACHEABLE_ZERO ||
+    item.expected_exception != '0 || item.cmo_pre_access_exception != '0) begin
+    set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "normal cacheable zero effect requires clean terminal");
+    return 1'b0;
+end
+return rm_ls_apply_zero_segments(item, 8'hff);
+```
+
+文字伪代码：
+
+```text
+本函数负责正常cacheable整行效果入口。
+验证cacheable zero且没有前置/响应异常后，将全8段mask交给公共zero段底座。
+底座在无yield的同一次调用中写64个expected_store_byte，并生成8个8B expected_store_entries。
+所有字节仍经过commit_memory_effect，保留SC无写义务被后续确定写覆盖的处理。
+```
+
+`rm_ls_apply_uncache_zero_effect()` 的抽象功能描述：只消费共享 observer 已证明的 Uncache zero 分段效果，不再次预测 denied/corrupt，也不叠加整行效果。
+
+真实逻辑摘要：
+
+```systemverilog
+if (item == null || item.cmo_path != RM_CMO_PATH_UNCACHE_ZERO ||
+    !item.cmo_effect_valid || item.cmo_pre_access_exception != '0 ||
+    ((item.cmo_segment_write_mask & ~item.cmo_segment_sent_mask) != '0) ||
+    item.cmo_segment_completed_mask != item.cmo_segment_sent_mask ||
+    (item.expected_exception == '0 &&
+     (item.cmo_segment_sent_mask != 8'hff || item.cmo_segment_write_mask != 8'hff))) begin
+    set_error(RM_LS_ERR_CMO_EFFECT_MISMATCH, "Uncache zero effect lacks verified segment evidence");
+    return 1'b0;
+end
+return rm_ls_apply_uncache_write_effect(item);
+```
+
+文字伪代码：
+
+```text
+本函数负责Uncache zero确定写集合的唯一落地。
+确认路径、效果资格、已发/已完成集合以及write mask均由共享validator证明。
+正常结果必须有8段完整完成及写效果；fault可以是连续前缀，但只写backend已接受且已生效的段。
+公共Uncache写helper委托zero段底座，更新相同overlay和entries，不另建缓存，也不回滚已接受写。
+即使第8段报错且此前已写满64B，也必须按异常完成；不能因数据全零把fault改成normal。
+```
+
+### 14.10 独立通知、reset 与结束边界
+
+`rm_uncache_error_observer::check_until()` 的抽象功能描述：后台持续消费真实协议与内部消费事实，独立比较顶层 `io_uncacheError_ecc_error_valid/bits`。它不等待当前程序 UID，不与指令同步异常比较合并。
+
+真实逻辑摘要：
+
+```systemverilog
+if((fact.denied || fact.corrupt) && ctrl.enable) begin
+    expected_v='{sample:event_v.sample+2,reset_epoch:ctrl.reset_epoch,
+        address:{fact.address[47:6],6'b0}};
+    expected_notification.push_back(expected_v);
+end
+```
+
+文字伪代码：
+
+```text
+本函数负责Uncache错误通知的独立逐事件比较。
+外D只证明相同token已送达；CMO_PATH_UNCACHE_CONSUME_D证明内部真正消费该source-generation。
+内部raw、Store资格及busError地址只交叉核对，答案仍来自框架冻结响应和独立CSR输入。
+读内部消费sample的顶层CSR：通知与CSR在MemBlock同样延迟2拍，故期望内部消费+2。
+外部TLBuffer延迟可变，不用固定外D+5、不用任意时间窗；同地址连续valid分别保留。
+生产、path及实际通知水位覆盖后才逐条比较sample/reset/address/次数，缺失和额外事件分别报错。
+```
+
+`memblock_rm::check_phase()` 的抽象功能描述：在场景结束时核对已经授权运行的服务是否全部收敛，不通过清队列制造完成状态。
+
+真实逻辑摘要：
+
+```systemverilog
+observer_service_path_facts();
+uncache_errors.final_check(path_observed_sample);
+void'(cmo_requests.check_drained());
+if(ls_model.configured && ls_model.current_uid!=observer_main_count)
+    `uvm_error("RM_PROGRAM_NOT_DRAINED",
+        $sformatf("RM仍有未比较指令 current=%0d count=%0d",ls_model.current_uid,observer_main_count))
+```
+
+文字伪代码：
+
+```text
+本函数负责最终残留检查。
+先服务已越过生产边界的最后批次；Uncache检查未解析TL、slot/source owner、通知及分配事实。
+CMO最终允许一次请求历史检查，找出未取消且未消费的请求、等待TL CBO的请求和等待SB完成的zero。
+核对程序cursor及最终Store比较pending；不产生额外flush或数据请求。
+普通DUT reset清observer活跃source、slot版本、流水、未到期通知和owner查询索引；
+CMO旧请求保存cancelled摘要，框架首次行选择与不可变历史按既有reset代际规则保留。
+指令成功消费后释放对应DCache事实，已终态Uncache owner仍保留迟到请求检查身份。
+RM仅比较真实flushPipe/异常及框架终态；UID+1恢复、年轻实例清理、重发和epoch创建仍归框架。
+```
+
+当前真实 VCS 定向已证明原子 gate1 的类别映射：AMO denied 为 `0x80`、AMO corrupt 为 `0x80000`、LR denied 为 `0x20`、SC denied 为 `0x80`，对应运行的 `UVM_ERROR/UVM_FATAL` 均为0。该结果证明上述映射与消费时序，不替代其他尚未执行组合的独立覆盖记录。
