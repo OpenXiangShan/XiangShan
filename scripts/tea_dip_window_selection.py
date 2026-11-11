@@ -64,15 +64,49 @@ def summarize(formal, analyses):
                       'Coverage is reported without reweighting missing points into a suite score.')
 
 
+def branch_pressure(formal, branch_summary, rows):
+    assert branch_summary['passed']
+    assert (branch_summary['source'], branch_summary['run_id']) == (formal['source'], formal['run_id'])
+    assert {p['point'] for p in branch_summary['points']} == {p['point'] for p in formal['points']}
+    selected = {r['point'] for r in rows}
+    guards = {}
+    for row in rows:
+        if row['local_branch_mispredicts_per_kinst'] == 0:
+            guards.setdefault(row['benchmark'], set()).add(row['point'])
+    targets = []
+    for benchmark, zero_windows in sorted(guards.items()):
+        ranked = []
+        for point in branch_summary['points']:
+            if point['benchmark'] != benchmark:
+                continue
+            frame = next(f for f in point['frames'] if f['phase'] == 'ROI')
+            rate = frame['conditional_mispredict_reasons']['SC'] * 1000 / frame['retired']
+            ranked.append((point['weight'] * rate, point['point'], rate))
+        priority, name, rate = max(ranked)
+        targets.append(dict(benchmark=benchmark, zero_mispredict_windows=sorted(zero_windows),
+                            largest_weighted_SC_mispredict_point=name, formal_SC_mispredicts_per_kinst=rate,
+                            formal_weighted_SC_mispredicts_per_kinst=priority, point_already_selected=name in selected))
+    return targets
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--formal', type=Path, required=True)
     parser.add_argument('--analyses', type=Path, nargs='+', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--branch-summary', type=Path,
+                        help='Audited complete formal branch summary for zero-mispredict window checks')
     args = parser.parse_args()
     data = summarize(json.loads(args.formal.read_text()), [(p, json.loads(p.read_text())) for p in args.analyses])
+    sources = [args.formal, *args.analyses, Path(__file__)]
+    if args.branch_summary:
+        data['branch_pressure_checks'] = branch_pressure(
+            json.loads(args.formal.read_text()), json.loads(args.branch_summary.read_text()), data['rows'])
+        sources.append(args.branch_summary)
+        data['scope'] += (' Zero-mispredict windows remain valid guards. Target ranking is formal SC-tagged '
+                          'conditional-mispredict exposure, not accuracy, saved cycles or a run instruction.')
     digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    data['source_sha256'] = {str(p): digest(p) for p in [args.formal, *args.analyses, Path(__file__)]}
+    data['source_sha256'] = {str(p): digest(p) for p in sources}
     args.output.write_text(json.dumps(data, indent=2) + '\n')
     print(json.dumps({key: data[key] for key in ['selected_unique_INT_points', 'covered_INT_programs', 'formal_INT_points', 'formal_INT_programs']}))
 
