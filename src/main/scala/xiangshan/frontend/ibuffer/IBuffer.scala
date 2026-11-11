@@ -206,12 +206,12 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
   numTryEnq := numFromFetch
 
-  private val packetCarrierMask = VecInit(
-    io.in.bits.valid.asBools.zip(io.in.bits.enqEnable.asBools).map { case (valid, enqEnable) =>
-      valid && enqEnable
+  private val packetTeaPsvVec = if (backendParams.teaPsvEn) {
+    val carrierMask = io.in.bits.valid.asBools.zip(io.in.bits.enqEnable.asBools).map {
+      case (valid, enqEnable) => valid && enqEnable
     }
-  )
-  private val packetTeaPsvVec = TeaFrontend.bindPacketPsv(packetCarrierMask, io.in.bits.teaPsv)
+    TeaFrontend.bindPacketPsv(carrierMask, io.in.bits.teaPsv)
+  } else VecInit.fill(EnqueueWidth)(0.U(0.W))
   private val enqData = VecInit.tabulate(EnqueueWidth) { i =>
     val entry = Wire(new IBufEntry).fromFetch(io.in.bits, i)
     entry.teaPsv := packetTeaPsvVec(i)

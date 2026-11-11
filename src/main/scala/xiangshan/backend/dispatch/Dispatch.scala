@@ -106,7 +106,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new RenameOutUop)))
     val toRenameAllFire = Output(Bool())
-    val dip = Option.when(backendParams.teaEn)(Output(new DipDispatch))
+    val dip = Option.when(backendParams.dipEn)(Output(new DipDispatch))
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // IssueQueues
@@ -703,19 +703,22 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
-  // Partial dispatch leaves the oldest remaining instruction in its original lane.
-  val drSqHeadIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
-  val drSqHead = fromRename(drSqHeadIdx)
-  val sqHasRoom = drSqHead.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
-  val drSqBlock = io.enqRob.isEmpty && drSqHead.valid &&
-    FuType.isStore(drSqHead.bits.fuType) && !sqHasRoom
-  val drSqPending = RegInit(false.B)
-  when (io.redirect.valid) {
-    drSqPending := false.B
-  }.elsewhen (drSqPending && drSqHead.fire) {
-    drSqPending := false.B
-  }.elsewhen (drSqBlock) {
-    drSqPending := true.B
+  val drSqPsv = WireDefault(VecInit.fill(RenameWidth)(0.U(TeaEvent.width.W)))
+  if (backendParams.teaTrackerEn) {
+    // The oldest valid lane has no older instruction in this dispatch group to block it.
+    val headIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
+    val head = fromRename(headIdx)
+    val sqHasRoom = head.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+    val sqBlock = io.enqRob.isEmpty && head.valid && FuType.isStore(head.bits.fuType) && !sqHasRoom
+    val pending = RegInit(false.B)
+    when(io.redirect.valid || head.fire) {
+      pending := false.B
+    }.elsewhen(sqBlock) {
+      pending := true.B
+    }
+    for (i <- 0 until RenameWidth) {
+      drSqPsv(i) := Mux(pending && headIdx === i.U && isStoreVec(i), TeaEvent.bit(TeaEvent.DR_SQ), 0.U)
+    }
   }
 
   /*
@@ -804,8 +807,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
-    when (drSqPending && drSqHeadIdx === i.U && isStore(i)) {
-      updatedUop(i).teaPsv := TeaPsvOps.setBit(fromRename(i).bits.teaPsv, TeaEvent.DR_SQ)
+    if (backendParams.teaPsvEn) {
+      updatedUop(i).teaPsv := fromRename(i).bits.teaPsv | drSqPsv(i)
+    } else {
+      updatedUop(i).teaPsv := 0.U
     }
     XSDebug(
       fromRename(i).fire &&

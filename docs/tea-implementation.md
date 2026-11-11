@@ -125,9 +125,11 @@ PSV_new = PSV_old OR 新增事件 mask
 
 ## 5. 采样节奏和状态分类
 
-构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
+构建时 `WITH_TEA=1` 生成 TEA tracker、selector 和数据库记录逻辑，并默认启用 `WITH_TEA_STATS=1`；可显式设 `WITH_TEA_STATS=0` 关闭周期统计。DIP 由独立的 `WITH_DIP=1` 控制。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
 
-采样间隔按周期推进，不等待先前目标退休。关闭采样后，debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
+采样间隔按周期推进，不等待先前目标退休。从未启用 `enableTea` 时，成员 helper 保持复位，输入置零。首次启用后，关闭新采样时 debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
+
+恢复原因 PC 来自 redirect 事件或异常对应的 debug PC；控制流事件携带取指块首地址，需要加上事件的 `getPcOffset()`，内存 redirect 已经携带指令 PC。成员 PSV 按 Slot 和完整 PC 匹配；没有匹配历史时保留事件原因 bit，不使用 Slot 中其他成员的 PSV。
 
 状态分类优先级如下，其中“恢复原因”指当前可见的原因：
 
@@ -307,7 +309,7 @@ PYTHONPATH=scripts python3 -m unittest test_tea_visualize
 
 ## 11. 低开销周期统计与队首上下文
 
-新增逻辑仅在 `WITH_TEA=1` 下生成，不改变功能 ROB、PSV、成员完成或延迟关联规则。
+周期统计由 `WITH_TEA_STATS=1` 控制（默认跟随 `WITH_TEA`），不改变功能 ROB、PSV、成员完成或延迟关联规则。
 `TeaCycleStats` 使用固定数量的计数器，不增加按 ROB 大小增长的存储，也不增加逐指令时间戳。
 
 ### 配置
@@ -320,14 +322,17 @@ PYTHONPATH=scripts python3 -m unittest test_tea_visualize
 
 默认采样周期为 256；现有 Constantin 文件中的显式周期（如 1000）保持生效。
 `teaGapThreshold0` 默认 128，只控制完整无提交区间的明细输出阈值，不影响直方图。
-Summary 是采集模式，现有 TEA tracker 仍然 elaboration 并跟踪成员；它主要节省数据库写入，
-不承诺消除 tracker 的计算成本。若不需要任何 TEA 功能，构建时不设置 `WITH_TEA=1`。
+Summary-only 使用 `WITH_TEA_STATS=1 WITH_TEA=0`，不生成成员 tracker 或前端 PSV。
+TEA、DIP 均关闭时，PSV sideband 宽度为零，不生成专用 miss/Dispatch 状态寄存器。
+这些构建模式需要 `--enable-difftest` 或 `--full-basicdiff` 的 debug 元数据；缺少时在参数解析阶段报错。
 
-数据库导出需包含四张表：
+采样模式的数据库导出需包含四张表：
 
 ```text
 --dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0'
 ```
+
+Summary-only 仅导出 `TeaCycleSummary_0 TeaNoCommit_0`，使用 `scripts/tea_visualize.py` 的 `export_cycle_stats` 函数生成精确统计；PICS 命令需要采样表。
 
 GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用现有 GSIM utility 接口和显式采样周期。
 

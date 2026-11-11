@@ -96,7 +96,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val isRvc = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
-  val teaPsv = UInt(xiangshan.TeaEvent.width.W)
+  val teaPsv = UInt((if (backendParams.teaPsvEn) xiangshan.TeaEvent.width else 0).W)
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
   // Load wait is needed
@@ -167,7 +167,7 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
-  val teaMemberRank = UInt(log2Ceil(RenameWidth).W)
+  val teaMemberRank = UInt((if (backendParams.teaTrackerEn) log2Ceil(RenameWidth) else 0).W)
   // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)

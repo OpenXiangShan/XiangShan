@@ -57,11 +57,15 @@ class TeaNativeMemberTracker {
     uint64_t valid;
     Ptr ptr;
   };
+  struct Read {
+    Ptr ptr;
+    uint64_t pc;
+  };
   struct Frame {
     uint64_t cycle, mark;
     Ptr head;
     uint64_t ready[2];
-    Ptr read[2];
+    Read read[2];
     uint64_t redirect;
     Ptr flush;
     uint64_t self;
@@ -225,16 +229,19 @@ public:
     previous = in;
     previousPhase = phase;
     previousValid = true;
-    for (const auto &p : in.read) {
+    for (const auto &query : in.read) {
+      const auto &p = query.ptr;
       int rank = RenameWidth - 1;
       const auto &e = entries[p.index];
       for (int r = 0; r < RenameWidth; ++r) {
-        if (e.members[r].live && e.flag == p.flag && e.members[r].former == p.former) {
+        if (e.members[r].live && e.flag == p.flag && e.members[r].former == p.former &&
+            e.members[r].pc == query.pc) {
           rank = r;
           break;
         }
       }
-      *out++ = e.members[rank].live && e.flag == p.flag && e.members[rank].former == p.former;
+      *out++ = e.members[rank].live && e.flag == p.flag && e.members[rank].former == p.former &&
+               e.members[rank].pc == query.pc;
       *out++ = e.members[rank].pc;
       *out++ = merged(in, ptr(p.index, rank), rank, e.members[rank].psv);
     }

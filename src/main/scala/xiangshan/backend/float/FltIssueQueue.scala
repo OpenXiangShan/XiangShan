@@ -495,7 +495,7 @@ class FltIssueQueue(
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
-  if (backendParams.teaEn) {
+  if (backendParams.teaTrackerEn || backendParams.dipEn || backendParams.teaCycleStatsEn) {
     val diagPre = enqEntryCanIssue ++ fastEntryCanIssue
     val diagPostCount = (enqEntryCanIssueVec ++ fastEntryCanIssueVec).map(x => PopCount(x)).reduce(_ +& _)
     val diagPreCount = PopCount(diagPre)

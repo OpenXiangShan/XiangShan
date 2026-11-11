@@ -28,6 +28,9 @@ import xiangshan.mem.{InstrType, LoadEntrance, LoadUnitS1, StoreEntrance, StoreU
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
 
 class TeaHelperTest extends XSTester {
+  private val teaConfig = config.alterPartial {
+    case DebugOptionsKey => config(DebugOptionsKey).copy(EnableDifftest = true, EnableTeaTracker = true)
+  }
   behavior of "TEA helper metadata"
 
   private def teaBitValue(event: Int): BigInt = BigInt(1) << event
@@ -390,7 +393,7 @@ class TeaHelperTest extends XSTester {
   it should "propagate teaPsv through the decode, rename, and enqueue bundles" in {
     val ctrlTea = teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.FL_MB)
 
-    simulate(new TeaPropagationSmoke(config)) { dut =>
+    simulate(new TeaPropagationSmoke(teaConfig)) { dut =>
       dut.clock.step()
       dut.io.decodeInTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.decodeOutTea.expect(ctrlTea.U(TeaEvent.width.W))
@@ -415,7 +418,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "keep DR_L1 on the earliest valid instruction even when that instruction bypasses IBuffer" in {
-    val ibufferConfig = config.alterPartial {
+    val ibufferConfig = teaConfig.alterPartial {
       case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
       case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfLevel = utility.XSPerfLevel.VERBOSE, perfDBHartID = 0)
     }
@@ -465,7 +468,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "bind DR_TLB to the earliest valid instruction when the fetch packet reports an ITLB miss" in {
-    val ibufferConfig = config.alterPartial {
+    val ibufferConfig = teaConfig.alterPartial {
       case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
       case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfLevel = utility.XSPerfLevel.VERBOSE, perfDBHartID = 0)
     }
@@ -501,7 +504,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "bind both front-end drain bits when icache and itlb miss reasons coexist in one packet" in {
-    val ibufferConfig = config.alterPartial {
+    val ibufferConfig = teaConfig.alterPartial {
       case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
       case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfLevel = utility.XSPerfLevel.VERBOSE, perfDBHartID = 0)
     }
@@ -536,13 +539,16 @@ class TeaHelperTest extends XSTester {
     }
   }
 
-  private val moduleTestConfig = config.alterPartial {
+  private val moduleTestConfig = teaConfig.alterPartial {
     case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
     case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false,
       perfLevel = utility.XSPerfLevel.VERBOSE, perfDBHartID = 0)
   }
 
   it should "retain DR_SQ on the actual store after partial dispatch drains the ROB" in {
+    // This fixture fixes IQ occupancy at zero, making its unsigned readiness comparison constant.
+    implicit val simulator = chisel3.simulator.HasSimulator.simulators.verilator(
+      verilatorSettings = svsim.verilator.Backend.CompilationSettings.default.withDisabledWarnings(Seq("UNSIGNED")))
     val coreParams = moduleTestConfig(XSCoreParamsKey)
     val dispatchConfig = moduleTestConfig.alterPartial { case XSCoreParamsKey => coreParams }
     simulate(new TeaDispatchHarness()(dispatchConfig)) { dut =>
