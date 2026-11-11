@@ -277,8 +277,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // convert prefetch req to main pipe req
   val prefetch_req = Wire(DecoupledIO(new MainPipeReq))
   prefetch_req.bits := (new MainPipeReq).convertPrefetchReq(io.prefetch_req.bits)
-  prefetch_req.valid := io.prefetch_req.valid
-  io.prefetch_req.ready := prefetch_req.ready
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(
+    coreParams.HartId, EnableCachePrefetch)
+  prefetch_req.valid := io.prefetch_req.valid && cachePrefetchEnable
+  io.prefetch_req.ready := !cachePrefetchEnable || prefetch_req.ready
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
@@ -927,6 +929,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.req_coh := s2_hit_coh
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
+  miss_req.pcValid := false.B
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm

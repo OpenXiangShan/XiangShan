@@ -163,15 +163,18 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.lsu.resp.bits.tag_error := false.B
 
 
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(
+    coreParams.HartId, EnableCachePrefetch)
+
   /**
     * send req to Dcache MissQueue
     */
   if(EnableStorePrefetchAtIssue) {
     // all miss stores, whether prefetched or normal, send requests directly to mshr
-    io.miss_req.valid := s2_valid && !s2_hit
+    io.miss_req.valid := cachePrefetchEnable && s2_valid && !s2_hit
   }else {
     // only prefetched miss stores will send requests directly to mshr
-    io.miss_req.valid := s2_valid && !s2_hit && s2_is_prefetch
+    io.miss_req.valid := cachePrefetchEnable && s2_valid && !s2_hit && s2_is_prefetch
   }
   io.miss_req.bits := DontCare
   // only send out a prefetch write to Dcache
@@ -184,6 +187,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   // TODO: consider tag error
   io.miss_req.bits.cancel := io.lsu.s2_kill
   io.miss_req.bits.pc := io.lsu.s2_pc
+  io.miss_req.bits.pcValid := false.B
 
   /**
     * update replacer, for now, disable this

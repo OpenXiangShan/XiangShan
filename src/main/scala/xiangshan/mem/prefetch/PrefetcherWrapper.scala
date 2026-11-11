@@ -104,7 +104,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   def isStoreAccess(uop: DynInst): Bool = FuType.isStore(uop.fuType)
 
   val hartId = p(XSCoreParamsKey).HartId
-  val l1D_pf_enable = RegNextN(io.pfCtrlFromCSR.l1D_pf_enable, 2, Some(true.B))
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(hartId, EnableCachePrefetch)
+  val l1D_pf_enable = cachePrefetchEnable && RegNextN(io.pfCtrlFromCSR.l1D_pf_enable, 2, Some(true.B))
   val pf_train_on_hit = RegNextN(io.pfCtrlFromCSR.l1D_pf_train_on_hit, 2, Some(true.B))
   val s2_loadPcVec = (0 until LD_TRAIN_WIDTH).map{ i=>
     RegEnable(io.fromOOO.s1_loadPc(i), io.trainSource.s1_loadFireHint(i))
@@ -175,13 +176,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io_act_threshold := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_threshold, 2, Some(12.U))
     pf.io_act_stride := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_stride, 2, Some(30.U))
     pf.io_stride_en := false.B
-    pf.io_dcache_evict <> io.fromDCache.sms_agt_evict_req
+    pf.io_dcache_evict <> xscache.coupledL2.CachePrefetchControl.gate(
+      io.fromDCache.sms_agt_evict_req, cachePrefetchEnable)
     val mbistSmsPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSms", hasMbist)
 
     for (i <- 0 until LD_TRAIN_WIDTH) {
       val source = io.trainSource.s3_load(i)
       val primaryValid = source.valid && !source.bits.isHwPrefetch
-      pf.io.ld_in(i).valid := Mux(
+      pf.io.ld_in(i).valid := cachePrefetchEnable && Mux(
         pf_train_on_hit,
         primaryValid,
         primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
@@ -197,7 +199,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     for (i <- 0 until ST_TRAIN_WIDTH) {
       val source = io.trainSource.s3_store(i)
       val primaryValid = source.valid && !source.bits.isHwPrefetch
-      pf.io.st_in(i).valid := Mux(
+      pf.io.st_in(i).valid := cachePrefetchEnable && Mux(
         pf_train_on_hit,
         primaryValid,
         primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
@@ -207,6 +209,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
 
     io.tlb_req(IdxSMS) <> pf.io.tlb_req
+    io.tlb_req(IdxSMS).req.valid := cachePrefetchEnable && pf.io.tlb_req.req.valid
+    pf.io.tlb_req.req.ready := cachePrefetchEnable && io.tlb_req(IdxSMS).req.ready
     pf.io.pmp_resp := io.pmp_resp(IdxSMS)
 
     l2_pf_arb.io.in(IdxSMS) <> pf.io.l2_req
@@ -239,7 +243,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         s3_loadPcVec(i)
       )
       // for stream
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
+      pf.io.ld_in(i).valid := cachePrefetchEnable && source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
       // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
@@ -250,6 +254,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
 
     io.tlb_req(IdxStreamStride) <> pf.io.tlb_req
+    io.tlb_req(IdxStreamStride).req.valid := cachePrefetchEnable && pf.io.tlb_req.req.valid
+    pf.io.tlb_req.req.ready := cachePrefetchEnable && io.tlb_req(IdxStreamStride).req.ready
     pf.io.pmp_resp := io.pmp_resp(IdxStreamStride)
 
     l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
@@ -267,7 +273,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     for(i <- 0 until LD_TRAIN_WIDTH){
       val source = io.trainSource.s3_load(i)
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
+      pf.io.ld_in(i).valid := cachePrefetchEnable && source.valid && source.bits.isFirstIssue && (
         source.bits.miss || isFromBerti(source.bits.metaSource)
       ) && !source.bits.isHwPrefetch // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
@@ -290,8 +296,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
 
     pf.io.refillTrain := io.fromDCache.refillTrain
+    pf.io.refillTrain.valid := cachePrefetchEnable && io.fromDCache.refillTrain.valid
 
     io.tlb_req(IdxBerti) <> pf.io.tlb_req
+    io.tlb_req(IdxBerti).req.valid := cachePrefetchEnable && pf.io.tlb_req.req.valid
+    pf.io.tlb_req.req.ready := cachePrefetchEnable && io.tlb_req(IdxBerti).req.ready
     pf.io.pmp_resp := io.pmp_resp(IdxBerti)
 
     l1_pf_arb.io.in(IdxBerti) <> pf.io.l1_req
@@ -304,7 +313,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
    * load prefetch to l1 Dcache
    * stride
    */
-  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
+  io.l1_pf_to_l1 <> xscache.coupledL2.CachePrefetchControl.gate(
+    Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg")), cachePrefetchEnable)
 
   /** load/store prefetch to l2 cache
    *  stride, sms
@@ -318,10 +328,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   io.fromDCache.sms_agt_evict_req.ready := false.B
 
-  io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
+  io.l1_pf_to_l2.addr_valid := cachePrefetchEnable && l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
-  io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l2.l2_pf_en := cachePrefetchEnable && RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)
   l2_trace.paddr := l2_pf_req.bits.addr

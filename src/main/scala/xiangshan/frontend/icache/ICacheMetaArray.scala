@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utils.VecRotate
+import xscache.coupledL2.L1ICopyUpdate
 
 class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
@@ -27,6 +28,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAd
     val read:     MetaReadBundle  = Flipped(new MetaReadBundle)
     val flush:    MetaFlushBundle = Flipped(new MetaFlushBundle)
     val flushAll: Bool            = Input(Bool())
+    val residency = coreParams.L2CacheParamsOpt.filter(_.replacement == "sdbp").flatMap(_.icacheCopy)
+      .map(geometry => Output(new L1ICopyUpdate(geometry)))
   }
 
   val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
@@ -108,6 +111,20 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAd
     b.io.flush.req.bits.waymask := f0_reqVec(i).bits.waymask
 
     b.io.flushAll := io.flushAll
+  }
+
+  io.residency.foreach { update =>
+    update.write.valid := banks.map(_.io.write.req.fire).reduce(_ || _)
+    update.write.bits.set := io.write.req.bits.vSetIdx
+    update.write.bits.wayMask := io.write.req.bits.waymask
+    update.write.bits.block := Cat(io.write.req.bits.entry.meta.phyTag,
+      io.write.req.bits.vSetIdx(pgUntagBits - blockOffBits - 1, 0))
+    update.flushAll := io.flushAll || reset.asBool
+    update.invalidate.zip(io.flush.req).foreach { case (out, in) =>
+      out.valid := in.valid
+      out.bits.set := in.bits.vSetIdx
+      out.bits.wayMask := in.bits.waymask
+    }
   }
 
   /* *** perf *** */

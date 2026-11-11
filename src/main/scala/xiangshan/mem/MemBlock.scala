@@ -715,6 +715,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
    *  - L1 prefetcher: fuzzer interface
    ******************************************************************/
 
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(
+    coreParams.HartId, EnableCachePrefetch)
+
   /** prefetcher site in L1 */
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
@@ -985,7 +988,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.csrTrigger.debugMode := debugMode
 
     // prefetch
-    stu.io.prefetchReq <> sbuffer.io.store_prefetch(i)
+    stu.io.prefetchReq <> xscache.coupledL2.CachePrefetchControl.gate(
+      sbuffer.io.store_prefetch(i), cachePrefetchEnable)
 
     // store unit does not need fast feedback
     io.mem_to_ooo.staIqFeedback(i).feedbackFast := DontCare

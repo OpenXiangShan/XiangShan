@@ -101,7 +101,7 @@ class ICacheMetaInterleavedBank(bankIdx: Int)(implicit p: Parameters) extends IC
     waymask = io.write.req.bits.waymask
   )
 
-  when(io.write.req.valid) {
+  when(io.write.req.fire) {
     validArray(io.write.req.bits.setIdx) := validArray(io.write.req.bits.setIdx) | io.write.req.bits.waymask
   }
 

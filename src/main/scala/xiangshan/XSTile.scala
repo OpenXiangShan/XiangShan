@@ -72,6 +72,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // L2 Prefetch
   l2top.inner.l2cache match {
     case Some(l2) =>
+      l2.icacheCopySink.foreach(_ := core.frontend.inner.icache.sdbpCopySource.get)
       l2.pf_recv_node.foreach(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := memBlock.l2_pf_sender_opt.get

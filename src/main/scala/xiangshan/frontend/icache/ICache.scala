@@ -31,7 +31,8 @@ import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utility.ReqSourceField
 import xscache.common.AliasField
-import xscache.coupledL2.MemBackTypeMMField
+import xscache.coupledL2.{MemBackTypeMMField, L1ICopyUpdate}
+import freechips.rocketchip.diplomacy.BundleBridgeSource
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
   override def shouldBeInlined: Boolean = false
@@ -56,6 +57,9 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     AliasTagBits.isEmpty || AliasTagBits.get <= 2,
     s"L2 cache supports only 2bits alias tag, ICache with ${nSets}sets * ${blockBytes}B need ${AliasTagBits.get}bits"
   )
+
+  val sdbpCopyGeometry = coreParams.L2CacheParamsOpt.filter(_.replacement == "sdbp").flatMap(_.icacheCopy)
+  val sdbpCopySource = sdbpCopyGeometry.map(geometry => BundleBridgeSource(() => new L1ICopyUpdate(geometry)))
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 

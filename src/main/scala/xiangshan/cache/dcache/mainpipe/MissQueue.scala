@@ -26,7 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.dataview._
 import chisel3.util._
-import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
+import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, PCValidKey, VaddrKey}
 import difftest._
 import freechips.rocketchip.tilelink._
 import xscache.common.{AliasKey, DirtyKey, PrefetchKey}
@@ -40,6 +40,16 @@ import xiangshan.mem.Bundles.SbufferForwardReq
 import freechips.rocketchip.util.UIntToAugmentedUInt
 import freechips.rocketchip.util.SeqToAugmentedSeq
 
+/** First accepted valid PC; zero is a valid PC value. */
+object MissQueuePC {
+  def canonical(pc: UInt, width: Int): UInt = pc.asSInt.pad(width).asUInt
+  def select(valid: Seq[Bool], pc: Seq[UInt]): (Bool, UInt) = {
+    require(valid.nonEmpty && valid.size == pc.size)
+    val mask = VecInit(valid).asUInt
+    (mask.orR, Mux1H(PriorityEncoderOH(mask), pc))
+  }
+}
+
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
   val pf_source = UInt(L1PfSourceBits.W)
@@ -47,6 +57,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val pc = UInt(VAddrBits.W)
+  val pcValid = Bool()
 
   val lqIdx = new LqPtr
   // store
@@ -305,7 +316,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     // pass vaddr to l2
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // pass pc to l2
-    acquire.user.lift(PCKey).foreach(_ := req.pc) 
+    acquire.user.lift(PCKey).foreach(field => field := MissQueuePC.canonical(req.pc, field.getWidth))
+    acquire.user.lift(PCValidKey).foreach(_ := req.pcValid)
 
     // miss req pipe reg pass keyword to L2, is priority
     // acquire.echo.lift(IsKeywordKey).foreach(_ := isKeyword())
@@ -314,7 +326,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     // trigger prefetch
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
     // req source
-    when(req.isFromLoad) {
+    when(req.isFromLoad || (l2ClientPcBitsOpt.nonEmpty.B && req.pcValid && req.isFromPrefetch)) {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
     }.elsewhen(req.isFromStore) {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
@@ -732,6 +744,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     when (!input_req_is_prefetch) {
       access := true.B // when merge non-prefetch req, set access bit
     }
+    // Retain the first valid demand PC even if a store replaces other request metadata.
+    req.pcValid := req.pcValid || miss_req_pipe_reg_bits.pcValid
+    req.pc := Mux(req.pcValid, req.pc, miss_req_pipe_reg_bits.pc)
     secondary_fired := true.B
   }
 
@@ -957,19 +972,23 @@ for(i <- 0 until reqNum) {
   // pass vaddr to l2
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // pass pc to l2
-  io.mem_acquire.bits.user.lift(PCKey).foreach(_ := req.pc)
+  val mergingPC = io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.pcValid
+  val (acquirePCValid, acquirePC) = MissQueuePC.select(Seq(req.pcValid, mergingPC),
+    Seq(req.pc, miss_req_pipe_reg_bits.pc))
+  io.mem_acquire.bits.user.lift(PCKey).foreach(field => field := MissQueuePC.canonical(acquirePC, field.getWidth))
+  io.mem_acquire.bits.user.lift(PCValidKey).foreach(_ := acquirePCValid)
   // pass keyword to L2
   // io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := isKeyword)
   io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := false.B)
   // trigger prefetch
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
-  when(prefetch && !secondary_fired) {
+  when(prefetch && !secondary_fired && !(l2ClientPcBitsOpt.nonEmpty.B && acquirePCValid)) {
     io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
   }.otherwise {
     when(req.isFromStore) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
-    }.elsewhen(req.isFromLoad) {
+    }.elsewhen(req.isFromLoad || (l2ClientPcBitsOpt.nonEmpty.B && acquirePCValid)) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
     }.elsewhen(req.isFromAMO) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUAtomicData.id.U)
@@ -1538,6 +1557,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for (i <- 0 until reqNum) {
     when (io.queryMQ(i).req.valid) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      val members = (0 until reqNum).map(j => query_fire(j) && !io.queryMQ(j).req.bits.cancel &&
+        analysis.compress_group(j) === i.U && io.queryMQ(j).req.bits.pcValid)
+      val (validPC, firstPC) = MissQueuePC.select(members, io.queryMQ.map(_.req.bits.pc).toSeq)
+      when(validPC) {
+        parallel_pipe_regs(i).req.pc := firstPC
+        parallel_pipe_regs(i).req.pcValid := true.B
+      }
     }
     parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
                                     (analysis.compress_group(i) === i.U) &&
@@ -1762,6 +1788,19 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for(i <- 0 until reqNum) {
     acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
     acquire_from_pipereg_vec(i).bits := parallel_pipe_regs(i).get_acquire(io.l2_pf_store_only)
+    // Include an accepted load merging in the very cycle the fast Acquire fires.
+    val mergingPCs = (0 until reqNum).map(j => query_fire(j) && !io.queryMQ(j).req.bits.cancel && can_merge_from_pipe(j) &&
+      can_merge_from_pipe_mshr(j) === parallel_pipe_regs(i).mshr_id && io.queryMQ(j).req.bits.pcValid)
+    val (hasMergingPC, mergingPC) = MissQueuePC.select(mergingPCs, io.queryMQ.map(_.req.bits.pc).toSeq)
+    when(!parallel_pipe_regs(i).req.pcValid && hasMergingPC) {
+      acquire_from_pipereg_vec(i).bits.user.lift(PCKey).foreach(field => field := MissQueuePC.canonical(mergingPC, field.getWidth))
+      acquire_from_pipereg_vec(i).bits.user.lift(PCValidKey).foreach(_ := true.B)
+      if (l2ClientPcBitsOpt.nonEmpty) {
+        when(parallel_pipe_regs(i).req.isFromPrefetch) {
+          acquire_from_pipereg_vec(i).bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
+        }
+      }
+    }
 
     XSPerfAccumulate(s"acquire_fire_from_pipereg_$i", acquire_from_pipereg_vec(i).fire)
     XSPerfAccumulate(s"parallel_pipe_regs_valid_$i", parallel_pipe_regs(i).reg_valid())

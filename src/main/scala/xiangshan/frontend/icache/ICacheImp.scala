@@ -125,6 +125,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.read <> mainPipe.io.dataRead
 
   // metaArray io
+  outer.sdbpCopySource.foreach(_.bundle := metaArray.io.residency.get)
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaFlush
   if (EnableCtrlUnit) {
@@ -148,11 +149,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   prefetcher.io.flush        := io.fromFtq.redirectFlush
+  // FDIP retains its CSR control independently of the Constantin prefetch master switch.
   prefetcher.io.csrPfEnable  := io.csrPfEnable
   prefetcher.io.eccEnable    := eccEnable
   prefetcher.io.missResp     := missUnit.io.resp
   prefetcher.io.flushFromBpu := io.fromFtq.flushFromBpu
   // cache softPrefetch
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(
+    coreParams.HartId, EnableCachePrefetch)
   private val softPrefetchValid = RegInit(false.B)
   private val softPrefetch      = RegInit(0.U.asTypeOf(new PrefetchReqBundle))
   /* FIXME:
@@ -162,7 +166,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
    * However, the impact on performance still needs to be assessed.
    * Considering that the frequency of prefetch.i may not be high, let's start with a temporary dummy solution.
    */
-  when(io.softPrefetchReq.map(_.valid).reduce(_ || _)) {
+  when(cachePrefetchEnable && io.softPrefetchReq.map(_.valid).reduce(_ || _)) {
     softPrefetchValid := true.B
     softPrefetch.fromSoftPrefetch(MuxCase(
       0.U.asTypeOf(new SoftIfetchPrefetchBundle),

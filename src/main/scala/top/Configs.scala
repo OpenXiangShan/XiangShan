@@ -620,3 +620,35 @@ trait DeprecatedConfigWarning {
   )
   Thread.sleep(10000)
 }
+
+/** Default cache prefetch off, retaining hardware for Constantin overrides. FDIP is unchanged. */
+class WithNoPrefetch extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(core => core.copy(
+    EnableCachePrefetch = false
+  ))
+})
+
+case class WithL2SDBP(params: SDBPParams = SDBPParams()) extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(core => core.copy(
+    L2CacheParamsOpt = core.L2CacheParamsOpt.map(_.copy(
+      replacement = "sdbp", sdbp = params,
+      icacheCopy = Some(L1ICopyParams(core.frontendParameters.icacheParameters.nSets,
+        core.frontendParameters.icacheParameters.nWays, core.frontendParameters.icacheParameters.blockBytes))
+    ))
+  ))
+})
+
+class SDBPConfig(n: Int = 1) extends Config(
+  new WithNoPrefetch ++ WithL2SDBP() ++
+    OpenLLCConfig("16MB", ways = 16, banks = 4) ++
+    L2CacheConfig("1MB", ways = 8, banks = 4, tp = false, enablePC = true) ++
+    WithNKBL1D(64, ways = 4) ++ new BaseConfig(n)
+)
+
+class SDBPLRUConfig(n: Int = 1) extends Config(
+  new Config((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(core => core.copy(
+      L2CacheParamsOpt = core.L2CacheParamsOpt.map(_.copy(replacement = "lru"))
+    ))
+  }) ++ new SDBPConfig(n)
+)

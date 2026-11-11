@@ -1,0 +1,12 @@
+{
+  "reference": "/nfs/home/chenzhuo/SDBP-ROOT",
+  "head": "63f74239f7a309d5be08c796679c851cad0d127e",
+  "historical_six_run_commit": "de1df30a09b46efd7948d75de46fcedd085abb54",
+  "files": {
+    "src/mem/cache/replacement_policies/sdbp_core.hh": "d61e899825efedc79194dc5c0bf0d4e88b4cb3ffd3ce229ea6a73cac7c359be0",
+    "src/mem/cache/replacement_policies/sdbp_core.cc": "cd3a52d7d073e2cf51b238fec35e456ff6767dadd2a87b94bc41e82f1b0e0b41",
+    "src/mem/cache/replacement_policies/sdbp_rp.cc": "1d34bff8b024b6cc8f7549e64d7ac09c88a4de2e968758ceee6ea1410e3c7be9",
+    "src/test/resources/sdbp-root-hash-vectors.csv": "b52ad7c24009cbe30cc6106e262e922e1b267cd9886f2f0182d028b4d7029e1f",
+    "src/test/resources/sdbp-root-sampler-vectors.csv": "16e742acd96e8ffb73f35694827253c07ffe115ee39d626371a47e29fc39291c"
+  }
+}

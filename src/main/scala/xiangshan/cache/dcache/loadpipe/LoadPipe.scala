@@ -419,8 +419,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.pseudo_data_error_inj_done := s2_fire && s2_hit && !io.bank_conflict_slow
   io.pseudo_error.ready := false.B
 
+  private val cachePrefetchEnable = xscache.coupledL2.CachePrefetchControl.enabled(
+    coreParams.HartId, EnableCachePrefetch)
+
   // send load miss to miss queue
-  io.miss_req.valid := s2_miss_req_valid
+  io.miss_req.valid := s2_miss_req_valid && (cachePrefetchEnable || !s2_is_prefetch)
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
@@ -430,6 +433,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_btot_occupy_fail
   io.miss_req.bits.pc := io.lsu.s2_pc
+  io.miss_req.bits.pcValid := s2_instrtype === LOAD_SOURCE.U
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
   io.miss_req.bits.occupy_way := s2_tag_match_way

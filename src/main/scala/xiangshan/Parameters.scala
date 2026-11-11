@@ -162,6 +162,8 @@ case class XSCoreParameters
     *      please set constant "modeStrideBerti" in PrefetcherWrapper.scala to "bothOn".
     *      TODO: separate Stream and Stride prefetcher in the future.
     */
+  // Startup default for Constantin cache_prefetch_enable<hartId>; excludes ICache FDIP.
+  EnableCachePrefetch: Boolean = true,
   prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
@@ -589,6 +591,7 @@ trait HasXSParameter {
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
 
   /** prefetch config */
+  def EnableCachePrefetch = coreParams.EnableCachePrefetch
   def prefetcherSeq = coreParams.prefetcher
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
   def PfNumInDtlbLD = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_ld)

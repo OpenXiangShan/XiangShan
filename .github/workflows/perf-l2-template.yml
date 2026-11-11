@@ -1,0 +1,338 @@
+name: Performance Regression Template (Unified)
+
+on:
+  workflow_call:
+    inputs:
+      test_branch:
+        description: Branch or commit to run performance test on
+        required: true
+        type: string
+      emulator:
+        description: emulator to use
+        required: false
+        type: string
+        default: gsim
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: string
+        default: DefaultConfig
+      benchmark_type:
+        required: false
+        type: string
+        description: Benchmark type
+        default: spec06-rva23-novec-gcc16-1.0c
+      benchmarks:
+        description: Specific benchmarks to run (comma-separated), leave empty to run all
+        required: false
+        type: string
+      cst_file:
+        description: Constantin file path (empty for default init setting, or file path for specific file)
+        required: false
+        type: string
+      disable_diff:
+        description: Disable difftest
+        required: false
+        type: boolean
+        default: false
+      enable_db:
+        description: Enable ChiselDB dump
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump, which implies enable_db
+        required: false
+        type: boolean
+        default: false
+      servers:
+        description: Servers to run emulation on, leave empty to let the script select
+        required: false
+        type: string
+      checkpoint_path:
+        description: "Custom checkpoint directory. Empty: json_path is a workload list"
+        required: false
+        type: string
+        default: ""
+      json_path:
+        description: Custom JSON, or workload list if checkpoint_path is empty
+        required: false
+        type: string
+        default: ""
+      warmup:
+        description: emu -W (default 20000000)
+        required: false
+        type: string
+        default: ""
+      max_instr:
+        description: emu -I (default 40000000)
+        required: false
+        type: string
+        default: ""
+      max_cycles:
+        description: emu -C (omit for unlimited)
+        required: false
+        type: string
+        default: ""
+      artifact_name:
+        description: Name of the uploaded score artifact
+        required: false
+        type: string
+        default: score
+    outputs:
+      SHORT_SHA:
+        description: Short git commit sha used in this run
+        value: ${{ jobs.run.outputs.SHORT_SHA }}
+      DATE:
+        description: Commit date in yymmdd format used in this run
+        value: ${{ jobs.run.outputs.DATE }}
+      SPEC_DIR:
+        description: Output report directory for this performance run
+        value: ${{ jobs.run.outputs.SPEC_DIR }}
+      CONFIG:
+        description: XiangShan config used in this run
+        value: ${{ inputs.xs_config }}
+      SCORE_FILE:
+        description: Path to the score.txt generated in this run
+        value: ${{ jobs.run.outputs.SCORE_FILE }}
+
+jobs:
+  run:
+    runs-on: perf
+    continue-on-error: false
+    #At most 2 days to finish
+    timeout-minutes: 7200
+    name: Checkpoints
+    outputs:
+      SHORT_SHA: ${{ steps.set_env.outputs.SHORT_SHA }}
+      DATE: ${{ steps.set_env.outputs.DATE }}
+      SPEC_DIR: ${{ steps.set_env.outputs.SPEC_DIR }}
+      SCORE_FILE: ${{ steps.set_env.outputs.SCORE_FILE }}
+    steps:
+      - name: Set test branch or commit
+        id: set_test
+        run: |
+          echo "Using specified branch: ${{ inputs.test_branch }}"
+          echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.set_test.outputs.commit_sha }}
+          fetch-depth: 0
+          submodules: true
+
+      - name: Set env
+        id: set_env
+        run: |
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
+
+          if [[ -z "${{ inputs.servers }}" ]]; then
+            if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
+              echo "SERVER_LIST=node" >> $GITHUB_ENV
+            else
+              echo "SERVER_LIST=open" >> $GITHUB_ENV
+            fi
+          else
+            echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
+          fi
+
+          SPEC_TAG="-${{ inputs.xs_config }}"
+          # Set CST_COMPILE_OPT and CST_RUN_OPT based on cst_file
+          if [[ -n "${{ inputs.cst_file }}" ]]; then
+            if [[ ! -f "${{ inputs.cst_file }}" ]]; then
+              echo "Error: cst_file does not exist: ${{ inputs.cst_file }}"
+              exit 1
+            fi
+            CONST_BASENAME=$(basename "${{ inputs.cst_file }}")
+            CONST_TAG=${CONST_BASENAME%.*}
+            SPEC_TAG="${SPEC_TAG}-${CONST_TAG}"
+
+            echo "CST_COMPILE_OPT=--with-constantin" >> $GITHUB_ENV
+            echo "CST_RUN_OPT=--cst-file ${{ inputs.cst_file }}" >> $GITHUB_ENV
+          else
+            echo "CST_COMPILE_OPT=" >> $GITHUB_ENV
+            echo "CST_RUN_OPT=" >> $GITHUB_ENV
+          fi
+          # prepend -nodiff to SPEC_TAG if disable_diff is true, to prevent no-diff runs are treated as normal runs in the report
+          if [[ "${{ inputs.disable_diff }}" == "true" ]]; then
+            SPEC_TAG="${SPEC_TAG}-nodiff"
+          fi
+          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
+
+          # set CKPT_HOME
+          case "${{ inputs.benchmark_type }}" in
+            spec06-rva23-novec-gcc16*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/checkpoint" >> $GITHUB_ENV
+              ;;
+            spec06-rv64gcb-xscc*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-gcc16*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/checkpoint" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-xscc*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/checkpoint" >> $GITHUB_ENV
+              ;;
+            spec26-gcc15*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/checkpoint" >> $GITHUB_ENV
+              ;;
+            custom)
+              echo "CKPT_HOME=${{ inputs.checkpoint_path }}" >> $GITHUB_ENV
+              ;;
+          esac
+
+          # set CKPT_JSON_PATH
+          case "${{ inputs.benchmark_type }}" in
+            spec06-rva23-novec-gcc16-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            spec06-rva23-novec-gcc16-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
+            spec06-rv64gcb-xscc-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-gcc16-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-gcc16-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-xscc-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-xscc-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
+            spec26-gcc15-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            spec26-gcc15-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
+            custom)
+              if [[ -z "${{ inputs.json_path }}" ]]; then
+                echo "Error: json_path is required when benchmark_type is custom"
+                exit 1
+              fi
+              if [[ ! -f "${{ inputs.json_path }}" ]]; then
+                echo "Error: json_path does not exist: ${{ inputs.json_path }}"
+                exit 1
+              fi
+              if [[ -n "${{ inputs.checkpoint_path }}" && ! -d "${{ inputs.checkpoint_path }}" ]]; then
+                echo "Error: checkpoint_path is not a directory: ${{ inputs.checkpoint_path }}"
+                exit 1
+              fi
+              echo "CKPT_JSON_PATH=${{ inputs.json_path }}" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "Error: Invalid benchmark_type: ${{ inputs.benchmark_type }}"
+              exit 1
+              ;;
+          esac
+
+          echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_ENV
+          echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_OUTPUT
+
+          # append benchmark_type to score.txt filename, to prevent race condition in "python3 main.py --report"
+          SCORE_FILE="${SPEC_DIR}/score-${{ inputs.benchmark_type }}.txt"
+          echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
+          echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
+
+      - name: Initialize submodules
+        run: make init-force
+
+      - name: Clean Up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+
+      - name: Build EMU with DRAMsim3
+        run: |
+          if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+              --config "${{ inputs.xs_config }}" \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
+              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
+              --llvm-profdata llvm-profdata --trace-fst \
+              --emulator ${{ inputs.emulator }} \
+              ${{ inputs.enable_db && '--enable-db' || '' }} \
+              ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
+              $CST_COMPILE_OPT
+            mkdir -p $SPEC_DIR
+            cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
+          fi
+          if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
+            cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
+          fi
+
+      - name: Run SPEC CPU checkpoints
+        run: |
+          cd $SCRIPTS_HOME/perf_trigger
+          EXTRA_OPTS=()
+          if [[ -n "${{ inputs.warmup }}" ]]; then
+            EXTRA_OPTS+=(--warmup "${{ inputs.warmup }}")
+          fi
+          if [[ -n "${{ inputs.max_instr }}" ]]; then
+            EXTRA_OPTS+=(--max-instr "${{ inputs.max_instr }}")
+          fi
+          if [[ -n "${{ inputs.max_cycles }}" ]]; then
+            EXTRA_OPTS+=(--max-cycles "${{ inputs.max_cycles }}")
+          fi
+          python3 main.py \
+            --gcpt-path "$CKPT_HOME" \
+            --json-path "$CKPT_JSON_PATH" \
+            --result-path "$SPEC_DIR" \
+            --benchmarks "${{ inputs.benchmarks }}" \
+            --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" \
+            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+            --server-list "$SERVER_LIST" \
+            ${{ !inputs.disable_diff && '--nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so' || '' }} \
+            --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
+            ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
+            --run \
+            "${EXTRA_OPTS[@]}" \
+            $CST_RUN_OPT
+
+      - name: Generate report
+        run: |
+          cd $SCRIPTS_HOME/perf_trigger
+          python3 main.py \
+            --gcpt-path "$CKPT_HOME" \
+            --json-path "$CKPT_JSON_PATH" \
+            --result-path "$SPEC_DIR" \
+            --benchmarks "${{ inputs.benchmarks }}" \
+            --report \
+            > "$SCORE_FILE"
+
+      - name: Generate GitHub summary
+        run: |
+          echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$SCORE_FILE" >> $GITHUB_STEP_SUMMARY
+          cat "$SCORE_FILE" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # if is custom and checkpoint_path is empty, then the benchmark is a workload list, which does not have a score, so we don't show the key indicators
+          if [[ "${{ inputs.benchmark_type }}" != "custom" || -n "${{ inputs.checkpoint_path }}" ]]; then
+            echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
+            echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
+            TOTAL_SCORE=$(grep "SPEC\(rate\)\?[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
+            INT_SCORE=$(grep "SPECint\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+            FP_SCORE=$(grep "SPECfp\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+            echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
+            echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
+            echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ steps.set_env.outputs.SCORE_FILE }}
