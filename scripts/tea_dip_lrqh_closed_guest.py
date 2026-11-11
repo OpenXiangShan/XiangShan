@@ -10,6 +10,17 @@ STATES = ['total', 'waiting', 'scheduled', 'ready_selected', 'ready_bank_blocked
 NAMES = ['diag_lrqh_' + state + '_entry_cycles' for state in STATES]
 
 
+
+def waiting_tag_bounds(total, waiting, active_cycles):
+    """OR cycles lower-bound tagged entry-cycles within the same resident cohort."""
+    assert 0 <= waiting <= total and 0 <= active_cycles <= total
+    # Tagged entries are at least active_cycles, so at most total-active_cycles
+    # resident entries can be untagged. OR=0 establishes that no entry was tagged.
+    return dict(active_cycles=active_cycles,
+                lower_entry_cycles=max(0, waiting + active_cycles - total),
+                upper_entry_cycles=waiting if active_cycles else 0)
+
+
 def analyze(folder, receipt_path):
     receipt = json.loads(receipt_path.read_text())
     result = json.loads((folder / 'result.json').read_text())
@@ -41,6 +52,15 @@ def analyze(folder, receipt_path):
                            entry_cycles_per_retired={state: value / retired for state, value in values.items()},
                            fraction_of_head_entry_cycles={state: value / values['total'] for state, value in values.items()}
                            if values['total'] else None))
+        prefix = '.loadQueueReplay.replay_'
+        suffix = '_scalar_rob_head_blocked_cycles'
+        causes = {name.split(prefix)[1].removesuffix(suffix): value for name, value in counters.items()
+                  if prefix in name and name.endswith(suffix)}
+        assert causes and all(0 <= value <= cycles for value in causes.values())
+        phases[-1]['waiting_cause_bounds'] = {
+            cause: waiting_tag_bounds(values['total'], values['waiting'], active)
+            for cause, active in causes.items()
+        }
     return dict(passed=True, point=receipt['point'], source=receipt['source'], phases=phases,
                 source_sha256={str(path): digest(path) for path in [receipt_path, Path(__file__)]},
                 scope='Actual allocated scalar entries matching the ROB-head pointer, excluding cancel and normal '
@@ -48,7 +68,10 @@ def analyze(folder, receipt_path):
                       'one ROB instruction. Waiting means outside the current eligible mask; scheduled includes '
                       'selection through return. Neither identifies DRAM service. Eligible includes current fast-TLB '
                       'wakeups; selected uses the actual s0 choice and s1 acceptance. No unique load lifetime, '
-                      'causal saved cycles or performance gain claim.')
+                      'causal saved cycles or performance gain claim. Cause-active counters OR the same resident entries '
+                      'per cycle. They lower-bound tagged entry-cycles; the waiting/tag intersection lower bound '
+                      'is max(0, waiting + active_cycles - total). Bounds are not measured joint counts and do not '
+                      'identify memory hierarchy service or latency.')
 
 
 def main():
