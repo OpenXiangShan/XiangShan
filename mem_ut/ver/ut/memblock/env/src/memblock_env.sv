@@ -73,6 +73,11 @@ class memblock_env  extends tcnt_env_base;
     other_ctrl_agent_agent  u_other_ctrl_agent_agent    ;
     uvm_tlm_analysis_fifo #(other_ctrl_agent_agent_xaction) other_ctrl_agent_mon2rm_fifo;
 
+    // 内部请求/错误来源共用一条被动事实流，RM adapter是唯一消费者。
+    cmo_path_agent u_cmo_path_agent;
+    cmo_path_agent_cfg cmo_path_cfg;
+    uvm_tlm_analysis_fifo #(cmo_path_agent_xaction) cmo_path_agent_mon2rm_fifo;
+
     uvm_tlm_analysis_fifo #(memblock_common_xaction) rm2scb_exp_fifo;
     uvm_tlm_analysis_fifo #(memblock_common_xaction) rm2scb_act_fifo;
 
@@ -185,6 +190,14 @@ function void memblock_env::build_phase(uvm_phase phase);
     this.u_other_ctrl_agent_agent = other_ctrl_agent_agent::type_id::create("u_other_ctrl_agent_agent",this);
     uvm_config_db#(other_ctrl_agent_agent_cfg)::set(this,"u_other_ctrl_agent_agent","cfg",this.cfg.u_other_ctrl_agent_agent_cfg) ;
 
+    cmo_path_agent_mon2rm_fifo = new("cmo_path_agent_mon2rm_fifo",this);
+    cmo_path_cfg = cmo_path_agent_cfg::type_id::create("cmo_path_cfg");
+    uvm_config_db#(cmo_path_agent_cfg)::set(this,"u_cmo_path_agent","cfg",cmo_path_cfg);
+    this.u_cmo_path_agent = cmo_path_agent::type_id::create("u_cmo_path_agent",this);
+    // 通过现有RM实例config入口交接FIFO，避免新增竞争消费者或公共错误历史副本。
+    uvm_config_db#(uvm_tlm_analysis_fifo#(cmo_path_agent_xaction))::set(
+        this,"rm","cmo_path_fifo",cmo_path_agent_mon2rm_fifo);
+
     rm2scb_exp_fifo = new($sformatf("rm2scb_exp_fifo"),this) ;
     rm2scb_act_fifo = new($sformatf("rm2scb_act_fifo"),this) ;
 
@@ -197,6 +210,7 @@ endfunction
 function void memblock_env::connect_phase(uvm_phase phase);
     super.connect_phase(phase);
     //rm.reg_model = this.reg_model;
+    this.u_cmo_path_agent.mon_item_port.connect(this.cmo_path_agent_mon2rm_fifo.analysis_export);
 
     this.u_backendToTopBypass_agent_agent.mon_item_port.connect(this.backendToTopBypass_agent_mon2rm_fifo.analysis_export);
     this.rm.backendToTopBypass_agent_mon_item_port.connect(this.backendToTopBypass_agent_mon2rm_fifo.blocking_get_export);

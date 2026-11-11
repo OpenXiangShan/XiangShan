@@ -22,6 +22,8 @@ class basicTest extends tcnt_test_base ;
           return vseq_name == "memblock_l2tlb_routed_ppn_vseq" ||
                  vseq_name == "memblock_dispatch_real_smoke_vseq" ||
                  vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_isolated_vseq" ||
                  vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_csr_random_config_vseq" ||
@@ -37,6 +39,9 @@ class basicTest extends tcnt_test_base ;
       // worker/main sequence owner；普通 VSEQ 不能因为 plus=1/3 被隐式扩展为控制场景。
       function bit vseq_supports_control_worker_topology(input string vseq_name);
           return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_isolated_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_csr_random_config_vseq" ||
                  vseq_name == "memblock_csr_scalar_load_10k_vseq" ||
@@ -52,6 +57,8 @@ class basicTest extends tcnt_test_base ;
           return (vseq_name == "memblock_l2tlb_routed_ppn_vseq" ||
                   vseq_name == "memblock_dispatch_real_smoke_vseq" ||
                   vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_fault_cold_isolated_vseq" ||
                   vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                   vseq_name == "memblock_l2tlb_pbmt_response_fault_vseq") &&
                  !memblock_sync_pkg::uses_control_barrier_topology();

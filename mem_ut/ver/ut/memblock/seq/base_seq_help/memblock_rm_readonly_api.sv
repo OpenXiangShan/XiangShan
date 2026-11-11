@@ -413,6 +413,11 @@ class memblock_rm_readonly_api extends uvm_object;
         virtual io_mem_to_ooo_int_wb_agent_agent_interface.mon_mp vif
     );
     extern task run_dut_writeback_observer_for_rm();
+    extern function bit mark_dut_cmo_completion_consumed_for_rm(input memblock_uid_t uid,
+        input memblock_rob_key_t key,input int unsigned dynamic_epoch);
+    extern function bit read_dut_cmo_writeback_for_rm(input memblock_uid_t uid,
+        input memblock_rob_key_t key, input int unsigned dynamic_epoch,
+        output dut_writeback_view_t view, output bit duplicate);
     extern function bit read_dut_load_writeback_for_rm(
         input memblock_rob_key_t key,
         output dut_writeback_view_t view
@@ -526,15 +531,13 @@ class memblock_rm_readonly_api extends uvm_object;
         output later_split_load_response_view_t response_view
     );
     // 中文注释：只读首段执行与独立D-error历史；pending区分尚未消费和已消费但无证明。
-    extern function bit try_read_first_split_cache_error_for_rm(
+    extern function bit try_read_first_split_access_context_for_rm(
         input memblock_uid_t uid,
         input int unsigned dynamic_epoch,
         input memblock_rob_key_t rob_key,
         input bit [63:0] original_vaddr,
-        input mem_addr_t line_addr,
         input longint unsigned bound_load_sample,
         output memblock_first_split_access_context_t context_view,
-        output l2_d_error_view_t error_view,
         output bit observation_pending
     );
     // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
@@ -583,6 +586,12 @@ class memblock_rm_readonly_api extends uvm_object;
         input  longint unsigned    sample,
         output l2_d_error_view_t   view
     );
+    extern function bit read_uncache_response_at_accept_for_rm(input longint unsigned sample,
+        input bit [3:0] source, output mem_access_base_sequence::uncache_d_error_record_t record);
+    extern function bit read_uncache_response_by_token_for_rm(input longint unsigned token,
+        output mem_access_base_sequence::uncache_d_error_record_t record);
+    extern function bit read_uncache_write_fact_for_rm(input longint unsigned token,
+        output mem_access_base_sequence::uncache_write_fact_t fact);
     extern function bit read_uncache_d_error_for_rm(
         input memblock_uid_t       uid,
         input int unsigned         dynamic_epoch,
@@ -663,6 +672,35 @@ task memblock_rm_readonly_api::run_dut_writeback_observer_for_rm();
     void'(get());
     m_dut_writeback_observer.run();
 endtask:run_dut_writeback_observer_for_rm
+
+// 抽象职责：只读当前CMO动态实例的唯一真实STA0，允许normal nonzero flushPipe=1。
+function bit memblock_rm_readonly_api::read_dut_cmo_writeback_for_rm(input memblock_uid_t uid,
+    input memblock_rob_key_t key, input int unsigned dynamic_epoch,
+    output dut_writeback_view_t view, output bit duplicate);
+    status_view_t status_view;
+    int unsigned flush_epoch;
+    view = '0;
+    duplicate = 0;
+    void'(get());
+    if (!read_status_for_rm(uid,status_view) || !status_view.valid ||
+        status_view.dynamic_epoch != dynamic_epoch || status_view.rob_idx_flag != key.flag ||
+        status_view.rob_idx_value != key.value) return 0;
+    if (status_view.sta_instance_flush_epoch_valid) flush_epoch = status_view.sta_instance_flush_epoch;
+    // fault恢复可能尚未置STA专属标记；只允许同一status动态epoch已有的active代际。
+    else if (status_view.active_instance_flush_epoch_valid) flush_epoch = status_view.active_instance_flush_epoch;
+    else return 0;
+    return m_dut_writeback_observer.read_cmo_sta0_by_rob(key,flush_epoch,uid,dynamic_epoch,view,duplicate);
+endfunction:read_dut_cmo_writeback_for_rm
+
+
+// 抽象职责：核心CMO成功消费后登记被动写回终态审计，不修改框架owner/epoch。
+function bit memblock_rm_readonly_api::mark_dut_cmo_completion_consumed_for_rm(input memblock_uid_t uid,
+    input memblock_rob_key_t key,input int unsigned dynamic_epoch);
+    dut_writeback_view_t completion;
+    bit duplicate;
+    if(!read_dut_cmo_writeback_for_rm(uid,key,dynamic_epoch,completion,duplicate)) return 0;
+    return m_dut_writeback_observer.mark_cmo_completion_consumed(completion);
+endfunction
 
 function bit memblock_rm_readonly_api::read_dut_load_writeback_for_rm(
     input memblock_rob_key_t key,
@@ -1503,15 +1541,13 @@ function bit memblock_rm_readonly_api::try_read_later_split_load_response_for_rm
     return 1'b1;
 endfunction:try_read_later_split_load_response_for_rm
 
-function bit memblock_rm_readonly_api::try_read_first_split_cache_error_for_rm(
+function bit memblock_rm_readonly_api::try_read_first_split_access_context_for_rm(
     input memblock_uid_t uid,
     input int unsigned dynamic_epoch,
     input memblock_rob_key_t rob_key,
     input bit [63:0] original_vaddr,
-    input mem_addr_t line_addr,
     input longint unsigned bound_load_sample,
     output memblock_first_split_access_context_t context_view,
-    output l2_d_error_view_t error_view,
     output bit observation_pending
 );
     common_data_transaction data;
@@ -1520,7 +1556,6 @@ function bit memblock_rm_readonly_api::try_read_first_split_cache_error_for_rm(
     bit [63:0] expected_low_vaddr;
 
     context_view = '{default:'0};
-    error_view = '{default:'0};
     observation_pending = 1'b0;
     if (bound_load_sample == 0 || !try_get_common_data(data)) return 1'b0;
     // 必须先等消费边界，不能把尚未建立的context当作已经观察过但不存在。
@@ -1562,14 +1597,9 @@ function bit memblock_rm_readonly_api::try_read_first_split_cache_error_for_rm(
         candidate.response_sample_seq > bound_load_sample ||
         candidate.later_page_seen || !candidate.data_cache_eligible ||
         candidate.response_nc || candidate.response_mmio || candidate.response_need_replay) return 1'b0;
-    if (!read_l2_d_error_for_rm(line_addr, candidate.data_sample_seq, error_view) ||
-        !error_view.valid || (!error_view.denied && !error_view.corrupt)) begin
-        error_view = '{default:'0};
-        return 1'b0;
-    end
     context_view = candidate;
     return 1'b1;
-endfunction:try_read_first_split_cache_error_for_rm
+endfunction:try_read_first_split_access_context_for_rm
 
 function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     input  memblock_uid_t uid,
@@ -1764,6 +1794,21 @@ function bit memblock_rm_readonly_api::read_l2_response_for_rm(
     end
     return 1;
 endfunction:read_l2_response_for_rm
+
+function bit memblock_rm_readonly_api::read_uncache_response_at_accept_for_rm(input longint unsigned sample,
+    input bit [3:0] source, output mem_access_base_sequence::uncache_d_error_record_t record);
+    return mem_access_base_sequence::read_uncache_response_at_accept(sample,source,record);
+endfunction:read_uncache_response_at_accept_for_rm
+
+function bit memblock_rm_readonly_api::read_uncache_response_by_token_for_rm(input longint unsigned token,
+    output mem_access_base_sequence::uncache_d_error_record_t record);
+    return mem_access_base_sequence::read_uncache_response_by_token(token,record);
+endfunction:read_uncache_response_by_token_for_rm
+
+function bit memblock_rm_readonly_api::read_uncache_write_fact_for_rm(input longint unsigned token,
+    output mem_access_base_sequence::uncache_write_fact_t fact);
+    return mem_access_base_sequence::read_uncache_write_fact(token,fact);
+endfunction:read_uncache_write_fact_for_rm
 
 function bit memblock_rm_readonly_api::read_uncache_d_error_for_rm(
     input memblock_uid_t       uid,

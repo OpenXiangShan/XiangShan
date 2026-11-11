@@ -25,6 +25,8 @@
 -F ../agent/io_mem_to_ooo_iq_feedback_agent_agent/io_mem_to_ooo_iq_feedback_agent_agent.f
 -F ../agent/other_ctrl_agent_agent/other_ctrl_agent_agent.f
 
+-F ../subagent/cmo_path_agent/cmo_path_agent.f
+
 -F ../common/memblock_common/memblock_common.f
 -F ../seq/seq.f
 -F ../env/memblock_env.f

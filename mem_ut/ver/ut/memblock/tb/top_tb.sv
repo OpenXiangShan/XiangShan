@@ -42,6 +42,7 @@ module top_tb;
     `include "../tb/tc_if_connect.sv"
     `include "../../../ut/memblock/tb/memblock_connect.sv"
     `MEMBLOCK_CONNECT(env,top_tb.U_MEMBLOCK)
+    `include "../tb/cmo_path_agent_connect.sv"
 
     initial begin
         // Initialize the shared sample coordinator before any UVM monitor can

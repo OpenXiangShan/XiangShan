@@ -60,6 +60,8 @@ package memblock_env_pkg;
     import io_mem_to_ooo_iq_feedback_agent_agent_pkg::*;
     import other_ctrl_agent_agent_dec::*;
     import other_ctrl_agent_agent_pkg::*;
+    import cmo_path_agent_dec::*;
+    import cmo_path_agent_pkg::*;
 
 
     import memblock_dec::*;

@@ -10,6 +10,13 @@
 
 // 纯值型核心不读取或写入验证环境 owner；UVM adapter 只向它传递值型快照。
 `include "rm_ls_core.sv"
+`include "rm_cmo_request_observer.sv"
+`include "rm_dcache_error_observer.sv"
+`include "rm_uncache_error_observer.sv"
+`include "soft_test_rm_cmo_core.sv"
+`include "soft_test_rm_uncache_error_observer.sv"
+`include "soft_test_rm_cmo_request.sv"
+
 
 class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
 
@@ -18,6 +25,14 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     // 中文注释：RM 自有的 expected 状态 owner。框架只通过只读 value view
     // 提供事实；RM 不持有、修改或推进任一框架 owner。
     rm_ls_model_t ls_model;
+    rm_cmo_request_observer_t cmo_requests;
+    rm_dcache_error_observer dcache_errors;
+    rm_uncache_error_observer uncache_errors;
+    uvm_tlm_analysis_fifo#(cmo_path_agent_xaction) cmo_path_fifo;
+    longint unsigned path_observed_sample;
+    bit observer_pending_evidence;
+    int unsigned observer_evidence_wait_count;
+
     int unsigned observer_main_count;
     bit          observer_check_store_pending;
     memblock_uid_t observer_check_store_uid;
@@ -28,6 +43,7 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     int unsigned observer_first_split_wait_count;
     int unsigned observer_atomic_wb_wait_count;
     bit          observer_trace_main_emitted[int unsigned];
+    bit          observer_trace_cmo_emitted[bit [63:0]];
     bit          observer_trace_translation_emitted[int unsigned];
     bit          observer_trace_translation_path_emitted[int unsigned];
     bit          observer_trace_dut_load_emitted[int unsigned];
@@ -64,10 +80,18 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
 
     extern         function      new(string name , uvm_component parent);
     extern         function void build_phase(uvm_phase phase);
+    extern function void check_phase(uvm_phase phase);
     extern virtual task run_phase(uvm_phase phase);
     extern virtual task main_phase(uvm_phase phase);
     extern virtual task main_process();
     extern virtual task observer_poll_process();
+    extern function void observer_service_path_facts();
+    extern function bit observer_capture_cmo_actual(
+        memblock_rm_readonly_api::main_transaction_view_t main_view,
+        rm_ls_program_item_t item);
+    extern function bit observer_apply_cmo_d_error_expectation(
+        rm_ls_program_item_t item, longint unsigned access_sample);
+
     extern function int unsigned observer_scalar_size(bit [8:0] fu_op_type);
     extern function int unsigned observer_atomic_size(bit [8:0] fu_op_type);
     extern function rm_atomic_kind_e observer_atomic_kind(bit [8:0] fu_op_type);
@@ -131,6 +155,7 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         rm_ls_program_item_t item,
         longint unsigned access_sample
     );
+    extern function bit observer_check_prefetch_d_error_suppression(rm_ls_program_item_t item);
     extern function bit observer_capture_load_backing(rm_ls_program_item_t item);
     extern function bit observer_capture_atomic_backing(rm_ls_program_item_t item);
     extern function bit observer_apply_atomic_d_error_expectation(
@@ -176,6 +201,16 @@ endfunction
 function void memblock_rm::build_phase(uvm_phase phase);
     super.build_phase(phase);
     this.ls_model = new();
+    cmo_requests = new();
+    dcache_errors = new();
+    uncache_errors = new("uncache_errors");
+    path_observed_sample = 0;
+    observer_pending_evidence = 0;
+    observer_evidence_wait_count = 0;
+    if (!uvm_config_db#(uvm_tlm_analysis_fifo#(cmo_path_agent_xaction))::get(
+            this,"","cmo_path_fifo",cmo_path_fifo))
+        `uvm_fatal("RM_PATH_FIFO", "RM缺少唯一cmo_path被动采样FIFO")
+
     this.observer_main_count = 0;
     this.observer_check_store_pending = 1'b0;
     this.observer_check_store_uid = '0;
@@ -185,6 +220,7 @@ function void memblock_rm::build_phase(uvm_phase phase);
     this.observer_first_split_wait_count = 0;
     this.observer_atomic_wb_wait_count = 0;
     this.observer_trace_main_emitted.delete();
+    this.observer_trace_cmo_emitted.delete();
     this.observer_trace_translation_emitted.delete();
     this.observer_trace_translation_path_emitted.delete();
     this.observer_trace_dut_load_emitted.delete();
@@ -263,6 +299,117 @@ task memblock_rm::main_phase(uvm_phase phase);
     join_none
     this.main_process();
 endtask
+
+// 抽象职责：唯一消费被动批次，先建立传输/错误事实再推进RM；不取走框架恢复事件。
+function void memblock_rm::observer_service_path_facts();
+    cmo_path_agent_xaction tr;
+    while(cmo_path_fifo!=null && cmo_path_fifo.try_peek(tr)) begin
+        // 同拍producer均发布完后才建立跨monitor关联，结果不依赖UVM task先后。
+        if(!tr.reset_active && tr.sample_seq>=memblock_sync_pkg::dut_sample_seq) break;
+        if(!cmo_path_fifo.try_get(tr)) break;
+        dcache_errors.observe_batch(tr);
+        uncache_errors.observe_batch(tr);
+        cmo_requests.observe_batch(tr);
+        path_observed_sample=tr.sample_seq;
+    end
+    uncache_errors.check_until(path_observed_sample);
+endfunction
+
+// 抽象职责：统一处理nonzero CMO响应错误；cacheablezero正常，不查永久PA错误摘要。
+function bit memblock_rm::observer_apply_cmo_d_error_expectation(
+    rm_ls_program_item_t item, longint unsigned access_sample);
+    mem_access_base_sequence::l2_response_history_t response;
+    bit delivered;
+    string detail;
+    if(item.cmo_pre_access_exception!=0) return 1;
+    if(item.cmo_path==RM_CMO_PATH_UNCACHE_ZERO) begin
+        if(!uncache_errors.validate_cmo_zero(item,access_sample,detail)) begin
+            observer_pending_evidence=uncache_errors.observation_pending();
+            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,detail); return 0;
+        end
+        return 1;
+    end
+    if(item.cmo_path==RM_CMO_PATH_CACHEABLE_ZERO) return 1;
+    if(!mem_access_base_sequence::query_l2_response_history(item.cmo_request_token,
+        48'(item.pa_by_byte[0]),access_sample,2'b01,response,delivered) ||
+       !response.valid || !delivered || !response.full_complete ||
+       !response.owner.valid || response.owner.uid!=item.uid ||
+       response.owner.dynamic_epoch!=item.dynamic_epoch ||
+       response.owner.rob_flag!=item.rob.flag || response.owner.rob_value!=item.rob.value[7:0] ||
+       response.owner.sq_flag!=item.sq_flag || response.owner.sq_value!=item.sq_value) begin
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,"CMO缺少owner匹配的实际CBOAck响应"); return 0;
+    end
+    if(response.beat0.denied) item.expected_exception[7]=1;
+    else if(response.beat0.corrupt) item.expected_exception[19]=1;
+    return 1;
+endfunction
+
+// 抽象职责：冻结最终STA0与当前CMO请求/异常证据；normal/fault均交给core唯一提交。
+function bit memblock_rm::observer_capture_cmo_actual(
+    memblock_rm_readonly_api::main_transaction_view_t main_view,
+    rm_ls_program_item_t item);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::dut_writeback_view_t wb;
+    memblock_rm_readonly_api::status_view_t status_v;
+    rm_cmo_completion_actual_t actual;
+    string detail;
+    bit duplicate;
+    ro=memblock_rm_readonly_api::get();
+    if(!ro.read_dut_cmo_writeback_for_rm(item.uid,
+        '{flag:main_view.rob_idx_flag,value:main_view.rob_idx_value},
+        item.dynamic_epoch,wb,duplicate)) begin
+        if(duplicate) begin
+            ls_model.set_error(RM_LS_ERR_CMO_DUPLICATE_COMPLETION,"CMO真实STA0重复"); return 0;
+        end
+        ls_model.set_error(RM_LS_ERR_CMO_ACTUAL_NOT_READY,
+            $sformatf("uid=%0d 缺少当前owner/epoch唯一最终STA0",item.uid));
+        observer_pending_evidence=1; return 0;
+    end
+    // STA接口没有replayInst字段；最终性由实际STA0与owner/终态证明。
+    if(!ro.read_status_for_rm(item.uid,status_v) || !wb.exception_valid ||
+       !wb.flush_pipe_valid) begin
+        ls_model.set_error(RM_LS_ERR_CMO_ACTUAL_NOT_READY,"CMO STA0最终属性不完整"); return 0;
+    end
+    if(item.cmo_path==RM_CMO_PATH_UNCACHE_ZERO && item.cmo_pre_access_exception==0) begin
+        if(!cmo_requests.validate_no_requests(item,wb.sample_seq,detail)) begin
+            observer_pending_evidence=cmo_requests.observation_pending();
+            ls_model.set_error(RM_LS_ERR_CMO_REQUEST_MISMATCH,detail); return 0;
+        end
+        if(!observer_apply_cmo_d_error_expectation(item,wb.sample_seq)) return 0;
+    end else begin
+        if(!uncache_errors.validate_no_cmo_requests(item,wb.sample_seq,detail)) begin
+            observer_pending_evidence=uncache_errors.observation_pending();
+            ls_model.set_error(RM_LS_ERR_CMO_REQUEST_MISMATCH,detail); return 0;
+        end
+        if(!cmo_requests.validate(item,wb.sample_seq,detail)) begin
+            observer_pending_evidence=cmo_requests.observation_pending();
+            ls_model.set_error(RM_LS_ERR_CMO_REQUEST_MISMATCH,detail); return 0;
+        end
+        if(!observer_apply_cmo_d_error_expectation(item,wb.sample_seq)) return 0;
+    end
+    actual=new(); actual.valid=1; actual.uid=item.uid; actual.rob=item.rob;
+    actual.sq_flag=item.sq_flag; actual.sq_value=item.sq_value;
+    actual.dynamic_epoch=item.dynamic_epoch; actual.fu_op_type=item.op;
+    actual.source_sta0=wb.source_kind==2 && wb.lane==0;
+    actual.is_final=1; actual.flush_pipe=wb.flush_pipe;
+    actual.exception_vec=wb.exception_vec; actual.sample_seq=wb.sample_seq;
+    actual.normal_pass=status_v.sta_pass && !status_v.sta_fault;
+    actual.fault_terminal=status_v.sta_fault && status_v.terminal_done;
+    return ls_model.push_cmo_actual(actual);
+endfunction
+
+// 抽象职责：终场只检查仍未消费的请求/通知及程序游标，不产生额外流量。
+function void memblock_rm::check_phase(uvm_phase phase);
+    super.check_phase(phase);
+    observer_service_path_facts();
+    uncache_errors.final_check(path_observed_sample);
+    void'(cmo_requests.check_drained());
+    if(ls_model.configured && ls_model.current_uid!=observer_main_count)
+        `uvm_error("RM_PROGRAM_NOT_DRAINED",
+            $sformatf("RM仍有未比较指令 current=%0d count=%0d",ls_model.current_uid,observer_main_count))
+    if(observer_check_store_pending)
+        `uvm_error("RM_STORE_NOT_DRAINED","最终Store-table比较尚未完成")
+endfunction
 
 function int unsigned memblock_rm::observer_scalar_size(bit [8:0] fu_op_type);
     case (fu_op_type)
@@ -462,7 +609,9 @@ function bit memblock_rm::observer_try_apply_first_split_data_error(
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_view;
     memblock_rm_readonly_api::dut_writeback_view_t load_view;
-    memblock_rm_readonly_api::l2_d_error_view_t error_view;
+    bit expected_af, expected_he, proven;
+    longint unsigned control_sample;
+    string detail;
     memblock_first_split_access_context_t context_view;
     memblock_rob_key_t rob_key;
 
@@ -484,22 +633,24 @@ function bit memblock_rm::observer_try_apply_first_split_data_error(
         load_view.rob_flag !== rob_key.flag || load_view.rob_value !== rob_key.value ||
         load_view.source_kind != 2'd1 || load_view.sample_seq == 0 ||
         load_view.replay_inst || load_view.flush_pipe) return 1'b0;
-    if (!ro.try_read_first_split_cache_error_for_rm(
+    if (!ro.try_read_first_split_access_context_for_rm(
             item.uid, item.dynamic_epoch, rob_key, item.computed_vaddr,
-            memblock_rm_readonly_api::mem_addr_t'({item.pa_by_byte[0][47:6], 6'b0}),
-            load_view.sample_seq, context_view, error_view, deferred)) return 1'b0;
-    item.expected_dcache_denied = error_view.denied;
-    item.expected_dcache_corrupt = error_view.corrupt && !error_view.denied;
-    if (item.expected_dcache_denied) item.expected_exception[5] = 1'b1;
-    if (item.expected_dcache_corrupt) item.expected_exception[19] = 1'b1;
+            load_view.sample_seq, context_view, deferred)) return 1'b0;
+    if (!dcache_errors.query_first_split_error(
+            item.uid, item.dynamic_epoch, {item.rob.flag,item.rob.value[7:0]},
+            {item.lq_flag,item.lq_value},item.pa_by_byte[0],prefix_bytes,
+            context_view.data_sample_seq,context_view.response_sample_seq,
+            load_view.sample_seq,expected_af, expected_he, control_sample, proven, detail)) begin
+        deferred=1; return 0;
+    end
+    if (!proven || (!expected_af && !expected_he)) return 0;
+    item.expected_dcache_denied=expected_af;
+    item.expected_dcache_corrupt=expected_he;
+    item.expected_exception[5] |= expected_af;
+    item.expected_exception[19] |= expected_he;
     `uvm_info("RM_LS_FIRST_SPLIT_DATA_ERROR",
-              $sformatf("uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h line=0x%0h request/data/response=%0d/%0d/%0d wb_sample=%0d generation=%0d activation=%0d/%0d denied=%0d corrupt=%0d pa_mask=0x%0h expected_exception=0x%0h",
-                        item.uid, item.dynamic_epoch, item.rob.flag, item.rob.value,
-                        item.computed_vaddr, {item.pa_by_byte[0][47:6], 6'b0},
-                        context_view.request_sample_seq, context_view.data_sample_seq,
-                        context_view.response_sample_seq, load_view.sample_seq, error_view.generation,
-                        error_view.corrupt_activation_sample, error_view.denied_activation_sample,
-                        error_view.denied, error_view.corrupt, item.pa_valid_mask, item.expected_exception), UVM_LOW)
+              $sformatf("uid=%0d epoch=%0d first-page consumed AF=%0d HE=%0d before later translation",
+                        item.uid,item.dynamic_epoch,expected_af,expected_he),UVM_LOW)
     return 1'b1;
 endfunction:observer_try_apply_first_split_data_error
 
@@ -565,6 +716,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_pma_pmp_view;
     bit store_access;
     bit atomic_access;
+    bit cmo_access;
+    bit exception_store_access;
     bit s1_active;
     bit s2_active;
     bit bare_identity;
@@ -588,9 +741,22 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     item.lq_flag = main_view.lq_idx_flag;
     item.lq_value = main_view.lq_idx_value;
     item.dynamic_epoch = status_view.dynamic_epoch;
+    item.sq_flag = main_view.sq_idx_flag;
+    item.sq_value = main_view.sq_idx_value;
+    cmo_access = main_view.fu_type == MEMBLOCK_FUTYPE_STU &&
+                 rm_ls_decode_cmo_final_op(main_view.fu_op_type) != RM_CMO_OP_NONE;
+    if((main_view.op_class==MEMBLOCK_OP_CLASS_CBO) != cmo_access) begin
+        ls_model.set_error(RM_LS_ERR_CMO_CLASSIFICATION,
+            $sformatf("uid=%0d CBO op_class/fu_type/final op不一致",item.uid)); return 0;
+    end
+    if (cmo_access) begin
+        item.cmo_op = rm_ls_decode_cmo_final_op(main_view.fu_op_type);
+        void'(rm_ls_assign_cmo_data_semantics(item));
+    end
     atomic_access = main_view.fu_type == MEMBLOCK_FUTYPE_MOU &&
                     memblock_op_behavior_util::is_amo_fuoptype(main_view.fu_op_type);
-    item.size_bytes = atomic_access ? observer_atomic_size(main_view.fu_op_type) :
+    // CMO只翻译请求地址；1B仅作为复用翻译循环的局部几何，返回前恢复CMO的0宽度。
+    item.size_bytes = cmo_access ? 1 : atomic_access ? observer_atomic_size(main_view.fu_op_type) :
                                       observer_scalar_size(main_view.fu_op_type);
     item.computed_vaddr = atomic_access ? main_view.src_0 :
                                           observer_compute_vaddr(main_view.src_0,
@@ -600,7 +766,9 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LW ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LD;
     item.fp_wen = main_view.op_class == MEMBLOCK_OP_CLASS_FP_LOAD;
-    if (atomic_access) begin
+    if (cmo_access) begin
+        item.kind = RM_LS_KIND_CMO;
+    end else if (atomic_access) begin
         item.kind = RM_LS_KIND_ATOMIC;
         item.atomic_kind = observer_atomic_kind(main_view.fu_op_type);
     end else if (main_view.fu_type == MEMBLOCK_FUTYPE_LDU &&
@@ -744,9 +912,11 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         end
         item.translation_key = tlb_context.entry_key;
     end
-    store_access = item.kind == RM_LS_KIND_STORE ||
+    store_access = (cmo_access && item.cmo_permission_write) ||
+                   item.kind == RM_LS_KIND_STORE ||
                    (item.kind == RM_LS_KIND_ATOMIC &&
                     item.atomic_kind != RM_ATOMIC_LR);
+    exception_store_access = cmo_access || store_access;
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
     if (item.kind == RM_LS_KIND_ATOMIC) begin
         pma_pmp_cmd = item.atomic_kind == RM_ATOMIC_LR ?
@@ -1143,12 +1313,12 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                   UVM_LOW)
     end else begin
         if (translation_access_fault)
-            item.expected_exception[store_access ? 7 : 5] = 1'b1;
-        if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
-        if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
+            item.expected_exception[exception_store_access ? 7 : 5] = 1'b1;
+        if (stage_one_fault) item.expected_exception[exception_store_access ? 15 : 13] = 1'b1;
+        if (stage_two_fault) item.expected_exception[exception_store_access ? 23 : 21] = 1'b1;
         if (!translation_access_fault && !stage_one_fault && !stage_two_fault) begin
             if (pma_pmp_access_fault || misaligned_maps_to_access_fault) begin
-                item.expected_exception[store_access ? 7 : 5] = 1'b1;
+                item.expected_exception[exception_store_access ? 7 : 5] = 1'b1;
             end
             if (!misaligned_maps_to_access_fault &&
                 (!pma_pmp_access_fault ||
@@ -1157,7 +1327,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                 observer_should_expect_addr_misaligned(
                     misaligned, store_access, tlb_context,
                     all_bytes_pma_pbmt)) begin
-                item.expected_exception[store_access ? 6 : 4] = 1'b1;
+                item.expected_exception[exception_store_access ? 6 : 4] = 1'b1;
             end
         end
     end
@@ -1203,6 +1373,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     // effective PBMT非零的合法Load由Uncache处理；PBMT=PMA时则依据逐byte
     // PMA分类在PMA-MMIO与normal cacheable之间选择。
     item.uncache_path = all_bytes_pma_mmio || !all_bytes_pma_pbmt;
+    item.uncache_nc_path = first_effective_pbmt_valid && first_effective_pbmt==2'd1;
     if (!observer_trace_translation_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRACE_TRANSLATION",
                   $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d hdMisalign=%0d allPbmtPma=%0d allPmaMmio=%0d allNormalCacheable=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
@@ -1223,6 +1394,24 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                             item.expected_exception),
                   UVM_LOW)
         observer_trace_translation_emitted[item.uid] = 1'b1;
+    end
+    if (cmo_access) begin
+        // 前置错误独立于CMO响应；它要求没有下游请求与数据效果。
+        if (all_bytes_pma_mmio && item.expected_exception == '0)
+            item.expected_exception[7] = 1'b1;
+        item.cmo_pre_access_exception = item.expected_exception;
+        item.cmo_path = item.cmo_op != RM_CMO_OP_ZERO ? RM_CMO_PATH_DCACHE_CMO :
+                        item.uncache_path ? RM_CMO_PATH_UNCACHE_ZERO :
+                                            RM_CMO_PATH_CACHEABLE_ZERO;
+        item.size_bytes = 0;
+        if(!observer_trace_cmo_emitted.exists({32'(item.uid),32'(item.dynamic_epoch)})) begin
+        observer_trace_cmo_emitted[{32'(item.uid),32'(item.dynamic_epoch)}]=1;
+        `uvm_info("RM_CMO_TRANSLATION",
+                  $sformatf("uid=%0d op=%0d permission=%s path=%0d exception=0x%0h",
+                            item.uid, item.cmo_op,
+                            item.cmo_permission_write ? "WRITE" : "READ",
+                            item.cmo_path, item.expected_exception), UVM_LOW)
+        end
     end
     return 1'b1;
 endfunction:observer_build_commit_item_with_observation
@@ -1311,60 +1500,60 @@ function bit memblock_rm::observer_apply_load_d_error_expectation(
                       item.all_normal_cacheable, item.uncache_path));
         return 1'b0;
     end
-    for (int unsigned byte_index = 0;
-         byte_index < item.size_bytes;
-         byte_index++) begin
-        if (!item.pa_valid_mask[byte_index]) begin
-            ls_model.set_error(
-                RM_LS_ERR_D_ERROR_NOT_READY,
-                $sformatf("uid %0d byte %0d has no PA for D-error lookup",
-                          item.uid, byte_index));
-            return 1'b0;
+    begin
+        bit expected_af, expected_he, proven;
+        longint unsigned control_sample;
+        string detail;
+        if (!dcache_errors.query_load_exception_bits(
+                item.uid,item.dynamic_epoch,{item.rob.flag,item.rob.value[7:0]},
+                {item.lq_flag,item.lq_value},access_sample,
+                expected_af,expected_he,control_sample,proven,detail)) begin
+            observer_pending_evidence=1; return 0;
         end
-        first_byte_on_line = 1'b1;
-        for (int unsigned previous_index = 0;
-             previous_index < byte_index;
-             previous_index++) begin
-            if (item.pa_by_byte[previous_index][47:6] ==
-                item.pa_by_byte[byte_index][47:6]) begin
-                first_byte_on_line = 1'b0;
-            end
+        if (!proven) begin
+            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid=%0d DCache消费来源缺失：%s",item.uid,detail)); return 0;
         end
-        if (!first_byte_on_line) begin
-            continue;
-        end
-        line_addr = memblock_rm_readonly_api::mem_addr_t'(
-            {item.pa_by_byte[byte_index][47:6], 6'b0});
-        if (!ro.read_l2_d_error_for_rm(line_addr, access_sample,
-                                       error_view) ||
-            !error_view.valid) begin
-            ls_model.set_error(
-                RM_LS_ERR_D_ERROR_NOT_READY,
-                $sformatf("uid %0d L2 D-error ledger unavailable line=0x%0h sample=%0d",
-                          item.uid, line_addr, access_sample));
-            return 1'b0;
-        end
-        item.expected_dcache_denied |= error_view.denied;
-        item.expected_dcache_corrupt |= error_view.corrupt &&
-                                         !error_view.denied;
-        `uvm_info("RM_LS_D_ERROR",
-                  $sformatf("uid=%0d line=0x%0h sample=%0d sticky=%0d denied=%0d corrupt=%0d generation=%0d activation(corrupt/denied)=%0d/%0d",
-                            item.uid, line_addr, access_sample,
-                            error_view.ledger_ready,
-                            error_view.denied, error_view.corrupt,
-                            error_view.generation,
-                            error_view.corrupt_activation_sample,
-                            error_view.denied_activation_sample),
-                  UVM_LOW)
-    end
-    if (item.expected_dcache_denied) begin
-        item.expected_exception[5] = 1'b1;
-    end
-    if (item.expected_dcache_corrupt) begin
-        item.expected_exception[19] = 1'b1;
+        // Load各独立输入分别denied优先后合并，允许不同来源的AF与HE同时存在。
+        item.expected_dcache_denied=expected_af;
+        item.expected_dcache_corrupt=expected_he;
+        item.expected_exception[5] |= expected_af;
+        item.expected_exception[19] |= expected_he;
     end
     return 1'b1;
 endfunction:observer_apply_load_d_error_expectation
+
+// 抽象职责：软件预取只比较真实LDA身份与响应错误抑制，不构造返回数据或后台请求。
+function bit memblock_rm::observer_check_prefetch_d_error_suppression(rm_ls_program_item_t item);
+    memblock_rm_readonly_api::dut_writeback_view_t wb;
+    memblock_rob_key_t rob_key;
+    memblock_rm_readonly_api ro;
+    bit proven;
+    string detail;
+    ro=memblock_rm_readonly_api::get();
+    rob_key='{flag:item.rob.flag,value:item.rob.value};
+    if(!ro.read_dut_load_writeback_for_rm(rob_key,wb)) begin
+        observer_pending_evidence=1;
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,"软件预取缺少当前ROB的真实LDA终态");return 0;
+    end
+    if(!wb.valid || !wb.rob_valid || !wb.rob_flag_valid || !wb.exception_valid ||
+        wb.source_kind!=1 || wb.rob_flag!=item.rob.flag || wb.rob_value!=item.rob.value ||
+        wb.replay_inst || wb.flush_pipe || wb.sample_seq==0) begin
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,"软件预取LDA终态身份或属性不匹配");return 0;
+    end
+    if(!dcache_errors.query_prefetch(item.uid,item.dynamic_epoch,
+        {item.rob.flag,item.rob.value[7:0]},{item.lq_flag,item.lq_value},wb.sample_seq,proven,detail)) begin
+        observer_pending_evidence=1;return 0;
+    end
+    if(!proven || !rm_dcache_error_observer::prefetch_suppression_matches(wb.exception_vec)) begin
+        ls_model.set_error(RM_LS_ERR_EXCEPTION_MISMATCH,
+            $sformatf("软件预取响应错误抑制失败 uid=%0d sample=%0d exception=0x%h detail=%s",
+                item.uid,wb.sample_seq,wb.exception_vec,detail));return 0;
+    end
+    `uvm_info("RM_PREFETCH_COMPARE",$sformatf("uid=%0d epoch=%0d sample=%0d 响应错误同步抑制PASS，无数据效果比较",
+        item.uid,item.dynamic_epoch,wb.sample_seq),UVM_LOW)
+    return 1;
+endfunction
 
 function bit memblock_rm::observer_capture_commit_actual(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
@@ -1379,6 +1568,34 @@ function bit memblock_rm::observer_capture_commit_actual(
 
     missing_dut_load_writeback = 1'b0;
     ro = memblock_rm_readonly_api::get();
+    if(main_view.fu_type==MEMBLOCK_FUTYPE_LDU &&
+        memblock_op_behavior_util::is_prefetch_fuoptype(main_view.fu_op_type))
+        return observer_check_prefetch_d_error_suppression(item);
+    if (item.kind == RM_LS_KIND_CMO)
+        return observer_capture_cmo_actual(main_view,item);
+    if (item.kind == RM_LS_KIND_STORE && item.uncache_path &&
+        !item.uncache_nc_path && item.expected_exception==0) begin
+        memblock_rm_readonly_api::dut_writeback_view_t store_view;
+        bit duplicate;
+        string detail;
+        if (!ro.read_dut_cmo_writeback_for_rm(item.uid,
+            '{flag:main_view.rob_idx_flag,value:main_view.rob_idx_value},
+            item.dynamic_epoch,store_view,duplicate)) begin
+            if(duplicate) begin
+                ls_model.set_error(RM_LS_ERR_EXCEPTION_MISMATCH,"MMIO Store最终STA0重复"); return 0;
+            end
+            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid=%0d MMIO Store缺少当前owner/epoch唯一最终STA0",item.uid));
+            observer_pending_evidence=1; return 0;
+        end
+        if(!uncache_errors.apply_store_expectation(item,store_view.sample_seq,detail)) begin
+            observer_pending_evidence=uncache_errors.observation_pending();
+            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,detail); return 0;
+        end
+        if(store_view.exception_vec !== item.expected_exception) begin
+            ls_model.set_error(RM_LS_ERR_EXCEPTION_MISMATCH,"MMIO Store STA0异常与独立响应不匹配"); return 0;
+        end
+    end
     if (item.kind == RM_LS_KIND_LOAD) begin
         load_rob_key.flag = main_view.rob_idx_flag;
         load_rob_key.value = main_view.rob_idx_value;
@@ -1537,49 +1754,32 @@ function bit memblock_rm::observer_capture_atomic_backing(rm_ls_program_item_t i
 endfunction:observer_capture_atomic_backing
 
 function bit memblock_rm::observer_apply_atomic_d_error_expectation(
-    rm_ls_program_item_t item,
-    longint unsigned access_sample
+    rm_ls_program_item_t item, longint unsigned access_sample
 );
-    memblock_rm_readonly_api ro;
-    memblock_rm_readonly_api::l2_d_error_view_t error_view;
-    memblock_rm_readonly_api::mem_addr_t line_addr;
-    bit store_access;
-    bit first_byte_on_line;
-
-    if (item == null || item.kind != RM_LS_KIND_ATOMIC ||
-        item.expected_exception != '0) return 1'b1;
-    if (!item.all_normal_cacheable || item.uncache_path || access_sample == 0) begin
+    bit [1:0] raw;
+    bit proven;
+    longint unsigned control_sample;
+    string detail;
+    memblock_sync_pkg::memblock_cache_error_control_t control;
+    if(item==null || item.kind!=RM_LS_KIND_ATOMIC || item.expected_exception!=0) return 1;
+    if(!item.all_normal_cacheable || item.uncache_path || access_sample==0) begin
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,"原子错误消费路径缺失"); return 0;
+    end
+    if(!dcache_errors.query(item.uid,item.dynamic_epoch,
+        {item.rob.flag,item.rob.value[7:0]},8'b0,access_sample,1,
+        raw,control_sample,proven,detail)) begin
+        observer_pending_evidence=1; return 0;
+    end
+    if(!proven || !memblock_sync_pkg::read_cache_error_control(control_sample,control)) begin
         ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
-                           $sformatf("uid %0d atomic cache D-error provenance unavailable",
-                                     item.uid));
-        return 1'b0;
+            $sformatf("uid=%0d 原子独立raw或CSR证据缺失：%s",item.uid,detail)); return 0;
     end
-    ro = memblock_rm_readonly_api::get();
-    store_access = item.atomic_kind != RM_ATOMIC_LR;
-    for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
-        first_byte_on_line = 1'b1;
-        for (int unsigned previous_index = 0;
-             previous_index < byte_index; previous_index++) begin
-            if (item.pa_by_byte[previous_index][47:6] ==
-                item.pa_by_byte[byte_index][47:6]) first_byte_on_line = 1'b0;
-        end
-        if (!first_byte_on_line) continue;
-        line_addr = memblock_rm_readonly_api::mem_addr_t'(
-            {item.pa_by_byte[byte_index][47:6], 6'b0});
-        if (!ro.read_l2_d_error_for_rm(line_addr, access_sample, error_view) ||
-            !error_view.valid) begin
-            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
-                               $sformatf("uid %0d atomic D-error ledger unavailable line=0x%0h",
-                                         item.uid, line_addr));
-            return 1'b0;
-        end
-        item.expected_dcache_denied |= error_view.denied;
-        item.expected_dcache_corrupt |= error_view.corrupt && !error_view.denied;
+    item.expected_dcache_denied=raw[1]; item.expected_dcache_corrupt=raw[0];
+    if(control.enable) begin
+        if(raw[1]) item.expected_exception[item.atomic_kind==RM_ATOMIC_LR ? 5 : 7]=1;
+        else if(raw[0]) item.expected_exception[19]=1;
     end
-    if (item.expected_dcache_denied)
-        item.expected_exception[store_access ? 7 : 5] = 1'b1;
-    if (item.expected_dcache_corrupt) item.expected_exception[19] = 1'b1;
-    return 1'b1;
+    return 1;
 endfunction:observer_apply_atomic_d_error_expectation
 
 function bit memblock_rm::observer_atomic_wb_wait_pending(
@@ -1768,6 +1968,7 @@ function string memblock_rm::observer_kind_name(rm_ls_kind_e kind);
         RM_LS_KIND_LOAD:  return "LOAD";
         RM_LS_KIND_STORE: return "STORE";
         RM_LS_KIND_ATOMIC: return "ATOMIC";
+        RM_LS_KIND_CMO: return "CMO";
         default:          return "CONTROL_OR_OTHER";
     endcase
 endfunction:observer_kind_name
@@ -1908,10 +2109,19 @@ function bit memblock_rm::observer_process_current_commit();
     end
     if (ls_model.current_uid >= observer_main_count) return 1'b1;
     if (observer_mismatch_reported) return 1'b0;
+    observer_pending_evidence=0;
     if (!ro.read_status_for_rm(ls_model.current_uid, status_view) ||
-        !status_view.valid || !status_view.rob_commit) return 1'b0;
+        !status_view.valid) return 1'b0;
     if (!ro.read_main_transaction_for_rm(ls_model.current_uid, main_view) || !main_view.valid)
         return 1'b0;
+    if (!status_view.rob_commit &&
+        !(main_view.fu_type==MEMBLOCK_FUTYPE_STU &&
+          rm_ls_decode_cmo_final_op(main_view.fu_op_type)!=RM_CMO_OP_NONE &&
+          status_view.terminal_done && status_view.sta_fault)) return 0;
+    // fault的rob_commit可早于合法terminal；终态未成立时不提交CMO快照。
+    if(main_view.fu_type==MEMBLOCK_FUTYPE_STU &&
+       rm_ls_decode_cmo_final_op(main_view.fu_op_type)!=RM_CMO_OP_NONE &&
+       status_view.sta_fault && !status_view.terminal_done) return 0;
     if (main_view.uid != ls_model.current_uid || status_view.uid != ls_model.current_uid) begin
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMMIT", "main/status UID does not match RM program cursor")
@@ -1944,8 +2154,10 @@ function bit memblock_rm::observer_process_current_commit();
                   UVM_LOW)
         observer_trace_main_emitted[main_view.uid] = 1'b1;
     end
-    if (status_view.replay_pending || status_view.redirect_pending ||
-        status_view.issue_killed || status_view.flushed) begin
+    if (!(main_view.fu_type==MEMBLOCK_FUTYPE_STU &&
+          rm_ls_decode_cmo_final_op(main_view.fu_op_type)!=RM_CMO_OP_NONE) &&
+        (status_view.replay_pending || status_view.redirect_pending ||
+         status_view.issue_killed || status_view.flushed)) begin
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMMIT",
                        $sformatf("uid %0d commit status still carries stale replay/flush state",
@@ -1984,6 +2196,7 @@ function bit memblock_rm::observer_process_current_commit();
     missing_dut_load_writeback = 1'b0;
     if (!observer_capture_commit_actual(main_view, item,
                                         missing_dut_load_writeback)) begin
+        if(observer_pending_evidence && ++observer_evidence_wait_count<256) return 0;
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
             observer_mismatch_reported = 1'b1;
@@ -1991,6 +2204,7 @@ function bit memblock_rm::observer_process_current_commit();
         return 1'b0;
     end
 
+    observer_evidence_wait_count=0;
     if (observer_atomic_wb_wait_pending(observer_atomic_wb_wait_count,
                                         missing_dut_load_writeback,
                                         item.kind)) begin
@@ -2069,6 +2283,16 @@ function bit memblock_rm::observer_process_current_commit();
             observer_mismatch_reported = 1'b1;
         end
         return 1'b0;
+    end
+    if(compare_result && item.kind==RM_LS_KIND_CMO &&
+       !ro.mark_dut_cmo_completion_consumed_for_rm(item.uid,
+            '{flag:item.rob.flag,value:MEMBLOCK_ROB_VALUE_W'(item.rob.value)},item.dynamic_epoch))
+        `uvm_error("RM_CMO_DUPLICATE_COMPLETION","CMO提交后终态审计注册失败")
+    if(ls_model.current_uid!=uid_before) begin
+        dcache_errors.release_completed_owner(item.uid,item.dynamic_epoch);
+        if(item.kind==RM_LS_KIND_CMO && item.cmo_pre_access_exception==0 &&
+           item.cmo_path!=RM_CMO_PATH_UNCACHE_ZERO)
+            cmo_requests.mark_consumed(item);
     end
     observer_trace_commit_result(item, status_view, compare_result);
     if (!compare_result) `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
@@ -2285,6 +2509,7 @@ endfunction:observer_check_final_store
 
 task memblock_rm::observer_poll_process();
     forever begin
+        observer_service_path_facts();
         void'(observer_process_current_commit());
         #1ns;
     end
@@ -2617,11 +2842,8 @@ task memblock_rm::main_process();
             //if(!$cast(other_ctrl_agent_tr_out, other_ctrl_agent_tr_in)) begin
             //    `uvm_fatal(get_type_name(),$sformatf("other_ctrl_agent_tr_in,is not a memblock_common_xaction or its extend"))
             //end
-            other_ctrl_agent_tr_out = memblock_common_xaction::type_id::create("other_ctrl_agent_tr_out");
-            other_ctrl_agent_tr_out.channel_id = other_ctrl_agent_tr_in.channel_id;
-            other_ctrl_agent_tr_out.pack_other_ctrl_agent(other_ctrl_agent_tr_in);
-
-            this.rm_item_exp_port.write(other_ctrl_agent_tr_out);
+            // 此端口仅发布Uncache错误事实；沿唯一consumer交给独立checker。
+            uncache_errors.observe_notification(other_ctrl_agent_tr_in);
             //this.rm_item_act_port.write(other_ctrl_agent_tr_out);
         end
 

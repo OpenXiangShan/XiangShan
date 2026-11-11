@@ -37,12 +37,14 @@ endfunction:new
 // 让 non-zero/fault redirect 后始终存在从 CBO UID+1 重建的静态工作。
 task memblock_main_dispatch_cbo_directed_sequence::build_main_table();
     bit [8:0] cbo_fuOpType;
+    memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
 
     ensure_dispatch_runtime_helpers();
-    if (memblock_sync_pkg::get_control_worker_topology_mode() !=
-        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED) begin
+    topology_mode = memblock_sync_pkg::get_control_worker_topology_mode();
+    if (topology_mode != memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED &&
+        topology_mode != memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("directed CBO main table requires disabled control topology, got %0d",
+                   $sformatf("directed CBO main table requires DISABLED or AUTO topology, got %0d",
                              memblock_sync_pkg::get_control_worker_topology_mode()))
     end
 
@@ -91,8 +93,22 @@ task memblock_main_dispatch_cbo_directed_sequence::build_main_table();
                                       MEMBLOCK_LSUOP_SD,
                                       5,
                                       64'h0000_0000_8000_4000));
+    // AUTO复用已有控制worker完成flushSB/L2 flush和最终Store-table比较；
+    // DISABLED仍保留静态Sv39 CSR，供PBMT/前置异常专项用例使用。
+    if (topology_mode == memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE) begin
+        set_manual_main_transaction(
+            6,
+            make_control_main_transaction("cbo_final_check_store", 6,
+                                           MEMBLOCK_OP_CLASS_CHECK_STORE,
+                                           '{flag:1'b0,value:MEMBLOCK_ROB_VALUE_W'(6)}));
+    end
     import_manual_main_table();
     check_main_table_control_policy("memblock_main_dispatch_cbo_directed_sequence");
+    // 中文注释：此定向builder覆盖了父类build_main_table，必须在整表导入后复用同一bootstrap。
+    // AUTO的CSR/SFence worker由父VSEQ唯一启动；这里只建立控制运行期握手，不重建表或放宽检查。
+    if (memblock_sync_pkg::uses_control_barrier_topology()) begin
+        control_barrier_service.initialize_control_runtime_bootstrap();
+    end
 endtask:build_main_table
 
 function main_control_transaction

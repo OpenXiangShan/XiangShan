@@ -30,9 +30,11 @@ task memblock_dispatch_real_cbo_directed_vseq::start_main_dispatch_sequence();
     memblock_main_dispatch_cbo_directed_sequence main_seq;
 
     if (memblock_sync_pkg::get_control_worker_topology_mode() !=
-        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED) begin
+            memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED &&
+        memblock_sync_pkg::get_control_worker_topology_mode() !=
+            memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE) begin
         `uvm_fatal(get_type_name(),
-                   "directed CBO VSEQ requires MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0")
+                   "directed CBO VSEQ requires MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0 or 1")
     end
     `uvm_do_on(main_seq, p_sequencer)
 endtask:start_main_dispatch_sequence
