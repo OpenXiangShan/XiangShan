@@ -12,6 +12,7 @@ import re
 import sqlite3
 
 from native_perf import read_blocks, unique_counters
+from tea_dip_query_endpoint_evidence import verify
 
 GATES = {
     'diag_rename_blocked_gate_mask': ['IntFreelist', 'FpFreelist', 'VecFreelist', 'VlFreelist', 'Dispatch', 'Walk', 'LSQ'],
@@ -68,9 +69,17 @@ def phase_counters(block):
                 duplicate_native_names=sum(len(values) > 1 for values in block.values()))
 
 
-def analyze(directory, source_root=None):
+def analyze(directory, source_root=None, receipt_path=None):
     directory = Path(directory)
-    assert (directory / 'exitcode').read_text().strip() == '0', 'simulator must have exited successfully'
+    if receipt_path is None:
+        assert (directory / 'exitcode').read_text().strip() == '0', 'simulator must have exited successfully'
+    else:
+        receipt = json.loads(Path(receipt_path).read_text())
+        result = json.loads((directory / 'result.json').read_text())
+        assert receipt['ready'] and not receipt['original_process_live'] and receipt['point'] == directory.name
+        assert result['original_process_closed'] and result['exitcode'] == 0 and result['difftest_passed']
+        assert receipt['source'] == result['source'] and receipt['process'] == result['process']
+        verify(directory, receipt['files'])
     stdout = (directory / 'simulator_out.txt').read_text()
     assert 'Difftest enabled' in stdout and 'EXCEEDING CYCLE/INSTR LIMIT' in stdout
     assert 'HIT CRITICAL' not in stdout
@@ -106,8 +115,14 @@ def analyze(directory, source_root=None):
                   for i, name in enumerate(['Computing', 'Stalled', 'Flushed', 'Drained'])}
         columns = {row['name'] for row in db.execute('pragma table_info(Tea_0)')}
         raw_valid = None
+        stalled_head_context = None
         if 'CONTEXT_HEADREASONVALID' in columns:
-            raw_valid = db.execute('SELECT count(*) FROM Tea_0 WHERE CYCLE>=? AND CYCLE<? AND STATE=1 AND CONTEXT_HEADREASONVALID!=0', (begin, end)).fetchone()[0]
+            stalled_head_context = [dict(head_reason_id=reason, head_ready=bool(ready), commit_block_mask=mask, samples=n)
+                                    for reason, ready, mask, n in db.execute(
+                                        'SELECT CASE WHEN CONTEXT_HEADREASONVALID!=0 THEN CONTEXT_HEADREASON END, '
+                                        'CONTEXT_HEADREADY, CONTEXT_COMMITBLOCKMASK, count(*) FROM Tea_0 '
+                                        'WHERE CYCLE>=? AND CYCLE<? AND STATE=1 GROUP BY 1,2,3 ORDER BY 1,2,3', (begin, end))]
+            raw_valid = sum(row['samples'] for row in stalled_head_context if row['head_reason_id'] is not None)
         grids = {}
         for table in ['Tea_0', 'Dip_0']:
             rows = [r[0] for r in db.execute(f'SELECT CYCLE FROM {table} WHERE CYCLE>=? AND CYCLE<? ORDER BY CYCLE', (begin, end))]
@@ -136,23 +151,29 @@ def analyze(directory, source_root=None):
                 sample_period=periods[0], samples=len(grids['Tea_0']), missing_endpoint_samples=sorted(missing),
                 exact_interior=dict(begin=first['CYCLE'], end=last['CYCLE'], cycles=span,
                                     omitted_edge_cycles=cycles-span, sample_error_pp=errors),
-                raw_head_reason_valid_stalled_samples=raw_valid, provided_source_contract=contract,
+                raw_head_reason_valid_stalled_samples=raw_valid, stalled_head_context=stalled_head_context,
+                native_head_wait_cycles={name: next((v for k, v in native.items() if k.endswith('.rob.' + name)), None)
+                                         for name in ('waitAluCycle', 'waitNormalCycle', 'waitBranchCycle',
+                                                      'waitLoadCycle', 'waitStoreCycle')},
+                provided_source_contract=contract,
                 phases={name: phase_counters(blocks[stamp]) for name, stamp in [('warmup', warm), ('roi', final)]},
                 limits=['Sample grid integrity does not prove representative sampling or per-PC accuracy.',
                         'TEA/DIP and native counters are different observation budgets; do not add them.',
                         'Gate histograms count request exposure, not independent causal CPI savings.',
+                        'Raw head-reason validity does not prove issue observability. Native waitAluCycle is a head FU category, not ALU busy time; head counters can overlap.',
                         'Issue entry-cycles, selected uops and success responses have different units.',
                         'No producer-consumer edges, request latency segments or branch recovery timeline are collected.'],
-                files={name: digest(directory / name) for name in ['simulator_out.txt', 'simulator_err.txt', 'simulator.db', 'exitcode']})
+                files={name: digest(directory / name) for name in ['simulator_out.txt', 'simulator_err.txt', 'simulator.db', 'exitcode' if receipt_path is None else 'result.json']})
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--source-root', type=Path)
+    parser.add_argument('--receipt', type=Path, help='Original successful closure receipt for this guest')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    result = analyze(args.directory, args.source_root)
+    result = analyze(args.directory, args.source_root, args.receipt)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(dict(cpi=result['cpi'], diagnostic_availability=result['phases']['roi']['diagnostic_availability'],
                           provided_source_contract=result['provided_source_contract']), ensure_ascii=False))
