@@ -71,11 +71,41 @@ def resource_inventory(path, inventory):
 
 
 def register_type_bits(kind):
- if kind in ['Clock', 'Reset', 'AsyncReset']:
-  return 1
- match = re.fullmatch(r'(?:UInt|SInt)<(\d+)>((?:\[\d+\])*)', kind)
- assert match, 'Unsupported changed FIR register type: ' + kind
- width = int(match[1])
- for length in re.findall(r'\[(\d+)\]', match[2]):
-  width *= int(length)
- return width
+ tokens = re.findall(r'\w+|[{}:,<>\[\]]', kind)
+ index = 0
+ def consume(token):
+  nonlocal index
+  assert tokens[index] == token, 'Unsupported changed FIR register type: ' + kind
+  index += 1
+ def width():
+  nonlocal index
+  token = tokens[index]
+  index += 1
+  if token == '{':
+   bits = 0
+   while tokens[index] != '}':
+    if tokens[index] == 'flip':
+     index += 1
+    index += 1  # Field name; direction does not affect storage width.
+    consume(':')
+    bits += width()
+    if tokens[index] == ',':
+     index += 1
+   consume('}')
+  elif token in ['Clock', 'Reset', 'AsyncReset']:
+   bits = 1
+  else:
+   assert token in ['UInt', 'SInt'], 'Unsupported changed FIR register type: ' + kind
+   consume('<')
+   bits = int(tokens[index])
+   index += 1
+   consume('>')
+  while index < len(tokens) and tokens[index] == '[':
+   consume('[')
+   bits *= int(tokens[index])
+   index += 1
+   consume(']')
+  return bits
+ bits = width()
+ assert index == len(tokens), 'Unsupported changed FIR register type: ' + kind
+ return bits
