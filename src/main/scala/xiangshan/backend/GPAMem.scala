@@ -29,10 +29,12 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
   private val ftqOffset = RegEnable(io.exceptionReadAddr.bits.ftqOffset, io.exceptionReadAddr.valid)
 
   private val gpabase = mem.io.rdata.head.gpaddr
+  private val isForVSnonLeafPTE = mem.io.rdata.head.isForVSnonLeafPTE
   private val gpa = gpabase + Cat(ftqOffset, 0.U(instOffsetBits.W))
 
-  io.exceptionReadData.gpaddr := gpa
-  io.exceptionReadData.isForVSnonLeafPTE := mem.io.rdata.head.isForVSnonLeafPTE
+  // if isForVSnonLeafPTE, gpabase itself is the gpaddr of the faulting PTE, should not apply offset to it
+  io.exceptionReadData.gpaddr := Mux(isForVSnonLeafPTE, gpabase, gpa)
+  io.exceptionReadData.isForVSnonLeafPTE := isForVSnonLeafPTE
 
   def getGPAPage(vaddr: UInt): UInt = {
     require(vaddr.getWidth == GPAddrBits, s"The width of gpa should be $GPAddrBits")
