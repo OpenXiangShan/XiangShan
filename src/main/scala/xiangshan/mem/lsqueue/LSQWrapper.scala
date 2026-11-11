@@ -138,6 +138,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val replayAllocate = Output(Bool())
 
     val diffStore = Flipped(new DiffStoreIO)
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -243,6 +244,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
+  loadQueue.io.csrCtrl             <> io.csrCtrl
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit

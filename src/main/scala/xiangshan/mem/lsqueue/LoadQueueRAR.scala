@@ -47,6 +47,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     // global
     val lqFull = Output(Bool())
+
+    // CSR controls
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   private val PartialPAddrStride: Int = 6
@@ -175,10 +178,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  So NC requests are not allowed to have RAR
       released(enqIndex) := enq.bits.is_nc || (
         enq.bits.data_valid &&
-        (release2Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
-        release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+        (release2Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+        || release1Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
       )
     }
     val debug_robIdx = enq.bits.uop.robIdx.asUInt
@@ -223,7 +224,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
-  // 1. Physical address match by CAM port.
+  // 1. Physical address match by CAM port, or we're in TSO mode
   // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
   val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -238,7 +239,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
     for(i <- 0 until LoadQueueRARSize) {
       matchMaskReg(i) := (allocated(i) &
-                         paddrModule.io.releaseViolationMmask(w)(i) &
+                         (io.csrCtrl.tso_enable || paddrModule.io.releaseViolationMmask(w)(i)) &
                          robIdxMask(i) &&
                          released(i))
       }

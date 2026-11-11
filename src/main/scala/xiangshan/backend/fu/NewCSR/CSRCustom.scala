@@ -34,6 +34,9 @@ trait CSRCustom { self: NewCSR =>
   val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
+  val stsoctl = Module(new CSRModule("Stsoctl", new StsoctlBundle))
+    .setAddr(0x5C5)
+
   // Machine Level Custom Read/Write
 
   // mcorepwr: Core Power Down Status Enable
@@ -54,6 +57,7 @@ trait CSRCustom { self: NewCSR =>
     slvpredctl,
     smblockctl,
     srnctl,
+    stsoctl,
     mcorepwr,
     mflushpwr,
   )
@@ -118,6 +122,10 @@ class SmblockctlBundle extends CSRBundle {
 class SrnctlBundle extends CSRBundle {
   val WFI_ENABLE     = RW(2).withReset(true.B).withDescription("Enable WFI execution.")
   val FUSION_ENABLE  = RW(0).withReset(true.B).withDescription("Enable instruction fusion.")
+}
+
+class StsoctlBundle extends CSRBundle {
+  val TSO_ENABLE    = RW(0).withReset(true.B)
 }
 
 class McorepwrBundle extends CSRBundle {
