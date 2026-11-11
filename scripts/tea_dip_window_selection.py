@@ -64,6 +64,27 @@ def summarize(formal, analyses):
                       'Coverage is reported without reweighting missing points into a suite score.')
 
 
+
+def pc_profile_overlap(reference, local, view, state):
+    """Compare factual sampled attribution within one view/state; empty populations stay unknown."""
+    distributions = []
+    for rows in [reference, local]:
+        by_pc, by_signature = {}, {}
+        for row in rows:
+            if row['view'] == view and row['state'] == state:
+                pc, signature, cost = row['pc'], row['signature'], row['cpi']
+                by_pc[pc] = by_pc.get(pc, 0) + cost
+                key = pc, signature
+                by_signature[key] = by_signature.get(key, 0) + cost
+        distributions.append(dict(pc=by_pc, signature=by_signature, total=sum(by_pc.values())))
+    left, right = distributions
+    return {kind: sum(min(left[kind].get(key, 0) / left['total'],
+                          right[kind].get(key, 0) / right['total'])
+                      for key in left[kind].keys() | right[kind].keys())
+            if left['total'] and right['total'] else None
+            for kind in ['pc', 'signature']}
+
+
 def branch_pressure(formal, branch_summary, rows):
     assert branch_summary['passed']
     assert (branch_summary['source'], branch_summary['run_id']) == (formal['source'], formal['run_id'])
