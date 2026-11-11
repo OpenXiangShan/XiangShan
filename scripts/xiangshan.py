@@ -18,6 +18,7 @@
 # Simple version of xiangshan python wrapper
 
 import argparse
+import glob
 import json
 import os
 import random
@@ -657,21 +658,11 @@ class XiangShan(object):
         return ""
 
     def __get_ci_tracertl(self, name):
-        # traces recorded by the trace-collecting NEMU, see README.txt in base_dir
-        base_dir = "/nfs/share/tracertl"
-        workloads = {
-            "tracertl-tests": [
-                "tests/exc_next.trace.zstd",    # exceptions whose trap target is the next instruction
-                "tests/exc_priv.trace.zstd",    # privilege transitions and medeleg delegation
-                "tests/ctx_fp.trace.zstd",      # mstatus.FS enabled by csrs, then FP instructions
-                "tests/ctx_restore.trace.zstd", # mstatus.FS restored from memory, which TraceRTL does not load
-                "tests/ctx_lazy.trace.zstd",    # FP instructions trapping with mstatus.FS Off
-                # tests/intr*.trace.zstd: TraceRTL does not replay the interrupt records of NEMU yet
-            ],
-            # same image as the exec coremark, see __am_apps_path
-            "coremark": ["coremark/coremark-riscv64-xs.trace.zstd"],
-        }
-        return map(lambda x: os.path.join(base_dir, x), workloads[name])
+        # traces recorded by NEMU, run with --tracertl; see README.txt next to them
+        if name == "tracertl-tests":
+            return sorted(glob.glob("/nfs/home/share/ci-workloads/tracertl/tests/*.trace.zstd"))
+        # same image as the exec coremark, see __am_apps_path
+        return ["/nfs/home/share/ci-workloads/tracertl/coremark/coremark-riscv64-xs.trace.zstd"]
 
     def run_ci(self, test):
         all_tests = {
@@ -689,9 +680,10 @@ class XiangShan(object):
             "f16_test": self.__get_ci_F16test,
             "iopmp-test": self.__get_ci_iopmptest,
             "frontend-misc-test": self.__get_ci_frontend_misc_test,
+            "tracertl-tests": self.__get_ci_tracertl,
+            "tracertl-coremark": self.__get_ci_tracertl,
         }
-        get_workloads = self.__get_ci_tracertl if self.args.tracertl else all_tests.get(test, self.__get_ci_workloads)
-        for target in get_workloads(test):
+        for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
             ret = self.run_emu(target)
             if ret:
