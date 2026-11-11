@@ -126,5 +126,15 @@ class ScTable(
       bank.io.w.req.bits.data        := VecInit(buffer.io.read.head.bits.wayData.get.map(_.asTypeOf(new ScEntry())))
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
+
+      val predictRead = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(i)
+      val trainRead   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(i)
+      val perfPrefix  = s"${tableType}${tableIdx}_bank${i}"
+      XSPerfAccumulate(s"${perfPrefix}_predict_reads", predictRead && bank.io.r.req.fire)
+      XSPerfAccumulate(s"${perfPrefix}_train_reads", trainRead && bank.io.r.req.fire)
+      XSPerfAccumulate(s"${perfPrefix}_sram_writes", bank.io.w.req.fire)
+      XSPerfAccumulate(s"${perfPrefix}_write_blocked_by_predict_cycles", buffer.io.read.head.valid && predictRead)
+      XSPerfAccumulate(s"${perfPrefix}_write_blocked_by_train_cycles", buffer.io.read.head.valid && trainRead)
+      XSPerfAccumulate(s"${perfPrefix}_write_buffer_overwrites", buffer.io.overwrite.head)
   }
 }

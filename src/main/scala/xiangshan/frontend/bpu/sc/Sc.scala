@@ -694,6 +694,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  PerfAccumulate
    */
 
+  // Prediction statistics include resolved branches that do not need a counter update.
+  private val t1_perfValidVec = VecInit(
+    t1_branches.zip(t1_branchesScIdxHitVec).zip(t1_branchesScIdxVec).map {
+      case ((branch, hit), predIdx) =>
+        t1_fire && branch.valid && branch.bits.attribute.isConditional && hit && t1_meta.tagePredValid(predIdx)
+    }
+  )
+  private val t1_perfValid = t1_perfValidVec.reduce(_ || _)
+
   private val scCorrectVec   = WireInit(VecInit.fill(NumBtbResultEntries)(false.B))
   private val scWrongVec     = WireInit(VecInit.fill(NumBtbResultEntries)(false.B))
   private val tageCorrectVec = WireInit(VecInit.fill(NumBtbResultEntries)(false.B))
@@ -717,12 +726,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   // foreach train branches
   for (i <- 0 until ResolveEntryBranchNumber) {
     val branchWayIdx = t1_branchesScIdxVec(i)
-    when(t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)) {
+    when(t1_meta.useScPred(branchWayIdx) && t1_perfValidVec(i)) {
       tageCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.tagePred(branchWayIdx)
       tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.tagePred(branchWayIdx)
       scCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPred(branchWayIdx)
       scWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= t1_meta.scPred(branchWayIdx)
-      trainUseScVec(branchWayIdx)  := true.B
+      trainUseScVec(branchWayIdx)  := t1_writeValidVec(i)
 
       scPathCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scPathTakenVec.get(branchWayIdx)
       scPathWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scPathTakenVec.get(branchWayIdx)
@@ -741,10 +750,41 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       scBiasWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scBiasTakenVec.get(branchWayIdx)
 
       scUsedVec(branchWayIdx) := true.B
-    }.otherwise {
-      scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)
+    }.elsewhen(t1_perfValidVec(i)) {
+      scNotUsedVec(branchWayIdx) := true.B
     }
   }
+  // Count unused SC predictions per resolved branch, including each TAGE confidence class.
+  private val scUnusedStats = t1_perfValidVec.zipWithIndex.map { case (perfValid, i) =>
+    val predIdx     = t1_branchesScIdxVec(i)
+    val valid       = perfValid && !t1_meta.useScPred(predIdx)
+    val scCorrect   = t1_writeTakenVec(i) === t1_meta.scPred(predIdx)
+    val tageCorrect = t1_writeTakenVec(i) === t1_meta.tagePred(predIdx)
+    val tageCtr     = t1_meta.tageCtr(predIdx).asTypeOf(TageTakenCounter())
+    val outcomes = Seq(
+      valid && scCorrect && !tageCorrect,
+      valid && !scCorrect && tageCorrect,
+      valid && scCorrect && tageCorrect,
+      valid && !scCorrect && !tageCorrect
+    )
+    (outcomes, Seq(tageCtr.isSaturate, tageCtr.isMid, tageCtr.isWeak))
+  }
+  Seq("correct_tage_wrong", "wrong_tage_correct", "correct_tage_correct", "wrong_tage_wrong")
+    .zipWithIndex.foreach { case (outcome, outcomeIdx) =>
+      XSPerfAccumulate(
+        s"sc_unused_${outcome}_branches",
+        PopCount(scUnusedStats.map { case (outcomes, _) => outcomes(outcomeIdx) })
+      )
+      Seq("high", "mid", "low").zipWithIndex.foreach { case (confidence, confidenceIdx) =>
+        XSPerfAccumulate(
+          s"sc_unused_${outcome}_tage_${confidence}_branches",
+          PopCount(scUnusedStats.map { case (outcomes, confidences) =>
+            outcomes(outcomeIdx) && confidences(confidenceIdx)
+          })
+        )
+      }
+    }
+
   // foreach prediction result lane
   for (i <- 0 until NumBtbResultEntries) {
     XSPerfAccumulate(s"sc_correct_tage_wrong${i}", scCorrectVec(i) && tageWrongVec(i))
@@ -789,11 +829,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   XSPerfSeqAccumulate(
     "total",
-    t1_writeValid,
+    t1_perfValid,
     Seq(
-      ("sc_train", changeVec.reduce(_ || _)),
+      ("sc_train", t1_writeValid && changeVec.reduce(_ || _)),
       ("train_use_sc", trainUseScVec.reduce(_ || _)),
-      ("pred_use_sc", t1_meta.useScPred.reduce(_ || _))
+      ("pred_use_sc", scUsedVec.reduce(_ || _))
     )
   )
 
@@ -867,6 +907,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
     val predWayIdx  = t1_branchesScIdxVec(i)
     val tableWayIdx = t1_branchesWayIdxVec(i)
+    // Table responses are available only for training reads, so keep this trace training-only.
     trace.valid        := t1_writeValidVec(i)
     trace.bits.startPc := t1_startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
