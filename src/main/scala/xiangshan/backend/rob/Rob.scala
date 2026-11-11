@@ -243,6 +243,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
   }
 
+  require(isPow2(bankNum))
+  require(RenameWidth <= bankNum)
+  val enqBankBits = log2Ceil(bankNum)
+  val bankHeadUop = (0 until bankNum).map { bank =>
+    val select = VecInit(canEnqueue.zip(allocatePtrVec).map { case (valid, ptr) =>
+      valid && ptr.value(enqBankBits - 1, 0) === bank.U
+    })
+    Mux1H(select, io.enq.req.map(_.bits))
+  }
+
   // robEntries enqueue
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
@@ -252,7 +262,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
       // TODO: enq
-      val entryHeadUop = Mux1H(enqOH, io.enq.req.map(_.bits))
+      val entryHeadUop = bankHeadUop(i % bankNum)
       connectEnq(robEntries(i), entryHeadUop)
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
