@@ -35,6 +35,10 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val slotFuType = FuType()
   val slotDispatchTime = UInt(XLEN.W)
   val slotIsFormer = Bool()
+  val wbTeaRank = UInt(log2Ceil(RenameWidth).W)
+  val slotTeaRank = UInt(log2Ceil(RenameWidth).W)
+  val wbRobFlag = Bool()
+  val slotRobFlag = Bool()
   // val globalID = UInt(XLEN.W)
   // val instType = FuType()
   // val mdpInfo = new DebugMdpInfo
