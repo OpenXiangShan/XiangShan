@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.{PerfCCT, SelectOne, XSPerfAccumulate, XSPerfHistogram}
+import utility.{GTimer, PerfCCT, SelectOne, XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.fu.FuType
@@ -30,6 +30,7 @@ class FltIssueQueue(
 
   val in = IO(Input(new In))
   val out = IO(Output(new Out))
+  private val perfTimer = Option.when(backendParams.debugEn)(GTimer())
 
   in.enq.foreach { case enq =>
     enq.bits.debug.foreach(x => PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
@@ -263,6 +264,7 @@ class FltIssueQueue(
     val inEnqBits = inEnq.bits
     enq.valid := inEnq.valid
     enq.bits.payload.fromEnq(inEnqBits)
+    enq.bits.payload.debug.foreach(_.perfDebugInfo.enqRsTime := perfTimer.get)
     enq.bits.status.fromEnq(inEnqBits)
   }
 
@@ -425,6 +427,8 @@ class FltIssueQueue(
   for ((deq: ValidIO[Deq], valid, deqEty) <- out.deq lazyZip deqValidVec lazyZip deqEntries) {
     deq.valid := valid
     deq.bits.fromEntry(deqEty)
+    deq.bits.debug.foreach(_.perfDebugInfo.selectTime := perfTimer.get)
+    deq.bits.debug.foreach(_.perfDebugInfo.issueTime := perfTimer.get + 1.U)
     when(deq.valid && deq.bits.fmaSrc3Wait.get =/= 0.U) {
       assert(FuType.isFmul(deq.bits.fuType) && FMacOpcode.isOP3(deq.bits.opcode) && deq.bits.fpRen(2))
     }

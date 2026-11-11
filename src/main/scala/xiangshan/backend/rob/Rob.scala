@@ -721,21 +721,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_exuData(wbIdx)(subIdx) := wb.bits.data
       debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
       wb.bits.perfDebugInfo.foreach { x =>
-        debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
-          slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
-          slotDebug.perfDebugInfo.selectTime := x.selectTime
-          slotDebug.perfDebugInfo.issueTime := x.issueTime
-          slotDebug.perfDebugInfo.writebackTime := x.writebackTime
-          slotDebug.perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
-          slotDebug.perfDebugInfo.tlbRespTime := x.tlbRespTime
-        }
-        when(wb.bits.robIdx.isFormer) {
-          robEntries(wbIdx).perfDebugInfo.foreach(_.enqRsTime := x.enqRsTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.selectTime := x.selectTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.issueTime := x.issueTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.writebackTime := x.writebackTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbFirstReqTime := x.tlbFirstReqTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbRespTime := x.tlbRespTime)
+        // A compressed half retains its first instruction's metadata.
+        when(wb.bits.debug_seqNum.get.seqNum === debug.debug_seqNum.seqNum) {
+          debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
+            slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
+            slotDebug.perfDebugInfo.selectTime := x.selectTime
+            slotDebug.perfDebugInfo.issueTime := x.issueTime
+            slotDebug.perfDebugInfo.writebackTime := x.writebackTime
+            slotDebug.perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
+            slotDebug.perfDebugInfo.tlbRespTime := x.tlbRespTime
+          }
+          when(wb.bits.robIdx.isFormer) {
+            robEntries(wbIdx).perfDebugInfo.foreach(_.enqRsTime := x.enqRsTime)
+            robEntries(wbIdx).perfDebugInfo.foreach(_.selectTime := x.selectTime)
+            robEntries(wbIdx).perfDebugInfo.foreach(_.issueTime := x.issueTime)
+            robEntries(wbIdx).perfDebugInfo.foreach(_.writebackTime := x.writebackTime)
+            robEntries(wbIdx).perfDebugInfo.foreach(_.tlbFirstReqTime := x.tlbFirstReqTime)
+            robEntries(wbIdx).perfDebugInfo.foreach(_.tlbRespTime := x.tlbRespTime)
+          }
         }
       }
       debug_lqIdx(wbIdx)(subIdx) := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
@@ -2063,6 +2066,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val debug_instData = Wire(new InstInfoEntry)
         val idx = wb.bits.robIdx.value
         debug_instData.robIdx := idx
+        val slotUop = debug_microOp(idx)(slotIndex(wb.bits.robIdx))
+        val slotDebug = debugMeta(slotUop)
+        debug_instData.wbSeqNum := wb.bits.debug_seqNum.get.seqNum
+        debug_instData.slotSeqNum := slotDebug.debug_seqNum.seqNum
+        debug_instData.slotFuType := slotUop.fuType
+        debug_instData.slotDispatchTime := slotDebug.perfDebugInfo.dispatchTime
+        debug_instData.slotIsFormer := wb.bits.robIdx.isFormer
         debug_instData.dvaddr := wb.bits.debug.vaddr
         debug_instData.dpaddr := wb.bits.debug.paddr
         debug_instData.issueTime := wb.bits.perfDebugInfo.get.issueTime

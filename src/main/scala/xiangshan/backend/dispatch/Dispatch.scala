@@ -787,6 +787,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     updatedUop(i) := fromRename(i).bits
     updatedUop(i).debug.foreach { debug => debug.perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove}
     updatedUop(i).debug.foreach(_.perfDebugInfo.dispatchTime := perfTimer.get)
+    fromRenameUpdate(i).bits.debug.foreach(_.perfDebugInfo.dispatchTime := perfTimer.get)
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U

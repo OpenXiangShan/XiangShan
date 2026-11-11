@@ -30,6 +30,11 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
    * But it can be used as a signal reference for instinfo
    */
   val robIdx = UInt(log2Ceil(RobSize).W)
+  val wbSeqNum = UInt(XLEN.W)
+  val slotSeqNum = UInt(XLEN.W)
+  val slotFuType = FuType()
+  val slotDispatchTime = UInt(XLEN.W)
+  val slotIsFormer = Bool()
   // val globalID = UInt(XLEN.W)
   // val instType = FuType()
   // val mdpInfo = new DebugMdpInfo
