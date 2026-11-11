@@ -1213,10 +1213,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     issueSta(i).valid && FuType.storeIsAMO(issueSta(i).bits.fuType)
   )
 
-  for (i <- 0 until StaCnt) when(st_atomics(i)) {
-    issueSta(i).ready := atomicsUnit.io.in.ready
-    storeUnits(i).io.stin.valid := false.B
+  // AMOCAS.Q issues two STA uops and every STA lane supports MouCfg, so more
+  // than one lane may present an atomic uop in the same cycle. AtomicsUnit has
+  // a single input: select one lane and leave the others not ready, so they
+  // are replayed by their issue queues instead of being silently dropped.
+  val st_atomics_sel = PriorityEncoderOH(st_atomics)
 
+  for (i <- 0 until StaCnt) when(st_atomics(i)) {
+    issueSta(i).ready := st_atomics_sel(i) && atomicsUnit.io.in.ready
+    storeUnits(i).io.stin.valid := false.B
+  }
+  for (i <- 0 until StaCnt) when(st_atomics_sel(i) && issueSta(i).fire) {
     state := s_atomics(i)
   }
   when (atomicsUnit.io.out.toRob.valid) {
@@ -1224,7 +1231,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   atomicsUnit.io.in.valid := st_atomics.reduce(_ || _)
-  atomicsUnit.io.in.bits := Mux1H(st_atomics, issueSta.map(_.bits))
+  atomicsUnit.io.in.bits := Mux1H(st_atomics_sel, issueSta.map(_.bits))
+  assert(PopCount(issueSta.zip(st_atomics).map { case (sta, amo) => amo && sta.fire }) <= 1.U,
+    "at most one STA atomic uop may enter AtomicsUnit per cycle")
   atomicsUnit.io.storeDataIn.zipWithIndex.foreach { case (stdin, i) =>
     stdin := stdExeUnits(i).io.atomicData
   }
@@ -1257,8 +1266,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   lsq.io.flushSbuffer.empty := sbuffer.io.sbempty
 
+  // AtomicsUnit generates feedbackSlow 2 cycles after io.in.fire (via GatedValidRegNext^2).
+  // Delay the per-lane fire qualification by 2 cycles to accurately route feedbackSlow
+  // back to the specific STA lane that issued the atomic uop, even when multiple uops
+  // from an AMOCAS.Q issue across different lanes on separate cycles.
+  val atomicsInFire = Seq.tabulate(StaCnt)(i => issueSta(i).fire && st_atomics(i))
+  val atomicsFeedbackValid = atomicsInFire.map(f => RegNext(RegNext(f, false.B), false.B))
+
   for (i <- 0 until StaCnt) {
-    when (state === s_atomics(i)) {
+    when (atomicsFeedbackValid(i)) {
       io.mem_to_ooo.staIqFeedback(i).feedbackSlow := atomicsUnit.io.feedbackSlow
       assert(!storeUnits(i).io.feedBackSlow.valid)
     }
