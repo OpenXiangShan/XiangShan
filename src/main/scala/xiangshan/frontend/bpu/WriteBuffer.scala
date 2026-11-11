@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.HoldUnless
 import utility.ReplacementPolicy
 import utility.XSError
 import utility.XSPerfAccumulate
@@ -130,8 +131,11 @@ class WriteBuffer[T <: WriteReqBundle](
         readValid && PopCount(hitVec) > 1.U,
         f"WriteBuffer_$nameSuffix read bypass port${portIdx}_hitMask should be no more than 1"
       )
-      resp.valid := readValid && hitVec.asUInt.orR
-      resp.bits  := Mux1H(hitVec, entries(portIdx))
+      // Match SRAM holdRead: retain the hit decision and data until the next read response,
+      // even if a stalled prediction's shadow entry is updated or replaced in the meantime.
+      val hit = hitVec.asUInt.orR
+      resp.valid := HoldUnless(hit, readValid, Some(false.B))
+      resp.bits  := HoldUnless(Mux1H(hitVec, entries(portIdx)), readValid && hit)
     }
   }
 
