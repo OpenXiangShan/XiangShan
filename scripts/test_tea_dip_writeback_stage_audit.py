@@ -7,7 +7,7 @@ from tea_dip_writeback_stage_audit import analyze
 
 COLUMNS = ('ID STAMP ROBIDX WBSEQNUM SLOTSEQNUM SLOTFUTYPE SLOTISFORMER SLOTDISPATCHTIME '
            'WRITEBACKTIME ISSUETIME DISPATCHLATENCY ENQRSLATENCY SELECTLATENCY ISSUELATENCY '
-           'WBTEARANK SLOTTEARANK WBROBFLAG SLOTROBFLAG').split()
+           'WBTEARANK SLOTTEARANK WBROBFLAG SLOTROBFLAG WBUOPIDX SLOTUOPIDX').split()
 
 
 def record(number, member, representative, slot_dispatch):
@@ -37,6 +37,16 @@ class WritebackIdentityTests(unittest.TestCase):
         self.assertEqual(result['counts']['other_member_writebacks'], 1)
         self.assertTrue(result['producer_ordering_passed'])
         self.assertTrue(result['representative_identity_and_ordering_passed'])
+
+    def test_same_rank_other_uop_cannot_overwrite_first_uop_timeline(self):
+        # Same-rank dispatch gaps survived the real GSIM rank repair.
+        other = record(1, 0, 0, 15758)
+        other['WBUOPIDX'] = 1
+        result = audit([other, record(2, 0, 0, 15759), record(3, 1, 1, 15759)])
+        self.assertTrue(result['representative_identity_and_ordering_passed'])
+        self.assertEqual(result['counts']['representative_writebacks'], 2)
+        self.assertEqual(result['counts']['same_member_other_uop_writebacks'], 1)
+        self.assertEqual(result['counts']['nonzero_uop_index_writebacks'], 1)
 
     def test_matching_rank_with_wrong_representative_time_remains_red(self):
         result = audit([record(1, 1, 1, 15758)])

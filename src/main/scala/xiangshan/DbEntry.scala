@@ -32,6 +32,8 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val robIdx = UInt(log2Ceil(RobSize).W)
   val wbSeqNum = UInt(XLEN.W)
   val slotSeqNum = UInt(XLEN.W)
+  val wbUopIdx = UInt(8.W)
+  val slotUopIdx = UInt(8.W)
   val slotFuType = FuType()
   val slotDispatchTime = UInt(XLEN.W)
   val slotIsFormer = Bool()

@@ -721,9 +721,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_exuData(wbIdx)(subIdx) := wb.bits.data
       debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
       wb.bits.perfDebugInfo.foreach { x =>
-        // A compressed half retains its first instruction's metadata.
+        // A compressed half retains its first member and micro-op metadata.
         when(wb.bits.robIdx.isSameSlot(debug_Uop.robIdx) &&
-          x.teaMemberRank === debug.perfDebugInfo.teaMemberRank) {
+          x.teaMemberRank === debug.perfDebugInfo.teaMemberRank &&
+          wb.bits.debug_seqNum.get.uopIdx === debug.debug_seqNum.uopIdx) {
           debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
             slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
             slotDebug.perfDebugInfo.selectTime := x.selectTime
@@ -2071,6 +2072,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val slotDebug = debugMeta(slotUop)
         debug_instData.wbSeqNum := wb.bits.debug_seqNum.get.seqNum
         debug_instData.slotSeqNum := slotDebug.debug_seqNum.seqNum
+        debug_instData.wbUopIdx := wb.bits.debug_seqNum.get.uopIdx
+        debug_instData.slotUopIdx := slotDebug.debug_seqNum.uopIdx
         debug_instData.slotFuType := slotUop.fuType
         debug_instData.slotDispatchTime := slotDebug.perfDebugInfo.dispatchTime
         debug_instData.slotIsFormer := wb.bits.robIdx.isFormer
