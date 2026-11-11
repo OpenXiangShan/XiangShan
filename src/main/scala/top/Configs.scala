@@ -400,7 +400,9 @@ case class L2CacheConfig
       blockBytes = l2p.blockBytes,
       enableDataECC = l2p.enableDataECC,
       hasMbist = l2p.hasMbist,
-      hasSramCtl = l2p.hasSramCtl
+      hasSramCtl = l2p.hasSramCtl,
+      pfTshrQuota = Some(29), // Selected by the three-workload quota sweep; startup override supported.
+      demandReserve = Some(8)
     )
   case CCHIParametersKey => up(CCHIParametersKey).copy(
     WayIndex_Width = log2Ceil(site(L2ParamsKey).ways)
