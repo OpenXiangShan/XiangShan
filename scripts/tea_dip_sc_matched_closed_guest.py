@@ -105,6 +105,8 @@ def analyze(folder, receipt_path):
 
             amount = counter('.sc.diag_sc_matched_cond_events')
             phase = defaultdict(Counter)
+            opposition = defaultdict(Counter)
+            opposition_pcs = defaultdict(lambda: defaultdict(Counter))
             first = last = None
             for _ in range(amount):
                 assert pending is not None, 'Native matched count exceeds actual records'
@@ -114,12 +116,19 @@ def analyze(folder, receipt_path):
                 observe(row, phase)
                 observe(row, cohorts)
                 observe(row, pcs[hex(row['CFIPC'])])
+                if row['USESC'] and row['PROVIDERCTR'] in [0, 7] and row['SCPRED'] != row['PROVIDERTAKEN']:
+                    observe(row, opposition)
+                    observe(row, opposition_pcs[hex(row['CFIPC'])])
                 pending = next(merged, None)
             assert phase['all_matched']['training_eligible'] == counter('.sc.diag_sc_cond_trace_events')
             if pending is not None and last is not None:
                 assert last < pending[0], 'Native matched phase cut splits simultaneous lanes'
             phases.append(dict(phase=label, native_print_stamp=stamp, matched_events=amount,
-                               first_private_stamp=first, last_private_stamp=last, cohorts=plain(phase)))
+                               first_private_stamp=first, last_private_stamp=last, cohorts=plain(phase),
+                               saturated_provider_opposition=dict(
+                                   cohorts=plain(opposition),
+                                   by_pc={pc: plain(value) for pc, value in sorted(opposition_pcs.items(),
+                                                                                  key=lambda item: int(item[0], 16))})))
         assert pending is None, 'Matched records remain after all native event counts'
     return dict(passed=True, point=folder.name, source=receipt['source'], tables=table_counts,
                 cohorts=plain(cohorts), native_training_phases=phases,
