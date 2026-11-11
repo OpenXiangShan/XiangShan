@@ -1,4 +1,4 @@
-"""Reconstruct owner and merged-demand residence from a closed L2MshrLifecycle batch trace.
+"""Reconstruct owner and merged-request residence from a closed L2MshrLifecycle batch trace.
 
 Native clean/dump markers define the same completion cohorts as existing
 MSHR histograms. Owner residence and post-merge tail overlap CPU execution;
