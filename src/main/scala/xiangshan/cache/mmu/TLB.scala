@@ -218,16 +218,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       fakeMMU.io.valid := req(idx).valid
       fakeMMU.io.vaddr := req(idx).bits.vaddr
 
-      val fakePaddr = if (Block(idx)) {
-        DataHoldBypass(fakeMMU.io.paddr, RegNext(req_in(idx).fire))
-      } else {
-        fakeMMU.io.paddr
-      }
+      val fakePaddr = fakeMMU.io.paddr
 
       // Only replace translated addresses. Bare (e.g. M-mode) accesses keep the
       // native vaddr-as-paddr so the trace's vpn-keyed map cannot alias them
       // (and their PMA check) onto a user page with the same vpn.
-      when (portTranslateEnable(idx)) {
+      when (accessInfo(idx).translateEnable) {
         resp(idx).bits.paddr.foreach(_ := fakePaddr(PAddrBits - 1, 0))
         resp(idx).bits.gpaddr.foreach(_ := fakePaddr)
       }
