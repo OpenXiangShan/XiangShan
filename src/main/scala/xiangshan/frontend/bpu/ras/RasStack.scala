@@ -537,13 +537,29 @@ class RasStack(implicit p: Parameters) extends RasModule
     rasIsEmpty := Mux(
       io.redirect.isCall,
       false.B,
+      // 会导致空判非空？其实比较无所谓，因为mbtb不太准，不要非空，判空就行
       resolvedEmpty(io.redirect.meta.ssp, io.redirect.meta.tosr, io.redirect.meta.tosw, io.redirect.meta.tosrInSpec)
     )
-  }.elsewhen(io.spec.pushValid) {
-    rasIsEmpty := false.B
+  }.elsewhen(io.s3SpecIn.valid && io.s3SpecIn.bits.hasOverride) {
+    rasIsEmpty := Mux(
+      io.s3SpecIn.bits.attribute.isCall,
+      false.B,
+      resolvedEmpty(s3_rasMeta.ssp, s3_rasMeta.tosr, s3_rasMeta.tosw, s3_rasMeta.tosrInSpec)
+    )
+  }.elsewhen(io.s2SpecIn.valid && io.s2SpecIn.bits.hasOverride) {
+    rasIsEmpty := Mux(
+      io.s2SpecIn.bits.attribute.isCall,
+      false.B,
+      resolvedEmpty(s2_rasMeta.ssp, s2_rasMeta.tosr, s2_rasMeta.tosw, s2_rasMeta.tosrInSpec)
+    )
   }.otherwise {
-    rasIsEmpty := resolvedEmpty(ssp, tosr, tosw, tosrInSpec)
+    rasIsEmpty := Mux(
+      io.spec.pushValid,
+      false.B,
+      resolvedEmpty(ssp, tosr, tosw, tosrInSpec)
+    )
   }
+
   io.topRetAddrValid := !rasIsEmpty
 
   when(io.commit.popValid) {
