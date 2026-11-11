@@ -37,6 +37,8 @@ Please fill in the issue template as completely and accurately as possible, incl
 
 You can use `./scripts/bug-report.sh` to generate the required attachments. This script collects system information, including the operating system, memory size, and toolchain versions. Please review the contents of `bug-report.tar.gz` before uploading it to ensure that no sensitive information is included.
 
+As required in issue templates, please try your best to find if there is already an issue or PR that describes/addresses the same problem. Please comment on the existing issue or PR to provide your finding/idea, rather than opening a new one. Any duplicate issues will be closed without further explanation.
+
 We also welcome pull requests that fix bugs. Please refer to the [Pull Request](#pull-request) section below.
 
 ### Known issues
@@ -61,13 +63,17 @@ We also welcome pull requests that implement new features. Please refer to the [
 
 ## Pull Request
 
-Before submitting a PR for a bug fix or a new feature, please open a corresponding type of issue first and discussing it with us and the community to avoid duplicated work.
-
 ### Before commit
 
-1. Please run `make reformat` before committing to automatically format the code.
-2. Please keep each commit / PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR. A PR may include the main functional change together with necessary preparatory refactoring, such as reorganizing port structures, but we recommend splitting them into separate commits to make review easier.
-3. Please configure your git `user.name` and `user.email` to match your GitHub account (use GitHub anonymous email is ok).
+1. Before submitting a PR, please open an issue first to discuss it with us and the community to avoid duplicated work.
+   1. PR that fix bugs -> [Bug report issue](#bug-report)
+   2. PR that implement new features -> [Feature request issue](#feature-request)
+2. Similar with issues, please search existing PRs to see if the same problem has already been or is being addressed. If so, please add your information to the existing PR instead of opening a new one. Duplicate PRs will be closed without further explanation.
+   1. The exception is if you believe the existing PR does not solve the problem in a proper way, you can submit your own PR after discussing with the community, also make sure to add link to the existing one (`Supersede #123456` in a new line) and describe why it is better.
+3. Please run `make reformat` before committing to automatically format the code.
+4. Please keep each commit / PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR.
+   1. A PR may include the main functional change together with necessary preparatory refactoring (such as reorganizing port structures), but please split them into separate commits to make review easier.
+5. Please configure your git `user.name` and `user.email` to match your GitHub account (use GitHub anonymous email is ok).
    1. Please refer to the [official documentation](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address).
    2. Run `git config user.{name,email}` to check your current configuration.
    3. If you need to change your configuration, run `git config user.name "Your Name"` and `git config user.email "your.email@example.com"`.

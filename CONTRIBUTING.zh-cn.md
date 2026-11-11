@@ -37,6 +37,8 @@
 
 您可以使用 `./scripts/bug-report.sh` 脚本生成所需附件。该脚本会收集系统信息（包括操作系统、内存大小、编译工具链版本等）；上传前请先审查 `bug-report.tar.gz` 中的内容，确认不包含敏感信息。
 
+如 issue 模板中所要求的，请尽量查找是否已有 issue 或 PR 描述/解决了相同的问题。如果有，请在现有 issue 或 PR 中补充信息，而不要新开一个 issue。重复的 issue 将会被关闭，恕不另作说明。
+
 我们欢迎您通过 PR 提交修复，另请参考 [Pull Request](#pull-request) 章节的建议。
 
 ### 部分已知问题说明
@@ -61,13 +63,17 @@
 
 ## Pull Request
 
-在正式通过 PR 提交 Bug 修复或新功能实现前，请先提交对应类型的 issue 与我们及社区进行讨论，避免重复工作。
-
 ### 提交前
 
-1. 请在 commit 前运行 `make reformat` 自动格式化代码。
-2. 请将每个 commit / PR 的改动控制在单一主题内，避免把多个不相关的功能修改混在同一个 PR 中。单个 PR 可以包含功能修复/改进及其必要的前置重构（如整理端口结构），但建议将它们拆分到不同的 commit 中以便 review。
-3. 请将您的 git `user.name` 和 `user.email` 配置为您在 GitHub 上的用户名和邮箱（使用 GitHub 匿名邮箱也可以）。
+1. 在正式提交 PR 之前，请先提交一个 issue 与我们和社区讨论，以避免重复工作。
+   1. 修复 bug 的 PR -> [Bug 报告 issue](#bug-报告)
+   2. 实现新特性的 PR -> [功能请求 issue](#功能请求)
+2. 和 issue 的要求类似，请搜索确认是否已有 PR 解决了或正在解决相同的问题。如果有，请在现有 PR 中补充信息，而不要新开一个 PR。重复的 PR 将会被关闭，恕不另作说明。
+   1. 例外情况：如果您认为现有 PR 并未以合适的方式解决问题，您可以在与社区讨论后提交自己的 PR。同时，请在新 PR 中附上现有 PR 的编号（单起一行 `Supersede #123456`），并说明为什么新方案更好。
+3. 请在 commit 前运行 `make reformat` 自动格式化代码。
+4. 请将每个 commit / PR 的改动控制在单一主题内，避免把多个不相关的功能修改混在同一个 PR 中。
+   1. 单个 PR 可以包含功能修复/改进及其必要的前置重构（如整理端口结构），但请将它们拆分到不同的 commit 中以便 review。
+5. 请将您的 git `user.name` 和 `user.email` 配置为您在 GitHub 上的用户名和邮箱（使用 GitHub 匿名邮箱也可以）。
    1. 请参考 [官方文档](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)。
    2. 运行 `git config user.{name,email}` 检查当前配置。
    3. 如果需要修改配置，请运行 `git config user.name "Your Name"` 和 `git config user.email "your.email@example.com"`。
