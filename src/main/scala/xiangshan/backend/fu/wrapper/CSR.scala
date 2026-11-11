@@ -17,7 +17,7 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.tracertl.TraceFakeSatpPpn
+import xiangshan.tracertl.TraceFakeSatpPpn
 import CSRConst._
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)

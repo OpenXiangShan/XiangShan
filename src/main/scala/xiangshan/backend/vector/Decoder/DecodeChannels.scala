@@ -28,7 +28,7 @@ import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter

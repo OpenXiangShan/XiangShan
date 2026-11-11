@@ -17,7 +17,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.util.CSRConst._
 import xiangshan.backend.decode.isa.CSRs
 import xiangshan.DebugOptionsKey
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 import system.HasSoCParameter
 import utility.ZeroExt
 import scala.collection.immutable.SeqMap

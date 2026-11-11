@@ -1992,7 +1992,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   if (env.TraceRTLMode) {
     // The TraceRTL runtime checks committed instructions against the trace.
-    val traceCollector = Module(new xiangshan.frontend.tracertl.TraceCollectorHelper(CommitWidth))
+    val traceCollector = Module(new xiangshan.tracertl.TraceCollectorHelper(CommitWidth))
     traceCollector.clock := clock
     traceCollector.reset := reset
     for (i <- 0 until CommitWidth) {

@@ -34,7 +34,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.mem.Bundles._
 import xiangshan.mem.StoreStage._
 import xiangshan.mem.prefetch._
-import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
+import xiangshan.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 
 class StoreUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,

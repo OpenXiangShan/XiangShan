@@ -22,7 +22,7 @@ import xiangshan.backend.rename.CompressType
 import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 import utility._

@@ -39,7 +39,7 @@ import xiangshan.mem.LoadStage._
 import xiangshan.mem.prefetch._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
-import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
+import xiangshan.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 
 class LoadUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,

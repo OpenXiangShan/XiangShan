@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {

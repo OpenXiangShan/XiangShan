@@ -16,7 +16,7 @@ import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 import xiangshan.backend.fu.fpu.Bundles._
 import yunsuan.fpu.fmul.utils.FMULToFADDCtrlBundle
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 
 trait HasFuLatency {
   val latencyVal: Option[Int]

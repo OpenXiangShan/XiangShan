@@ -37,7 +37,7 @@ import xiangshan.backend.decode.VTypeGen
 import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
-import xiangshan.frontend.tracertl.TraceDriveCollectorHelper
+import xiangshan.tracertl.TraceDriveCollectorHelper
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {

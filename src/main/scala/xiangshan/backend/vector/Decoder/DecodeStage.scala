@@ -17,7 +17,7 @@ import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
 import xiangshan.backend.vector.LatDecoder
 import xiangshan.ExceptionNO._
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.tracertl.TraceRTLChoose
 
 class DecodeStage()(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false

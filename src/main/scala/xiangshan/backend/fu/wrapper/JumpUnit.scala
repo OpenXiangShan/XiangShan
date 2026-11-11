@@ -8,7 +8,7 @@ import xiangshan.backend.fu.{FuConfig, PipedFuncUnit}
 import xiangshan.frontend.{PcInit, PrunedAddrInit}
 import xiangshan.frontend.bpu.BranchAttribute.BranchType
 import xiangshan.{JumpOpType, Redirect, RedirectLevel}
-import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
+import xiangshan.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   // associated with AddrData's position of NJmpCfg.srcData

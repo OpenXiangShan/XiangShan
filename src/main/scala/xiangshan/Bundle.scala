@@ -31,7 +31,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ftq.FtqToCtrlIO
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.tracertl.TraceInfo
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}

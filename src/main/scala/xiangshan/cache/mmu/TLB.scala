@@ -33,7 +33,7 @@ import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import xiangshan.frontend.tracertl.TraceFakeMMU
+import xiangshan.tracertl.TraceFakeMMU
 import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
