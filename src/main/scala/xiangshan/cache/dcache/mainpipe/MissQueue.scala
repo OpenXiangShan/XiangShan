@@ -369,6 +369,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val denied = RegInit(false.B)
   val corrupt = RegInit(false.B)
   val no_pending = RegInit(true.B)
+  val req_channel = RegInit(0.U(memChannelBits.W))
 
   state := state_next
 
@@ -412,7 +413,12 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       0.U(memChannelBits.W)
     }
   }
-  io.channel_sel := Mux(RegNext(io.req.fire), selectChannel(req.address), 0.U)
+
+  when (io.req.fire) {
+    req_channel := selectChannel(io.req.bits.address)
+  }
+
+  io.channel_sel := Mux(state === s_sreq, req_channel, 0.U)
 
   io.req.ready := state === s_idle
 
