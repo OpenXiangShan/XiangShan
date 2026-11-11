@@ -724,12 +724,19 @@ endtask:check_l2_d_error_sample_boundaries
 task soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle();
     sbuffer_mem_access_base_sequence responder;
     memblock_uncache_owner_expected_fatal_catcher catcher;
+    memblock_uncache_owner_expected_fatal_catcher lifecycle_catcher;
+    longint unsigned accepted_sample;
 
     responder = sbuffer_mem_access_base_sequence::type_id::create(
         "uncache_source_lifecycle_responder");
     responder.clear_runtime_state();
+    // 中文注释：纯软件调用不推进全局sample；不同source同sample可同时持有独立owner。
+    accepted_sample = memblock_sync_pkg::peek_current_dut_global_sample();
     responder.note_uncache_source_accept(4'h3, 48'h8000_0100, 10);
     responder.note_uncache_source_accept(4'h7, 48'h8000_0200, 11);
+    expect_true(memblock_sync_pkg::sbuffer_uncache_outstanding_mask == 16'h0088 &&
+                memblock_sync_pkg::sbuffer_uncache_last_a_sample == accepted_sample,
+                "same-sample different-source acceptance lost public lifecycle ownership");
     expect_true(responder.uncache_source_outstanding == 16'h0088,
                 "Uncache source ledger did not retain two independent owners");
     responder.note_uncache_source_complete(4'h7, 20);
@@ -751,20 +758,29 @@ task soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle()
     responder.note_uncache_source_accept(4'h3, 48'h8000_0300, 30);
     catcher = new("uncache_source_reuse_catcher",
                   "*Uncache source reused before D completion source=3*");
+    // 中文注释：catch本地fatal后UVM继续原函数，公共镜像也会拒绝同一违规；两层均需精确捕获并断言。
+    lifecycle_catcher = new("uncache_source_reuse_lifecycle_catcher",
+                            "invalid A accept source=3*");
     uvm_report_cb::add(null, catcher);
+    uvm_report_cb::add(null, lifecycle_catcher);
     responder.note_uncache_source_accept(4'h3, 48'h8000_0400, 31);
+    uvm_report_cb::delete(null, lifecycle_catcher);
     uvm_report_cb::delete(null, catcher);
-    expect_true(catcher.caught_count == 1,
-                "same-source reuse did not trigger the expected owner fatal");
+    expect_true(catcher.caught_count == 1 && lifecycle_catcher.caught_count == 1,
+                "same-source reuse did not trigger both exact local/public owner fatals");
 
     responder.clear_runtime_state();
     catcher = new("uncache_no_owner_d_catcher",
                   "*Uncache D.fire has no accepted source owner source=5*");
+    lifecycle_catcher = new("uncache_no_owner_d_lifecycle_catcher",
+                            "invalid D complete source=5*");
     uvm_report_cb::add(null, catcher);
+    uvm_report_cb::add(null, lifecycle_catcher);
     responder.note_uncache_source_complete(4'h5, 40);
+    uvm_report_cb::delete(null, lifecycle_catcher);
     uvm_report_cb::delete(null, catcher);
-    expect_true(catcher.caught_count == 1,
-                "ownerless D completion did not trigger the expected fatal");
+    expect_true(catcher.caught_count == 1 && lifecycle_catcher.caught_count == 1,
+                "ownerless D did not trigger both exact local/public lifecycle fatals");
     responder.clear_runtime_state();
 endtask:check_uncache_source_lifecycle
 
