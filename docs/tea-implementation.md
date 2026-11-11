@@ -375,7 +375,7 @@ Summary 模式分析仍需保留四表 schema；`--spec-log-dir` 要求 ROI 内�
 
 ```bash
 python3 scripts/test_tea_visualize.py
-proxychains -q mill -i xiangshan.test.testOnly xiangshan.TeaCycleStatsTest
+mill -i xiangshan.test.testOnly xiangshan.TeaCycleStatsTest
 ```
 
 RTL 测试覆盖采集边界、区间长度、直方图边界、关闭后重新开启和周期快照的包含关系。

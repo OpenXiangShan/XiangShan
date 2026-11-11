@@ -24,7 +24,7 @@ Dispatch 宽度为 `RenameWidth`，单位为 uop；每个样本中每个槽位�
 在仓库根目录构建 GSIM：
 
 ```bash
-NOOP_HOME="$PWD" proxychains -q make gsim GSIM=1 CONFIG=DefaultConfig NUM_CORES=1 \
+NOOP_HOME="$PWD" make gsim GSIM=1 CONFIG=DefaultConfig NUM_CORES=1 \
   EMU_THREADS=1 WITH_TEA=1 WITH_DIP=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j48
 ```
 
