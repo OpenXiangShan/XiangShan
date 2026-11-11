@@ -42,7 +42,8 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.regfile.RfWritePortBundle
-import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.backend.vector.{Exu, VecIssueQueue, VecRegionImp, VecRegionModule}
 import xiangshan.backend.float.{FltExu, FltIssueQueue, FltRegionImp, FltRegionModule}

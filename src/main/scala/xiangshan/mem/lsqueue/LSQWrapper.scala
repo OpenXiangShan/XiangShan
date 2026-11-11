@@ -24,7 +24,8 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, IssueQueueLRQWakeUpBundle, MemExuOutput, MemToRob, UopIdx, connectSamePort}
 import xiangshan.backend._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobLsqIO
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.mem.Bundles._

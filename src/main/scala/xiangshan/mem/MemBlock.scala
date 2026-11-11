@@ -37,7 +37,8 @@ import xiangshan.backend.fu.FuType._
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
-import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._

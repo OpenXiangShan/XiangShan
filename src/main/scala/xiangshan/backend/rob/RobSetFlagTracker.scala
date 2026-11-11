@@ -22,12 +22,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
-
-/** A set-only flag update tagged with the instruction that generated it. */
-class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XSBundle {
-  val robIdx = new RobPtr
-  val setMask = UInt(flagWidth.W)
-}
+import xiangshan.backend.rob.RobSetFlagTracker._
 
 /** Tracks the oldest in-flight setter for each bit of a sticky ROB flag. */
 class RobSetFlagTracker(
@@ -61,12 +56,8 @@ class RobSetFlagTracker(
     candidateIndices
   }
 
-  val io = IO(new Bundle {
-    val update = Input(Vec(numUpdatePorts, Valid(new RobSetFlagUpdateReq(width))))
-    val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
-    val redirect = Input(Valid(new Redirect))
-    val commitSetMask = Output(UInt(width.W))
-  })
+  val in = IO(new In(width, numUpdatePorts, numCommitPorts))
+  val out = IO(new Out(width, numUpdatePorts, numCommitPorts))
 
   private def selectOldest(candidates: Seq[(Bool, RobPtr)]): (Bool, RobPtr) = {
     ParallelOperation(candidates, (left: (Bool, RobPtr), right: (Bool, RobPtr)) => {
@@ -86,13 +77,13 @@ class RobSetFlagTracker(
   private val pendingValid = RegInit(VecInit(Seq.fill(width)(false.B)))
   private val pendingRobIdx = RegInit(VecInit(Seq.fill(width)(RobPtr(false.B, 0.U))))
 
-  private val updateNeedsFlush = io.update.map(_.bits.robIdx.needFlush(io.redirect))
-  private val updateCommits = io.update.map { update =>
-    io.commit.map(commit => commit.valid && commit.bits.isSameEntry(update.bits.robIdx)).reduce(_ || _)
+  private val updateNeedsFlush = in.update.map(_.bits.robIdx.needFlush(in.redirect))
+  private val updateCommits = in.update.map { update =>
+    in.commit.map(commit => commit.valid && commit.bits.isSameEntry(update.bits.robIdx)).reduce(_ || _)
   }
-  private val commonUpdateValid = io.update.zipWithIndex.map { case (update, index) =>
+  private val commonUpdateValid = in.update.zipWithIndex.map { case (update, index) =>
     update.valid && !updateNeedsFlush(index) &&
-      !(!io.redirect.valid && updateCommits(index))
+      !(!in.redirect.valid && updateCommits(index))
   }
 
   if (orderedUpdatePorts) {
@@ -100,23 +91,23 @@ class RobSetFlagTracker(
       older <- 0 until numUpdatePorts
       younger <- older + 1 until numUpdatePorts
     } {
-      when(io.update(older).valid && io.update(younger).valid) {
+      when(in.update(older).valid && in.update(younger).valid) {
         assert(
-          io.update(older).bits.robIdx.isNotAfterSlot(io.update(younger).bits.robIdx),
+          in.update(older).bits.robIdx.isNotAfterSlot(in.update(younger).bits.robIdx),
           s"ordered RobSetFlagTracker update ports $older and $younger are out of ROB order"
         )
       }
     }
   }
 
-  io.commitSetMask := VecInit((0 until width).map { bit =>
-    val pendingNeedsFlush = pendingRobIdx(bit).needFlush(io.redirect)
-    val pendingCommits = pendingValid(bit) && !io.redirect.valid && io.commit.map { commit =>
+  out.commitSetMask := VecInit((0 until width).map { bit =>
+    val pendingNeedsFlush = pendingRobIdx(bit).needFlush(in.redirect)
+    val pendingCommits = pendingValid(bit) && !in.redirect.valid && in.commit.map { commit =>
       commit.valid && commit.bits.isSameEntry(pendingRobIdx(bit))
     }.reduce(_ || _) && !pendingNeedsFlush
 
     val updateCandidates = candidatesByFlag(bit).map { index =>
-      val update = io.update(index)
+      val update = in.update(index)
       val valid = commonUpdateValid(index) && update.bits.setMask(bit)
       (valid, update.bits.robIdx)
     }
@@ -142,4 +133,28 @@ class RobSetFlagTracker(
 
     pendingCommits
   }).asUInt
+}
+
+object RobSetFlagTracker {
+  class In(width: Int, numUpdatePorts: Int, numCommitPorts: Int)(implicit p: Parameters) extends XSBundle {
+    // Speculative flag setters.
+    val update = Input(Vec(numUpdatePorts, Valid(new RobSetFlagUpdateReq(width))))
+
+    // Retired setter identities.
+    val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
+
+    // Recovery boundary.
+    val redirect = Input(Valid(new Redirect))
+  }
+
+  class Out(width: Int, numUpdatePorts: Int, numCommitPorts: Int)(implicit p: Parameters) extends XSBundle {
+    // Architectural flag updates.
+    val commitSetMask = Output(UInt(width.W))
+  }
+
+  /** A set-only flag update tagged with the inst robIdx that generated it. */
+  class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val setMask = UInt(flagWidth.W)
+  }
 }

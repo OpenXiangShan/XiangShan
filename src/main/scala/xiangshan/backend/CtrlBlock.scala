@@ -31,7 +31,8 @@ import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{Rob, RobPtr}
+import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
@@ -123,10 +124,10 @@ class CtrlBlockImp(
 
   private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
 
-  private val s0_robFlushRedirect = rob.io.flushOut
-  private val s0_robFlushPcInfo = rob.io.flushPcInfo
+  private val s0_robFlushRedirect = rob.out.flushOut
+  private val s0_robFlushPcInfo = rob.out.flushPcInfo
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
-  private val s1_robFlushPcInfo = Wire(chiselTypeOf(rob.io.flushPcInfo))
+  private val s1_robFlushPcInfo = Wire(chiselTypeOf(rob.out.flushPcInfo))
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
   s1_robFlushPcInfo := RegEnable(s0_robFlushPcInfo, s0_robFlushRedirect.valid)
@@ -345,8 +346,8 @@ class CtrlBlockImp(
   val trace = Module(new Trace)
   trace.io.in.fromEncoder.stall  := io.traceCoreInterface.fromEncoder.stall
   trace.io.in.fromEncoder.enable := io.traceCoreInterface.fromEncoder.enable
-  trace.io.in.fromRob            := rob.io.trace.traceCommitInfo
-  rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
+  trace.io.in.fromRob            := rob.out.trace.traceCommitInfo
+  rob.out.trace.blockCommit       := trace.io.out.blockRobCommit
   val tracePcStart = Wire(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
     println(s"[CtrlBlock] pcMem read port for \"trace\" index $i: $pcMemIdx.")
@@ -407,13 +408,13 @@ class CtrlBlockImp(
   // Thus, we make all flush reasons to behave the same as exceptions for frontend.
   // why flushOut: instructions with flushPipe are not commited to frontend
   // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-  val frontendCommit = rob.io.commits.commitValid.reduce(_ || _) &&
-    rob.io.commits.isCommit && !s0_robFlushRedirect.valid
+  val frontendCommit = rob.out.commits.commitValid.reduce(_ || _) &&
+    rob.out.commits.isCommit && !s0_robFlushRedirect.valid
   io.frontend.toFtq.commit.valid := RegNext(frontendCommit)
   io.frontend.toFtq.commit.bits := RegEnable(
     ParallelPriorityMux(
-      rob.io.commits.commitValid.reverse,
-      rob.io.commits.info.map(_.ftqIdx).reverse
+      rob.out.commits.commitValid.reverse,
+      rob.out.commits.info.map(_.ftqIdx).reverse
     ),
     frontendCommit
   )
@@ -421,7 +422,7 @@ class CtrlBlockImp(
   val isEmptyDelay = !(RegNext(VecInit(decode.in.mop.map(_.valid))).asUInt.orR ||
     RegNext(VecInit(rename.io.in.map(_.valid))).asUInt.orR ||
     RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR) &&
-    RegNext(rob.io.enq.isEmpty)
+    RegNext(rob.in.enq.isEmpty)
   io.frontend.backendEmpty := RegNext(isEmptyDelay)
 
   io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
@@ -432,8 +433,8 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxAhead.bits := oldestExuRedirect.bits.ftqIdx
 
   // Be careful here:
-  // T0: rob.io.flushOut, s0_robFlushRedirect
-  // T1: s1_robFlushRedirect, rob.io.exception.valid
+  // T0: rob.out.flushOut, s0_robFlushRedirect
+  // T1: s1_robFlushRedirect, rob.out.exception.valid
   // T2: csr.redirect.valid
   // T3: csr.exception.valid
   // T4: get csr.trapTarget from csr
@@ -442,7 +443,7 @@ class CtrlBlockImp(
     s1_robFlushPcAdjusted, // replay inst
     s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
-  private val s4_csrIsTrap = DelayN(rob.io.exception.valid, 3)
+  private val s4_csrIsTrap = DelayN(rob.out.exception.valid, 3)
   private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
 
   val flushTarget = Mux(s4_csrIsTrap, s4_trapTargetFromCsr.pc, s2_robFlushPc)
@@ -458,10 +459,10 @@ class CtrlBlockImp(
 
   for (i <- 0 until DecodeWidth) {
     gpaMem.io.fromIFU := io.frontend.fromIfu
-    gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
-    gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
-    gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
-    gpaMem.io.exceptionReadAddr.bits.isRVC := rob.io.readGPAMemAddr.bits.isRVC
+    gpaMem.io.exceptionReadAddr.valid := rob.out.readGPAMemAddr.valid
+    gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.out.readGPAMemAddr.bits.ftqPtr
+    gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.out.readGPAMemAddr.bits.ftqOffset
+    gpaMem.io.exceptionReadAddr.bits.isRVC := rob.out.readGPAMemAddr.bits.isRVC
   }
 
   // vtype commit
@@ -469,11 +470,11 @@ class CtrlBlockImp(
   decode.in.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.in.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
 
-  io.frontend.toIBuf.resumingVType := rob.io.toDecode.isResumeVType
-  io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
-  io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
+  io.frontend.toIBuf.resumingVType := rob.out.toDecode.isResumeVType
+  io.frontend.toIBuf.walkToArchVType := rob.out.toDecode.walkToArchVType
+  io.frontend.toIBuf.walkVType := rob.out.toDecode.walkVType
   io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
-  io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
+  io.frontend.toIBuf.commitVType := rob.out.toDecode.commitVType
 
   // add decode Buf for in.ready better timing
   /**
@@ -617,8 +618,8 @@ class CtrlBlockImp(
   snpt.io.enq := genSnapshot
   snpt.io.enqData.robIdx := rename.io.out.map(_.bits.robIdx)
   snpt.io.enqData.isCFI := rename.io.out.map(_.bits.snapshot)
-  snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
-    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2.isSameEntry(snpt.io.snapshots(snpt.io.deqPtr.value).robIdx.head))).orR
+  snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.out.commits.isCommit &&
+    Cat(rob.out.commits.commitValid.zip(rob.out.commits.robIdx).map(x => x._1 && x._2.isSameEntry(snpt.io.snapshots(snpt.io.deqPtr.value).robIdx.head))).orR
   snpt.io.redirect := s1_s3_redirect.valid
   val flushVec = VecInit(snpt.io.snapshots.map { snapshot =>
     val notCFIMask = snapshot.isCFI.map(~_)
@@ -646,11 +647,11 @@ class CtrlBlockImp(
     }
   )
 
-  rob.io.snpt.snptEnq := DontCare
-  rob.io.snpt.snptDeq := snpt.io.deq
-  rob.io.snpt.useSnpt := useSnpt
-  rob.io.snpt.snptSelect := snptSelect
-  rob.io.snpt.flushVec := flushVecNext
+  rob.in.snpt.snptEnq := DontCare
+  rob.in.snpt.snptDeq := snpt.io.deq
+  rob.in.snpt.useSnpt := useSnpt
+  rob.in.snpt.snptSelect := snptSelect
+  rob.in.snpt.flushVec := flushVecNext
   rename.io.ratSnpt.snptEnq := genSnapshot
   rename.io.ratSnpt.snptDeq := snpt.io.deq
   rename.io.ratSnpt.useSnpt := useSnpt
@@ -715,12 +716,12 @@ class CtrlBlockImp(
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rename.io.hartId := io.fromTop.hartId
-  rename.io.diffRatCommitRobIdx.foreach(_ := rob.io.diffRatCommitRobIdx.get)
-  rename.io.diffRatCommitRobIdxVec.foreach(_ := rob.io.diffRatCommitRobIdxVec.get)
+  rename.io.diffRatCommitRobIdx.foreach(_ := rob.out.diffRatCommitRobIdx.get)
+  rename.io.diffRatCommitRobIdxVec.foreach(_ := rob.out.diffRatCommitRobIdxVec.get)
 
   rename.io.redirect := s1_s3_redirect
-  rename.io.rabCommits := rob.io.rabCommits
-  rename.io.vlCommits := rob.io.vlCommits
+  rename.io.rabCommits := rob.out.rabCommits
+  rename.io.vlCommits := rob.out.vlCommits
   rename.io.singleStep := io.fromCSR.toDecode.singlestep
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.out.uop).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
@@ -769,22 +770,22 @@ class CtrlBlockImp(
 
 
   dispatch.io.redirect := s1_s3_redirect
-  val enqRob = Wire(chiselTypeOf(rob.io.enq))
-  enqRob.canAccept := rob.io.enq.canAccept
-  enqRob.canAcceptForDispatch := rob.io.enq.canAcceptForDispatch
-  enqRob.isEmpty := rob.io.enq.isEmpty
-  enqRob.resp := rob.io.enq.resp
+  val enqRob = Wire(chiselTypeOf(rob.in.enq))
+  enqRob.canAccept := rob.in.enq.canAccept
+  enqRob.canAcceptForDispatch := rob.in.enq.canAcceptForDispatch
+  enqRob.isEmpty := rob.in.enq.isEmpty
+  enqRob.resp := rob.in.enq.resp
   enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
-    sink.valid := RegNext(source.valid && !rob.io.redirect.valid) && !s1_s3_redirect.valid
+    sink.valid := RegNext(source.valid && !rob.in.redirect.valid) && !s1_s3_redirect.valid
     sink.bits := RegEnable(source.bits, source.valid)
   }
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
   dispatch.io.enqRob.canAcceptForDispatch := enqRob.canAcceptForDispatch
   dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
   dispatch.io.enqRob.resp := enqRob.resp
-  rob.io.enq.needAlloc := enqRob.needAlloc
-  rob.io.enq.req := enqRob.req
+  rob.in.enq.needAlloc := enqRob.needAlloc
+  rob.in.enq.req := enqRob.req
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpFp  := io.toDispatch.wakeUpFp
@@ -814,11 +815,11 @@ class CtrlBlockImp(
   dispatch.io.fromLsqEnqCtrl.sqStall.foreach(_ := lsqEnqCtrl.io.sqStall.get)
   io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
 
-  dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
-  dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
+  dispatch.io.debugBlockBackward.foreach(_ := rob.out.debugBlockBackward.get)
+  dispatch.io.debugWaitForward.foreach(_ := rob.out.debugWaitForward.get)
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
   dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
-  dispatch.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
+  dispatch.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -840,76 +841,85 @@ class CtrlBlockImp(
   io.toExuBlock.flush := s2_s4_redirect
 
 
-  rob.io.hartId := io.fromTop.hartId
-  rob.io.redirect := s1_s3_redirect
-  rob.io.writeback := delayedNotFlushedWriteBack
-  rob.io.exuWriteback := delayedWriteBack
-  rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
-  rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
-  rob.io.readGPAMemData := gpaMem.io.exceptionReadData
-  rob.io.fromVecExcpMod.busy := io.fromVecExcpMod.busy
+  rob.in.hartId := io.fromTop.hartId
+  rob.in.redirect := s1_s3_redirect
+  rob.in.writeback := delayedNotFlushedWriteBack
+  rob.in.exuWriteback := delayedWriteBack
+  rob.in.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.in.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
+  rob.out.readGPAMemData := gpaMem.io.exceptionReadData
+  rob.in.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
   io.redirect := s1_s3_redirect
 
   // rob to int block
-  io.robio.csr <> rob.io.csr
+  rob.in.csr.intrBitSet := io.robio.csr.intrBitSet
+  rob.in.csr.trapTarget := io.robio.csr.trapTarget
+  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
+  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
+  io.robio.csr.fflags := rob.out.csr.fflags
+  io.robio.csr.vxsat := rob.out.csr.vxsat
+  io.robio.csr.vstart := rob.out.csr.vstart
+  io.robio.csr.dirty_fs := rob.out.csr.dirty_fs
+  io.robio.csr.dirty_vs := rob.out.csr.dirty_vs
+  io.robio.csr.perfinfo := rob.out.csr.perfinfo
   // When wfi is disabled, it will not block ROB commit.
-  rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.io.wfi_enable := decode.in.fromCSR.custom.wfi_enable
-  rob.io.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
+  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
+  rob.in.wfi_enable := decode.in.fromCSR.custom.wfi_enable
+  rob.in.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
 
-  io.toTop.cpuWfi := DelayN(rob.io.cpu_wfi, 5)
+  io.toTop.cpuWfi := DelayN(rob.out.cpu_wfi, 5)
 
-  io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
-  io.robio.exception := rob.io.exception
-  io.robio.diffCommitForTrap.zip(rob.io.diffCommitForTrap).foreach { case (sink, source) => sink := source }
-  rob.io.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
+  io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.out.csr.perfinfo.retiredInstr)
+  io.robio.exception := rob.out.exception
+  io.robio.diffCommitForTrap.zip(rob.out.diffCommitForTrap).foreach { case (sink, source) => sink := source }
+  rob.in.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
   io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
   // wfi
-  io.frontend.wfi.wfiReq := rob.io.wfi.wfiReq
-  rob.io.wfi.safeFromFrontend := io.frontend.wfi.wfiSafe
-  io.toMem.wfi.wfiReq := rob.io.wfi.wfiReq
-  rob.io.wfi.safeFromMem := io.toMem.wfi.wfiSafe
+  io.frontend.wfi.wfiReq := rob.out.wfi.wfiReq
+  io.toMem.wfi.wfiReq := rob.out.wfi.wfiReq
+  rob.out.wfi.safeFromFrontend := io.frontend.wfi.wfiSafe
+  rob.out.wfi.safeFromMem := io.toMem.wfi.wfiSafe
 
   // rob to mem block
-  io.robio.lsq <> rob.io.lsq
+  io.robio.lsq <> rob.out.lsq
 
   io.diff_vl_rat .foreach(_ := rename.io.diff_vl_rat.get)
 
-  rob.io.debug_ls := io.robio.debug_ls
-  rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
-  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
-  rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
-  rob.io.debugEnqLsq := io.debugEnqLsq
-  rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
-  rob.io.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
+  rob.in.debug_ls := io.robio.debug_ls
+  rob.in.debugHeadLsIssue := io.robio.robHeadLsIssue
+  rob.in.lsTopdownInfo := io.robio.lsTopdownInfo
+  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
+  rob.in.debugEnqLsq := io.debugEnqLsq
+  rob.in.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
+  rob.in.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
-  io.robio.robDeqPtr := rob.io.robDeqPtr
+  io.robio.robDeqPtr := rob.out.robDeqPtr
 
-  io.robio.storeDebugInfo <> rob.io.storeDebugInfo
+  io.robio.storeDebugInfo <> rob.in.storeDebugInfo
 
   // rob to backend
-  io.robio.commitVType := rob.io.toDecode.commitVType
+  io.robio.commitVType := rob.out.toDecode.commitVType
   // backend to decode
   decode.in.vstart := io.toDecode.vstart
   // backend to rob
-  rob.io.vstartIsZero := io.toDecode.vstart === 0.U
+  rob.in.vstartIsZero := io.toDecode.vstart === 0.U
 
   io.toCSR.trapInstInfo := decode.out.toCSR.trapInstInfo
 
-  io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
-  io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo
+  io.toVecExcpMod.logicPhyRegMap := rob.out.toVecExcpMod.logicPhyRegMap
+  io.toVecExcpMod.excpInfo       := rob.out.toVecExcpMod.excpInfo
   io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
-  io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
-  rob.io.debugTopDown.fromCore := io.debugTopDown.fromCore
-  io.debugRolling := rob.io.debugRolling
-  dispatch.io.debugRobTrueCommit.foreach(_ := rob.io.debugTopDown.toDispatch.robTrueCommit)
-  rename.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
+  io.debugTopDown.fromRob := rob.out.debugTopDown.toCore
+  rob.in.debugTopDown.fromCore := io.debugTopDown.fromCore
+  io.debugRolling := rob.out.debugRolling
+  dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.debugTopDown.toDispatch.robTrueCommit)
+  rename.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
 
-  io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
+  io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.out.robFull)
   io.perfInfo.ctrlInfo.intdqFull := false.B
   io.perfInfo.ctrlInfo.fpdqFull := false.B
   io.perfInfo.ctrlInfo.lsdqFull := false.B
