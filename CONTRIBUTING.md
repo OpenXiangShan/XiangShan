@@ -11,6 +11,9 @@ English | [中文](CONTRIBUTING.zh-cn.md)
     - [Known issues](#known-issues)
   - [Feature Request](#feature-request)
   - [Pull Request](#pull-request)
+    - [Before commit](#before-commit)
+    - [Commit message](#commit-message)
+    - [Review/CI Process](#reviewci-process)
   - [Build and Usage Problems](#build-and-usage-problems)
   - [Other Question](#other-question)
   - [AI Use](#ai-use)
@@ -58,13 +61,20 @@ We also welcome pull requests that implement new features. Please refer to the [
 
 ## Pull Request
 
-Before submitting a PR for a bug fix or a new feature, we recommend opening the corresponding type of issue first and discussing it with us and the community to avoid duplicated work.
+Before submitting a PR for a bug fix or a new feature, please open a corresponding type of issue first and discussing it with us and the community to avoid duplicated work.
 
-Please run `make reformat` before committing to automatically format the code.
+### Before commit
 
-Please keep each PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR. A PR may include the main functional change together with necessary preparatory refactoring, such as reorganizing port structures, but we recommend splitting them into separate commits to make review easier.
+1. Please run `make reformat` before committing to automatically format the code.
+2. Please keep each commit / PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR. A PR may include the main functional change together with necessary preparatory refactoring, such as reorganizing port structures, but we recommend splitting them into separate commits to make review easier.
+3. Please configure your git `user.name` and `user.email` to match your GitHub account (use GitHub anonymous email is ok).
+   1. Please refer to the [official documentation](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address).
+   2. Run `git config user.{name,email}` to check your current configuration.
+   3. If you need to change your configuration, run `git config user.name "Your Name"` and `git config user.email "your.email@example.com"`.
 
-This repository generally follows conventional commits. Commit messages and PR titles should follow the `type(scope): description` format, and the description should clearly explain what changed and why.
+### Commit message
+
+This repository generally follows [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/). Commit messages and PR titles should follow the `type(scope): description` format, and the description should clearly explain what changed and why.
 
 Common `type` values include, but are not limited to:
 
@@ -91,7 +101,7 @@ In addition, please describe your changes sufficiently in the commit message and
 
 A complete example of a commit message:
 
-```
+```text
 fix(some-module): fix some bug
 
 The original design has a bug that blabla.
@@ -105,7 +115,13 @@ Assisted-by: Some-AI-Agent:Model-Version Some-MCP-TOOL
 Co-authored-by: Another Author <another.author@example.com>
 ```
 
-We recommend creating a `Draft Pull Request` first, and converting it to `Ready for review` only after rebasing onto the latest mainline, completing self-testing, and getting CI to pass. PRs from external contributors may not be able to trigger CI automatically. In that case, you can refer to [CODEOWNERS](.github/CODEOWNERS) and `@` the relevant maintainers for help triggering it manually. Once the PR is marked ready, we will start the review process; until then, you can continue refining it.
+### Review/CI Process
+
+We recommend creating a `Draft Pull Request` first, and converting it to `Ready for review` only after rebasing onto the latest mainline, completing self-testing, and getting CI to pass.
+
+PRs from external contributors may not be able to trigger CI automatically. In that case, you can refer to [CODEOWNERS](.github/CODEOWNERS) and `@` the relevant maintainers for help triggering it manually.
+
+Once the PR is marked ready, we will start the review process; until then, you can continue refining it.
 
 ## Build and Usage Problems
 
