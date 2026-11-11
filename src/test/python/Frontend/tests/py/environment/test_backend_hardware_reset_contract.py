@@ -33,9 +33,6 @@ def _dirty_model():
     model.pending_events.append(BackendEvent("redirect", 10, {"target_pc": 0x80002000}))
     model._cfvec_queue.append(_queue_instr(0x80200F00, 0, 21))
     model._pending_queue_resolve_indices.append(0)
-    model._pending_queue_call_ret_commit_indices.append(0)
-    model._scheduled_queue_call_ret_commit_groups.append((10, [object()]))
-    model._visible_queue_call_ret_commit_group.append(object())
     model._pending_level0_target_ftq = (0, 22)
     model._pending_level0_target_pc = 0x80003000
     model._last_correct_cfi_context = {"ftq_flag": 0, "ftq_value": 21}
@@ -215,9 +212,8 @@ def test_environment_reset_does_not_observe_or_plan_backend_or_clear_errors(monk
     env.register_cycle_observer(lambda cycle, _env: called.append(cycle))
     for stem in ("commit_valid", "redirect_valid", "ftq_idx_ahead_valid"):
         getattr(env.backend_agent._drive_if, stem).value = 1
-    for stem in ("resolve_valid", "call_ret_commit_valid"):
-        for signal in getattr(env.backend_agent._drive_if, stem):
-            signal.value = 1
+    for signal in env.backend_agent._drive_if.resolve_valid:
+        signal.value = 1
     dut.reset.value = 1
     dut.io_reset_vector_addr.value = 0x80004000 >> 1
     env._on_clock_edge(100)
@@ -235,22 +231,17 @@ def test_environment_reset_does_not_observe_or_plan_backend_or_clear_errors(monk
     assert called == [100, 101]
     for stem in ("commit_valid", "redirect_valid", "ftq_idx_ahead_valid"):
         assert getattr(env.backend_agent._drive_if, stem).value == 0
-    for stem in ("resolve_valid", "call_ret_commit_valid"):
-        assert all(signal.value == 0 for signal in getattr(env.backend_agent._drive_if, stem))
+    assert all(signal.value == 0 for signal in env.backend_agent._drive_if.resolve_valid)
 
 
 @pytest.mark.parametrize("patch", [
     {"redirect": 1}, {"resolves": [0, 1, 0]},
-    {"call_ret_payloads": [{"ras_action": 1, "ftq_start_pc": 0x80010000}]},
-    {"call_ret_payloads": [{"ras_action": 0, "ftq_start_pc": 0x80000000}]},
-    {"call_ret_payloads": [{"ras_action": 0, "ftq_start_pc": None}]},
     {"commit_start_pc": 0x80000000}, {"commit_start_pc": None},
 ])
 def test_reset_dut_checker_rejects_old_or_unidentified_actions(patch):
 
     record = {"redirect": 0, "resolves": [0, 0, 0], "commit": 1,
-              "commit_start_pc": 0x80010000,
-              "call_ret_payloads": [{"ras_action": 0, "ftq_start_pc": 0x80010000}]}
+              "commit_start_pc": 0x80010000}
     assert_no_old_actions(record, 0x80010000)
     with pytest.raises(AssertionError):
         assert_no_old_actions({**record, **patch}, 0x80010000)

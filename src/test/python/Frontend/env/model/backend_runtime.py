@@ -97,7 +97,6 @@ class BackendCycleActions:
     wfi_req: int = 0
     commit_entry: Optional[Any] = None
     resolve_entries: tuple = ()
-    call_ret_commit_group: tuple = ()
     ftq_idx_ahead: Optional[FtqIdxAheadTxn] = None
     redirect_payload: Optional[dict] = None
     vtype_commit: Optional[tuple[int, bool]] = None

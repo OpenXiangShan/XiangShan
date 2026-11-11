@@ -104,9 +104,6 @@ class BackendToFtqBundle(Bundle):
         "resolve_bits_mispredict": "io_backend_toFtq_resolve_#_bits_mispredict",
         "resolve_bits_attribute_branch_type": "io_backend_toFtq_resolve_#_bits_attribute_branchType",
         "resolve_bits_attribute_ras_action": "io_backend_toFtq_resolve_#_bits_attribute_rasAction",
-        "call_ret_commit_valid": "io_backend_toFtq_callRetCommit_#_valid",
-        "call_ret_commit_bits_ras_action": "io_backend_toFtq_callRetCommit_#_bits_rasAction",
-        "call_ret_commit_bits_ftq_ptr_value": "io_backend_toFtq_callRetCommit_#_bits_ftqPtr_value",
     }
 
     redirect_valid = Signal()
@@ -145,13 +142,6 @@ class BackendToFtqBundle(Bundle):
     )
     resolve_bits_attribute_ras_action = SignalList(
         "io_backend_toFtq_resolve_#_bits_attribute_rasAction", 3
-    )
-    call_ret_commit_valid = SignalList("io_backend_toFtq_callRetCommit_#_valid", 8)
-    call_ret_commit_bits_ras_action = SignalList(
-        "io_backend_toFtq_callRetCommit_#_bits_rasAction", 8
-    )
-    call_ret_commit_bits_ftq_ptr_value = SignalList(
-        "io_backend_toFtq_callRetCommit_#_bits_ftqPtr_value", 8
     )
 
     def drive_idle(self) -> None:
@@ -192,9 +182,6 @@ class BackendToFtqBundle(Bundle):
             self.resolve_bits_mispredict,
             self.resolve_bits_attribute_branch_type,
             self.resolve_bits_attribute_ras_action,
-            self.call_ret_commit_valid,
-            self.call_ret_commit_bits_ras_action,
-            self.call_ret_commit_bits_ftq_ptr_value,
         ):
             for signal in signals:
                 signal.value = 0

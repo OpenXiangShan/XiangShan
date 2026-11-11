@@ -257,13 +257,24 @@ def test_full_frontend_top_level_signals_match_environment_bundles() -> None:
     )
     wrapper_signals = _wrapper_logic_signal_names()
     missing_from_bundles = sorted(wrapper_signals - modelled)
-    stale_in_bundles = sorted(modelled - wrapper_signals)
+    absent_optional_names = {"io_tlbCsr_priv_fenceVirt"} - wrapper_signals
+    stale_in_bundles = sorted(modelled - wrapper_signals - absent_optional_names)
     mismatches = {}
     if missing_from_bundles:
         mismatches["top_level_signals_missing_from_bundles"] = missing_from_bundles
     if stale_in_bundles:
         mismatches["bundle_signals_missing_from_top_level"] = stale_in_bundles
     assert not mismatches, mismatches
+
+
+def test_backend_commit_bundle_uses_only_ftq_entry_commit() -> None:
+    names = _bundle_signal_names((BackendToFtqBundle,))
+    assert {
+        "io_backend_toFtq_commit_valid",
+        "io_backend_toFtq_commit_bits_flag",
+        "io_backend_toFtq_commit_bits_value",
+    } <= names
+    assert not any("callRetCommit" in name for name in names)
 
 
 def test_full_frontend_environment_initializes_every_input() -> None:

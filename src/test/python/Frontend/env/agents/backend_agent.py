@@ -18,7 +18,6 @@ class BackendAgent:
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels: set[int] = set()
-        self._call_ret_commit_valid_lanes: set[int] = set()
         self._ftq_idx_ahead_valid_driven = False
 
     @staticmethod
@@ -44,7 +43,6 @@ class BackendAgent:
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels.clear()
-        self._call_ret_commit_valid_lanes.clear()
         self._ftq_idx_ahead_valid_driven = False
 
     @staticmethod
@@ -67,9 +65,6 @@ class BackendAgent:
         for channel in self._resolve_valid_channels:
             self._write(self._drive_if.resolve_valid[channel], 0)
         self._resolve_valid_channels.clear()
-        for lane in self._call_ret_commit_valid_lanes:
-            self._write(self._drive_if.call_ret_commit_valid[lane], 0)
-        self._call_ret_commit_valid_lanes.clear()
         if self._ftq_idx_ahead_valid_driven:
             self._write(self._drive_if.ftq_idx_ahead_valid, 0)
             self._ftq_idx_ahead_valid_driven = False
@@ -87,7 +82,6 @@ class BackendAgent:
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels.clear()
-        self._call_ret_commit_valid_lanes.clear()
         self._ftq_idx_ahead_valid_driven = False
 
     def start_cycle(self, can_accept: int, wfi_req: int = 0, backend_empty: int = 1) -> None:
@@ -157,15 +151,6 @@ class BackendAgent:
             if channel not in self._resolve_valid_channels:
                 self._write(self._drive_if.resolve_valid[channel], 1)
                 self._resolve_valid_channels.add(channel)
-
-    def drive_call_ret_commit(self, group: Iterable[object]) -> None:
-        assert self._drive_if is not None
-        for lane, inst in enumerate(list(group)[:8]):
-            self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], int(getattr(inst, "ras_action", 0)))
-            self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], int(getattr(inst, "ftq_value", 0)))
-            if lane not in self._call_ret_commit_valid_lanes:
-                self._write(self._drive_if.call_ret_commit_valid[lane], 1)
-                self._call_ret_commit_valid_lanes.add(lane)
 
     def drive_redirect(self, payload: Mapping[str, object]) -> None:
         assert self._drive_if is not None

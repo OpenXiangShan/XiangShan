@@ -670,9 +670,6 @@ def _ftq_idx_ahead_drive_if():
     return SimpleNamespace(
         redirect_valid=_Signal(),
         resolve_valid=[_Signal() for _ in range(3)],
-        call_ret_commit_valid=[_Signal() for _ in range(8)],
-        call_ret_commit_bits_ras_action=[_Signal() for _ in range(8)],
-        call_ret_commit_bits_ftq_ptr_value=[_Signal() for _ in range(8)],
         ftq_idx_ahead_valid=_Signal(),
         ftq_idx_ahead_flag=_Signal(),
         ftq_idx_ahead_value=_Signal(),
@@ -989,8 +986,6 @@ def test_backend_agent_clears_ftq_idx_ahead_valid_without_rewriting_payload() ->
     assert drive_if.ftq_idx_ahead_valid.value == 1
     assert drive_if.ftq_idx_ahead_flag.value == 1
     assert drive_if.ftq_idx_ahead_value.value == 63
-    drive_if.call_ret_commit_bits_ras_action[0].value = 2
-    drive_if.call_ret_commit_bits_ftq_ptr_value[0].value = 9
     valid_write_count = drive_if.ftq_idx_ahead_valid.write_count
 
     agent.clear_one_shot_signals()
@@ -1002,8 +997,6 @@ def test_backend_agent_clears_ftq_idx_ahead_valid_without_rewriting_payload() ->
     assert drive_if.ftq_idx_ahead_valid.write_count == valid_write_count + 1
     assert drive_if.ftq_idx_ahead_flag.value == 1
     assert drive_if.ftq_idx_ahead_value.value == 63
-    assert drive_if.call_ret_commit_bits_ras_action[0].value == 2
-    assert drive_if.call_ret_commit_bits_ftq_ptr_value[0].value == 9
 
 
 def test_backend_agent_writes_commit_valid_for_each_transaction_and_clears_once() -> None:

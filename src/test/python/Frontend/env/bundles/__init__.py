@@ -58,6 +58,19 @@ def _bind_bundle_member(value, dut, *, bundle_type: type[Bundle], required: bool
 def _bind_bundle(bundle_type: type[Bundle], dut, *, required: bool):
     bundle = bundle_type()
     signal_bindings = getattr(bundle_type, "SIGNAL_BINDINGS", {})
+    absent_optional_members = set()
+    for group in getattr(bundle_type, "OPTIONAL_SIGNAL_GROUPS", ()):
+        names = [
+            name
+            for member in group
+            for name in (
+                getattr(bundle, member).names
+                if isinstance(getattr(bundle, member), SignalList)
+                else (signal_bindings.get(member, member),)
+            )
+        ]
+        if not any(getattr(dut, name, None) is not None for name in names):
+            absent_optional_members.update(group)
 
     for attr_name in dir(bundle):
         if attr_name.startswith("_"):
@@ -69,11 +82,16 @@ def _bind_bundle(bundle_type: type[Bundle], dut, *, required: bool):
                 bundle,
                 attr_name,
                 _dut_pin_required(dut, signal_name, bundle_type)
-                if required
+                if required and attr_name not in absent_optional_members
                 else _dut_pin_optional(dut, signal_name),
             )
             continue
-        _bind_bundle_member(attr_value, dut, bundle_type=bundle_type, required=required)
+        _bind_bundle_member(
+            attr_value,
+            dut,
+            bundle_type=bundle_type,
+            required=required and attr_name not in absent_optional_members,
+        )
     return bundle
 
 

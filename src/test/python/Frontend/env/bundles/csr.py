@@ -4,6 +4,7 @@ from toffee import Bundle, Signal
 
 
 class TlbCsrBundle(Bundle):
+    OPTIONAL_SIGNAL_GROUPS = (("io_tlbCsr_priv_fenceVirt",),)
     io_tlbCsr_satp_mode = Signal()
     io_tlbCsr_satp_asid = Signal()
     io_tlbCsr_satp_ppn = Signal()
@@ -26,6 +27,7 @@ class TlbCsrBundle(Bundle):
     io_tlbCsr_priv_vsum = Signal()
     io_tlbCsr_priv_virt = Signal()
     io_tlbCsr_priv_virt_changed = Signal()
+    io_tlbCsr_priv_fenceVirt = Signal()
     io_tlbCsr_priv_spvp = Signal()
     io_tlbCsr_priv_imode = Signal()
     io_tlbCsr_priv_dmode = Signal()
@@ -47,7 +49,8 @@ class TlbCsrBundle(Bundle):
             "io_tlbCsr_mbmc_BME", "io_tlbCsr_mbmc_CMODE", "io_tlbCsr_mbmc_BCLEAR",
             "io_tlbCsr_mbmc_BMA", "io_tlbCsr_priv_mxr", "io_tlbCsr_priv_sum",
             "io_tlbCsr_priv_vmxr", "io_tlbCsr_priv_vsum", "io_tlbCsr_priv_virt",
-            "io_tlbCsr_priv_virt_changed", "io_tlbCsr_priv_spvp", "io_tlbCsr_priv_imode",
+            "io_tlbCsr_priv_virt_changed", "io_tlbCsr_priv_fenceVirt",
+            "io_tlbCsr_priv_spvp", "io_tlbCsr_priv_imode",
             "io_tlbCsr_priv_dmode", "io_tlbCsr_priv_debug", "io_tlbCsr_mPBMTE",
             "io_tlbCsr_hPBMTE", "io_tlbCsr_pmm_mseccfg", "io_tlbCsr_pmm_menvcfg",
             "io_tlbCsr_pmm_henvcfg", "io_tlbCsr_pmm_hstatus", "io_tlbCsr_pmm_senvcfg",

@@ -17,10 +17,6 @@ RESOLVE_STATE_SKIPPED = "skipped"
 ROB_COMMIT_STATE_PENDING = "pending"
 ROB_COMMIT_STATE_COMMITTED = "committed"
 
-CALL_RET_STATE_NONE = "none"
-CALL_RET_STATE_PENDING = "pending"
-CALL_RET_STATE_EMITTED = "emitted"
-
 GOLDEN_MATCH_STATE_UNKNOWN = "unknown"
 GOLDEN_MATCH_STATE_MATCHED = "matched"
 GOLDEN_MATCH_STATE_MISMATCHED = "mismatched"
@@ -72,18 +68,6 @@ class ResolveEntry:
 
 
 @dataclass
-class CommitInstruction:
-    json_index: int
-    pc: int
-    instr: int
-    ftq_flag: int
-    ftq_value: int
-    ras_action: int
-    queue_index: Optional[int] = None
-    ftq_offset: Optional[int] = None
-
-
-@dataclass
 class QueueInstr:
     cycle: int
     slot: int
@@ -98,8 +82,6 @@ class QueueInstr:
     path_state: str = PATH_STATE_UNKNOWN
     resolve_state: str = RESOLVE_STATE_NOT_NEEDED
     rob_commit_state: str = ROB_COMMIT_STATE_PENDING
-    call_ret_commit_state: str = CALL_RET_STATE_NONE
-    call_ret_ras_action: int = 0
     golden_match_state: str = GOLDEN_MATCH_STATE_UNKNOWN
     golden_index: Optional[int] = None
     golden_target_pc: Optional[int] = None
@@ -143,9 +125,6 @@ class BackendState:
     cfvec_queue: Deque[QueueInstr] = field(default_factory=deque)
     active_wrong_path_episode: Optional[ActiveWrongPathEpisode] = None
     pending_queue_resolve_indices: Deque[int] = field(default_factory=deque)
-    pending_queue_call_ret_commit_indices: Deque[int] = field(default_factory=deque)
-    scheduled_queue_call_ret_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = field(default_factory=deque)
-    visible_queue_call_ret_commit_group: list[CommitInstruction] = field(default_factory=list)
     commit_min_delay: int = 3
     commit_max_delay: int = 10
     rng: object = random
@@ -153,74 +132,6 @@ class BackendState:
     def append_cfvec_queue_instruction(self, instr: QueueInstr) -> int:
         self.cfvec_queue.append(instr)
         return len(self.cfvec_queue) - 1
-
-    def schedule_next_queue_call_ret_commit_group(self) -> None:
-        if not self.pending_queue_call_ret_commit_indices:
-            return
-        if (
-            self.scheduled_queue_call_ret_commit_groups
-            and int(self.scheduled_queue_call_ret_commit_groups[-1][0]) >= int(self.current_cycle) + 1
-        ):
-            return
-        group: list[CommitInstruction] = []
-        while self.pending_queue_call_ret_commit_indices and len(group) < 8:
-            idx = int(self.pending_queue_call_ret_commit_indices.popleft())
-            if idx < 0 or idx >= len(self.cfvec_queue):
-                continue
-            entry = self.cfvec_queue[idx]
-            group.append(
-                CommitInstruction(
-                    json_index=-1 if entry.golden_index is None else int(entry.golden_index),
-                    pc=int(entry.pc),
-                    instr=int(entry.instr),
-                    ftq_flag=int(entry.ftq_flag),
-                    ftq_value=int(entry.ftq_value),
-                    ras_action=int(entry.call_ret_ras_action),
-                    queue_index=int(idx),
-                    ftq_offset=int(entry.ftq_offset),
-                )
-            )
-        if not group:
-            return
-        self.scheduled_queue_call_ret_commit_groups.append((int(self.current_cycle) + 1, group))
-
-    def _call_ret_queue_index_from_identity(self, inst: CommitInstruction) -> Optional[int]:
-        inst_offset = getattr(inst, "ftq_offset", None)
-        if inst_offset is None:
-            return None
-        candidates: list[int] = []
-        for idx, entry in enumerate(self.cfvec_queue):
-            if int(entry.ftq_flag) != int(inst.ftq_flag):
-                continue
-            if int(entry.ftq_value) != int(inst.ftq_value):
-                continue
-            if int(entry.ftq_offset) != int(inst_offset):
-                continue
-            candidates.append(int(idx))
-        if not candidates:
-            return None
-        for idx in candidates:
-            if self.cfvec_queue[int(idx)].call_ret_commit_state == CALL_RET_STATE_PENDING:
-                return int(idx)
-        return int(candidates[0])
-
-    def activate_visible_queue_call_ret_commit_group(self) -> None:
-        self.visible_queue_call_ret_commit_group = []
-        if not self.scheduled_queue_call_ret_commit_groups:
-            return
-        ready_cycle, group = self.scheduled_queue_call_ret_commit_groups[0]
-        if int(self.current_cycle) < int(ready_cycle):
-            return
-        self.scheduled_queue_call_ret_commit_groups.popleft()
-        self.visible_queue_call_ret_commit_group = list(group)
-        for inst in self.visible_queue_call_ret_commit_group:
-            idx = self._call_ret_queue_index_from_identity(inst)
-            if idx is None and getattr(inst, "ftq_offset", None) is None:
-                queue_index = getattr(inst, "queue_index", None)
-                if queue_index is not None:
-                    idx = int(queue_index)
-            if idx is not None and 0 <= int(idx) < len(self.cfvec_queue):
-                self.cfvec_queue[int(idx)].call_ret_commit_state = CALL_RET_STATE_EMITTED
 
     def increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         next_value = int(value) + 1
@@ -321,25 +232,6 @@ class BackendState:
                 bool(flush_itself),
             )
         return False
-
-    @staticmethod
-    def decode_commit_ras_action(instr: int) -> int:
-        opc = int(instr) & 0x7F
-        if opc == 0x6F:
-            rd = (int(instr) >> 7) & 0x1F
-            return 2 if rd in (1, 5) else 0
-        if opc == 0x67:
-            rd = (int(instr) >> 7) & 0x1F
-            rs1 = (int(instr) >> 15) & 0x1F
-            is_rd_link = rd in (1, 5)
-            is_rs1_link = rs1 in (1, 5)
-            if is_rd_link and is_rs1_link and rd != rs1:
-                return 3
-            if is_rs1_link and not is_rd_link:
-                return 1
-            if is_rd_link:
-                return 2
-        return 0
 
     def ftq_entry_dispatch_ready_for_commit(self, entry: FtqEntry) -> bool:
         if bool(entry.dispatch_complete):

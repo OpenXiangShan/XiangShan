@@ -28,7 +28,6 @@ from ..model.backend_state import (
     ActiveWrongPathEpisode,
     BackendEvent,
     BackendState,
-    CommitInstruction,
     FtqEntry,
     GOLDEN_MATCH_STATE_MATCHED,
     GOLDEN_MATCH_STATE_MISMATCHED,
@@ -40,7 +39,6 @@ from ..model.backend_state import (
     ResolveEntry,
     ROB_COMMIT_STATE_PENDING,
     ROB_COMMIT_STATE_COMMITTED,
-    CALL_RET_STATE_PENDING,
     RESOLVE_STATE_EMITTED,
     RESOLVE_STATE_NOT_NEEDED,
     RESOLVE_STATE_PENDING,
@@ -150,9 +148,6 @@ class BackendModel:
         self._pending_level0_target_pc: Optional[int] = None
         self._cfvec_queue: Deque[QueueInstr] = deque()
         self._pending_queue_resolve_indices: Deque[int] = deque()
-        self._pending_queue_call_ret_commit_indices: Deque[int] = deque()
-        self._scheduled_queue_call_ret_commit_groups: Deque[tuple[int, list[int]]] = deque()
-        self._visible_queue_call_ret_commit_group: list[int] = []
         self._active_wrong_path_episode_state: Optional[ActiveWrongPathEpisode] = None
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
@@ -675,9 +670,6 @@ class BackendModel:
             self._active_wrong_path_episode_state
         )
         state.pending_queue_resolve_indices = self._pending_queue_resolve_indices
-        state.pending_queue_call_ret_commit_indices = self._pending_queue_call_ret_commit_indices
-        state.scheduled_queue_call_ret_commit_groups = self._scheduled_queue_call_ret_commit_groups
-        state.visible_queue_call_ret_commit_group = self._visible_queue_call_ret_commit_group
         state.commit_min_delay = int(self.commit_min_delay)
         state.commit_max_delay = int(self.commit_max_delay)
         state.rng = self._rng
@@ -707,9 +699,6 @@ class BackendModel:
         self._cfvec_queue = state.cfvec_queue
         self._active_wrong_path_episode_state = self._copy_active_wrong_path_episode(state.active_wrong_path_episode)
         self._pending_queue_resolve_indices = state.pending_queue_resolve_indices
-        self._pending_queue_call_ret_commit_indices = state.pending_queue_call_ret_commit_indices
-        self._scheduled_queue_call_ret_commit_groups = state.scheduled_queue_call_ret_commit_groups
-        self._visible_queue_call_ret_commit_group = state.visible_queue_call_ret_commit_group
         self.commit_min_delay = int(state.commit_min_delay)
         self.commit_max_delay = int(state.commit_max_delay)
 
@@ -2165,14 +2154,11 @@ class BackendModel:
         )
         self._recompute_cfi_budgets_from_pending_resolves()
 
-    def _cfvec_queue_mark_committed(self, queue_index: int, instr: int) -> None:
+    def _cfvec_queue_mark_committed(self, queue_index: int) -> None:
         if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
         queue_entry = self._cfvec_queue[queue_index]
         queue_entry.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
-        queue_entry.call_ret_ras_action = self._sync_backend_state().decode_commit_ras_action(int(instr))
-        queue_entry.call_ret_commit_state = CALL_RET_STATE_PENDING
-        self._pending_queue_call_ret_commit_indices.append(int(queue_index))
 
     def _cfvec_queue_mark_recovery_residual(self, queue_index: int) -> None:
         if queue_index < 0 or queue_index >= len(self._cfvec_queue):
@@ -2340,33 +2326,6 @@ class BackendModel:
             for idx in state.pending_queue_resolve_indices
             if (new_idx := _kept_index(int(idx))) is not None
         )
-        state.pending_queue_call_ret_commit_indices = deque(
-            int(new_idx)
-            for idx in state.pending_queue_call_ret_commit_indices
-            if (new_idx := _kept_index(int(idx))) is not None
-        )
-        state.scheduled_queue_call_ret_commit_groups = deque(
-            (int(ready_cycle), kept_group)
-            for ready_cycle, group in state.scheduled_queue_call_ret_commit_groups
-            if (
-                kept_group := [
-                    (
-                        inst
-                        if getattr(inst, "queue_index", None) is None
-                        else replace(inst, queue_index=_kept_index(int(getattr(inst, "queue_index"))))
-                    )
-                    for inst in group
-                    if getattr(inst, "queue_index", None) is None or _kept_index(int(getattr(inst, "queue_index"))) is not None
-                ]
-            )
-        )
-        state.visible_queue_call_ret_commit_group = [
-            replace(inst, queue_index=_kept_index(int(getattr(inst, "queue_index"))))
-            if getattr(inst, "queue_index", None) is not None
-            else inst
-            for inst in state.visible_queue_call_ret_commit_group
-            if getattr(inst, "queue_index", None) is None or _kept_index(int(getattr(inst, "queue_index"))) is not None
-        ]
         last_correct_queue_index_map = {
             int(old_idx): int(new_idx)
             for old_idx in range(len(state.cfvec_queue) + len(removed_entries))
@@ -2446,11 +2405,6 @@ class BackendModel:
             for idx in self._pending_queue_resolve_indices
             if int(idx) >= pop_count
         )
-        self._pending_queue_call_ret_commit_indices = deque(
-            int(idx) - pop_count
-            for idx in self._pending_queue_call_ret_commit_indices
-            if int(idx) >= pop_count
-        )
 
     def _cfvec_queue_remove_range(self, start: int, stop: int) -> None:
         remove_start = max(0, int(start))
@@ -2495,27 +2449,6 @@ class BackendModel:
             for idx in self._pending_queue_resolve_indices
             if int(idx) in queue_index_map
         )
-        self._pending_queue_call_ret_commit_indices = deque(
-            int(queue_index_map[int(idx)])
-            for idx in self._pending_queue_call_ret_commit_indices
-            if int(idx) in queue_index_map
-        )
-        self._scheduled_queue_call_ret_commit_groups = deque(
-            (int(ready_cycle), kept_group)
-            for ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
-            if (
-                kept_group := [
-                    replace(inst, queue_index=queue_index_map.get(int(inst.queue_index)))
-                    for inst in group
-                    if getattr(inst, "queue_index", None) is None or int(inst.queue_index) in queue_index_map
-                ]
-            )
-        )
-        self._visible_queue_call_ret_commit_group = [
-            replace(inst, queue_index=queue_index_map.get(int(inst.queue_index)))
-            for inst in self._visible_queue_call_ret_commit_group
-            if getattr(inst, "queue_index", None) is None or int(inst.queue_index) in queue_index_map
-        ]
         self._cfvec_queue_close_surviving_ftq_spans(removed_ftqs)
         self._cfvec_queue_recompute_redirect_origin()
         self._restore_active_wrong_path_episode_after_queue_edit(prior_episode)
@@ -2703,9 +2636,6 @@ class BackendModel:
         self._last_driven_redirect_cycle = None
         self._skip_cfvec_until_cycle = None
         self._pending_queue_resolve_indices.clear()
-        self._pending_queue_call_ret_commit_indices.clear()
-        self._scheduled_queue_call_ret_commit_groups.clear()
-        self._visible_queue_call_ret_commit_group = []
         self._last_correct_cfi_context = None
         self._last_committed_correct_cfi_context = None
 
@@ -3461,9 +3391,10 @@ class BackendModel:
             return cur
         return None
 
-    def _record_instruction_commit(self, queue_index: Optional[int], instr: int) -> None:
+    def _record_instruction_commit(self, queue_index: Optional[int]) -> None:
         if queue_index is not None:
-            self._cfvec_queue_mark_committed(int(queue_index), int(instr))
+            self._sync_backend_state()
+            self._cfvec_queue_mark_committed(int(queue_index))
         self._apply_backend_state()
 
     @staticmethod
@@ -3507,7 +3438,7 @@ class BackendModel:
                 break
             if self.backend_mode == "auto_bin" and self._is_vector_config(queue_entry.instr):
                 vtype_commit = (self._committed_vtype_from_trace(queue_entry), is_vsetvl)
-            self._record_instruction_commit(int(queue_index), int(queue_entry.instr))
+            self._record_instruction_commit(int(queue_index))
             if is_vsetvl:
                 vsetvl_source = queue_entry
                 break
@@ -3544,17 +3475,6 @@ class BackendModel:
             self._fail_vtype_stimulus(f"vsetvl commit did not produce a redirect: pc=0x{source.pc:x}")
         self.golden_trace.reset(next_index)
         return redirect
-
-    def _schedule_next_queue_call_ret_commit_group(self) -> None:
-        self._sync_backend_state().schedule_next_queue_call_ret_commit_group()
-        self._apply_backend_state()
-
-    def _activate_visible_queue_call_ret_commit_group(self) -> None:
-        self._sync_backend_state().activate_visible_queue_call_ret_commit_group()
-        self._apply_backend_state()
-
-    def _current_semantic_call_ret_commit_group(self) -> tuple[CommitInstruction, ...]:
-        return tuple(self._visible_queue_call_ret_commit_group)
 
     def _predicted_cfi_outcome(self, instr: int, pc: int, pred_taken: bool, is_rvc: bool) -> Optional[tuple]:
         if bool(is_rvc) and self._is_compressed_indirect_jump(int(instr)):
@@ -4310,7 +4230,6 @@ class BackendModel:
             pending_target_rank = self._pending_level0_target_rank()
             queue_head_entries = list(self._cfvec_queue)[: int(span_len)]
             self._record_last_committed_correct_cfi_context(queue_head_entries)
-            self._schedule_next_queue_call_ret_commit_group()
             self._cfvec_queue_pop_head(int(span_len))
             self.ftq_entries = deque(
                 entry
@@ -5045,7 +4964,6 @@ class BackendModel:
 
     def plan_cycle_actions(self) -> BackendCycleActions:
         observation = self._last_observation
-        self._activate_visible_queue_call_ret_commit_group()
         self._clear_stale_auxiliary_states()
         self._watchdog(observation)
         if self.cfvec_if is not None:
@@ -5071,8 +4989,6 @@ class BackendModel:
             )
         )
         commit_entry = None if exception_redirect else self._plan_commit_entry_for_cycle(apply=False)
-        call_ret_commit_group = self._current_semantic_call_ret_commit_group()
-        self._schedule_next_queue_call_ret_commit_group()
         if self.vtype_checker is not None and self._cfvec_cycle_snapshot is not None:
             snapshot = self._cfvec_cycle_snapshot
             self.vtype_checker.check_cycle(
@@ -5087,7 +5003,6 @@ class BackendModel:
             wfi_req=self.wfi_req,
             commit_entry=commit_entry,
             resolve_entries=resolve_entries,
-            call_ret_commit_group=call_ret_commit_group,
             ftq_idx_ahead=ftq_idx_ahead,
             redirect_payload=redirect_payload,
             vtype_commit=vtype_commit,
@@ -5122,7 +5037,6 @@ class BackendModel:
             agent.drive_vtype_commit(actions.vtype_commit)
         agent.drive_ftq_idx_ahead(actions.ftq_idx_ahead)
         agent.drive_resolves(actions.resolve_entries)
-        agent.drive_call_ret_commit(actions.call_ret_commit_group)
         agent.drive_commit(actions.commit_entry)
         self.commit_entry_driven(actions.commit_entry)
         if actions.redirect_payload is not None:
@@ -5140,34 +5054,20 @@ class BackendModel:
         }
 
     def pending_work_count(self) -> int:
-        scheduled_call_ret_count = sum(
-            len(group)
-            for _ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
-        )
         return (
             len(self.ftq_entries)
             + len(self._pending_resolves)
             + len(self.pending_events)
-            + len(self._pending_queue_call_ret_commit_indices)
-            + int(scheduled_call_ret_count)
-            + len(self._visible_queue_call_ret_commit_group)
             + (1 if self._current_ftq_entry is not None else 0)
             + (1 if self._pending_level0_target_ftq is not None else 0)
             + (1 if self._has_active_wrong_path_episode() else 0)
         )
 
     def backend_empty_for_dut(self) -> int:
-        scheduled_call_ret_count = sum(
-            len(group)
-            for _ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
-        )
         pending_work = (
             len(self.ftq_entries)
             + len(self._pending_resolves)
             + len(self.pending_events)
-            + len(self._pending_queue_call_ret_commit_indices)
-            + int(scheduled_call_ret_count)
-            + len(self._visible_queue_call_ret_commit_group)
             + (1 if self._current_ftq_entry is not None else 0)
         )
         return 0 if pending_work > 0 else 1
@@ -5184,30 +5084,11 @@ class BackendModel:
             for entry in self._pending_resolves
             if entry.queue_index is None or int(entry.queue_index) in matched_queue_indices
         )
-        pending_call_ret_count = sum(
-            1
-            for idx in self._pending_queue_call_ret_commit_indices
-            if int(idx) in matched_queue_indices
-        )
-        scheduled_call_ret_count = sum(
-            1
-            for _ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
-            for inst in group
-            if int(inst.json_index) >= 0
-        )
-        visible_call_ret_count = sum(
-            1
-            for inst in self._visible_queue_call_ret_commit_group
-            if int(inst.json_index) >= 0
-        )
         active_recovery_count = 1 if self._has_active_wrong_path_episode() else 0
         return (
             len(matched_queue_indices)
             + pending_resolve_count
             + len(self.pending_events)
-            + pending_call_ret_count
-            + scheduled_call_ret_count
-            + visible_call_ret_count
             + active_recovery_count
         )
 

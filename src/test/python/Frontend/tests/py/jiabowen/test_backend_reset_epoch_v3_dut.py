@@ -7,12 +7,6 @@ import pytest
 
 def _assert_no_old_actions(record, new_pc):
     assert record["redirect"] == 0 and not any(record["resolves"]), record
-    # callRetCommit carries every semantic commit, including non-CFIs with
-    # rasAction=0. Check its actual action and fresh DUT-published FTQ owner,
-    # rather than incorrectly requiring all commit-valid lanes to stay zero.
-    for payload in record["call_ret_payloads"]:
-        assert payload["ras_action"] == 0, payload
-        assert payload["ftq_start_pc"] is not None and payload["ftq_start_pc"] >= new_pc, payload
     if record["commit"]:
         assert record["commit_start_pc"] is not None and record["commit_start_pc"] >= new_pc, record
 
@@ -71,12 +65,6 @@ def test_backend_reset_starts_fresh_ftq_epoch_and_cancels_old_redirect(env):
             "commit": int(ctrl.commit_valid.value), "redirect": int(ctrl.redirect_valid.value),
             "ahead": int(ctrl.ftq_idx_ahead_valid.value),
             "resolves": [int(s.value) for s in ctrl.resolve_valid],
-            "call_ret": [int(s.value) for s in ctrl.call_ret_commit_valid],
-            "call_ret_payloads": [{
-                "lane": i, "ras_action": int(ctrl.call_ret_commit_bits_ras_action[i].value),
-                "ftq_value": int(ctrl.call_ret_commit_bits_ftq_ptr_value[i].value),
-                "ftq_start_pc": ftq_starts.get(int(ctrl.call_ret_commit_bits_ftq_ptr_value[i].value)),
-            } for i in range(8) if int(ctrl.call_ret_commit_valid[i].value)],
             "commit_start_pc": ftq_starts.get(int(ctrl.commit_bits_value.value)),
             "resolve_payloads": [{
                 "channel": i, "pc": int(ctrl.resolve_bits_pc_addr[i].value) << 1,
@@ -102,7 +90,7 @@ def test_backend_reset_starts_fresh_ftq_epoch_and_cancels_old_redirect(env):
         assert r["software_commit_ptr"] == [0, 0]
         assert r["pending_work"] == r["pc_entries"] == 0
         assert r["commit"] == r["redirect"] == r["ahead"] == 0
-        assert not any(r["resolves"]) and not any(r["call_ret"])
+        assert not any(r["resolves"])
     # The first observer edge may precede synchronous hardware update.
     assert all(r["hardware_commit_ptr"] == [0, 0] for r in reset_records[1:])
     for _ in range(2000):
