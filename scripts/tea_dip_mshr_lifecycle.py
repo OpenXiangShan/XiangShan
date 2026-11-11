@@ -102,7 +102,7 @@ def reconstruct(rows, slots):
             item.update(merge_cycle=cycle, merge_source=source)
             merges[bank] += 1
             merge_count += 1
-        if row['DUMP'] and row['LOGENABLE']:
+        if row['NATIVEDUMP'] and row['LOGENABLE']:
             assert bank not in snapshots[cycle], (bank, cycle)
             unfinished = [dict(entry=e, owner_source=SOURCES[x['source']],
                                merged_source=SOURCES[x['merge_source']] if 'merge_source' in x else None,

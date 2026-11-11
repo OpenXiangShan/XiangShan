@@ -5,7 +5,7 @@ from tea_dip_mshr_lifecycle import reconstruct
 
 def row(cycle, bank=0, allocated=None, merged=None, freed=(), clean=False, dump=False):
     r = dict(NATIVECYCLE=cycle, EVENTS_BANK=bank, EVENTS_ALLOCATED_VALID=allocated is not None,
-             EVENTS_MERGED_VALID=merged is not None, CLEAN=clean, DUMP=dump, LOGENABLE=True)
+             EVENTS_MERGED_VALID=merged is not None, CLEAN=clean, NATIVEDUMP=dump, LOGENABLE=True)
     for i in range(2):
         r[f'EVENTS_FREED_{i}_VALID'] = False
     for i, age in freed:
