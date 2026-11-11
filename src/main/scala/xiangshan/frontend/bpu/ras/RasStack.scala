@@ -560,7 +560,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     )
   }
 
-  io.topRetAddrValid := !rasIsEmpty
+  io.topRetAddrValid := !resolvedEmpty(ssp, tosr, tosw, tosrInSpec)
 
   when(io.commit.popValid) {
     val nspUpdate = Wire(UInt(StackPtrWidth.W))
