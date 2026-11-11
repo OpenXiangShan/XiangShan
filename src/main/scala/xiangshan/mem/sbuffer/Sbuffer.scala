@@ -415,8 +415,9 @@ class Sbuffer(implicit p: Parameters)
       Mux(!enbufferSelReg, evenInsertVec, oddInsertVec)
     )
   ) // slow to generate, for debug only
-  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && firstInsertVec.orR  && !(tsoActive && canMerge(0) && !tsoMergeLast(0))
-  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && secondInsertVec.orR && !(tsoActive && canMerge(1) && !(tsoMergeLast(1) && sameTag))
+  // Flows with vecValid=false must not use their invalid address to block dequeue.
+  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && firstInsertVec.orR  && !(tsoActive && io.in(0).bits.vecValid && canMerge(0) && !tsoMergeLast(0))
+  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && secondInsertVec.orR && !(tsoActive && io.in(1).bits.vecValid && canMerge(1) && !(tsoMergeLast(1) && sameTag))
   val forward_need_uarch_drain = WireInit(false.B)
   val merge_need_uarch_drain = WireInit(false.B)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
