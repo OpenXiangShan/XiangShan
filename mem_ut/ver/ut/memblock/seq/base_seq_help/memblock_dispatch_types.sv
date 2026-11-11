@@ -1086,4 +1086,10 @@ typedef enum int unsigned {
     MEMBLOCK_STATUS_STD_FAULT          = 29
 } memblock_status_field_e;
 
+// 中文注释：既有 TL A.user_reqSource 的编译期编码，来自 utility BusKeyField.scala；不是 runtime 配置。
+typedef enum bit [4:0] {
+    MEMBLOCK_REQ_CPU_LOAD = 5'd2, MEMBLOCK_REQ_CPU_STORE = 5'd3,
+    MEMBLOCK_REQ_CPU_ATOMIC = 5'd4, MEMBLOCK_REQ_L1_PREFETCH = 5'd6
+} memblock_tl_req_source_e;
+
 `endif

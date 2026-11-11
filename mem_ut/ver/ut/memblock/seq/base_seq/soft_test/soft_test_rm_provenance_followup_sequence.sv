@@ -59,6 +59,13 @@ class soft_test_rm_provenance_followup_sequence extends memblock_dispatch_base_s
     extern virtual task body();
     extern virtual function void expect_true(input bit condition,
                                              input string message);
+    extern function bit reserve_l2_test_error(input bit [47:0] line_addr,
+        input longint unsigned sample, input bit [9:0] source, input bit candidate_valid,
+        input bit candidate_denied, input bit candidate_corrupt, output bit denied,
+        output bit corrupt, output bit needs_candidate, output longint unsigned token);
+    extern function void publish_l2_test_error(input bit [47:0] line_addr,
+        input bit denied, input bit corrupt, input longint unsigned sample,
+        input bit [9:0] source, input longint unsigned token);
     extern virtual task check_uid_tlb_payload_over_live_entry();
     extern virtual task check_l1_hit_issue_snapshot_lifecycle();
     extern virtual task check_l1_hit_overlap_resolution();
@@ -83,6 +90,41 @@ function void soft_test_rm_provenance_followup_sequence::expect_true(
         `uvm_fatal(get_type_name(), message)
     end
 endfunction:expect_true
+
+// 仅供软件定向测试构造真实接口相同的冻结上下文，不在公共框架提供 generation=0 兼容路径。
+function bit soft_test_rm_provenance_followup_sequence::reserve_l2_test_error(
+    input bit [47:0] line_addr, input longint unsigned sample, input bit [9:0] source,
+    input bit candidate_valid, input bit candidate_denied, input bit candidate_corrupt,
+    output bit denied, output bit corrupt, output bit needs_candidate, output longint unsigned token);
+    mem_access_base_sequence::l2_d_error_line_record_t choice;
+    mem_access_base_sequence::l2_d_error_state_e candidate;
+    token = 0;
+    candidate = candidate_denied ? mem_access_base_sequence::L2_D_ERROR_DENIED :
+        (candidate_corrupt ? mem_access_base_sequence::L2_D_ERROR_CORRUPT : mem_access_base_sequence::L2_D_ERROR_NONE);
+    if (!mem_access_base_sequence::lookup_l2_line_choice(line_addr, sample, source, 2,
+            MEMBLOCK_REQ_CPU_LOAD, candidate_valid, candidate, needs_candidate, choice)) return 0;
+    if (needs_candidate) return 1;
+    denied = choice.state == mem_access_base_sequence::L2_D_ERROR_DENIED;
+    corrupt = choice.state != mem_access_base_sequence::L2_D_ERROR_NONE;
+    token = mem_access_base_sequence::begin_l2_response_history(line_addr, sample, source,
+        0, 2, 6, MEMBLOCK_REQ_CPU_LOAD, 1, denied, corrupt, 0);
+    return token != 0;
+endfunction:reserve_l2_test_error
+
+function void soft_test_rm_provenance_followup_sequence::publish_l2_test_error(
+    input bit [47:0] line_addr, input bit denied, input bit corrupt,
+    input longint unsigned sample, input bit [9:0] source, input longint unsigned token);
+    bit actual_denied, actual_corrupt, needs_candidate;
+    longint unsigned actual_token;
+    actual_token = token;
+    if (actual_token == 0) begin
+        expect_true(reserve_l2_test_error(line_addr, sample-1, source, 1, denied, corrupt,
+            actual_denied, actual_corrupt, needs_candidate, actual_token), "test response reservation failed");
+    end
+    mem_access_base_sequence::publish_l2_response_beat_history(actual_token, 0, sample);
+    mem_access_base_sequence::publish_l2_response_beat_history(actual_token, 1, sample);
+    mem_access_base_sequence::complete_l2_response_history(actual_token);
+endfunction:publish_l2_test_error
 
 task soft_test_rm_provenance_followup_sequence::body();
     seq_csr_common::init();
@@ -645,71 +687,38 @@ task soft_test_rm_provenance_followup_sequence::check_l2tlb_waiting_uid_logical_
 endtask:check_l2tlb_waiting_uid_logical_fanout
 
 task soft_test_rm_provenance_followup_sequence::check_l2_d_error_sample_boundaries();
-    mem_access_base_sequence::mem_addr_t line_addr;
-    mem_access_base_sequence::mem_addr_t current_sample_line_addr;
-    mem_access_base_sequence::mem_addr_t reserved_line_addr;
+    memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::l2_d_error_view_t view;
-    longint unsigned current_sample;
-    longint unsigned reservation_generation;
-    bit denied;
-    bit corrupt;
-    bit needs_candidate;
-
-    line_addr = 48'h0000_0b93_a1c0;
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
-        line_addr, 1'b0, 1'b1, 10, 10'h12, 0);
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    line_addr, 9, view) && view.valid &&
-                !view.corrupt && !view.denied,
-                "corrupt became visible before its activation sample");
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    line_addr, 10, view) && view.corrupt && !view.denied,
-                "corrupt was not visible at its activation sample");
-
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
-        line_addr, 1'b1, 1'b1, 20, 10'h13, 0);
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    line_addr, 19, view) && view.corrupt && !view.denied,
-                "denied upgrade leaked before its activation sample");
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    line_addr, 20, view) && view.corrupt && view.denied,
-                "denied upgrade was not visible at its activation sample");
-
-    current_sample_line_addr = 48'h0000_0b93_a200;
-    current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
-    expect_true(current_sample > 1,
-                "DUT global sample is unavailable for production D-error wrapper test");
-    mem_access_base_sequence::commit_l2_d_error_on_current_grant_d_fire(
-        current_sample_line_addr, 1'b0, 1'b1, 10'h14, 0);
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    current_sample_line_addr, current_sample - 1, view) &&
-                !view.corrupt && !view.denied,
-                "current-sample GrantData corrupt leaked into the previous sample");
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    current_sample_line_addr, current_sample, view) &&
-                view.corrupt && !view.denied &&
-                view.corrupt_activation_sample == current_sample,
-                "production GrantData wrapper did not publish DUT-sample provenance");
-
-    reserved_line_addr = 48'h0000_0b93_a240;
-    expect_true(mem_access_base_sequence::prepare_l2_d_error_for_grant(
-                    reserved_line_addr, current_sample, 10'h15,
-                    1'b1, 1'b0, 1'b1,
-                    denied, corrupt, needs_candidate,
-                    reservation_generation) &&
-                !denied && corrupt && !needs_candidate &&
-                reservation_generation != 0,
-                "GrantData corrupt reservation did not retain provenance");
-    mem_access_base_sequence::commit_l2_d_error_on_current_grant_d_fire(
-        reserved_line_addr, denied, corrupt, 10'h15,
-        reservation_generation);
-    expect_true(memblock_rm_readonly_api::get().read_l2_d_error_for_rm(
-                    reserved_line_addr, current_sample, view) &&
-                view.corrupt && !view.denied &&
-                view.generation == reservation_generation &&
-                view.source_valid && view.source == 10'h15,
-                "GrantData reservation/commit changed line or provenance");
+    bit denied, corrupt, needs_candidate;
+    longint unsigned token;
+    bit [47:0] line_addr;
+    ro = memblock_rm_readonly_api::get();
+    line_addr = 48'h0b93a1c0;
+    mem_access_base_sequence::reset_l2_line_history();
+    expect_true(reserve_l2_test_error(line_addr, 9, 10'h12, 1, 0, 1,
+        denied, corrupt, needs_candidate, token), "failed token reservation");
+    mem_access_base_sequence::publish_l2_response_beat_history(token, 0, 10);
+    expect_true(ro.read_l2_response_for_rm(token, line_addr, 9, 1, view) &&
+        !view.consumption_proven, "beat became visible before D.fire sample");
+    expect_true(ro.read_l2_response_for_rm(token, line_addr, 10, 1, view) &&
+        view.consumption_proven && view.corrupt && !view.denied && !view.full_complete,
+        "first beat error was hidden by incomplete response");
+    expect_true(ro.read_l2_response_for_rm(token, line_addr, 10, 2, view) &&
+        !view.consumption_proven, "untransferred second beat was visible");
+    mem_access_base_sequence::publish_l2_response_beat_history(token, 1, 20);
+    mem_access_base_sequence::complete_l2_response_history(token);
+    expect_true(ro.read_l2_response_for_rm(token, line_addr, 20, 3, view) &&
+        view.consumption_proven && view.full_complete, "complete response history lost");
+    expect_true(ro.read_l2_d_error_for_rm(line_addr, 20, view) && view.line_seen &&
+        !view.consumption_proven && !view.corrupt && !view.denied,
+        "PA-only diagnostic was used as error consumption proof");
+    line_addr += 64;
+    expect_true(reserve_l2_test_error(line_addr, 21, 10'h13, 1, 1, 1,
+        denied, corrupt, needs_candidate, token), "failed independent denied reservation");
+    publish_l2_test_error(line_addr, denied, corrupt, 22, 10'h13, token);
+    expect_true(ro.read_l2_response_for_rm(token, line_addr, 22, 3, view) &&
+        view.consumption_proven && view.denied && view.corrupt,
+        "independent denied token lost raw response");
 endtask:check_l2_d_error_sample_boundaries
 
 task soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle();
@@ -828,8 +837,8 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
     expect_true(baseline.request_sample_seq == 10 && baseline.data_sample_seq == 22 &&
                 baseline.data_cache_eligible && baseline.response_sample_seq == 30,
                 "first split event binding or same-sample response/S2 handling failed");
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(line_addr, 0, 1, 15, 10'h22, 0);
+    mem_access_base_sequence::reset_l2_line_history();
+    publish_l2_test_error(line_addr, 0, 1, 15, 10'h22, 0);
     expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
                     line_addr, 40, context_view, error_view, pending) && !pending &&
                 error_view.corrupt && !error_view.denied && context_view.data_sample_seq == 22,
@@ -914,21 +923,21 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
                     line_addr, 40, context_view, error_view, pending) && pending,
                 "old reset frontier authorized termination");
     data.split_observed_reset_epoch = reset_epoch;
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    mem_access_base_sequence::reset_l2_line_history();
     expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
                     line_addr, 40, context_view, error_view, pending) && !pending,
                 "clean low segment authorized termination");
-    expect_true(mem_access_base_sequence::prepare_l2_d_error_for_grant(
+    expect_true(reserve_l2_test_error(
                     line_addr, 12, 10'h23, 1, 0, 1, denied, corrupt, needs_candidate,
                     reservation_generation), "failed to reserve independent error");
     expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
                     line_addr, 40, context_view, error_view, pending), "reserve-only became active error");
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
+    publish_l2_test_error(
         line_addr, denied, corrupt, 25, 10'h23, reservation_generation);
     expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
                     line_addr, 40, context_view, error_view, pending), "post-data pre-WB activation leaked backwards");
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(line_addr, 1, 1, 15, 10'h24, 0);
+    mem_access_base_sequence::reset_l2_line_history();
+    publish_l2_test_error(line_addr, 1, 1, 15, 10'h24, 0);
     expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
                     line_addr, 40, context_view, error_view, pending) && error_view.denied,
                 "independent pre-data denied was lost");
@@ -956,7 +965,7 @@ task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_pr
     data.split_observed_reset_epoch = saved_frontier_epoch;
     if (saved_owner_valid) data.uid_by_active_rob[map_key] = saved_owner;
     else data.uid_by_active_rob.delete(map_key);
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    mem_access_base_sequence::reset_l2_line_history();
     `uvm_info("FIRST_SPLIT_PROVENANCE_DIRECTED", "first split positive and negative gates PASS", UVM_LOW)
 endtask:check_first_split_cache_error_provenance
 

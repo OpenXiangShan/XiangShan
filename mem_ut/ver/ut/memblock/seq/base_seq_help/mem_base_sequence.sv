@@ -30,33 +30,82 @@ class mem_access_base_sequence extends uvm_sequence;
         SHARED_MEM_WRITE_UNCACHE = 2'd2
     } shared_mem_write_owner_e;
 
-    // 中文注释：L2 D-channel 错误账本按 64B physical line 保存。PENDING 只存在
-    // 于 response 建立到最后一个 GrantData D.fire 之间；live map 只保存 NONE、
-    // CORRUPT 或 DENIED。DENIED 语义上同时包含 corrupt，状态不支持运行期清除。
+    // 中文注释：首次行选择终身冻结，包含 CLEAN。它只控制响应生成，不能作为当前指令异常的地址 oracle。
     typedef enum bit [1:0] {
-        L2_D_ERROR_NONE    = 2'd0,
-        L2_D_ERROR_PENDING = 2'd1,
-        L2_D_ERROR_CORRUPT = 2'd2,
-        L2_D_ERROR_DENIED  = 2'd3
+        L2_D_ERROR_NONE = 2'd0, L2_D_ERROR_CORRUPT = 2'd2, L2_D_ERROR_DENIED = 2'd3
     } l2_d_error_state_e;
 
     typedef struct packed {
-        bit                  valid;
-        l2_d_error_state_e   state;
-        longint unsigned     generation;
-        longint unsigned     corrupt_activation_sample;
-        longint unsigned     denied_activation_sample;
-        bit                  source_valid;
-        bit [9:0]            source;
+        bit valid;
+        l2_d_error_state_e state;
+        longint unsigned generation;
+        longint unsigned accept_sample;
+        int unsigned first_kind;
+        bit [4:0] req_source;
+        bit source_valid;
+        bit [9:0] source;
     } l2_d_error_line_record_t;
 
     typedef struct packed {
-        bit                  valid;
-        l2_d_error_state_e   proposed_state;
-        longint unsigned     accept_sample;
-        longint unsigned     generation;
-        bit [9:0]            source;
-    } l2_d_error_pending_record_t;
+        bit valid;
+        memblock_uid_t uid;
+        int unsigned dynamic_epoch;
+        bit rob_flag;
+        bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value;
+        bit sq_flag;
+        bit [MEMBLOCK_SQ_VALUE_W-1:0] sq_value;
+    } l2_response_owner_t;
+
+    typedef struct packed {
+        bit valid;
+        longint unsigned sample;
+        bit [63:0] byte_mask;
+        bit denied;
+        bit corrupt;
+    } l2_response_beat_t;
+
+    // 中文注释：唯一 token 历史保留接受身份及每 beat 实际 D.fire，临时响应释放后不删除。
+    // reset_epoch 隔离 DUT reset，source_generation 隔离 source 重用；两者均不改变首次行选择。
+    typedef struct packed {
+        bit valid;
+        longint unsigned token;
+        longint unsigned reset_epoch;
+        longint unsigned source_generation;
+        longint unsigned line_generation;
+        mem_addr_t line_addr;
+        bit is_release;
+        int unsigned kind;
+        bit [3:0] opcode;
+        bit [9:0] source;
+        bit [4:0] req_source;
+        longint unsigned accept_sample;
+        bit injection_allowed;
+        bit denied;
+        bit corrupt;
+        bit echo_is_keyword;
+        bit [1:0] beat_valid;
+        l2_response_beat_t beat0;
+        l2_response_beat_t beat1;
+        bit full_complete;
+        longint unsigned complete_sample;
+        l2_response_owner_t owner;
+    } l2_response_history_t;
+
+    // 中文注释：Probe 子上下文仅记录 B/C 方向与父响应，DUT 返回 corrupt 不进入注入选择表。
+    typedef struct packed {
+        bit valid;
+        longint unsigned token;
+        longint unsigned local_probe_token;
+        longint unsigned parent_response_token;
+        longint unsigned reset_epoch;
+        mem_addr_t line_addr;
+        longint unsigned b_sample;
+        bit [1:0] c_beat_valid;
+        l2_response_beat_t c_beat0;
+        l2_response_beat_t c_beat1;
+        bit full_complete;
+    } l2_probe_history_t;
+    static l2_probe_history_t l2_probe_history_by_token[longint unsigned];
 
     localparam int unsigned UNCACHE_D_ERROR_MAX_OWNERS = 16;
 
@@ -174,14 +223,18 @@ class mem_access_base_sequence extends uvm_sequence;
     // 1KiB backing line 内有多条 64 B line 而漂移。
     static bit [63:0]                  dcache_corrupt_byte_mask_by_line[dcache_line_addr_t];
 
-    // 中文注释：sticky ledger 与 DCache alias、C-channel corrupt observer、shared
-    // memory overlay 完全隔离。它只在 testcase/shared-memory 初始化时清空，DCache
-    // runtime reset、CBO、Probe、Release 和 Uncache 都不得修改这两张表。
-    static l2_d_error_line_record_t    l2_d_error_live_by_line[dcache_line_addr_t];
-    static l2_d_error_pending_record_t l2_d_error_pending_by_line[dcache_line_addr_t];
-    static longint unsigned             l2_d_error_next_generation = 1;
-    static bit                          l2_d_error_ledger_ready = 1'b0;
-    static bit                          l2_d_error_sticky_enabled = 1'b0;
+    // 中文注释：首次选择唯一真源；只在 testcase/shared-memory 生命周期边界删除。
+    static l2_d_error_line_record_t l2_line_history_by_line[dcache_line_addr_t];
+    static l2_response_history_t l2_response_history_by_token[longint unsigned];
+    // 接受 sample+方向+source 唯一索引供被动 monitor 绑定，不按当前 source 猜旧 owner。
+    typedef bit [138:0] l2_accept_key_t;
+    static longint unsigned l2_response_token_by_accept[l2_accept_key_t];
+    static longint unsigned l2_active_response_token[2][64];
+    static longint unsigned l2_source_generation[2][64];
+    static longint unsigned l2_next_response_token = 1;
+    static longint unsigned l2_d_error_next_generation = 1;
+    static longint unsigned l2_response_reset_epoch = 0;
+    static bit l2_d_error_ledger_ready = 1'b0;
     // 中文注释：Uncache ledger 只由 testcase shared-memory lifecycle 全量清空。
     // source_active/pending 可在 DUT reset 时中止，source generation 仍单调递增；
     // 完成历史按 UID+dynamic_epoch 索引，RM 查询不会扫描完整历史。
@@ -214,43 +267,37 @@ class mem_access_base_sequence extends uvm_sequence;
     );
     extern static function bit is_shared_memory_lifecycle_initialized();
     extern static function void report_l2_d_error_fatal(input string message);
-    extern static function void reset_l2_d_error_ledger(input bit sticky_enabled);
-    extern static function bit prepare_l2_d_error_for_grant(
-        input  mem_addr_t            line_addr,
-        input  longint unsigned      accept_sample,
-        input  bit [9:0]             source,
-        input  bit                   candidate_valid,
-        input  bit                   candidate_denied,
-        input  bit                   candidate_corrupt,
-        output bit                   denied,
-        output bit                   corrupt,
-        output bit                   needs_candidate,
-        output longint unsigned      reservation_generation
-    );
-    extern static function void commit_l2_d_error_on_grant_d_fire(
-        input mem_addr_t        line_addr,
-        input bit               denied,
-        input bit               corrupt,
-        input longint unsigned  sample,
-        input bit [9:0]         source,
-        input longint unsigned  reservation_generation
-    );
-    extern static function longint unsigned current_l2_d_error_sample(
-        input string caller
-    );
-    extern static function void commit_l2_d_error_on_current_grant_d_fire(
-        input mem_addr_t        line_addr,
-        input bit               denied,
-        input bit               corrupt,
-        input bit [9:0]         source,
-        input longint unsigned  reservation_generation
-    );
-    extern static function bit query_l2_d_error_at_sample(
-        input  mem_addr_t            line_addr,
-        input  longint unsigned      sample,
-        output bit                   sticky_enabled,
-        output l2_d_error_line_record_t record
-    );
+    extern static function void reset_l2_line_history();
+    extern static function void abort_l2_response_pending();
+    extern static function bit lookup_l2_line_choice(
+        input mem_addr_t line_addr, input longint unsigned sample, input bit [9:0] source,
+        input int unsigned kind, input bit [4:0] req_source,
+        input bit candidate_valid, input l2_d_error_state_e candidate,
+        output bit needs_candidate, output l2_d_error_line_record_t record);
+    extern static function void register_clean_l2_access(input mem_addr_t line_addr,
+        input longint unsigned sample, input bit [9:0] source, input int unsigned kind);
+    extern static function longint unsigned begin_l2_response_history(
+        input mem_addr_t line_addr, input longint unsigned sample, input bit [9:0] source,
+        input bit is_release, input int unsigned kind, input bit [3:0] opcode,
+        input bit [4:0] req_source, input bit injection_allowed,
+        input bit denied, input bit corrupt, input bit echo_is_keyword);
+    extern static function void publish_l2_response_beat_history(
+        input longint unsigned token, input int unsigned beat_idx, input longint unsigned sample);
+    extern static function void complete_l2_response_history(input longint unsigned token);
+    extern static function bit query_l2_line_history_at_sample(
+        input mem_addr_t line_addr, input longint unsigned sample,
+        output l2_d_error_line_record_t record);
+    extern static function bit query_l2_response_history(
+        input longint unsigned token, input mem_addr_t line_addr,
+        input longint unsigned sample, input bit [1:0] required_beats,
+        output l2_response_history_t record, output bit beats_available);
+    extern static function bit find_l2_response_at_accept(
+        input longint unsigned sample, input bit [9:0] source, input bit is_release,
+        output longint unsigned token);
+    extern static function bit bind_l2_response_owner(
+        input longint unsigned token, input longint unsigned accept_sample,
+        input l2_response_owner_t owner);
+    extern static function longint unsigned current_l2_d_error_sample(input string caller);
     extern static function uncache_d_error_owner_key_t make_uncache_d_error_owner_key(
         input memblock_uid_t uid,
         input int unsigned dynamic_epoch
@@ -458,11 +505,13 @@ function void mem_access_base_sequence::clear_shared_memory_state();
     write_overlay_byte_valid.delete();
     write_overlay_corrupt_byte_mask.delete();
     dcache_corrupt_byte_mask_by_line.delete();
-    l2_d_error_live_by_line.delete();
-    l2_d_error_pending_by_line.delete();
+    l2_line_history_by_line.delete();
+    l2_response_history_by_token.delete();
+    l2_probe_history_by_token.delete();
+    l2_response_token_by_accept.delete();
     l2_d_error_next_generation  = 1;
     l2_d_error_ledger_ready     = 1'b0;
-    l2_d_error_sticky_enabled   = 1'b0;
+
     uncache_d_error_history_by_owner.delete();
     uncache_d_error_pending_by_owner.delete();
     uncache_d_error_source_active = '0;
@@ -489,7 +538,7 @@ function void mem_access_base_sequence::initialize_shared_memory_state(
     if (ranges_en) begin
         init_main_mem_range(base, capacity);
     end
-    reset_l2_d_error_ledger(seq_csr_common::get_l2_d_error_sticky_en());
+    reset_l2_line_history();
     reset_uncache_d_error_ledger();
     shared_mem_lifecycle_initialized = 1'b1;
 endfunction:initialize_shared_memory_state
@@ -504,320 +553,231 @@ function void mem_access_base_sequence::report_l2_d_error_fatal(input string mes
     uvm_pkg::uvm_report_fatal("L2_D_ERROR_LEDGER", message, UVM_NONE);
 endfunction:report_l2_d_error_fatal
 
-// 抽象职责：在 testcase/shared-memory 初始化边界建立空的 sticky ledger。该函数
-// 只负责状态初始化，不读取 DCache runtime map，也不在 CBO/Probe/reset service 中调用。
-function void mem_access_base_sequence::reset_l2_d_error_ledger(input bit sticky_enabled);
-    l2_d_error_live_by_line.delete();
-    l2_d_error_pending_by_line.delete();
+// 抽象职责：唯一 testcase 生命周期初始化；普通 DUT reset 仅中止传输，不删除行选择或历史。
+function void mem_access_base_sequence::reset_l2_line_history();
+    l2_line_history_by_line.delete();
+    l2_response_history_by_token.delete();
+    l2_probe_history_by_token.delete();
+    l2_response_token_by_accept.delete();
     l2_d_error_next_generation = 1;
-    l2_d_error_sticky_enabled  = sticky_enabled;
-    l2_d_error_ledger_ready    = 1'b1;
-endfunction:reset_l2_d_error_ledger
-
-// 抽象职责：在 GrantData response 创建点解析同一 physical line 的已有 live/pending
-// 错误，或者为调用方声明需要一次新的随机候选。调用方仅在 needs_candidate=1 时采样
-// 权重并以 candidate_valid=1 再次调用，因此同线 sticky 命中不会额外消耗随机数。
-function bit mem_access_base_sequence::prepare_l2_d_error_for_grant(
-    input  mem_addr_t            line_addr,
-    input  longint unsigned      accept_sample,
-    input  bit [9:0]             source,
-    input  bit                   candidate_valid,
-    input  bit                   candidate_denied,
-    input  bit                   candidate_corrupt,
-    output bit                   denied,
-    output bit                   corrupt,
-    output bit                   needs_candidate,
-    output longint unsigned      reservation_generation
-);
-    dcache_line_addr_t          line_key;
-    l2_d_error_line_record_t    live_record;
-    l2_d_error_pending_record_t pending_record;
-
-    denied                 = 1'b0;
-    corrupt                = 1'b0;
-    needs_candidate        = 1'b0;
-    reservation_generation = 0;
-    if (!l2_d_error_ledger_ready || !l2_d_error_sticky_enabled) begin
-        report_l2_d_error_fatal(
-            "sticky GrantData preparation requires an initialized enabled ledger");
-        return 1'b0;
+    l2_next_response_token = 1;
+    l2_response_reset_epoch = 0;
+    foreach (l2_active_response_token[d, i]) begin
+        l2_active_response_token[d][i] = 0;
+        l2_source_generation[d][i] = 0;
     end
-    line_key = line_addr[47:6];
-    if (l2_d_error_live_by_line.exists(line_key)) begin
-        live_record = l2_d_error_live_by_line[line_key];
-        if (!live_record.valid ||
-            (live_record.state != L2_D_ERROR_CORRUPT &&
-             live_record.state != L2_D_ERROR_DENIED)) begin
-            report_l2_d_error_fatal(
-                $sformatf("invalid live L2 D error record line=0x%0h state=%0d valid=%0d",
-                          line_addr, live_record.state, live_record.valid));
-            return 1'b0;
-        end
-        denied                 = live_record.state == L2_D_ERROR_DENIED;
-        corrupt                = 1'b1;
-        reservation_generation = live_record.generation;
-        uvm_pkg::uvm_report_info(
-            "L2_D_ERROR_RESERVE",
-            $sformatf("reuse live line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d",
-                      line_addr, source, accept_sample, live_record.state,
-                      live_record.generation), UVM_LOW);
-        return 1'b1;
-    end
-    if (l2_d_error_pending_by_line.exists(line_key)) begin
-        pending_record = l2_d_error_pending_by_line[line_key];
-        if (!pending_record.valid ||
-            (pending_record.proposed_state != L2_D_ERROR_CORRUPT &&
-             pending_record.proposed_state != L2_D_ERROR_DENIED)) begin
-            report_l2_d_error_fatal(
-                $sformatf("invalid pending L2 D error record line=0x%0h state=%0d valid=%0d",
-                          line_addr,
-                          pending_record.proposed_state,
-                          pending_record.valid));
-            return 1'b0;
-        end
-        denied                 = pending_record.proposed_state == L2_D_ERROR_DENIED;
-        corrupt                = 1'b1;
-        reservation_generation = pending_record.generation;
-        uvm_pkg::uvm_report_info(
-            "L2_D_ERROR_RESERVE",
-            $sformatf("reuse pending line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d owner_source=%0d owner_sample=%0d",
-                      line_addr, source, accept_sample,
-                      pending_record.proposed_state,
-                      pending_record.generation,
-                      pending_record.source,
-                      pending_record.accept_sample), UVM_LOW);
-        return 1'b1;
+    l2_d_error_ledger_ready = 1'b1;
+endfunction:reset_l2_line_history
+
+function void mem_access_base_sequence::abort_l2_response_pending();
+    if (!l2_d_error_ledger_ready) return;
+    l2_response_reset_epoch++;
+    foreach (l2_active_response_token[d, i]) l2_active_response_token[d][i] = 0;
+endfunction:abort_l2_response_pending
+
+// 抽象职责：单 key 冻结首次选择，未提供候选时只返回随机授权；CLEAN 与错误均立即登记。
+function bit mem_access_base_sequence::lookup_l2_line_choice(
+    input mem_addr_t line_addr, input longint unsigned sample, input bit [9:0] source,
+    input int unsigned kind, input bit [4:0] req_source,
+    input bit candidate_valid, input l2_d_error_state_e candidate,
+    output bit needs_candidate, output l2_d_error_line_record_t record);
+    dcache_line_addr_t key;
+    record = '0;
+    needs_candidate = 0;
+    if (!l2_d_error_ledger_ready || sample == 0) return 0;
+    key = line_addr[47:6];
+    if (l2_line_history_by_line.exists(key)) begin
+        record = l2_line_history_by_line[key];
+        return record.valid;
     end
     if (!candidate_valid) begin
-        needs_candidate = 1'b1;
-        return 1'b1;
+        needs_candidate = 1;
+        return 1;
     end
-    if (candidate_denied && !candidate_corrupt) begin
-        report_l2_d_error_fatal(
-            $sformatf("GrantData denied requires corrupt line=0x%0h source=%0d",
-                      line_addr, source));
-        return 1'b0;
+    if (!(candidate inside {L2_D_ERROR_NONE, L2_D_ERROR_CORRUPT, L2_D_ERROR_DENIED}) ||
+        l2_d_error_next_generation == 0) begin
+        report_l2_d_error_fatal("invalid first line choice/generation");
+        return 0;
     end
-    denied  = candidate_denied;
-    corrupt = candidate_corrupt;
-    if (!corrupt) begin
-        return 1'b1;
-    end
-    if (l2_d_error_next_generation == 0) begin
-        report_l2_d_error_fatal("L2 D error generation wrapped to zero");
-        return 1'b0;
-    end
-    pending_record = '{default:'0};
-    pending_record.valid          = 1'b1;
-    pending_record.proposed_state = denied ? L2_D_ERROR_DENIED : L2_D_ERROR_CORRUPT;
-    pending_record.accept_sample  = accept_sample;
-    pending_record.generation     = l2_d_error_next_generation;
-    pending_record.source         = source;
-    l2_d_error_next_generation++;
-    l2_d_error_pending_by_line[line_key] = pending_record;
-    reservation_generation = pending_record.generation;
-    uvm_pkg::uvm_report_info(
-        "L2_D_ERROR_RESERVE",
-        $sformatf("create pending line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d",
-                  line_addr, source, accept_sample,
-                  pending_record.proposed_state,
-                  pending_record.generation), UVM_LOW);
-    return 1'b1;
-endfunction:prepare_l2_d_error_for_grant
+    record.valid = 1;
+    record.state = candidate;
+    record.generation = l2_d_error_next_generation++;
+    record.accept_sample = sample;
+    record.first_kind = kind;
+    record.source_valid = 1;
+    record.source = source;
+    record.req_source = req_source;
+    l2_line_history_by_line[key] = record;
+    return 1;
+endfunction:lookup_l2_line_choice
 
-// 抽象职责：在最后一个 GrantData D.fire 后把 response 固定的错误结果提交到
-// live ledger。它只进行单 line 关联数组访问；早于该时刻的 RM 查询绝不会看到 pending。
-function void mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
-    input mem_addr_t        line_addr,
-    input bit               denied,
-    input bit               corrupt,
-    input longint unsigned  sample,
-    input bit [9:0]         source,
-    input longint unsigned  reservation_generation
-);
-    dcache_line_addr_t          line_key;
-    l2_d_error_line_record_t    live_record;
-    l2_d_error_pending_record_t pending_record;
-    bit                         pending_valid;
-    l2_d_error_state_e          proposed_state;
-    longint unsigned            activation_generation;
+// 抽象职责：无注入能力的真实 B/C 接受只补首次 CLEAN，不改已有选择或数据。
+function void mem_access_base_sequence::register_clean_l2_access(input mem_addr_t line_addr,
+    input longint unsigned sample, input bit [9:0] source, input int unsigned kind);
+    bit needs_candidate;
+    l2_d_error_line_record_t record;
+    if (!lookup_l2_line_choice(line_addr, sample, source, kind, 0, 1,
+                              L2_D_ERROR_NONE, needs_candidate, record))
+        report_l2_d_error_fatal("clean access before ledger/sample initialization");
+endfunction:register_clean_l2_access
 
-    if (!l2_d_error_sticky_enabled) begin
+// 抽象职责：在真实接受点分配不可复用 token，冻结响应身份，不读取或创建数据。
+function longint unsigned mem_access_base_sequence::begin_l2_response_history(
+    input mem_addr_t line_addr, input longint unsigned sample, input bit [9:0] source,
+    input bit is_release, input int unsigned kind, input bit [3:0] opcode,
+    input bit [4:0] req_source, input bit injection_allowed,
+    input bit denied, input bit corrupt, input bit echo_is_keyword);
+    l2_response_history_t record;
+    l2_accept_key_t key;
+    if (!l2_d_error_ledger_ready || source >= 64 || sample == 0 ||
+        !l2_line_history_by_line.exists(line_addr[47:6]) || l2_next_response_token == 0) begin
+        report_l2_d_error_fatal("response begin without valid line/source/sample");
+        return 0;
+    end
+    if (l2_active_response_token[is_release][source] != 0) begin
+        report_l2_d_error_fatal($sformatf("source reused before D completion source=%0d release=%0d", source, is_release));
+        return 0;
+    end
+    record = '0;
+    record.valid = 1;
+    record.token = l2_next_response_token++;
+    record.reset_epoch = l2_response_reset_epoch;
+    record.source_generation = ++l2_source_generation[is_release][source];
+    record.line_generation = l2_line_history_by_line[line_addr[47:6]].generation;
+    record.line_addr = {line_addr[47:6], 6'b0};
+    record.is_release = is_release;
+    record.kind = kind;
+    record.opcode = opcode;
+    record.source = source;
+    record.req_source = req_source;
+    record.accept_sample = sample;
+    record.injection_allowed = injection_allowed;
+    record.denied = denied;
+    record.corrupt = corrupt;
+    record.echo_is_keyword = echo_is_keyword;
+    key = {l2_response_reset_epoch, sample, is_release, source};
+    if (l2_response_token_by_accept.exists(key)) begin
+        report_l2_d_error_fatal("duplicate accepted response identity");
+        return 0;
+    end
+    l2_response_history_by_token[record.token] = record;
+    l2_response_token_by_accept[key] = record.token;
+    l2_active_response_token[is_release][source] = record.token;
+    return record.token;
+endfunction:begin_l2_response_history
+
+// 抽象职责：首 beat 即发布实际送达事实，关键词顺序决定物理高低半行；hold 不调用此入口。
+function void mem_access_base_sequence::publish_l2_response_beat_history(
+    input longint unsigned token, input int unsigned beat_idx, input longint unsigned sample);
+    l2_response_history_t record;
+    l2_response_beat_t beat_record;
+    bit high_half;
+    if (!l2_response_history_by_token.exists(token)) begin
+        report_l2_d_error_fatal("D.fire references missing response token");
         return;
     end
-    if (!l2_d_error_ledger_ready) begin
-        report_l2_d_error_fatal("GrantData D.fire observed before sticky ledger initialization");
-    end
-    if (denied && !corrupt) begin
-        report_l2_d_error_fatal(
-            $sformatf("GrantData denied without corrupt line=0x%0h source=%0d",
-                      line_addr, source));
-    end
-    if (!corrupt) begin
+    record = l2_response_history_by_token[token];
+    if (record.reset_epoch != l2_response_reset_epoch || sample < record.accept_sample ||
+        beat_idx > 1 || record.beat_valid[beat_idx] || record.full_complete ||
+        l2_active_response_token[record.is_release][record.source] != token) begin
+        report_l2_d_error_fatal("D.fire response epoch/beat/source mismatch");
         return;
     end
-    line_key = line_addr[47:6];
-    proposed_state = denied ? L2_D_ERROR_DENIED : L2_D_ERROR_CORRUPT;
-    pending_valid = l2_d_error_pending_by_line.exists(line_key);
-    pending_record = '{default:'0};
-    if (pending_valid) begin
-        pending_record = l2_d_error_pending_by_line[line_key];
-        if (!pending_record.valid ||
-            pending_record.proposed_state != proposed_state ||
-            (reservation_generation != 0 &&
-             pending_record.generation != reservation_generation)) begin
-            report_l2_d_error_fatal(
-                $sformatf("GrantData pending reservation mismatch line=0x%0h response_gen=%0d pending_gen=%0d response_state=%0d pending_state=%0d",
-                          line_addr,
-                          reservation_generation,
-                          pending_record.generation,
-                          proposed_state,
-                          pending_record.proposed_state));
-        end
-    end
-    uvm_pkg::uvm_report_info(
-        "L2_D_ERROR_COMMIT",
-        $sformatf("begin line=0x%0h source=%0d sample=%0d state=%0d response_generation=%0d pending=%0d pending_generation=%0d",
-                  line_addr, source, sample, proposed_state,
-                  reservation_generation, pending_valid,
-                  pending_record.generation), UVM_LOW);
-    if (!l2_d_error_live_by_line.exists(line_key)) begin
-        if (pending_valid) begin
-            activation_generation = pending_record.generation;
-        end else begin
-            if (reservation_generation != 0) begin
-                report_l2_d_error_fatal(
-                    $sformatf("GrantData response references missing reservation line=0x%0h generation=%0d",
-                              line_addr, reservation_generation));
-            end
-            if (l2_d_error_next_generation == 0) begin
-                report_l2_d_error_fatal("L2 D error generation wrapped to zero");
-            end
-            activation_generation = l2_d_error_next_generation;
-            l2_d_error_next_generation++;
-        end
-        live_record = '{default:'0};
-        live_record.valid                      = 1'b1;
-        live_record.state                      = proposed_state;
-        live_record.generation                 = activation_generation;
-        live_record.corrupt_activation_sample  = sample;
-        live_record.denied_activation_sample   = denied ? sample : 0;
-        live_record.source_valid               = 1'b1;
-        live_record.source                     = source;
-        l2_d_error_live_by_line[line_key] = live_record;
-    end else begin
-        live_record = l2_d_error_live_by_line[line_key];
-        if (!live_record.valid ||
-            (live_record.state != L2_D_ERROR_CORRUPT &&
-             live_record.state != L2_D_ERROR_DENIED)) begin
-            report_l2_d_error_fatal(
-                $sformatf("invalid live state on GrantData commit line=0x%0h state=%0d valid=%0d",
-                          line_addr, live_record.state, live_record.valid));
-        end
-        if (live_record.state == L2_D_ERROR_CORRUPT &&
-            proposed_state == L2_D_ERROR_DENIED) begin
-            if (pending_valid) activation_generation = pending_record.generation;
-            else begin
-                if (l2_d_error_next_generation == 0) begin
-                    report_l2_d_error_fatal("L2 D error generation wrapped to zero");
-                end
-                activation_generation = l2_d_error_next_generation;
-                l2_d_error_next_generation++;
-            end
-            live_record.state                    = L2_D_ERROR_DENIED;
-            live_record.generation               = activation_generation;
-            live_record.denied_activation_sample = sample;
-            l2_d_error_live_by_line[line_key] = live_record;
-        end
-    end
-    if (pending_valid) begin
-        l2_d_error_pending_by_line.delete(line_key);
-    end
-    live_record = l2_d_error_live_by_line[line_key];
-    uvm_pkg::uvm_report_info(
-        "L2_D_ERROR_COMMIT",
-        $sformatf("complete line=0x%0h source=%0d sample=%0d state=%0d generation=%0d activation=%0d/%0d",
-                  line_addr, source, sample, live_record.state,
-                  live_record.generation,
-                  live_record.corrupt_activation_sample,
-                  live_record.denied_activation_sample), UVM_LOW);
-endfunction:commit_l2_d_error_on_grant_d_fire
+    beat_record = '0;
+    beat_record.valid = 1;
+    beat_record.sample = sample;
+    beat_record.denied = record.denied;
+    beat_record.corrupt = record.corrupt;
+    high_half = record.echo_is_keyword ^ (beat_idx == 1);
+    beat_record.byte_mask = record.kind == 2 ?
+        (high_half ? 64'hffff_ffff_0000_0000 : 64'h0000_0000_ffff_ffff) : 64'hffff_ffff_ffff_ffff;
+    if (beat_idx == 0) record.beat0 = beat_record;
+    else record.beat1 = beat_record;
+    record.beat_valid[beat_idx] = 1;
+    l2_response_history_by_token[token] = record;
+endfunction:publish_l2_response_beat_history
 
-// DCache response generation and RM writeback observation must use the same
-// monotonic DUT-sample domain.  Simulation time is deliberately not accepted
-// here because it is not comparable with the RM's sample_seq provenance.
-function longint unsigned mem_access_base_sequence::current_l2_d_error_sample(
-    input string caller
-);
+function void mem_access_base_sequence::complete_l2_response_history(input longint unsigned token);
+    l2_response_history_t record;
+    bit [1:0] required_mask;
+    if (!l2_response_history_by_token.exists(token)) begin
+        report_l2_d_error_fatal("completion references missing token");
+        return;
+    end
+    record = l2_response_history_by_token[token];
+    required_mask = record.kind == 2 ? 2'b11 : 2'b01;
+    if (record.full_complete || record.beat_valid != required_mask ||
+        record.reset_epoch != l2_response_reset_epoch ||
+        l2_active_response_token[record.is_release][record.source] != token) begin
+        report_l2_d_error_fatal("response completion before expected beats or duplicate completion");
+        return;
+    end
+    record.full_complete = 1;
+    record.complete_sample = record.kind == 2 ? record.beat1.sample : record.beat0.sample;
+    l2_response_history_by_token[token] = record;
+    l2_active_response_token[record.is_release][record.source] = 0;
+endfunction:complete_l2_response_history
+
+// 抽象职责：只读行选择诊断，不把永久行属性解释为当前指令实际消费的错误。
+function bit mem_access_base_sequence::query_l2_line_history_at_sample(
+    input mem_addr_t line_addr, input longint unsigned sample,
+    output l2_d_error_line_record_t record);
+    record = '0;
+    if (!l2_d_error_ledger_ready || sample == 0) return 0;
+    if (l2_line_history_by_line.exists(line_addr[47:6]) &&
+        l2_line_history_by_line[line_addr[47:6]].accept_sample <= sample)
+        record = l2_line_history_by_line[line_addr[47:6]];
+    return 1;
+endfunction:query_l2_line_history_at_sample
+
+// 抽象职责：按 token 返回已送达的精确 beat，未送达和旧 reset 代际均不构成消费证明。
+function bit mem_access_base_sequence::query_l2_response_history(
+    input longint unsigned token, input mem_addr_t line_addr,
+    input longint unsigned sample, input bit [1:0] required_beats,
+    output l2_response_history_t record, output bit beats_available);
+    record = '0;
+    beats_available = 0;
+    if (!l2_d_error_ledger_ready || sample == 0 || required_beats == 0) return 0;
+    if (!l2_response_history_by_token.exists(token)) return 1;
+    record = l2_response_history_by_token[token];
+    if (record.line_addr[47:6] != line_addr[47:6] || record.reset_epoch != l2_response_reset_epoch) return 0;
+    if (record.beat0.sample > sample) begin record.beat_valid[0] = 0; record.beat0 = '0; end
+    if (record.beat1.sample > sample) begin record.beat_valid[1] = 0; record.beat1 = '0; end
+    if (record.complete_sample > sample) record.full_complete = 0;
+    beats_available = (record.beat_valid & required_beats) == required_beats;
+    return 1;
+endfunction:query_l2_response_history
+
+function bit mem_access_base_sequence::find_l2_response_at_accept(
+    input longint unsigned sample, input bit [9:0] source, input bit is_release,
+    output longint unsigned token);
+    l2_accept_key_t key;
+    key = {l2_response_reset_epoch, sample, is_release, source};
+    token = 0;
+    if (!l2_d_error_ledger_ready || !l2_response_token_by_accept.exists(key)) return 0;
+    token = l2_response_token_by_accept[key];
+    return 1;
+endfunction:find_l2_response_at_accept
+
+function bit mem_access_base_sequence::bind_l2_response_owner(
+    input longint unsigned token, input longint unsigned accept_sample,
+    input l2_response_owner_t owner);
+    l2_response_history_t record;
+    if (!owner.valid || !l2_response_history_by_token.exists(token)) return 0;
+    record = l2_response_history_by_token[token];
+    if (record.accept_sample != accept_sample || record.owner.valid ||
+        record.reset_epoch != l2_response_reset_epoch) return 0;
+    record.owner = owner;
+    l2_response_history_by_token[token] = record;
+    return 1;
+endfunction:bind_l2_response_owner
+
+function longint unsigned mem_access_base_sequence::current_l2_d_error_sample(input string caller);
     longint unsigned sample;
-
     sample = memblock_sync_pkg::peek_current_dut_global_sample();
-    if (sample == 0) begin
-        report_l2_d_error_fatal(
-            $sformatf("%s observed before DUT global sample initialization", caller));
-    end
+    if (sample == 0) report_l2_d_error_fatal($sformatf("%s before DUT sample initialization", caller));
     return sample;
 endfunction:current_l2_d_error_sample
-
-function void mem_access_base_sequence::commit_l2_d_error_on_current_grant_d_fire(
-    input mem_addr_t        line_addr,
-    input bit               denied,
-    input bit               corrupt,
-    input bit [9:0]         source,
-    input longint unsigned  reservation_generation
-);
-    commit_l2_d_error_on_grant_d_fire(
-        line_addr,
-        denied,
-        corrupt,
-        current_l2_d_error_sample("GrantData D.fire"),
-        source,
-        reservation_generation
-    );
-endfunction:commit_l2_d_error_on_current_grant_d_fire
-
-// 抽象职责：为 RM 提供一条 physical line 在指定 sample 的不可变值型错误视图。
-// 查询不创建 backing line、不消费 pending，也不会因后续 CBO/Probe 改变历史结果。
-function bit mem_access_base_sequence::query_l2_d_error_at_sample(
-    input  mem_addr_t            line_addr,
-    input  longint unsigned      sample,
-    output bit                   sticky_enabled,
-    output l2_d_error_line_record_t record
-);
-    dcache_line_addr_t       line_key;
-    l2_d_error_line_record_t live_record;
-
-    record = '{default:'0};
-    sticky_enabled = l2_d_error_sticky_enabled;
-    if (!l2_d_error_ledger_ready) begin
-        return 1'b0;
-    end
-    if (!l2_d_error_sticky_enabled) begin
-        return 1'b1;
-    end
-    line_key = line_addr[47:6];
-    if (!l2_d_error_live_by_line.exists(line_key)) begin
-        return 1'b1;
-    end
-    live_record = l2_d_error_live_by_line[line_key];
-    if (!live_record.valid) begin
-        report_l2_d_error_fatal(
-            $sformatf("invalid empty live record line=0x%0h", line_addr));
-        return 1'b0;
-    end
-    if (live_record.state == L2_D_ERROR_DENIED &&
-        live_record.denied_activation_sample <= sample) begin
-        record = live_record;
-        return 1'b1;
-    end
-    if (live_record.corrupt_activation_sample <= sample) begin
-        record = live_record;
-        record.state = L2_D_ERROR_CORRUPT;
-        record.denied_activation_sample = 0;
-        return 1'b1;
-    end
-    return 1'b1;
-endfunction:query_l2_d_error_at_sample
 
 function mem_access_base_sequence::uncache_d_error_owner_key_t
 mem_access_base_sequence::make_uncache_d_error_owner_key(
@@ -1796,10 +1756,8 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         bit [9:0]               sink;
         bit                     denied;
         bit                     corrupt;
-        // 中文注释：sticky ledger 的 reservation generation 在 AcquireBlock A.fire
-        // 固定，并随两拍 GrantData 一起保持；最后一个 D.fire 用它审计 pending/live
-        // 转换，不能在 D.ready hold 期间重新生成。
-        longint unsigned        l2_d_error_reservation_generation;
+        // 中文注释：真实接受时分配的 token，跨 alias defer、Probe、调度及 D hold 保持不变。
+        longint unsigned        response_token;
         bit                     echo_isKeyword;
         bit [47:0]              line_addr;
         bit [1:0]               line_alias;
@@ -1816,6 +1774,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         bit [47:0] line_addr;
         bit [1:0]  line_alias;
         bit [9:0]  sink;
+        longint unsigned response_token;
     } dcache_grant_ack_record_t;
 
     typedef struct {
@@ -1847,12 +1806,14 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         bit                       deferred_response_reserved;
         bit [9:0]                 deferred_sink;
         longint unsigned          deferred_accept_cycle;
+        longint unsigned          deferred_response_token;
     } dcache_cached_line_record_t;
 
     // 中文注释：Probe record 保存一笔 B Probe 的稳定身份，C response 通过 line 唯一定位后再回到 token。
     // 同一 physical line 只允许一笔未收敛 record；不同 line 可同时 WAIT_C，B channel 仍一次只保持一笔。
     typedef struct {
         dcache_probe_token_t token;
+        longint unsigned history_token;
         // batch_id 仅记录随机 batch 归属；0 表示 alias/CBO/flush 等非随机 owner。
         longint unsigned     batch_id;
         bit [47:0]           line_addr;
@@ -1883,6 +1844,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     dcache_probe_token_t        pending_cbo_probe_token;
     bit                         pending_cbo_ack_denied;
     bit                         pending_cbo_ack_corrupt;
+    longint unsigned            pending_cbo_response_token;
 
     // 中文注释：轻量 L2 flush 只拥有 request level、snapshot 和 Probe 调度状态。
     // 设置：观察到 io_outer_l2_flush_en 后进入 DRAIN；清零：DONE 观察到 request 撤销或 reset。
@@ -1906,6 +1868,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     // 中文注释：ReleaseData 首个 C.fire 已经占用一个未来 ReleaseAck response slot。
     // 该 reservation 防止 16 笔表接近满时第二 beat 收齐后没有空间建立 ReleaseAck。
     bit c_assembly_response_reserved;
+    longint unsigned c_assembly_response_token;
 
     // 中文注释：stop-prepare 只在“新请求或状态真正推进”时重置 quiet window，不能因为
     // 一个已卡住的 record 每拍仍存在而无限重置。该快照只保存 O(1) 的 lifecycle 摘要，
@@ -2023,6 +1986,9 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     extern virtual function void service_probe_b_hold();
     extern virtual function void build_probe_b_xaction(inout dcache_agent_agent_xaction cycle_xact);
     extern virtual function void process_probe_b_fire();
+    extern virtual function void publish_probe_c_history(input dcache_probe_record_t probe_record,
+        input int unsigned beat_idx, input bit is_data, input bit corrupt);
+
     extern virtual function void check_probe_response_param(
         input dcache_probe_record_t probe_record,
         input bit [2:0]             response_param,
@@ -2034,7 +2000,8 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     );
     extern virtual task start_alias_conflict(
         input dcache_agent_agent_xaction req_xact,
-        input longint unsigned           accept_cycle
+        input longint unsigned           accept_cycle,
+        input longint unsigned           response_token
     );
     extern virtual task complete_probe_record(
         input int              probe_index,
@@ -2078,9 +2045,13 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     extern virtual function void capture_l2_flush_snapshot();
     extern virtual function void service_l2_flush(input bit sampled_l2_flush_en);
     extern virtual function bit l2_flush_blocks_a_request(input bit sampled_l2_flush_en);
+    extern virtual function longint unsigned reserve_l2_a_history(input dcache_agent_agent_xaction req_xact);
+    extern virtual function bit classify_response_error_injection(input dcache_agent_agent_xaction req_xact,
+        output int unsigned kind, output int unsigned denied_weight, output int unsigned corrupt_weight);
     extern virtual task accept_dcache_a_request(
         input dcache_agent_agent_xaction req_xact,
-        input longint unsigned           accept_cycle
+        input longint unsigned           accept_cycle,
+        input longint unsigned           resume_token = 0
     );
     extern virtual function void build_current_d_xaction(inout dcache_agent_agent_xaction cycle_xact);
     extern virtual function void process_d_fire();
@@ -2138,6 +2109,7 @@ function void dcache_mem__access_base_sequence::clear_c_assembly_state();
     c_assembly_data           = '0;
     c_assembly_probe_token    = '0;
     c_assembly_response_reserved = 1'b0;
+    c_assembly_response_token = 0;
 endfunction:clear_c_assembly_state
 
 function void dcache_mem__access_base_sequence::clear_cbo_context();
@@ -2151,9 +2123,11 @@ function void dcache_mem__access_base_sequence::clear_cbo_context();
     pending_cbo_probe_token  = '0;
     pending_cbo_ack_denied   = 1'b0;
     pending_cbo_ack_corrupt  = 1'b0;
+    pending_cbo_response_token = 0;
 endfunction:clear_cbo_context
 
 function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_cache_map = 1'b1);
+    abort_l2_response_pending();
     a_accept_armed           = 1'b0;
     c_accept_armed           = 1'b0;
     armed_a_req_xact         = null;
@@ -3012,6 +2986,7 @@ function bit dcache_mem__access_base_sequence::submit_probe(
     bit [47:0] line_key;
     dcache_cached_line_record_t line_record;
     dcache_probe_record_t probe_record;
+    l2_probe_history_t history;
 
     probe_token = '0;
     line_key = line_addr64(line_addr);
@@ -3047,6 +3022,16 @@ function bit dcache_mem__access_base_sequence::submit_probe(
     probe_record.owner       = probe_owner;
     probe_record.state       = DCACHE_PROBE_STATE_QUEUED;
     next_probe_token++;
+    history = '0;
+    history.valid = 1;
+    history.token = l2_next_response_token++;
+    history.local_probe_token = probe_record.token;
+    history.reset_epoch = l2_response_reset_epoch;
+    history.line_addr = line_key;
+    if (probe_owner == DCACHE_PROBE_OWNER_CBO) history.parent_response_token = pending_cbo_response_token;
+    if (probe_owner == DCACHE_PROBE_OWNER_ALIAS_CONFLICT) history.parent_response_token = line_record.deferred_response_token;
+    l2_probe_history_by_token[history.token] = history;
+    probe_record.history_token = history.token;
     probe_token = probe_record.token;
     probe_record_q.push_back(probe_record);
     if (probe_owner != DCACHE_PROBE_OWNER_ALIAS_CONFLICT) begin
@@ -3108,14 +3093,45 @@ function void dcache_mem__access_base_sequence::process_probe_b_fire();
         `uvm_fatal(get_type_name(),
                    $sformatf("B.fire token=%0d does not identify a B_HOLD Probe record", probe_b_hold_token))
     end
+    register_clean_l2_access(probe_record_q[probe_index].line_addr,
+        current_l2_d_error_sample("Probe B.fire"), 0, 0);
+    l2_probe_history_by_token[probe_record_q[probe_index].history_token].b_sample =
+        current_l2_d_error_sample("Probe B.fire");
+
     probe_record_q[probe_index].state = DCACHE_PROBE_STATE_WAIT_C;
     probe_b_hold_valid                = 1'b0;
     probe_b_hold_token                = '0;
 endfunction:process_probe_b_fire
 
+// 抽象职责：发布 Probe C 回复实际方向的事实，不触碰 L2 注入状态或写回数据。
+function void dcache_mem__access_base_sequence::publish_probe_c_history(
+    input dcache_probe_record_t probe_record, input int unsigned beat_idx,
+    input bit is_data, input bit corrupt);
+    l2_probe_history_t history;
+    l2_response_beat_t beat_record;
+    if (!l2_probe_history_by_token.exists(probe_record.history_token))
+        `uvm_fatal(get_type_name(), "Probe C.fire missing history token")
+    history = l2_probe_history_by_token[probe_record.history_token];
+    if (history.reset_epoch != l2_response_reset_epoch || history.b_sample == 0 ||
+        beat_idx > 1 || history.c_beat_valid[beat_idx] || history.full_complete)
+        `uvm_fatal(get_type_name(), "Probe C.fire epoch/beat mismatch")
+    beat_record = '0;
+    beat_record.valid = 1;
+    beat_record.sample = current_l2_d_error_sample("Probe C.fire");
+    beat_record.corrupt = corrupt;
+    beat_record.byte_mask = is_data ? (beat_idx == 0 ? 64'h0000_0000_ffff_ffff :
+        64'hffff_ffff_0000_0000) : 64'hffff_ffff_ffff_ffff;
+    if (beat_idx == 0) history.c_beat0 = beat_record;
+    else history.c_beat1 = beat_record;
+    history.c_beat_valid[beat_idx] = 1;
+    history.full_complete = !is_data || beat_idx == 1;
+    l2_probe_history_by_token[probe_record.history_token] = history;
+endfunction:publish_probe_c_history
+
 task dcache_mem__access_base_sequence::start_alias_conflict(
     input dcache_agent_agent_xaction req_xact,
-    input longint unsigned           accept_cycle
+    input longint unsigned           accept_cycle,
+    input longint unsigned           response_token
 );
     bit [47:0] line_addr;
     bit [9:0] reserved_sink;
@@ -3139,6 +3155,7 @@ task dcache_mem__access_base_sequence::start_alias_conflict(
     line_record.deferred_response_reserved  = 1'b1;
     line_record.deferred_sink               = reserved_sink;
     line_record.deferred_accept_cycle       = accept_cycle;
+    line_record.deferred_response_token     = response_token;
     line_record.lifecycle_state             = DCACHE_LINE_ALIAS_CONFLICT;
     cached_line_by_addr[line_addr]          = line_record;
     if (!submit_probe(line_addr,
@@ -3169,6 +3186,7 @@ task dcache_mem__access_base_sequence::enqueue_pending_cbo_ack(input longint uns
     response_record.cbo_opcode     = pending_cbo_probe_opcode;
     response_record.denied         = pending_cbo_ack_denied;
     response_record.corrupt        = pending_cbo_ack_corrupt;
+    response_record.response_token = pending_cbo_response_token;
 
     // 将 CBO A.fire 时已经占用的一笔容量原子转换为可调度的 D response record。
     cbo_response_reserved = 1'b0;
@@ -3253,7 +3271,7 @@ task dcache_mem__access_base_sequence::complete_probe_record(
                 probe_record_q.delete(probe_index);
                 cached_line_by_addr.delete(probe_record.line_addr);
                 observe_dcache_line_transition(line_record.alias_valid, 1'b0);
-                accept_dcache_a_request(deferred_acquire, complete_cycle);
+                accept_dcache_a_request(deferred_acquire, complete_cycle, line_record.deferred_response_token);
             end else begin
                 probe_record_q.delete(probe_index);
                 remove_cached_line(probe_record.line_addr, "probe_toN");
@@ -3524,18 +3542,102 @@ function bit dcache_mem__access_base_sequence::select_random_cached_line(output 
     return 1'b0;
 endfunction:select_random_cached_line
 
+// 抽象职责：复用已采集 reqSource 确定能力；Store 来源含 zero 和合并消费者均强制正常。
+function bit dcache_mem__access_base_sequence::classify_response_error_injection(
+    input dcache_agent_agent_xaction req_xact, output int unsigned kind,
+    output int unsigned denied_weight, output int unsigned corrupt_weight);
+    denied_weight = 0;
+    corrupt_weight = 0;
+    case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
+        TL_A_OPCODE_CBO_CLEAN, TL_A_OPCODE_CBO_FLUSH, TL_A_OPCODE_CBO_INVAL: begin
+            kind = DCACHE_PENDING_D_CBO_ACK;
+            denied_weight = seq_csr_common::get_l2_cbo_ack_denied_wt();
+            corrupt_weight = seq_csr_common::get_l2_cbo_ack_corrupt_wt();
+            return 1;
+        end
+        TL_A_OPCODE_ACQUIRE_PERM: begin
+            kind = DCACHE_PENDING_D_GRANT;
+            if (req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource != MEMBLOCK_REQ_CPU_STORE)
+                `uvm_fatal(get_type_name(), "AcquirePerm requires Store reqSource")
+            return 0;
+        end
+        TL_A_OPCODE_ACQUIRE_BLOCK: kind = DCACHE_PENDING_D_GRANT_DATA;
+        default: begin
+            `uvm_fatal(get_type_name(), "unsupported coherent A opcode in error classification")
+            return 0;
+        end
+    endcase
+    case (req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource)
+        MEMBLOCK_REQ_CPU_STORE: return 0;
+        MEMBLOCK_REQ_CPU_LOAD, MEMBLOCK_REQ_CPU_ATOMIC, MEMBLOCK_REQ_L1_PREFETCH: begin
+            denied_weight = seq_csr_common::get_l2_grantdata_denied_wt();
+            corrupt_weight = seq_csr_common::get_l2_grantdata_corrupt_wt();
+            return 1;
+        end
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("unknown reqSource=%0d at coherent A.fire",
+                req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource))
+            return 0;
+        end
+    endcase
+endfunction:classify_response_error_injection
+
+// 抽象职责：仅真实 A.fire 调用一次，在任何 Probe/defer 或数据访问前冻结选择与 token。
+function longint unsigned dcache_mem__access_base_sequence::reserve_l2_a_history(
+    input dcache_agent_agent_xaction req_xact);
+    bit allowed;
+    bit needs_candidate;
+    bit denied;
+    bit corrupt;
+    int unsigned kind;
+    int unsigned denied_weight;
+    int unsigned corrupt_weight;
+    longint unsigned sample;
+    l2_d_error_state_e candidate;
+    l2_d_error_line_record_t choice;
+    mem_addr_t line_addr;
+    line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+    sample = current_l2_d_error_sample("coherent A.fire");
+    allowed = classify_response_error_injection(req_xact, kind, denied_weight, corrupt_weight);
+    if (!lookup_l2_line_choice(line_addr, sample,
+            {4'b0,req_xact.auto_inner_dcache_client_out_a_bits_source}, kind,
+            req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource,
+            0, L2_D_ERROR_NONE, needs_candidate, choice))
+        `uvm_fatal(get_type_name(), "first line lookup failed")
+    if (needs_candidate) begin
+        candidate = L2_D_ERROR_NONE;
+        if (allowed) begin
+            if (sample_d_error_enable(denied_weight, "L2 first line denied")) candidate = L2_D_ERROR_DENIED;
+            else if (sample_d_error_enable(corrupt_weight, "L2 first line corrupt")) candidate = L2_D_ERROR_CORRUPT;
+        end
+        if (!lookup_l2_line_choice(line_addr, sample,
+                {4'b0,req_xact.auto_inner_dcache_client_out_a_bits_source}, kind,
+                req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource,
+                1, candidate, needs_candidate, choice) || needs_candidate)
+            `uvm_fatal(get_type_name(), "first line reservation failed")
+    end
+    denied = allowed && choice.state == L2_D_ERROR_DENIED;
+    corrupt = allowed && (choice.state == L2_D_ERROR_CORRUPT ||
+                           (choice.state == L2_D_ERROR_DENIED && kind == DCACHE_PENDING_D_GRANT_DATA));
+    return begin_l2_response_history(line_addr, sample,
+        {4'b0,req_xact.auto_inner_dcache_client_out_a_bits_source}, 0, kind,
+        req_xact.auto_inner_dcache_client_out_a_bits_opcode,
+        req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource, allowed,
+        denied, corrupt, req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword);
+endfunction:reserve_l2_a_history
+
 task dcache_mem__access_base_sequence::accept_dcache_a_request(
     input dcache_agent_agent_xaction req_xact,
-    input longint unsigned           accept_cycle
+    input longint unsigned           accept_cycle,
+    input longint unsigned           resume_token
 );
     bit [47:0] line_addr;
     bit [255:0] line_data_low;
     bit [255:0] line_data_high;
     bit [9:0]  grant_sink;
     bit [1:0]  probe_cap;
-    bit        l2_d_error_needs_candidate;
-    bit        l2_d_error_candidate_denied;
-    bit        l2_d_error_candidate_corrupt;
+    longint unsigned response_token;
+    l2_response_history_t response_history;
     dcache_probe_token_t        probe_token;
     dcache_cached_line_record_t line_record;
     dcache_response_record_t response_record;
@@ -3555,8 +3657,10 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                              req_xact.auto_inner_dcache_client_out_a_bits_address))
     end
     check_line_range(line_addr, "dcache coherent A");
+    response_token = resume_token == 0 ? reserve_l2_a_history(req_xact) : resume_token;
+    response_history = l2_response_history_by_token[response_token];
     if (is_alias_conflict_request(req_xact)) begin
-        start_alias_conflict(req_xact, accept_cycle);
+        start_alias_conflict(req_xact, accept_cycle, response_token);
         return;
     end
 
@@ -3565,6 +3669,9 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
     response_record.line_addr      = line_addr;
     response_record.size           = req_xact.auto_inner_dcache_client_out_a_bits_size;
     response_record.source         = req_xact.auto_inner_dcache_client_out_a_bits_source;
+    response_record.response_token = response_token;
+    response_record.denied = response_history.denied;
+    response_record.corrupt = response_history.corrupt;
 
     case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
         TL_A_OPCODE_ACQUIRE_BLOCK: begin
@@ -3595,62 +3702,6 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             response_record.line_alias     = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
             response_record.data_low       = line_data_low;
             response_record.data_high      = line_data_high;
-            // 中文注释：sticky 模式下先查询同 line 的 live/pending 状态。只有完全
-            // 无状态时才采样一次候选并创建 reservation；关闭 sticky 时保持原有每笔
-            // response 独立采样行为。两拍 D 和 D.ready hold 始终只搬运该快照。
-            if (seq_csr_common::get_l2_d_error_sticky_en()) begin
-                if (!prepare_l2_d_error_for_grant(
-                        line_addr,
-                        current_l2_d_error_sample("AcquireBlock reservation"),
-                        {4'b0, response_record.source},
-                        1'b0,
-                        1'b0,
-                        1'b0,
-                        response_record.denied,
-                        response_record.corrupt,
-                        l2_d_error_needs_candidate,
-                        response_record.l2_d_error_reservation_generation)) begin
-                    `uvm_fatal(get_type_name(),
-                               $sformatf("failed to prepare sticky GrantData error line=0x%0h",
-                                         line_addr))
-                end
-                if (l2_d_error_needs_candidate) begin
-                    l2_d_error_candidate_denied = sample_d_error_enable(
-                        seq_csr_common::get_l2_grantdata_denied_wt(),
-                        "DCache GrantData denied"
-                    );
-                    l2_d_error_candidate_corrupt = l2_d_error_candidate_denied ? 1'b1 :
-                        sample_d_error_enable(
-                            seq_csr_common::get_l2_grantdata_corrupt_wt(),
-                            "DCache GrantData corrupt"
-                        );
-                    if (!prepare_l2_d_error_for_grant(
-                            line_addr,
-                            current_l2_d_error_sample("AcquireBlock reservation candidate"),
-                            {4'b0, response_record.source},
-                            1'b1,
-                            l2_d_error_candidate_denied,
-                            l2_d_error_candidate_corrupt,
-                            response_record.denied,
-                            response_record.corrupt,
-                            l2_d_error_needs_candidate,
-                            response_record.l2_d_error_reservation_generation) ||
-                        l2_d_error_needs_candidate) begin
-                        `uvm_fatal(get_type_name(),
-                                   $sformatf("failed to reserve sticky GrantData error line=0x%0h",
-                                             line_addr))
-                    end
-                end
-            end else begin
-                response_record.denied = sample_d_error_enable(
-                    seq_csr_common::get_l2_grantdata_denied_wt(),
-                    "DCache GrantData denied"
-                );
-                response_record.corrupt = response_record.denied ? 1'b1 : sample_d_error_enable(
-                    seq_csr_common::get_l2_grantdata_corrupt_wt(),
-                    "DCache GrantData corrupt"
-                );
-            end
             response_record.hint_pending   = sample_hint_enable();
             response_record.hint_source_id = req_xact.auto_inner_dcache_client_out_a_bits_source[3:0];
             response_record.hint_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
@@ -3704,14 +3755,9 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             pending_cbo_probe_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
             pending_cbo_probe_line   = line_addr;
             pending_cbo_probe_source = req_xact.auto_inner_dcache_client_out_a_bits_source;
-            pending_cbo_ack_denied = sample_d_error_enable(
-                seq_csr_common::get_l2_cbo_ack_denied_wt(),
-                "DCache CBOAck denied"
-            );
-            pending_cbo_ack_corrupt = sample_d_error_enable(
-                seq_csr_common::get_l2_cbo_ack_corrupt_wt(),
-                "DCache CBOAck corrupt"
-            );
+            pending_cbo_ack_denied = response_history.denied;
+            pending_cbo_ack_corrupt = response_history.corrupt;
+            pending_cbo_response_token = response_token;
 
             if (!cached_line_by_addr.exists(line_addr)) begin
                 enqueue_pending_cbo_ack(accept_cycle);
@@ -3812,6 +3858,8 @@ function void dcache_mem__access_base_sequence::process_d_fire();
     if (!current_d_valid) begin
         `uvm_fatal(get_type_name(), "D.fire observed without a current DCache response record")
     end
+    publish_l2_response_beat_history(current_d_record.response_token,
+        current_d_record.beat_idx, current_l2_d_error_sample("D.fire"));
     if ((current_d_record.kind == DCACHE_PENDING_D_GRANT_DATA) &&
         ((current_d_record.beat_idx + 1) < current_d_record.beat_count)) begin
         current_d_record.beat_idx++;
@@ -3819,18 +3867,13 @@ function void dcache_mem__access_base_sequence::process_d_fire();
     end
 
     completed_record = current_d_record;
+    complete_l2_response_history(completed_record.response_token);
     case (completed_record.kind)
         DCACHE_PENDING_D_GRANT_DATA: begin
-            commit_l2_d_error_on_current_grant_d_fire(
-                completed_record.line_addr,
-                completed_record.denied,
-                completed_record.corrupt,
-                {4'b0, completed_record.source},
-                completed_record.l2_d_error_reservation_generation
-            );
             grant_ack_record.line_addr = completed_record.line_addr;
             grant_ack_record.line_alias = completed_record.line_alias;
             grant_ack_record.sink      = completed_record.sink;
+            grant_ack_record.response_token = completed_record.response_token;
             grant_ack_wait_q.push_back(grant_ack_record);
             mark_cached_line_grant_wait(completed_record.line_addr, completed_record.line_alias);
         end
@@ -3838,6 +3881,7 @@ function void dcache_mem__access_base_sequence::process_d_fire();
             grant_ack_record.line_addr = completed_record.line_addr;
             grant_ack_record.line_alias = completed_record.line_alias;
             grant_ack_record.sink      = completed_record.sink;
+            grant_ack_record.response_token = completed_record.response_token;
             grant_ack_wait_q.push_back(grant_ack_record);
             mark_cached_line_grant_wait(completed_record.line_addr, completed_record.line_alias);
         end
@@ -3883,6 +3927,11 @@ function void dcache_mem__access_base_sequence::process_e_fire();
     observed_sink = raw_observed_sink;
     foreach (grant_ack_wait_q[i]) begin
         if (grant_ack_wait_q[i].sink == observed_sink) begin
+            if (!l2_response_history_by_token.exists(grant_ack_wait_q[i].response_token) ||
+                !l2_response_history_by_token[grant_ack_wait_q[i].response_token].full_complete ||
+                l2_response_history_by_token[grant_ack_wait_q[i].response_token].reset_epoch != l2_response_reset_epoch)
+                `uvm_fatal(get_type_name(), "E.fire references missing or stale completed Grant")
+
             record_cached_line(grant_ack_wait_q[i].line_addr, grant_ack_wait_q[i].line_alias);
             grant_ack_wait_q.delete(i);
             return;
@@ -3968,6 +4017,7 @@ task dcache_mem__access_base_sequence::complete_release_c_assembly(input longint
     response_record.source         = c_assembly_source;
     response_record.sink           = '0;
     response_record.line_addr      = c_assembly_line;
+    response_record.response_token = c_assembly_response_token;
     // 将 assembly reservation 原子转换为真正 record；它不应额外占用第二个 capacity。
     c_assembly_response_reserved = 1'b0;
     enqueue_dcache_response(response_record);
@@ -4018,6 +4068,9 @@ task dcache_mem__access_base_sequence::consume_c_beat(
     if (c_assembly_received_beats >= 2) begin
         `uvm_fatal(get_type_name(), "C multi-beat assembly received more than 2 beats")
     end
+    if (c_assembly_owner == DCACHE_C_OWNER_PROBE)
+        publish_probe_c_history(probe_record_q[probe_index], c_assembly_received_beats,
+            1, c_req_xact.auto_inner_dcache_client_out_c_bits_corrupt);
     if (c_assembly_received_beats == 0) begin
         c_assembly_data[255:0] = c_req_xact.auto_inner_dcache_client_out_c_bits_data;
     end else begin
@@ -4050,6 +4103,9 @@ task dcache_mem__access_base_sequence::start_c_assembly(
     dcache_probe_record_t probe_record;
 
     line_addr = line_addr64(c_req_xact.auto_inner_dcache_client_out_c_bits_address);
+    register_clean_l2_access(line_addr, current_l2_d_error_sample("C.fire"),
+        {4'b0,c_req_xact.auto_inner_dcache_client_out_c_bits_source}, DCACHE_PENDING_D_RELEASE_ACK);
+
 
     // 同一 physical line 的 Probe owner 尚未收到 C reply 时，Release/ReleaseData 若先删除
     // line record，会让随后到来的 ProbeAck/Data 失去唯一生命周期 owner。轻量模型没有合并
@@ -4082,6 +4138,7 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             check_probe_response_param(probe_record,
                                        c_req_xact.auto_inner_dcache_client_out_c_bits_param,
                                        "ProbeAck");
+            publish_probe_c_history(probe_record, 0, 0, c_req_xact.auto_inner_dcache_client_out_c_bits_corrupt);
             complete_probe_record(probe_index, 1'b0, 1'b0, accept_cycle);
         end
         TL_C_OPCODE_PROBE_ACKDATA: begin
@@ -4139,6 +4196,12 @@ task dcache_mem__access_base_sequence::start_c_assembly(
                 response_record.source         = c_req_xact.auto_inner_dcache_client_out_c_bits_source;
                 response_record.sink           = '0;
                 response_record.line_addr      = line_addr;
+                response_record.response_token = begin_l2_response_history(line_addr,
+                    current_l2_d_error_sample("Release C.fire"),
+                    {4'b0,c_req_xact.auto_inner_dcache_client_out_c_bits_source}, 1,
+                    DCACHE_PENDING_D_RELEASE_ACK, {1'b0,c_req_xact.auto_inner_dcache_client_out_c_bits_opcode},
+                    c_req_xact.auto_inner_dcache_client_out_c_bits_user_reqSource, 0, 0, 0, 0);
+
                 enqueue_dcache_response(response_record);
             end
         end
@@ -4154,6 +4217,12 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             check_line_range(line_addr, "ReleaseData");
             clear_c_assembly_state();
             c_assembly_owner          = DCACHE_C_OWNER_RELEASE;
+            c_assembly_response_token = begin_l2_response_history(line_addr,
+                current_l2_d_error_sample("ReleaseData first C.fire"),
+                {4'b0,c_req_xact.auto_inner_dcache_client_out_c_bits_source}, 1,
+                DCACHE_PENDING_D_RELEASE_ACK, {1'b0,c_req_xact.auto_inner_dcache_client_out_c_bits_opcode},
+                c_req_xact.auto_inner_dcache_client_out_c_bits_user_reqSource, 0, 0, 0, 0);
+
             c_assembly_opcode         = c_req_xact.auto_inner_dcache_client_out_c_bits_opcode;
             c_assembly_line           = line_addr;
             c_assembly_source         = c_req_xact.auto_inner_dcache_client_out_c_bits_source;

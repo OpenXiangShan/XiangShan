@@ -9,6 +9,12 @@ memory backend，但不共享协议 queue、timer、D hold、source、sink 或�
 
 | 术语 | 当前含义 | 代码对象 | 说明 |
 |---|---|---|---|
+| `line choice` | 首次真实访问按权重冻结的 CLEAN/CORRUPT/DENIED 选择 | `l2_line_history_by_line` | CLEAN 同样立即登记，普通 DUT reset 不清除 |
+| `response token` | 一次真实接受事务的唯一身份 | `l2_response_history_by_token` | source 重用不能复用 token |
+| `source generation` | source 本次占用代次 | `l2_source_generation` | A、Release 两个方向分别管理 |
+| `beat availability` | 指定 beat 已实际 D.fire 的时间事实 | `beat0/beat1` | 首 beat 可先于整笔完成查询 |
+| `reqSource` | DUT 已有的请求来源编码 | `MEMBLOCK_REQ_CPU_*` | Store 来源包括 cacheable zero，固定正常响应 |
+| `consumption_proven` | token 查询要求的 beat 已按 sample 送达 | readonly 值视图 | PA-only 诊断始终不提供该证明 |
 | `shared memory` | 测试级 sparse backing 与 write overlay | `mem_access_base_sequence` static store | 只保存 memory-facing 访问，不是 RTL L2 cache |
 | `response record` | 已 A/C fire、等待 D 返回的协议回复 | `dcache_rsp_q` / `uncache_rsp_q` | 两通道各自独立维护 |
 | `eligible_cycle` | record 最早可被本通道 scheduler 选择的 service cycle | 两种 response record | 防止新入队 record 当拍返回 |
@@ -337,3 +343,39 @@ DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还�
 - 本 flow 已实现 D-error response snapshot，但它只驱动合法 Uncache D 字段，不接入主表、LSQ、
   pass/fail 或 terminal。多 Probe/toB、alias、CBO closure 和完整 L2 flush 仍必须由相应专项 plan
   在现有 response pipeline 上扩展，不能恢复旧的单 pending 状态机。
+
+## 12. L2 首次行选择与逐 beat 历史（2026-11-11）
+
+本节描述已落地的框架记录层；统一错误 RM 的消费观察接入仍按对应方案独立实施，不因框架完成而宣称带注错 RM 回归通过。
+
+### 12.1 真实 A 接受与延期恢复
+
+`dcache_mem__access_base_sequence::reserve_l2_a_history()` 的抽象职责是把真实 A 接受转成一次固定行选择和唯一响应 token，在数据读取、Probe 或别名等待之前完成。
+
+中文文字伪代码：先按 opcode 确定 GrantData、Grant 或 CBOAck 能力；Acquire 依据已冻结的五位 reqSource 区分 Store 与 Load/Atomic/Prefetch。未知来源明确报错。查询该行首次选择；只有未见行才按当前类别权重先判断 denied、未命中再判断 corrupt，排除类直接 CLEAN。立即保存选择及非零 generation，再按本笔能力编码 raw 位并建立 token。Store 来源即使命中历史错误仍固定为正常，但不改旧选择。接受索引用 reset 代际、接受 sample、方向和 source 构成。
+
+`dcache_mem__access_base_sequence::accept_dcache_a_request()` 的抽象职责是把固定接受身份交给既有响应/Probe 队列。
+
+中文文字伪代码：检查容量、size、行对齐和范围，首次接受分配 token；别名冲突把该 token 和完整 request 副本保存在行上下文并启动 Probe。Probe 收敛后再次进入 helper 时显式传入原 token，仅恢复响应构造，不再随机或重复接受。普通响应、CBO 等待上下文均复制已冻结 raw 位。CBO 的 Probe 子记录引用原 token，完成后仍使用原结果建立 CBOAck。
+
+### 12.2 B/C/E 与数据写回
+
+`mem_access_base_sequence::register_clean_l2_access()` 的抽象职责是让无注入能力的真实 B/C 访问补齐首次 CLEAN 记录。
+
+中文文字伪代码：在实际 B.fire 或首 C.fire 按行单 key 查询；缺失就登记 CLEAN，已存在则原样返回；不执行随机，也不读取或写入数据。Release/ReleaseData 在首 C.fire 建立独立响应 token，第二 beat 复用；Probe C 回复按子 token 单独记录真实 corrupt，绝不反写行注入结果。原有 C 数据收集和 shared memory 写批次照常执行，历史错误不作为拒绝 Store/zero 数据的条件。E.fire 通过既有 sink 队列引用已完整完成的 Grant token，检查代际后完成原 lifecycle，不建立新选择。
+
+### 12.3 D.fire 与只读查询
+
+`mem_access_base_sequence::publish_l2_response_beat_history()` 的抽象职责是发布每次真实 D.fire 的不可变事实。
+
+中文文字伪代码：核对 token、reset/source 生命周期及 beat 未被发布，按冻结关键词顺序计算物理高低32B mask，保存当次 raw 与 sample，再原子置有效位。首 beat 完成立即可查，D hold 不调用。最后 beat 后调用完整完成入口核对预期 mask，标记 full_complete 并释放 source 活跃索引；历史不删除。
+
+`memblock_rm_readonly_api::read_l2_response_for_rm()` 的抽象职责是按实际消费 token/beat 返回对应 sample 可见的事实。
+
+中文文字伪代码：查询唯一 token 历史并核对物理行与 reset 代际；过滤晚于消费 sample 的 beat，要求指定 mask 全部已送达后才置 consumption_proven 并输出 raw 位。PA-only 的 read_l2_d_error_for_rm 仅输出首次选择诊断，denied/corrupt 始终为零，不能授权当前指令异常。owner 绑定按精确接受 sample 验证，不从当前 source 猜旧 owner。
+
+### 12.4 生命周期与参数
+
+取消 `MEMBLOCK_L2_D_ERROR_STICKY_EN`、getter 和所有 cfg 入口；记录能力始终存在，四个既有 L2 错误权重仍默认0。testcase/shared-memory 初始化清空所有选择和历史；普通 DUT reset 只递增响应代际、终止未完成 source，不清首次选择。redirect、Probe、替换均不重抽。
+
+专用框架自测入口为 `basicTest / memblock_l2_line_history_directed_vseq`；真实响应驱动与 RM 带错误端到端验证由分阶段实施记录管理。

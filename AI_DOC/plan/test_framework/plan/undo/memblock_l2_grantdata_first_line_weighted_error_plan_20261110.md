@@ -471,3 +471,12 @@ RM 不生成 redirect、`UID+1` 恢复、epoch 或重发。实际实现和用例
 ## 10. 功能覆盖率协同支持
 
 本 plan 不需要实现 coveragent/covergroup。后续组件可使用首次类别、首次行结果、权重、跨类复用、真实 raw 位、token/owner 关联和beat availability等字段；不把覆盖率命中作为框架激励合法性判据。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+- 实施日期：2026-11-11；开始代码基线 `b9c65cf26015d71a420b787458f0f866cc1b99f2`。框架代码已实现，独立 review、远端验证与 RM 依赖闭环尚未完成，继续保留 `undo`。
+- [IMPLEMENTATION_DELTA] 既有 reqSource 端口实际为5位，公共枚举使用5位并保留2/3/4/6的编码，避免未知值截断。原 plan 未约定位宽，行为无变更。
+- [IMPLEMENTATION_DELTA] 采用 `reset_epoch + accept_sample + direction + source` 的精确接受索引，为后续被动 monitor 提供 token 绑定；owner bind 要求精确接受 sample，不读取当前 source 的主表 owner。被动观察方先推进采样水位再绑定属于后续统一错误方案接入职责。
+- [IMPLEMENTATION_DELTA] Probe 的 B/C 事实存放独立子上下文历史，只记录方向、父响应 token、每 beat sample/raw 与覆盖范围；不复制 payload，不成为第二份行选择表。E 仅沿 GrantAck 队列引用原 token。
+- [IMPLEMENTATION_DELTA] 为被动 monitor 增加只读 owner 探测 `try_read_uid_by_sq_for_rm/try_read_uid_by_rob_for_rm`。正常 map miss 返回 false 且清空 UID，不生成 UVM_ERROR；不改变正式严格查询接口。
+- 阶段依赖：PA-only readonly 查询现在仅供诊断，旧 RM 的 token/消费 provenance 接入归统一错误方案。仅权重0的基础执行与独立框架自测可用于本阶段验证；禁止把旧 first-split/带注错 RM 正向用例标记已通过。旧 soft helper 已迁移到软件测试内部的 token 构造，正向消费证明仍须对应 RM 阶段补齐。

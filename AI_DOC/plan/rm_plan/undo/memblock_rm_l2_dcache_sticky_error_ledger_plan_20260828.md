@@ -1,5 +1,7 @@
 # memblock RM/L2 DCache 无清除错误状态账本修改方案（2026-08-28）
 
+> 2026-11-11 历史说明：本文保留当时实现/分析。可关闭 sticky、仅错误行登记及仅凭 PA/sample 预测错误的接口已由 `AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` 的常开首次行选择与逐 beat token 事实取代；旧配置项不再支持。RM 消费接入以统一 denied/corrupt 方案及本轮实现 review 为准。
+
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | 待 coding，未实施 |

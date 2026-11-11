@@ -1,5 +1,7 @@
 # 跨页Load首段数据错误提前终止修复方案
 
+> 2026-11-11 历史说明：本文保留当时实现/分析。可关闭 sticky、仅错误行登记及仅凭 PA/sample 预测错误的接口已由 `AI_DOC/plan/test_framework/plan/undo/memblock_l2_grantdata_first_line_weighted_error_plan_20261110.md` 的常开首次行选择与逐 beat token 事实取代；旧配置项不再支持。RM 消费接入以统一 denied/corrupt 方案及本轮实现 review 为准。
+
 日期：2026-10-30。状态：**已完成；原seed10000笔、21/21真实DUT及四类必要软件专项通过，Turing最终FINAL_IMPLEMENTATION_REVIEW_PASS，迁do并随本记录单Bug提交**。
 范围：V2母任务中的RM检查顺序及必要的被动执行时序观测；不修改RTL、请求生成、TLB resolver或无关soft_test。
 

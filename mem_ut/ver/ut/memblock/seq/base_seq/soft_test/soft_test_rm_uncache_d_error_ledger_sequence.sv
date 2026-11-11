@@ -293,19 +293,25 @@ task soft_test_rm_uncache_d_error_ledger_sequence::check_l2_uncache_isolation();
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::l2_d_error_view_t l2_view;
     memblock_rm_readonly_api::uncache_d_error_view_t uncache_view;
-
-    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
-    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
-        48'h5000, 1'b0, 1'b1, 400, 10'd1, 0);
+    mem_access_base_sequence::l2_d_error_line_record_t choice;
+    bit needs_candidate;
+    longint unsigned token;
+    mem_access_base_sequence::reset_l2_line_history();
+    expect_true(mem_access_base_sequence::lookup_l2_line_choice(48'h5000, 399, 1,
+        2, MEMBLOCK_REQ_CPU_LOAD, 1, mem_access_base_sequence::L2_D_ERROR_CORRUPT,
+        needs_candidate, choice), "L2 isolation choice failed");
+    token = mem_access_base_sequence::begin_l2_response_history(48'h5000, 399, 1,
+        0, 2, 6, MEMBLOCK_REQ_CPU_LOAD, 1, 0, 1, 0);
+    mem_access_base_sequence::publish_l2_response_beat_history(token, 0, 400);
+    mem_access_base_sequence::publish_l2_response_beat_history(token, 1, 400);
+    mem_access_base_sequence::complete_l2_response_history(token);
     ro = memblock_rm_readonly_api::get();
-    expect_true(ro.read_l2_d_error_for_rm(48'h5000, 400, l2_view) &&
-                l2_view.valid && l2_view.corrupt,
-                "cacheable L2 ledger query failed");
-    expect_true(ro.read_uncache_d_error_for_rm(
-                    500, 1, 0, 16'd50, 0, 7'd50,
-                    48'h5000, 4, 400, uncache_view) &&
-                !uncache_view.found && !uncache_view.not_ready,
-                "L2 error leaked into Uncache ledger");
+    expect_true(ro.read_l2_response_for_rm(token, 48'h5000, 400, 3, l2_view) &&
+        l2_view.valid && l2_view.consumption_proven && l2_view.corrupt,
+        "cacheable L2 token query failed");
+    expect_true(ro.read_uncache_d_error_for_rm(500, 1, 0, 16'd50, 0, 7'd50,
+        48'h5000, 4, 400, uncache_view) && !uncache_view.found && !uncache_view.not_ready,
+        "L2 error leaked into Uncache ledger");
 endtask:check_l2_uncache_isolation
 
 task soft_test_rm_uncache_d_error_ledger_sequence::check_load_expected_case(

@@ -342,7 +342,14 @@ class memblock_rm_readonly_api extends uvm_object;
     // 初始化；state/activation 来自指定 query sample，绝不暴露 live associative map。
     typedef struct packed {
         bit                  valid;
-        bit                  sticky_enabled;
+        bit                  ledger_ready;
+        bit                  line_seen;
+        bit                  consumption_proven;
+        bit                  full_complete;
+        bit [1:0]            beat_valid;
+        longint unsigned     response_token;
+        longint unsigned     reset_epoch;
+        longint unsigned     source_generation;
         bit                  denied;
         bit                  corrupt;
         mem_access_base_sequence::l2_d_error_state_e state;
@@ -468,6 +475,8 @@ class memblock_rm_readonly_api extends uvm_object;
         output framework_context_view_t view
     );
     extern function bit framework_ready_for_rm();
+    extern function bit try_read_uid_by_rob_for_rm(input memblock_rob_key_t key, output memblock_uid_t uid);
+    extern function bit try_read_uid_by_sq_for_rm(input memblock_sq_key_t key, output memblock_uid_t uid);
     extern function bit read_uid_by_rob_for_rm(
         input  memblock_rob_key_t key,
         output memblock_uid_t uid
@@ -565,6 +574,10 @@ class memblock_rm_readonly_api extends uvm_object;
     extern function bit get_dcache_overlay_readiness_for_rm(
         output dcache_overlay_readiness_view_t view
     );
+    extern function bit read_l2_response_for_rm(
+        input longint unsigned token, input mem_addr_t line_addr,
+        input longint unsigned sample, input bit [1:0] required_beats,
+        output l2_d_error_view_t view);
     extern function bit read_l2_d_error_for_rm(
         input  mem_addr_t          line_addr,
         input  longint unsigned    sample,
@@ -1130,6 +1143,31 @@ function bit memblock_rm_readonly_api::read_framework_context_for_rm(
     return 1'b1;
 endfunction:read_framework_context_for_rm
 
+// 抽象职责：被动采样的无副作用 owner 探测；正常缺失不生成 UVM_ERROR。
+function bit memblock_rm_readonly_api::try_read_uid_by_rob_for_rm(
+    input memblock_rob_key_t key, output memblock_uid_t uid);
+    common_data_transaction data;
+    memblock_rob_map_key_t map_key;
+    uid = '0;
+    if (!try_get_common_data(data)) return 0;
+    map_key = {key.flag, key.value};
+    if (!data.uid_by_active_rob.exists(map_key)) return 0;
+    uid = data.uid_by_active_rob[map_key];
+    return 1;
+endfunction:try_read_uid_by_rob_for_rm
+
+function bit memblock_rm_readonly_api::try_read_uid_by_sq_for_rm(
+    input memblock_sq_key_t key, output memblock_uid_t uid);
+    common_data_transaction data;
+    memblock_sq_map_key_t map_key;
+    uid = '0;
+    if (!try_get_common_data(data)) return 0;
+    map_key = {key.flag, key.value};
+    if (!data.uid_by_sq.exists(map_key)) return 0;
+    uid = data.uid_by_sq[map_key];
+    return 1;
+endfunction:try_read_uid_by_sq_for_rm
+
 function bit memblock_rm_readonly_api::read_uid_by_rob_for_rm(
     input  memblock_rob_key_t key,
     output memblock_uid_t uid
@@ -1679,46 +1717,53 @@ function bit memblock_rm_readonly_api::get_dcache_overlay_readiness_for_rm(
     return 1'b0;
 endfunction:get_dcache_overlay_readiness_for_rm
 
+// 抽象职责：仅返回首次行选择诊断；没有 token 的查询不能授权任何指令错误。
 function bit memblock_rm_readonly_api::read_l2_d_error_for_rm(
-    input  mem_addr_t          line_addr,
-    input  longint unsigned    sample,
-    output l2_d_error_view_t   view
-);
+    input mem_addr_t line_addr, input longint unsigned sample, output l2_d_error_view_t view);
     mem_access_base_sequence::l2_d_error_line_record_t record;
-    bit sticky_enabled;
-
-    view = '{
-        valid: 1'b0,
-        sticky_enabled: 1'b0,
-        denied: 1'b0,
-        corrupt: 1'b0,
-        state: mem_access_base_sequence::L2_D_ERROR_NONE,
-        generation: 0,
-        corrupt_activation_sample: 0,
-        denied_activation_sample: 0,
-        source_valid: 1'b0,
-        source: '0
-    };
-    if (!mem_access_base_sequence::query_l2_d_error_at_sample(
-            line_addr, sample, sticky_enabled, record)) begin
-        return 1'b0;
-    end
-    view.valid          = 1'b1;
-    view.sticky_enabled = sticky_enabled;
-    view.state          = record.valid ? record.state :
-                          mem_access_base_sequence::L2_D_ERROR_NONE;
-    view.denied         = record.valid &&
-                          record.state == mem_access_base_sequence::L2_D_ERROR_DENIED;
-    view.corrupt        = record.valid &&
-                          (record.state == mem_access_base_sequence::L2_D_ERROR_CORRUPT ||
-                           record.state == mem_access_base_sequence::L2_D_ERROR_DENIED);
-    view.generation                 = record.generation;
-    view.corrupt_activation_sample  = record.corrupt_activation_sample;
-    view.denied_activation_sample   = record.denied_activation_sample;
-    view.source_valid               = record.source_valid;
-    view.source                     = record.source;
-    return 1'b1;
+    view = '0;
+    if (!mem_access_base_sequence::query_l2_line_history_at_sample(line_addr, sample, record)) return 0;
+    view.valid = 1;
+    view.ledger_ready = 1;
+    view.line_seen = record.valid;
+    view.state = record.state;
+    view.generation = record.generation;
+    view.source_valid = record.source_valid;
+    view.source = record.source;
+    return 1;
 endfunction:read_l2_d_error_for_rm
+
+// 抽象职责：从实际消费 token 的已送达 beat 形成响应错误事实，不依赖永久行状态。
+function bit memblock_rm_readonly_api::read_l2_response_for_rm(
+    input longint unsigned token, input mem_addr_t line_addr,
+    input longint unsigned sample, input bit [1:0] required_beats, output l2_d_error_view_t view);
+    mem_access_base_sequence::l2_response_history_t record;
+    bit available;
+    view = '0;
+    if (!mem_access_base_sequence::query_l2_response_history(token, line_addr, sample,
+            required_beats, record, available)) return 0;
+    view.valid = 1;
+    view.ledger_ready = 1;
+    view.line_seen = record.valid;
+    view.consumption_proven = available;
+    view.full_complete = record.full_complete;
+    view.beat_valid = record.beat_valid;
+    view.response_token = record.token;
+    view.reset_epoch = record.reset_epoch;
+    view.source_generation = record.source_generation;
+    view.generation = record.line_generation;
+    view.source_valid = record.valid;
+    view.source = record.source;
+    if (available) begin
+        view.denied = (required_beats[0] && record.beat0.denied) || (required_beats[1] && record.beat1.denied);
+        view.corrupt = (required_beats[0] && record.beat0.corrupt) || (required_beats[1] && record.beat1.corrupt);
+        view.state = view.denied ? mem_access_base_sequence::L2_D_ERROR_DENIED :
+            (view.corrupt ? mem_access_base_sequence::L2_D_ERROR_CORRUPT : mem_access_base_sequence::L2_D_ERROR_NONE);
+        view.corrupt_activation_sample = required_beats[0] ? record.beat0.sample : record.beat1.sample;
+        view.denied_activation_sample = view.denied ? view.corrupt_activation_sample : 0;
+    end
+    return 1;
+endfunction:read_l2_response_for_rm
 
 function bit memblock_rm_readonly_api::read_uncache_d_error_for_rm(
     input memblock_uid_t       uid,

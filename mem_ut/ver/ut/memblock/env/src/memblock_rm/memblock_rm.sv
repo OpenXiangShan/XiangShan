@@ -1350,7 +1350,7 @@ function bit memblock_rm::observer_apply_load_d_error_expectation(
         `uvm_info("RM_LS_D_ERROR",
                   $sformatf("uid=%0d line=0x%0h sample=%0d sticky=%0d denied=%0d corrupt=%0d generation=%0d activation(corrupt/denied)=%0d/%0d",
                             item.uid, line_addr, access_sample,
-                            error_view.sticky_enabled,
+                            error_view.ledger_ready,
                             error_view.denied, error_view.corrupt,
                             error_view.generation,
                             error_view.corrupt_activation_sample,
