@@ -104,11 +104,11 @@ Performance counters are printed at the end, as in a normal run.
 
 ### Tests and CI
 
-- **Ready-made traces** are in `/nfs/share/tracertl` (see its `README.txt`):
+- **Ready-made traces** are in `/nfs/home/share/ci-workloads/tracertl` (see its `README.txt`):
   - `tests/*.trace.zstd`: exception, privilege and FP-context corner cases;
   - `coremark/coremark-riscv64-xs.trace.zstd`: CoreMark.
 - **Run them** with `python3 scripts/xiangshan.py --tracertl --ci tracertl-tests`
-  (or `--ci coremark`).
+  (or `--ci tracertl-coremark`).
 - **The CI job** `EMU - TraceRTL` in `.github/workflows/emu.yml` runs both suites.
   It also runs CoreMark on an exec emu built with the same flags, and fails if the
   TraceRTL IPC drifts too far from the exec IPC.

@@ -529,7 +529,8 @@ Only `CONFIG`, `NUM_CORES`, `WITH_DRAMSIM3`, `DRAMSIM3_HOME`, `WITH_CHISELDB`,
 `XS_SIM_ARGS` are passed down.
 
 `scripts/xiangshan.py --build --tracertl` calls this target. `--tracertl` with
-`--ci` runs the traces in `/nfs/share/tracertl` with `--tracertl-file … --no-diff`.
+`--ci tracertl-tests` or `--ci tracertl-coremark` runs the traces in
+`/nfs/home/share/ci-workloads/tracertl` with `--tracertl-file … --no-diff`.
 
 ## 10. Debugging
 

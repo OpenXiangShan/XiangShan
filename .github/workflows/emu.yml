@@ -302,7 +302,7 @@ jobs:
 
   # TraceRTL functional test
   # The TraceRTL emu replays traces recorded by NEMU instead of running an image,
-  # see /nfs/share/tracertl/README.txt for where they come from.
+  # see /nfs/home/share/ci-workloads/tracertl/README.txt for where they come from.
   # CoreMark also runs on an exec emu with the same flags, and TraceRTL must
   # stay within MAX_IPC_DIFF of its IPC.
   # Both emus are built in this workspace one after the other, each one is saved
@@ -373,7 +373,7 @@ jobs:
             --tracertl \
             --wave-dump ${PERF_HOME} \
             --numa --threads 1 \
-            --ci coremark \
+            --ci tracertl-coremark \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee ${PERF_HOME}/tracertl_coremark.log
           echo "IPC=$(grep -aoP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
