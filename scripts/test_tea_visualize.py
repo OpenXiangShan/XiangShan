@@ -22,6 +22,8 @@ class TeaAnalysisTest(unittest.TestCase):
         self.database = Path(self.directory.name) / "tea.db"
         fields = ["ID", "CYCLE", "STATE", "TARGETVALID", "TARGET_ALLOCATIONCYCLE",
                   "TARGET_ROBINDEX", "TARGET_RANK"]
+        fields += [f"CONTEXT_{field}" for field in
+                   ("RETIRED", "COMMITBLOCKMASK", "HEADREASONVALID", "HEADREASON", "HEADREADY")]
         fields += [f"VALIDMASK_{i}" for i in range(8)]
         fields += [f"{prefix}_{i}" for prefix in ("PCVEC", "PSVVEC") for i in range(64)]
         with sqlite3.connect(self.database) as con:
@@ -34,7 +36,7 @@ class TeaAnalysisTest(unittest.TestCase):
                 row = dict.fromkeys(fields, 0)
                 row.update(ID=cycle + 1, CYCLE=cycle, STATE=1)
                 if cycle in (0, 8):
-                    row.update(STATE=0, VALIDMASK_0=1, PCVEC_0=0x10000000)
+                    row.update(STATE=0, CONTEXT_RETIRED=2, VALIDMASK_0=1, PCVEC_0=0x10000000)
                     if cycle == 0:
                         row.update(VALIDMASK_0=3, PCVEC_1=0xFFFFFFFF80001000 - (1 << 64))
                     else:
@@ -193,7 +195,6 @@ class TeaAnalysisTest(unittest.TestCase):
 
     def test_formal_boundary_keeps_untracked_retirements_as_unknown(self):
         with sqlite3.connect(self.database) as con:
-            con.execute("ALTER TABLE Tea_0 ADD COLUMN CONTEXT_RETIRED INTEGER DEFAULT 0")
             con.execute("UPDATE Tea_0 SET VALIDMASK_0=0, CONTEXT_RETIRED=3 WHERE CYCLE=0")
             con.execute("UPDATE Tea_0 SET VALIDMASK_7=0, CONTEXT_RETIRED=4 WHERE CYCLE=8")
         first = self.load(cycle_range=(0, 1))
@@ -248,8 +249,6 @@ class TeaAnalysisTest(unittest.TestCase):
 
     def test_context_is_entry_scoped_and_does_not_change_weights(self):
         with sqlite3.connect(self.database) as con:
-            for field in ("COMMITBLOCKMASK", "HEADREASONVALID", "HEADREASON", "HEADREADY"):
-                con.execute(f"ALTER TABLE Tea_0 ADD COLUMN CONTEXT_{field} INTEGER DEFAULT 0")
             con.execute("UPDATE Tea_0 SET CONTEXT_HEADREASONVALID=1, CONTEXT_HEADREASON=58 WHERE CYCLE=1")
             con.execute("UPDATE Tea_0 SET CONTEXT_COMMITBLOCKMASK=12 WHERE CYCLE=2")
         run = self.load()

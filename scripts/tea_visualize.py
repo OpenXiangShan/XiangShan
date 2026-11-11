@@ -156,7 +156,7 @@ def load_data(path, label, args):
                 lanes = [(normalize_pc(row[f"PCVEC_{i}"]), row[f"PSVVEC_{i}"])
                          for i in range(width) if mask & (1 << i)]
                 if state == 0:
-                    retired = row["CONTEXT_RETIRED"] if "CONTEXT_RETIRED" in columns else len(lanes)
+                    retired = row["CONTEXT_RETIRED"]
                     if retired <= 0 or retired < len(lanes):
                         raise ValueError(f"{path}: invalid retired count in row {row['ID']}")
                     # Pre-window allocations have no history; preserve their share of this cycle.
@@ -202,10 +202,9 @@ def load_data(path, label, args):
                 counts[pc][psv] += 1
                 weights[pc][psv] += weight
                 state_weights[STATES[state]][pc][psv] += weight
-                if "CONTEXT_COMMITBLOCKMASK" in columns:
-                    mask = row["CONTEXT_COMMITBLOCKMASK"]
-                    reason = row["CONTEXT_HEADREASON"] if row["CONTEXT_HEADREASONVALID"] else -1
-                    contexts[(pc, state, mask, reason, row["CONTEXT_HEADREADY"])] += weight
+                mask = row["CONTEXT_COMMITBLOCKMASK"]
+                reason = row["CONTEXT_HEADREASON"] if row["CONTEXT_HEADREASONVALID"] else -1
+                contexts[(pc, state, mask, reason, row["CONTEXT_HEADREADY"])] += weight
                 summary["selected_lanes"] += 1
                 summary["sample_weight"] += weight
                 summary[f"state_{STATES[state].lower()}_weight"] += weight

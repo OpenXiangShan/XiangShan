@@ -2121,7 +2121,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       for (i <- 0 until (LduCnt + StaCnt)) {
         val lsInfo = in.debug_ls.debugLsInfo(i)
         teaPsvSetSources += TeaPsvSetSource(lsInfo.s1_isTlbMiss, lsInfo.s1_robIdx, TeaEvent.bit(TeaEvent.ST_TLB))
-        teaPsvSetSources += TeaPsvSetSource(lsInfo.s2_isDcacheMiss, lsInfo.s2_robIdx, TeaEvent.bit(TeaEvent.ST_L1))
+        teaPsvSetSources += TeaPsvSetSource(lsInfo.s2_isDcacheFirstMiss, lsInfo.s2_robIdx, TeaEvent.bit(TeaEvent.ST_L1))
       }
       val teaSelector = Module(new TeaSampleSelector)
       teaSelector.io.enable := enableTea.asBool
@@ -2142,8 +2142,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       tracker.io.readPtr(1) := teaFlushPtr
       tracker.io.readPc(0) := teaRedirectPc
       tracker.io.readPc(1) := teaExceptionPc
-      teaRedirectPsv := Mux(tracker.io.read(0).valid, tracker.io.read(0).psv, teaRedirectPsvDefault)
-      teaExceptionPsv := Mux(tracker.io.read(1).valid, tracker.io.read(1).psv, TeaEvent.bit(TeaEvent.FL_EX))
+      teaRedirectPsv := Mux(tracker.io.read(0).valid, tracker.io.read(0).bits, teaRedirectPsvDefault)
+      teaExceptionPsv := Mux(tracker.io.read(1).valid, tracker.io.read(1).bits, TeaEvent.bit(TeaEvent.FL_EX))
       // Keep the helper input independent of its read-valid outputs used by state classification.
       tracker.io.markStalled := teaSelector.io.sampleValid && !isEmpty &&
         state =/= s_walk && !in.redirect.valid && !hasTeaCommit

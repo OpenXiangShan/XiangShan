@@ -25,7 +25,7 @@ private[xiangshan] object TeaMemberTrackerNative {
   }
 
   def cpp(name: String, rob: Int, rename: Int, commit: Int, wb: Int, events: Int): String = {
-    val outputWords = 10 + commit * rename * 6 + rename * 9
+    val outputWords = 8 + commit * rename * 6 + rename * 9
     s"""
        |$implementation
        |extern "C" void $name(unsigned char reset, unsigned char phase,

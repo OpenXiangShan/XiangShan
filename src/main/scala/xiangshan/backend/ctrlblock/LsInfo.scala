@@ -69,7 +69,6 @@ object DebugLsInfo {
 
 class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
   val s1_isTlbMiss = Bool() // any issue; used by TEA ST_TLB
-  val s2_isDcacheMiss = Bool() // any issue; used by TEA ST_L1
   // unified processing at the end stage of load/store  ==> s2  ==> bug that will write error robIdx data
   val s1_robIdx = new RobPtr
   val s2_robIdx = new RobPtr

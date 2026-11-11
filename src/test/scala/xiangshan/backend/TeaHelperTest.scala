@@ -36,7 +36,7 @@ class TeaHelperTest extends XSTester {
   private def teaBitValue(event: Int): BigInt = BigInt(1) << event
 
   class TeaPropagationSmoke(p: Parameters) extends Module {
-    private val ctrlTea = TeaPsvOps.setBit(TeaEvent.bit(TeaEvent.DR_L1), TeaEvent.FL_MB)
+    private val ctrlTea = TeaEvent.bit(TeaEvent.DR_L1) | TeaEvent.bit(TeaEvent.FL_MB)
 
     val io = IO(new Bundle {
       val decodeInTea = Output(UInt(TeaEvent.width.W))
@@ -94,14 +94,8 @@ class TeaHelperTest extends XSTester {
     inBits.instrs := io.instrs
     inBits.valid := io.validMask
     inBits.enqEnable := io.enqEnableMask
-    inBits.teaPsv := Mux(
-      io.packetDrTlb,
-      TeaPsvOps.setBit(
-        Mux(io.packetDrL1, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty),
-        TeaEvent.DR_TLB
-      ),
-      Mux(io.packetDrL1, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty)
-    )
+    inBits.teaPsv := Mux(io.packetDrL1, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty) |
+      Mux(io.packetDrTlb, TeaEvent.bit(TeaEvent.DR_TLB), TeaPsvOps.empty)
 
     ibuffer.io.flush := false.B
     ibuffer.io.fromBackend := 0.U.asTypeOf(new BackendToIBufBundle()(p))

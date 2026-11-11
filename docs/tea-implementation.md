@@ -367,7 +367,6 @@ Top-down 原因固定为 Entry 级证据，不能证明它属于 TEA 选中的 r
 沿用 `scripts/tea_visualize.py` 命令。每个输入额外生成 `head_context.csv`、
 `cycle_summary.json` 和 `no_commit_intervals.csv`。后两者覆盖全部已采集的启用窗口，
 不应用 `--cycle-range` 或 PC 排除条件；JSON 的 scope/observed_end/collection_closed 显式记录该口径。
-旧数据库仍可分析，没有新增字段时上下文表为空，不生成精确周期结果。
 Summary 模式分析仍需保留四表 schema；`--spec-log-dir` 要求 ROI 内存在 TEA 样本，
 因此纯 Summary 使用普通分析入口。全启用窗口摘要不能直接作为 SPEC 测量 ROI 的精确计数。
 

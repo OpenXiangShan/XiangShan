@@ -41,10 +41,6 @@ object TeaEvent {
 
 object TeaPsvOps {
   def empty: UInt = 0.U(TeaEvent.width.W)
-
-  def setBit(psv: UInt, event: Int): UInt = {
-    psv | TeaEvent.bit(event)
-  }
 }
 
 object TeaState {
