@@ -55,6 +55,15 @@ def analyze(folder, receipt_path):
     for name, values in counters.items():
         if re.search(r'\.l2cache\.slices_\d+\.reqArb\.sinkA_stall_by_mshrFull$', name):
             pressure[name] = dict(values=values, unit='per-bank condition cycles')
+    attempts = {}
+    for name, values in counters.items():
+        if re.fullmatch(r'.*\.missQueue\.entries_\d+\.main_pipe_attempt_cycles', name):
+            assert len(values) == 1 and 0 <= values[0] <= number(cycles), (name, values)
+            attempts[name] = values[0]
+    unavailable = scalar('.missQueue.utilization', 'non-primary-ready miss entry-cycles, including admission reservations')
+    attempt_sum = sum(attempts.values()) if attempts else None
+    if attempt_sum is not None and number(unavailable) is not None:
+        assert attempt_sum <= number(unavailable), 'Main-pipe attempts exceed all non-primary-ready entry-time'
     ptw = {}
     for role, entry in [('load', 'load_filter_load_entry'), ('store', 'store_filter_store_entry'),
                         ('prefetch', 'prefetch_filter_prefetch_entry')]:
@@ -70,6 +79,8 @@ def analyze(folder, receipt_path):
                 ROB_head_load_wait=load_wait,
                 ROB_head_load_wait_per_retired=number(load_wait)/number(retired) if number(load_wait) is not None else None,
                 L2_sinkA_mshrFull=pressure,PTW=ptw,
+                L1_MQ_mainpipe_attempts=dict(entries=attempts, attempt_entry_cycles=attempt_sum,
+                                             unavailable_entry_cycles=unavailable),
                 receipt_sha256=digest(receipt_path),native_log_sha256=digest(folder/'simulator_err.txt'),
                 tool_sha256=digest(Path(__file__)),
                 scope='ROB-head L2 address match is not qualified by not-writeback or LOAD type; '
@@ -78,7 +89,10 @@ def analyze(folder, receipt_path):
                       'Prefetch share is miss-entry time, not useless traffic or CPU-loss share. '
                       'Bank stall conditions can overlap and propagate; PTW handshakes and blocked '
                       'cycles have different units. Absent/ambiguous counters remain unknown; '
-                      'these observations do not prove capacity, bandwidth or a causal performance gain.')
+                      'Main-pipe attempts count allocated-entry time after request acceptance through completion, replay or retry; '
+                      'the old main_pipe_penalty is not consumed. Attempt sums are not disjoint CPU cycles '
+                      'or completed-request latency. These observations do not prove capacity, bandwidth '
+                      'or a causal performance gain.')
 
 
 def main():

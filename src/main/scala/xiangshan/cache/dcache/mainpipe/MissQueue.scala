@@ -1152,7 +1152,10 @@ for(i <- 0 until reqNum) {
   XSPerfAccumulate("penalty_between_grantlast_and_release",
     BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
   )
-  XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
+  // Ordinary load/store refills complete on main_pipe_refill_resp; main_pipe_resp is AMO-only.
+  val mainPipeAttemptDone = io.main_pipe_resp || io.main_pipe_refill_resp ||
+    io.main_pipe_replay || io.main_pipe_evict_BtoT_way || release_entry
+  XSPerfAccumulate("main_pipe_attempt_cycles", req_valid && BoolStopWatch(io.main_pipe_req.fire, mainPipeAttemptDone))
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
