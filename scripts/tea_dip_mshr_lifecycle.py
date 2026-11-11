@@ -1,7 +1,8 @@
 """Reconstruct owner and merged-request residence from a closed L2MshrLifecycle batch trace.
 
-Native clean/dump markers define the same completion cohorts as existing
-MSHR histograms. Owner residence and post-merge tail overlap CPU execution;
+Native completion histograms exclude the dump cycle; allocation and merge
+accumulators include it. Clean clears both after the cycle's events.
+Owner residence and post-merge tail overlap CPU execution;
 neither is CPU critical latency or recoverable cycles.
 """
 import argparse
@@ -66,6 +67,18 @@ def reconstruct(rows, slots):
     allocation_count = merge_count = free_count = simultaneous_free_batches = 0
     for row in rows:
         cycle, bank = row['NATIVECYCLE'], row['EVENTS_BANK']
+        # Histogram prints current counters; Accumulate includes this cycle's events.
+        snapshot = None
+        if row['NATIVEDUMP'] and row['LOGENABLE']:
+            assert bank not in snapshots[cycle], (bank, cycle)
+            unfinished = [dict(entry=e, owner_source=SOURCES[x['source']],
+                               merged_source=SOURCES[x['merge_source']] if 'merge_source' in x else None,
+                               observed_owner_age=cycle - x['start'],
+                               observed_post_merge_age=cycle - x['merge_cycle'] if 'merge_cycle' in x else None)
+                          for (b, e), x in active.items() if b == bank]
+            snapshot = dict(begin_after_clean=starts[bank],
+                slot_counts=dict(counts[bank]), slot_sums=dict(totals[bank]),
+                completion_groups=groups(completed[bank], starts[bank]), unfinished=unfinished)
         freed = [i for i in slots if row[f'EVENTS_FREED_{i}_VALID']]
         simultaneous_free_batches += len(freed) > 1
         for entry in freed:
@@ -102,17 +115,9 @@ def reconstruct(rows, slots):
             item.update(merge_cycle=cycle, merge_source=source)
             merges[bank] += 1
             merge_count += 1
-        if row['NATIVEDUMP'] and row['LOGENABLE']:
-            assert bank not in snapshots[cycle], (bank, cycle)
-            unfinished = [dict(entry=e, owner_source=SOURCES[x['source']],
-                               merged_source=SOURCES[x['merge_source']] if 'merge_source' in x else None,
-                               observed_owner_age=cycle - x['start'],
-                               observed_post_merge_age=cycle - x['merge_cycle'] if 'merge_cycle' in x else None)
-                          for (b, e), x in active.items() if b == bank]
-            snapshots[cycle][bank] = dict(begin_after_clean=starts[bank],
-                slot_counts=dict(counts[bank]), slot_sums=dict(totals[bank]),
-                allocation_counts=dict(allocations[bank]), merge_pulses=merges[bank],
-                completion_groups=groups(completed[bank], starts[bank]), unfinished=unfinished)
+        if snapshot is not None:
+            snapshot.update(allocation_counts=dict(allocations[bank]), merge_pulses=merges[bank])
+            snapshots[cycle][bank] = snapshot
         if row['CLEAN']:
             starts[bank] = cycle
             completed[bank].clear()
@@ -172,7 +177,8 @@ def analyze(database, native_log):
                   native_log_sha256=hashlib.sha256(native_log.read_bytes()).hexdigest(),
                   scope='Captured allocation/merge/free batches through the last printed native dump. '
                         'Owner age equals its original full-width timer. Native epoch boundaries and '
-                        'per-slot completion count/sum are checked exactly. Post-merge-to-free includes '
+                        'per-slot completion count/sum exclude the dump handshake, while allocation/merge '
+                        'accumulators include it. Post-merge-to-free includes '
                         'protocol completion and may extend beyond CPU data return. Censored requests '
                         'are listed separately; no CPU critical delay or unique DRAM cause is inferred.')
     return result
