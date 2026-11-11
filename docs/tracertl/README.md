@@ -37,9 +37,11 @@ load / store data are don't care.
 - **Exceptions and interrupts.** A traced exception is raised at decode as an
   illegal instruction, and the CSR unit sends traps and `xret`s to the traced target.
   All other exception sources (TLB, PMP, CSR permission, misalignment) are silenced,
-  so the RTL traps exactly where the trace did. Interrupts, and the jump from the
-  reset vector to the first traced PC, are force-jump records that pass through the
-  pipeline like a trapping instruction.
+  so the RTL traps exactly where the trace did. The RTL's own interrupt sources are
+  disabled, so interrupts can only come from the trace. They are meant to replay as
+  force-jump records (exception bit 7 set) that pass through the pipeline like a
+  trapping instruction; today only the synthetic jump from the reset vector to the
+  first traced PC uses this path (see §3).
 - **Memory access.** Load, store and AMO units take the traced VA and PA. The TLBs
   still look up, miss and walk, so translation latency is kept, but the translated
   address comes from the trace's VA→PA map, and the page walker reads PTEs from a page
@@ -115,7 +117,12 @@ Performance counters are printed at the end, as in a normal run.
 
 - Wrong-path instructions are not executed (see §1). Their effects on the backend
   and on the data caches are therefore not modelled.
-- NEMU's interrupt records are not replayed yet.
+- Interrupts are not supported yet. NEMU writes an interrupt as a standalone
+  record with PC 0 and no encoding, and TraceRTL rejects such a trace at load
+  time as illegal. A trace must therefore be recorded without interrupts.
+- Features whose performance depends on data values (value prediction, data
+  compression) cannot be evaluated, since register and memory data are not
+  modelled.
 - CSR state that a program loads from memory is not modelled, since there is no
   program image. One example is restoring `mstatus.FS` from a saved context.
 - AMOs take their address from the trace but do not access the DCache.
