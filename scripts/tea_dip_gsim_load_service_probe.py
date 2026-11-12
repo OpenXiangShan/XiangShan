@@ -53,7 +53,10 @@ def source(root, header, database, symbols):
     unit, enum = unit_path.read_text(), enum_path.read_text()
     assert 'cause(C_WF) := false.B' in unit and 'cause(C_MF) := false.B' in unit
     assert re.search(r'val C_WF\s*= 7\b', enum) and re.search(r'val C_MF\s*= 12\b', enum)
+    package = root / 'src/main/scala/xiangshan/mem/pipeline/package.scala'
+    assert re.search(r'val noQuery = addType.*?val hit = addType.*?val miss = addType', package.read_text(), re.S)
     snapshots, commits, cases, bindings = [], [], [], []
+    detail_bindings = []
     for lane in range(3):
         p = PREFIX + f'LoadUnit_{lane}__DOT__'
         inp, out = p + 's1__DOT__pipeOutBits__DOT__', p + 's2__DOT__pipeOutBits__DOT__'
@@ -86,6 +89,16 @@ def source(root, header, database, symbols):
         store = field(p + 's2__DOT__storeFullForward', 1)
         need = field(p + 's2__DOT__needDCacheAccess', 1)
         perf_miss = field(p + 's2__DOT__io_perf_1_value_REG$NEXT', 1)
+        bank = PREFIX + 'dcache__DOT__dcache__DOT__bankedDataArray__DOT__'
+        suffix = '' if lane == 0 else '_' + str(lane)
+        detail = [value(p + 's2__DOT__troubleMaker'), field(inp + 'tlbAccessResult', 3),
+                  field(inp + 'specialModeRequest', 1),
+                  '(' + field(inp + 'unalignHead', 1) + ' && ' + field(inp + 'shouldFastReplay', 1) + ')',
+                  field(bank + 'real_rr_bank_conflict_reg' + suffix, 1),
+                  field(bank + 'real_wr_bank_conflict_reg' + suffix, 1),
+                  field(bank + 'real_rrl_bank_conflict_reg' + suffix, 1)]
+        detail_bindings.append(dict(lane=lane, expressions=detail))
+
         scalar = [f'uint64_t({v})' for v in values]
         cases.append(f'''  if (prior_valid[{lane}]) assert(prior_causes[{lane}] == ({current_mask}));
   prior_valid[{lane}] = bool({valid});
@@ -96,7 +109,15 @@ def source(root, header, database, symbols):
     prior_causes[{lane}] = cause;
     const unsigned fire = unsigned({fire});
     assert({perf_miss} == bool(fire && (cause & (1u << 6))));
-    write_event({lane}, fire, unsigned({raw_miss}), unsigned({full}), unsigned({store}), unsigned({need}), cause, {','.join(scalar)});
+    const unsigned trouble = unsigned({detail[0]});
+    const unsigned tlb = unsigned({detail[1]});
+    const unsigned special = unsigned({detail[2]});
+    const unsigned unaligned = unsigned({detail[3]});
+    const unsigned rr = unsigned({detail[4]}), rw = unsigned({detail[5]}), rrl = unsigned({detail[6]});
+    assert(bool(cause & (1u << 3)) == bool((trouble && tlb == 4) || special));
+    assert(bool(cause & (1u << 8)) == bool(trouble && (({need} && (rr || rw || rrl)) || unaligned)));
+    write_event({lane}, fire, unsigned({raw_miss}), unsigned({full}), unsigned({store}), unsigned({need}), cause,
+      trouble, tlb, special, unaligned, rr, rw, rrl, {','.join(scalar)});
   }}''')
         bindings.append(dict(lane=lane, valid_equals_handshake=True, fire_expression=assignments[fire_name], raw_miss=raw_miss_name))
     step = '_ZN7SSimTop4stepEv'
@@ -118,15 +139,16 @@ static bool prior_valid[3]{{}};
 static unsigned prior_causes[3]{{}};
 static FILE *output = nullptr;
 static void write_event(unsigned lane, unsigned fire, unsigned miss, unsigned full, unsigned store,
-  unsigned need, unsigned cause, uint64_t flag, uint64_t index, uint64_t former, uint64_t rank,
+  unsigned need, unsigned cause, unsigned trouble, unsigned tlb, unsigned special, unsigned unaligned,
+  unsigned rr, unsigned rw, unsigned rrl, uint64_t flag, uint64_t index, uint64_t former, uint64_t rank,
   uint64_t uop, uint64_t issue, uint64_t pc, uint64_t va, uint64_t pa, uint64_t entrance, uint64_t type) {{
   if (!output) {{
     output = fopen("load-service-probe.csv", "w");
     if (!output) {{ perror("load-service-probe.csv"); abort(); }}
-    fprintf(output, "core_cycle,clean,native_dump,lane,fire,raw_miss,full_forward,store_full_forward,need_dcache,cause_mask,rob_flag,rob_index,rob_former,rank,uop_index,issue_cycle,pc,virtual_address,physical_address,entrance,instr_type\\n");
+    fprintf(output, "core_cycle,clean,native_dump,lane,fire,raw_miss,full_forward,store_full_forward,need_dcache,cause_mask,trouble_maker,tlb_access_result,special_request,unaligned_replay,read_read_conflict,read_write_conflict,readline_conflict,rob_flag,rob_index,rob_former,rank,uop_index,issue_cycle,pc,virtual_address,physical_address,entrance,instr_type\\n");
   }}
-  fprintf(output, "%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\\n",
-    context.core,context.clean,context.dump,lane,fire,miss,full,store,need,cause,flag,index,former,rank,uop,issue,pc,va,pa,entrance,type);
+  fprintf(output, "%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\\n",
+    context.core,context.clean,context.dump,lane,fire,miss,full,store,need,cause,trouble,tlb,special,unaligned,rr,rw,rrl,flag,index,former,rank,uop,issue,pc,va,pa,entrance,type);
 }}
 extern "C" void __real_{writer}({signature});
 extern "C" void __wrap_{writer}({signature}) {{
@@ -147,12 +169,13 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
 {chr(10).join(commits)}
   assert(context.clean == {clean} && context.dump == {dump});
   if (context.seen && (context.clean || context.dump))
-    write_event(3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    write_event(3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 {chr(10).join(cases)}
 }}
 '''
     return cpp, [step, writer], dict(lanes=bindings, assignments=assignments,
-        generated_source_sha256=code_hashes, RTL_source_sha256={str(p): digest(p) for p in [unit_path, enum_path]},
+        detail_bindings=detail_bindings, cause_details_asserted=True,
+        generated_source_sha256=code_hashes, RTL_source_sha256={str(p): digest(p) for p in [unit_path, enum_path, package]},
         cause_next_commit_asserted=True, WB_identity='not_captured', scope='S2 attempts only. Next payload commitments and qualified miss event are asserted; final WB/lifetime association is not established.')
 
 
