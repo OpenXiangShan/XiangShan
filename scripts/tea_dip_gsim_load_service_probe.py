@@ -21,7 +21,7 @@ IDENTITY = [('uop__DOT__robIdx__DOT__flag', 1), ('uop__DOT__robIdx__DOT__value',
             ('entrance', 8), ('accessType__DOT__instrType', 3)]
 
 
-def source(root, header, database, symbols):
+def source(root, header, database, symbols, capture_wb=False):
     model = root / 'build/gsim-compile/model'
     declared = set(re.findall(r'uint(?:8|16|32|64)_t ([A-Za-z0-9_$]+)(?:;|\[)', header))
     assignments, code_hashes = {}, {}
@@ -57,6 +57,7 @@ def source(root, header, database, symbols):
     assert re.search(r'val noQuery = addType.*?val hit = addType.*?val miss = addType', package.read_text(), re.S)
     snapshots, commits, cases, bindings = [], [], [], []
     detail_bindings = []
+    wb_cases, wb_bindings = [], []
     for lane in range(3):
         p = PREFIX + f'LoadUnit_{lane}__DOT__'
         inp, out = p + 's1__DOT__pipeOutBits__DOT__', p + 's2__DOT__pipeOutBits__DOT__'
@@ -100,7 +101,29 @@ def source(root, header, database, symbols):
         detail_bindings.append(dict(lane=lane, expressions=detail))
 
         scalar = [f'uint64_t({v})' for v in values]
-        cases.append(f'''  if (prior_valid[{lane}]) assert(prior_causes[{lane}] == ({current_mask}));
+        joint_s2 = ''
+        joint_clear = ''
+        if capture_wb:
+            wb_name = p + 's3__DOT__loadSuccessfulWriteback'
+            wb_success = value(wb_name)
+            wb_values = [field(out + name, width) for name, width in IDENTITY]
+            wb_bindings.append(dict(lane=lane, success_expression=assignment(wb_name),
+                                    fields=wb_values))
+            wb_cases.append(f"""  if ({wb_success}) {{
+    assert(context.seen && previous_s2_fire[{lane}]);
+    assert(context.core == previous_s2_core[{lane}] + 1);
+{chr(10).join(f'    assert(previous_s2[{lane}][{i}] == {v});' for i, v in enumerate(wb_values))}
+    write_joint(2, {lane}, 0, {','.join(f'uint64_t({v})' for v in wb_values)});
+  }}""")
+            joint_clear = f'  previous_s2_fire[{lane}] = false;'
+            joint_s2 = f"""    if (fire) {{
+      previous_s2_fire[{lane}] = true; previous_s2_core[{lane}] = context.core;
+{chr(10).join(f'      previous_s2[{lane}][{i}] = {v};' for i, v in enumerate(values))}
+      write_joint(1, {lane}, cause, {','.join(scalar)});
+    }}"""
+
+        cases.append(f'''{joint_clear}
+  if (prior_valid[{lane}]) assert(prior_causes[{lane}] == ({current_mask}));
   prior_valid[{lane}] = bool({valid});
   if ({valid}) {{
     assert(context.seen);
@@ -118,6 +141,7 @@ def source(root, header, database, symbols):
     assert(bool(cause & (1u << 8)) == bool(trouble && (({need} && (rr || rw || rrl)) || unaligned)));
     write_event({lane}, fire, unsigned({raw_miss}), unsigned({full}), unsigned({store}), unsigned({need}), cause,
       trouble, tlb, special, unaligned, rr, rw, rrl, {','.join(scalar)});
+{joint_s2}
   }}''')
         bindings.append(dict(lane=lane, valid_equals_handshake=True, fire_expression=assignments[fire_name], raw_miss=raw_miss_name))
     step = '_ZN7SSimTop4stepEv'
@@ -127,6 +151,29 @@ def source(root, header, database, symbols):
     args = [item.strip().split()[-1].lstrip('*') for item in signature.split(',')]
     clean = field('difftest__DOT__perfCtrl__DOT__clean', 1)
     dump = field('difftest__DOT__perfCtrl__DOT__dump', 1)
+    joint_cpp = ''
+    joint_boundary = ''
+    if capture_wb:
+        issue_source = root / 'src/main/scala/xiangshan/backend/issue/IssueQueue.scala'
+        assert 'issueTime := GTimer() + 1.U' in issue_source.read_text()
+        joint_cpp = r"""
+static bool previous_s2_fire[3]{};
+static uint64_t previous_s2_core[3]{};
+static uint64_t previous_s2[3][11]{};
+static FILE *joint_output = nullptr;
+static void write_joint(unsigned kind, unsigned lane, unsigned cause, uint64_t flag, uint64_t index,
+  uint64_t former, uint64_t rank, uint64_t uop, uint64_t issue, uint64_t pc, uint64_t va,
+  uint64_t pa, uint64_t entrance, uint64_t type) {
+  if (!joint_output) {
+    joint_output = fopen("load-writeback-probe.csv", "w");
+    if (!joint_output) { perror("load-writeback-probe.csv"); abort(); }
+    fprintf(joint_output, "core_cycle,clean,native_dump,kind,lane,cause_mask,rob_flag,rob_index,rob_former,rank,uop_index,issue_cycle,pc,virtual_address,physical_address,entrance,instr_type\n");
+  }
+  fprintf(joint_output, "%lu,%u,%u,%u,%u,%u,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n",
+    context.core,context.clean,context.dump,kind,lane,cause,flag,index,former,rank,uop,issue,pc,va,pa,entrance,type);
+}
+"""
+        joint_boundary = '    write_joint(0,3,0,0,0,0,0,0,0,0,0,0,0,0);'
     cpp = f'''#include "SimTop.h"
 #include <cassert>
 #include <cstdint>
@@ -134,6 +181,7 @@ def source(root, header, database, symbols):
 #include <cstdlib>
 struct Context {{ bool seen; uint64_t core; unsigned clean, dump; }};
 static Context context{{}};
+{joint_cpp}
 static bool in_step = false;
 static bool prior_valid[3]{{}};
 static unsigned prior_causes[3]{{}};
@@ -168,18 +216,23 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
   in_step = true; __real_{step}(model); in_step = false;
 {chr(10).join(commits)}
   assert(context.clean == {clean} && context.dump == {dump});
-  if (context.seen && (context.clean || context.dump))
+  if (context.seen && (context.clean || context.dump)) {{
     write_event(3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+{joint_boundary}
+  }}
+{chr(10).join(wb_cases)}
 {chr(10).join(cases)}
 }}
 '''
     return cpp, [step, writer], dict(lanes=bindings, assignments=assignments,
         detail_bindings=detail_bindings, cause_details_asserted=True,
-        generated_source_sha256=code_hashes, RTL_source_sha256={str(p): digest(p) for p in [unit_path, enum_path, package]},
+        writeback_capture=capture_wb, writeback_bindings=wb_bindings,
+        S2_to_WB_one_cycle_asserted=capture_wb,
+        generated_source_sha256=code_hashes, RTL_source_sha256={str(p): digest(p) for p in [unit_path, enum_path, package] + ([issue_source] if capture_wb else [])},
         cause_next_commit_asserted=True, WB_identity='not_captured', scope='S2 attempts only. Next payload commitments and qualified miss event are asserted; final WB/lifetime association is not established.')
 
 
-def build(root, output, compiler, library):
+def build(root, output, compiler, library, capture_wb=False):
     root, output, library = Path(root).resolve(), Path(output).resolve(), Path(library).resolve()
     assert not output.exists()
     model = root / 'build/gsim-compile/model'
@@ -187,7 +240,7 @@ def build(root, output, compiler, library):
     objects = sorted(model.glob('*.o')) + sorted((root / 'build/gsim-compile/other').glob('*.o'))
     originals = {str(p): digest(p) for p in [original, header, database, library, *objects]}
     symbols = subprocess.check_output(['nm', '--defined-only', str(original)], text=True)
-    cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols)
+    cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols, capture_wb=capture_wb)
     output.mkdir(parents=True)
     (output / 'probe.cpp').write_text(cpp)
     (output / 'objects.rsp').write_text('\n'.join(shlex.quote(str(p)) for p in objects) + '\n')
@@ -215,9 +268,10 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compiler', default='clang++')
+    parser.add_argument('--capture-wb', action='store_true', help='Also capture matched S2 attempts and successful load writebacks')
     parser.add_argument('--dramsim3-library', type=Path, required=True)
     args = parser.parse_args()
-    proof = build(args.root, args.output, args.compiler, args.dramsim3_library)
+    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_wb=args.capture_wb)
     print(json.dumps({k: proof[k] for k in ['passed', 'binary', 'binary_sha256', 'original_files_unchanged', 'original_objects']}))
 
 
