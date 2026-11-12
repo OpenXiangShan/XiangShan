@@ -190,6 +190,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
       core.module.io.l2_hint <> l2top.module.io.l2_hint
+      // Performance comparison: suppress only the core's L2-to-L1D hint.
+      // Keep coupledL2's internal hint-guided grant scheduling unchanged.
+      core.module.io.l2_hint.foreach(_.valid := false.B)
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2top.module.io.debugTopDown.l2MissMatch
