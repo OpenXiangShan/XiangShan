@@ -6,6 +6,7 @@ import pytest
 
 from env.core.transactions import ProgramImage
 from env.funcov.py.ifu.owner_v3_funcov import OWNER_V3_EVENT_TYPE
+from env.funcov.py.ifu.cacheable_pipeline_funcov import _native_signal_names
 from env.sequences import LoadProgramSequence
 
 
@@ -24,7 +25,7 @@ _CROSS_TRAIN_SECOND_START_OFFSET = 0x60
 _CROSS_TRAIN_BRANCH_OFFSET = 0x74
 _CROSS_TRAIN_LONG_BLOCK_OFFSET = 0x100
 _CROSS_TRAIN_LONG_BRANCH_OFFSET = 0x13E
-_IFU_PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
+_IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
 _OBSERVABLE_S2_SLOTS = 35
 _PREDICTOR_WARMUP_OWNER_BINS = (
     "BIN-899",
@@ -160,7 +161,7 @@ def _load_cross_block_not_taken_training_and_reset(env) -> int:
 def _read_required(recorder, *names: str) -> int:
     value = recorder._read_first_dut_signal(
         recorder.env.dut,
-        tuple(str(name) for name in names),
+        _native_signal_names(names),
     )
     assert value is not None, f"required V3 PredChecker signal is unavailable: {names}"
     return int(value)
@@ -169,13 +170,13 @@ def _read_required(recorder, *names: str) -> int:
 def _read_optional(recorder, *names: str) -> int | None:
     value = recorder._read_first_dut_signal(
         recorder.env.dut,
-        tuple(str(name) for name in names),
+        _native_signal_names(names),
     )
     return None if value is None else int(value)
 
 
 def _read_direct(env, *names: str) -> int | None:
-    for name in names:
+    for name in _native_signal_names(names):
         try:
             signal = getattr(env.dut, str(name), None)
             if signal is None:
