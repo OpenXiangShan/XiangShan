@@ -53,6 +53,7 @@ import xiangshan.backend.dispatch._
 import xiangshan.backend.rob.Rob._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  // Retain the ROB module hierarchy.
   override def shouldBeInlined: Boolean = false
 
   lazy val module = new RobImp(this)(p, params)
@@ -60,15 +61,45 @@ class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with
 
 class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper)
   with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with HasCriticalErrors {
+
+  /*
+   * Local parameters
+   * Values below refer to DefaultConfig: RobSize = 160, RenameWidth = CommitWidth = 8.
+   */
+  private val bankNum: Int = 8
+  private val bankAddrWidth: Int = log2Up(CommitWidth) // 3 bits for the offset within a commit row.
+  private val bankNumWidth: Int = log2Up(bankNum) // 3 bits for physical bank selection.
+  private val entriesPerBank: Int = RobSize / bankNum // 20 entries per bank.
+  private val fflagsWidth: Int = 5
+
+  assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
+  require(RenameWidth <= CommitWidth)
+
+  // Size trace counts in instructions, half-words, and bytes.
+  private val traceInstrCountWidth: Int = log2Ceil(RenameWidth + 1) // 4 bits for 0 to 8 instructions.
+  private val traceHalfWordsWidth: Int = log2Ceil(RenameWidth * 2 + 1) // 5 bits for 0 to 16 half-words.
+  private val traceByteCountWidth: Int = log2Ceil(RenameWidth * 4 + 1) // 6 bits for 0 to 32 bytes.
+
+  private val traceEncodeTable = (1 to RenameWidth).flatMap { instrNum => // 44 instruction/RVC combinations.
+    (0 to instrNum).map(nonRVCNum => (instrNum, nonRVCNum))
+  }
+  private val traceDecodeTable = traceEncodeTable.map { case (instrNum, nonRVCNum) => // 44 count pairs.
+    (instrNum, instrNum + nonRVCNum)
+  }
+
   private val LduCnt = params.LduCnt
   private val StaCnt = params.StaCnt
 
+  /*
+   * Interfaces and writeback aliases
+   */
   val in = IO(new In(params))
   val out = IO(new Out(params))
 
   override lazy val io_perf: Vec[PerfEvent] = out.perfEvents
   override lazy val io_error: Vec[Bool] = out.criticalErrors
 
+  // Select writeback ports for completion, exceptions, and branch observations.
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = in.exuWriteback
   val exceptionWBs = in.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = in.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
@@ -76,93 +107,168 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isBrhOrJmpWBs = in.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
   val csrWBs = in.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
   val ldWBs = in.exuWriteback.filter(x => x.bits.params.hasLoadFu).toSeq
-
-  if (backendParams.debugEn){
-    PerfCCT.tick(clock, reset)
-    in.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
-      PerfCCT.updateInstPos(wb.bits.debug_seqNum.get, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
-    }
-  }
-
   val numExuWbPorts = exuWBs.length
-  val bankAddrWidth = log2Up(CommitWidth)
-
   println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
 
+  // Restrict each flag tracker bit to writeback ports that carry it.
+  private val writebackFflagsCandidates = (0 until in.writeback.size).filter { index =>
+    in.writeback(index).bits.fflags.nonEmpty
+  }
+  private val writebackVxsatCandidates = (0 until in.writeback.size).filter { index =>
+    in.writeback(index).bits.vxsat.nonEmpty
+  }
+  private val writebackFlagCandidates =
+    Seq.fill(fflagsWidth)(writebackFflagsCandidates) :+ writebackVxsatCandidates
+
+  /*
+   * Submodules
+   * Instantiate queue pointers and recovery buffers.
+   */
   val rab = Module(new RenameBuffer(RabSize))
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
-  val bankNum = 8
-  assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
-  val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
-  // Per-slot functional state used by exception handling and performance
-  // accounting.
-  val slotUopBuf = Reg(Vec(RobSize, Vec(2, new RobSlotInfo)))
-  // pointers
-  // For enqueue ptr, we don't duplicate it since only enqueue needs it.
+  val exceptionGen = Module(new ExceptionGen(params))
+  val deqPtrGenModule = Module(new RobDeqPtrWrapper)
+  val enqPtrGenModule = Module(new RobEnqPtrWrapper)
+
+  // Track speculative CSR setters until retirement.
+  val enqFlagTracker = Module(new RobSetFlagTracker(
+    2,
+    in.enq.req.size,
+    CommitWidth,
+    orderedUpdatePorts = true
+  ))
+  val writebackFlagTracker = Module(new RobSetFlagTracker(
+    fflagsWidth + 1,
+    in.writeback.size,
+    CommitWidth,
+    writebackFlagCandidates
+  ))
+
+  // Monitor retirement stalls and collect optional TopDown history.
+  val commitStuckCounter = Module(new CommitStuckCounter(
+    width = log2Up(maxCommitStuck),
+    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
+  ))
+  val topdownRobInfoCollect = Option.when(backendParams.debugEn) {
+    Module(new TopdownRobInfoCollect(backendParams.iqEntryNum, RobSize))
+  }
+
+  // Capture recovery pointers with rename snapshots.
+  val snapshotPtrVec = Wire(Vec(CommitWidth, new RobPtr))
+  val snptEnq = in.enq.canAccept && in.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
+  val snapshots = SnapshotGenerator(
+    enqData = snapshotPtrVec,
+    enq = snptEnq,
+    deq = in.snpt.snptDeq,
+    redirect = in.redirect.valid,
+    flushVec = in.snpt.flushVec
+  )
+
+  /*
+   * Shared state and control signals
+   * Share queue and recovery pointers across the data paths.
+   */
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
   val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
+
+  // Register admission and serialization state.
   val allowEnqueue = RegInit(true.B)
   val allowEnqueueForDispatch = RegInit(true.B)
-  val vecExcpInfo = RegInit(ValidIO(new VecExcpInfo).Lit(
-    _.valid -> false.B,
-  ))
-
-  /**
-   * Enqueue (from dispatch)
-   */
-  // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
   val enqPtr = enqPtrVec(0)
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
-  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-  in.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.in.canEnq && vtypeBuffer.in.canEnq && !in.fromVecExcpMod.busy
-  in.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.in.canEnqForDispatch && vtypeBuffer.in.canEnqForDispatch && !in.fromVecExcpMod.busy
+  val hasWFI = RegInit(false.B)
+
+  // Hold recovery state and connect commit/exception feedback.
+  val s_idle :: s_walk :: Nil = Enum(2)
+  val state = RegInit(s_idle)
+  val state_next = Wire(chiselTypeOf(state))
+  val deqHasFlushed = RegInit(false.B)
+  val intrBitSetReg = RegNext(in.csr.intrBitSet)
+  val lastCycleFlush = RegNext(out.flushOut.valid)
+  val diffTrapPending = WireDefault(false.B)
+  val walkPtrHead = Wire(new RobPtr)
+  val exceptionDataRead = exceptionGen.out.state
+  val isEmpty = enqPtr.isSameEntry(deqPtr)
+  val intrEnable = Wire(Bool())
+  val deqNeedFlush = Wire(Bool())
+  val blockCommit = Wire(Bool())
+  val allowOnlyOneCommit = Wire(Bool())
+
+  // Per-slot copy of the full enqueue uop for debug and difftest.
+  val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
+  val debug_lqIdx = Reg(Vec(RobSize, Vec(2, new LqPtr)))
+  val debug_sqIdx = Reg(Vec(RobSize, Vec(2, new SqPtr)))
+  val debug_exuData = Reg(Vec(RobSize, Vec(2, UInt(XLEN.W))))
+  val debug_exuDebug = Reg(Vec(RobSize, Vec(2, new DebugBundle)))
+  val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
+  val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
+  val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(VecInit(Seq.fill(2)(false.B))))
+  val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
+  val enqHalfWritten = RegInit(VecInit(Seq.fill(RobSize)(VecInit(Seq.fill(2)(false.B)))))
+
+  // Retain the first vector instruction address for vsetvl handling.
+  val firstVInstrFtqPtr = RegInit(0.U.asTypeOf(new FtqPtr))
+  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(FetchBlockInstOffsetWidth.W)))
+  val firstVInstrRobIdx = RegInit(RobPtr(false.B, 0.U))
+
+  /*
+   * Entry
+   * Interleave physical entries across banks.
+   */
+  val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
+  // Per-slot functional state used by exception handling and performance accounting.
+  val slotUopBuf = Reg(Vec(RobSize, Vec(2, new RobSlotInfo)))
+  val robBanks = VecInit((0 until bankNum).map { i =>
+    VecInit(robEntries.zipWithIndex.filter(_._2 % bankNum == i).map(_._1))
+  })
+
+  // Retain the redirect range for delayed validity clearing.
+  val redirectValidReg = RegNext(in.redirect.valid)
+  val redirectBegin = Reg(UInt(log2Up(RobSize).W))
+  val redirectEnd = Reg(UInt(log2Up(RobSize).W))
+  val redirectAll = RegInit(false.B)
+
+  /*
+   * Enqueue
+   * Allocate one physical pointer per accepted first uop.
+   */
+  val allocatePtrVec = VecInit((0 until RenameWidth).map { i =>
+    enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))
+  })
+
+  // Gate admission on ROB, RAB, VTB, and vector exception capacity.
+  in.enq.canAccept := allowEnqueue && !hasBlockBackward &&
+    rab.in.canEnq && vtypeBuffer.in.canEnq && !in.fromVecExcpMod.busy
+  in.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward &&
+    rab.in.canEnqForDispatch && vtypeBuffer.in.canEnqForDispatch && !in.fromVecExcpMod.busy
   in.enq.resp := allocatePtrVec
+
   val uopCanEnqueue = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   val canEnqueue = VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop && in.enq.canAccept))
-  val timer = GTimer()
 
-  private val traceInstrCountWidth = log2Ceil(RenameWidth + 1)
-  private val traceEncodeTable = (1 to RenameWidth).flatMap { instrNum =>
-    (0 to instrNum).map(nonRVCNum => (instrNum, nonRVCNum))
-  }
-  private val traceDecodeTable = traceEncodeTable.map { case (instrNum, nonRVCNum) =>
-    (instrNum, instrNum + nonRVCNum)
-  }
-  private def decodeTraceInstrCount(traceIretire: UInt): UInt = {
-    chisel3.util.experimental.decode.decoder(
-      traceIretire,
-      TruthTable(
-        traceDecodeTable.zipWithIndex.map { case ((instrNum, _), encode) =>
-          BitPat((encode + 1).U(IretireWidthEncoded.W)) -> BitPat(instrNum.U(traceInstrCountWidth.W))
-        },
-        BitPat.N(traceInstrCountWidth)
-      )
-    )
-  }
-  private def decodeTraceHalfWords(traceIretire: UInt): UInt = {
-    chisel3.util.experimental.decode.decoder(
-      traceIretire,
-      TruthTable(
-        traceDecodeTable.zipWithIndex.map { case ((_, halfWords), encode) =>
-          BitPat((encode + 1).U(IretireWidthEncoded.W)) -> BitPat(halfWords.U(IretireWidthCommited.W))
-        },
-        BitPat.N(IretireWidthCommited)
-      )
-    )
-  }
-  private def traceHalfWordsToBytes(halfWords: UInt): UInt = {
-    val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
-    Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
-  }
+  // Advance the enqueue pointers for newly allocated entries.
+  enqPtrGenModule.in.redirect := in.redirect
+  enqPtrGenModule.in.allowEnqueue := allowEnqueue && rab.in.canEnq && !in.fromVecExcpMod.busy
+  enqPtrGenModule.in.hasBlockBackward := hasBlockBackward
+  enqPtrGenModule.in.enq := VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop))
+  enqPtrVec := enqPtrGenModule.out.ptrVec
 
-  // robEntries enqueue
+  // Reserve enough free entries for the following dispatch groups.
+  val dispatchNum = Mux(in.enq.canAccept, PopCount(in.enq.req.map(req => req.valid && req.bits.firstUop)), 0.U)
+  in.enq.isEmpty := RegNext(isEmpty && !VecInit(in.enq.req.map(_.valid)).asUInt.orR)
+  val numValidEntries = distanceBetween(enqPtr, deqPtr)
+  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
+  allowEnqueueForDispatch := numValidEntries + dispatchNum <= (RobSize - 2 * RenameWidth).U
+  out.robFull := !allowEnqueue
+
+  // Initialize entry metadata and retain each slot's trace boundary.
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val entryEnqValid = uopCanEnqueue.zip(in.enq.req).map { case (valid, req) =>
@@ -170,13 +276,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !in.redirect.valid){
-      // TODO: enq
       val entryHeadUop = Mux1H(enqOH, in.enq.req.map(_.bits))
       robEntries(i).connectEnq(entryHeadUop)
+
+      // The youngest uop supplies the entry-level trace tail.
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, in.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
       robEntries(i).formerTraceBlockInPipe.iretire := entryHeadUop.formerTraceIretire
+
+      // Preserve the former tail for a later compressed-slot downgrade.
       val formerEntryEnqValid = entryEnqValid.zip(in.enq.req).map { case (valid, req) =>
         valid && req.bits.robIdx.isFormer
       }
@@ -186,6 +295,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         robEntries(i).formerTraceBlockInPipe.ilastsize := youngestFormerUop.traceBlockInPipe.ilastsize
       }
     }.elsewhen(in.redirect.valid && in.redirect.bits.robIdx.value === i.U){
+      // A partial redirect retains only the former slot.
       val entryPairType = robEntries(i).entryPairType
       val redirectIsFormer = in.redirect.bits.robIdx.isFormer
       val redirectFlushItSelf = in.redirect.bits.flushItself()
@@ -200,22 +310,153 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
   }
-  // robBanks0 include robidx : 0 8 16 24 32 ...
-  val robBanks = VecInit((0 until bankNum).map(i => VecInit(robEntries.zipWithIndex.filter(_._2 % bankNum == i).map(_._1))))
-  // each Bank has 20 Entries, read addr is one hot
-  // all banks use same raddr
-  val eachBankEntrieNum = robBanks(0).length
-  val robBanksRaddrThisLine = RegInit(1.U(eachBankEntrieNum.W))
-  val robBanksRaddrNextLine = Wire(UInt(eachBankEntrieNum.W))
+
+  // Index entry allocations for validity and completion updates.
+  val enqOHByEntry = (0 until RobSize).map { i =>
+    VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map {
+      case (valid, ptrMatch) => valid && ptrMatch
+    })
+  }
+  for (i <- 0 until RobSize) {
+    val enqOH = enqOHByEntry(i)
+    // Commit takes priority over allocation and delayed redirect cleanup.
+    val commitCond = out.commits.isCommit && out.commits.commitValid
+      .zip(deqPtrVec.map(_.value === i.U))
+      .map(x => x._1 && x._2)
+      .reduce(_ || _)
+    assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
+    // TODO: fix the needFlush logic for CROB
+    // redirectBegin is still valid, but redirectBegin+1 is invalid
+    val needFlush = redirectValidReg && (Mux(
+      redirectEnd > redirectBegin,
+      (i.U > redirectBegin) && (i.U < redirectEnd),
+      (i.U > redirectBegin) || (i.U < redirectEnd)
+    ) || redirectAll)
+    when(commitCond) {
+      robEntries(i).valid := false.B
+    }.elsewhen(enqOH.asUInt.orR && !in.redirect.valid) {
+      robEntries(i).valid := true.B
+    }.elsewhen(needFlush){
+      robEntries(i).valid := false.B
+    }
+  }
+
+  /*
+   * Writeback
+   * Collect enqueue metadata for entry completion updates.
+   */
+  val uopEnqValidSeq = in.enq.req.map(req => in.enq.canAccept && req.valid)
+  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
+  val enqHasExcpSeq = in.enq.req.map(_.bits.hasException)
+  val enqRobIdxSeq = in.enq.req.map(req => req.bits.robIdx.value)
+  val enqWBNumVec = VecInit(in.enq.req.map(req => req.bits.numWB))
+  private val enqWriteStdVec = VecInit(in.enq.req.map(req => req.bits.stdwriteNeed))
+  val enqFormerWBNumVec = VecInit(in.enq.req.map(req => req.bits.formerNumWB))
+  val enqLatterWBNumVec = VecInit(in.enq.req.map(req => req.bits.latterNumWB))
+
+  for (i <- 0 until RobSize) {
+    // Count register mappings added to this entry.
+    val enqOH = enqOHByEntry(i)
+    val robIdxMatchSeq = in.enq.req.map(_.bits.robIdx.value === i.U)
+    val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+    val instCanEnqFlag = enqOH.asUInt.orR
+    val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
+    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map {
+      case (writeFlag, valid) => writeFlag && valid
+    })
+    val entryPairType = robEntries(i).entryPairType
+    val redirectIsFormer = in.redirect.bits.robIdx.isFormer
+    val redirectFlushItSelf = in.redirect.bits.flushItself()
+
+    when(isFirstEnq){
+      robEntries(i).realDestSize := realDestEnqNum
+    }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
+      robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
+    }.elsewhen(in.redirect.valid && in.redirect.bits.robIdx.value === i.U){
+      val clearsLatter = CompressType.isNotNORMAL(entryPairType) && (
+        redirectIsFormer && !redirectFlushItSelf ||
+        !redirectIsFormer && redirectFlushItSelf
+      )
+      when(clearsLatter && (CompressType.isCC(entryPairType) || CompressType.isCS(entryPairType))){
+        robEntries(i).realDestSize := robEntries(i).complexSlotHasDest
+      }.elsewhen(clearsLatter && CompressType.isSC(entryPairType)){
+        robEntries(i).realDestSize := robEntries(i).realDestSize - robEntries(i).complexSlotHasDest
+      }
+    }
+
+    // Count former and latter writebacks independently.
+    val enqFormerWBNum = Mux1H(enqOH, enqFormerWBNumVec)
+    val enqLatterWBNum = Mux1H(enqOH, enqLatterWBNumVec)
+    val formerWbCnt = PopCount(in.writeback.map { writeback =>
+      writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer
+    })
+    val latterWbCnt = PopCount(in.writeback.map { writeback =>
+      writeback.valid && writeback.bits.robIdx.value === i.U && !writeback.bits.robIdx.isFormer
+    })
+
+    // Latch exception-flush requests for each slot.
+    val slotNeedFlushMask = robEntries(i).slotNeedFlushMask
+    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+      writeback.valid && needFlushWb && writeback.bits.robIdx.value === i.U
+    }
+    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
+    }
+    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
+    }
+    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
+    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
+    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
+    when(robEntries(i).valid && needFlushWriteBack){
+      slotNeedFlushMask := slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
+    }
+
+    // Saturate completion counts and clear slots removed by redirect.
+    val redirectHitThisEntry = robEntries(i).valid &&
+      in.redirect.valid &&
+      in.redirect.bits.robIdx.value === i.U
+    val redirectClearsLatter = redirectHitThisEntry &&
+      CompressType.isNotNORMAL(entryPairType) && (
+        in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
+        !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
+      )
+    val enqEntryPairType = Mux1H(enqOH, in.enq.req.map(_.bits.entryPairType))
+    // Remaining slot completions stored in the entry array after this cycle.
+    val nextPackedUopState = calcNextPackedUopState(
+      entryValid = robEntries(i).valid,
+      entryUopState = robEntries(i).uopState,
+      entryCompressType = robEntries(i).entryPairType,
+      redirectClearsLatter = redirectClearsLatter,
+      needFlushWriteBackFormer = needFlushWriteBackFormer,
+      needFlushWriteBackLater = needFlushWriteBackLater,
+      instCanEnqFlag = instCanEnqFlag,
+      enqState = robEntries(i).encodeUopState(
+        entryPairType = enqEntryPairType,
+        formerUopNum = enqFormerWBNum,
+        latterUopNum = enqLatterWBNum
+      ),
+      formerWbCntRaw = formerWbCnt,
+      latterWbCntRaw = latterWbCnt
+    )
+    robEntries(i).uopState := nextPackedUopState
+  }
+
+  /*
+   * Dequeue
+   * Generate current and next bank-row addresses.
+   */
+  val robBanksRaddrThisLine = RegInit(1.U(entriesPerBank.W))
+  val robBanksRaddrNextLine = Wire(UInt(entriesPerBank.W))
   robBanksRaddrThisLine := robBanksRaddrNextLine
-  val bankNumWidth = log2Up(bankNum)
   val deqPtrWidth = deqPtr.value.getWidth
   val highDeqPtrThisLine = deqPtr.value(deqPtrWidth - 1, bankNumWidth)
   val highDeqPtrMax = (RobSize - 1).U(deqPtrWidth - 1, bankNumWidth)
   val highDeqPtrNextLine = Mux(highDeqPtrThisLine === highDeqPtrMax, 0.U, highDeqPtrThisLine + 1.U)
   val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrThisLine, i.U(bankNumWidth.W))))
   val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrNextLine, i.U(bankNumWidth.W))))
-  // robBanks read
+
+  // Read both rows through the registered one-hot address.
   val robBanksRdataThisLine = VecInit(robBanks.map{ case bank =>
     Mux1H(robBanksRaddrThisLine, bank)
   })
@@ -223,6 +464,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val shiftBank = bank.drop(1) :+ bank(0)
     Mux1H(robBanksRaddrThisLine, shiftBank)
   })
+
+  // Select the next row address for retirement or recovery.
   val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val needUpdateCommitW = Wire(Vec(2 * CommitWidth, Bool()))
@@ -230,16 +473,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val donotNeedWalk = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val allCommitted = Wire(Bool())
-
-  when(allCommitted) {
-    hasCommitted := 0.U.asTypeOf(hasCommitted)
-  }.elsewhen(out.commits.isCommit){
-    for (i <- 0 until CommitWidth){
-      hasCommitted(i) := commitValidThisLine(i) || hasCommitted(i)
-    }
-  }
-  allCommitted := out.commits.isCommit && commitValidThisLine.last
-  val walkPtrHead = Wire(new RobPtr)
   val changeBankAddrToDeqPtr = walkPtrVec.head.addEntries(CommitWidth.U).isAfterSlot(lastWalkPtr)
   when(in.redirect.valid){
     robBanksRaddrNextLine := UIntToOH(walkPtrHead.value(walkPtrHead.value.getWidth-1, bankAddrWidth))
@@ -250,6 +483,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise(
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
+
+  // Cache the retirement window and select commit or walk lanes.
   val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
@@ -261,36 +496,138 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  /*
-    decode iretireEncoded => iretires, instrSize
-    (instrNum((log2Ceil(RenameWidth + 1)).W), iretire(IretireWidthInPipe.W), encode(IretireWidthEncode.W))
-    val instrSizeTable = Seq(
-      (1, 1, 1), (1, 2, 2),
-      (2, 2, 3), (2, 3, 4), (2, 4, 5),
-      (3, 3, 6), (3, 4, 7), (3, 5, 8), (3, 6, 9),
-      (4, 4, 10), (4, 5, 11), (4, 6, 12), (4, 7, 13), (4, 8, 14),
-      (5, 5, 15), (5, 6, 16), (5, 7, 17), (5, 8, 18), (5, 9, 19), (5, 10, 20),
-      (6, 6, 21), (6, 7, 22), (6, 8, 23), (6, 9, 24), (6, 10, 25), (6, 11, 26), (6, 12, 27),
+  // Forward enqueue and writeback changes into both cached rows.
+  val robBanksRdata = VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
+  val needUpdate = Wire(Vec(2 * CommitWidth, new RobEntryBundle))
+  needUpdate := VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
+  val needUpdateRobIdx = robIdxThisLine ++ robIdxNextLine
+  for (i <- 0 until 2 * CommitWidth) {
+    // Update the mapping count before caching the entry.
+    val enqHeadOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === needUpdateRobIdx(i))).map {
+      case (valid, ptrMatch) => valid && ptrMatch
+    })
+    val robIdxMatchSeq = in.enq.req.map(_.bits.robIdx.value === needUpdateRobIdx(i))
+    val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+    val instCanEnqFlag = enqHeadOH.asUInt.orR
+    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map {
+      case (writeFlag, valid) => writeFlag && valid
+    })
+    when(!needUpdate(i).valid && instCanEnqFlag) {
+      needUpdate(i).realDestSize := realDestEnqNum
+    }.elsewhen(needUpdate(i).valid && instCanEnqFlag) {
+      needUpdate(i).realDestSize := robBanksRdata(i).realDestSize + realDestEnqNum
+    }
+
+    // Apply the same slot completion calculation as the entry array.
+    val enqFormerWBNum = Mux1H(enqHeadOH, enqFormerWBNumVec)
+    val enqLatterWBNum = Mux1H(enqHeadOH, enqLatterWBNumVec)
+    val formerWbCnt = PopCount(in.writeback.map { writeback =>
+      writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer
+    })
+    val latterWbCnt = PopCount(in.writeback.map { writeback =>
+      writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer
+    })
+    val slotNeedFlushMask = robBanksRdata(i).slotNeedFlushMask
+    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+      writeback.valid && needFlushWb && (writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    }
+    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
+    }
+    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
+    }
+    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
+    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
+    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
+    when(needUpdate(i).valid && needFlushWriteBack) {
+      needUpdate(i).slotNeedFlushMask := slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
+    }
+
+    val redirectHitThisEntry = needUpdate(i).valid &&
+      in.redirect.valid &&
+      in.redirect.bits.robIdx.value === needUpdateRobIdx(i)
+    val entryPairType = robBanksRdata(i).entryPairType
+    val redirectClearsLatter = redirectHitThisEntry &&
+      CompressType.isNotNORMAL(entryPairType) && (
+        in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
+        !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
+      )
+    val enqEntryPairType = Mux1H(enqHeadOH, in.enq.req.map(_.bits.entryPairType))
+    // Forwarded slot completions determine whether the cached entry is ready to retire.
+    val nextPackedUopState = calcNextPackedUopState(
+      entryValid = needUpdate(i).valid,
+      entryUopState = robBanksRdata(i).uopState,
+      entryCompressType = robBanksRdata(i).entryPairType,
+      redirectClearsLatter = redirectClearsLatter,
+      needFlushWriteBackFormer = needFlushWriteBackFormer,
+      needFlushWriteBackLater = needFlushWriteBackLater,
+      instCanEnqFlag = instCanEnqFlag,
+      enqState = robBanksRdata(i).encodeUopState(
+        entryPairType = enqEntryPairType,
+        formerUopNum = enqFormerWBNum,
+        latterUopNum = enqLatterWBNum
+      ),
+      formerWbCntRaw = formerWbCnt,
+      latterWbCntRaw = latterWbCnt
     )
-  */
+    needUpdate(i).uopState := nextPackedUopState
+    needUpdateCommitW(i) := !nextPackedUopState.orR
+
+    // Correct the surviving trace tail with the resolved branch outcome.
+    val youngestSlotIsFormer = CompressType.isNORMAL(robBanksRdata(i).entryPairType) || redirectClearsLatter
+    val taken = branchWBs.map(writeback =>
+      writeback.valid &&
+      writeback.bits.robIdx.value === needUpdateRobIdx(i) &&
+      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
+      writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    when(robBanksRdata(i).valid && Itype.isNonTaken(robBanksRdata(i).traceBlockInPipe.itype) && taken){
+      // BranchType code(notaken itype = 4) must be correctly replaced!
+      needUpdate(i).traceBlockInPipe.itype := Itype.Taken
+    }
+  }
+  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(bankNum))
+  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(bankNum))
+
+  // Decode instruction counts and byte lengths for retirement.
   val iretireCommit = Wire(Vec(CommitWidth, UInt(IretireWidthCommited.W)))
   val instrSizeCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
   val formerInstrCntCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
   val latterInstrCntCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
   val formerHalfWordsCommit = Wire(Vec(CommitWidth, UInt(IretireWidthCommited.W)))
-  val formerLenCommit = Wire(Vec(CommitWidth, UInt(log2Ceil(RenameWidth * 4 + 1).W)))
+  val formerLenCommit = Wire(Vec(CommitWidth, UInt(traceByteCountWidth.W)))
 
   for (i <- 0 until CommitWidth) {
-    iretireCommit(i) := decodeTraceHalfWords(rawInfo(i).traceBlockInPipe.iretire)
-    instrSizeCommit(i) := decodeTraceInstrCount(rawInfo(i).traceBlockInPipe.iretire)
-    formerInstrCntCommit(i) := decodeTraceInstrCount(rawInfo(i).formerTraceIretire)
-    formerHalfWordsCommit(i) := decodeTraceHalfWords(rawInfo(i).formerTraceIretire)
+    iretireCommit(i) := decodeTraceHalfWords(
+      traceIretire = rawInfo(i).traceBlockInPipe.iretire,
+      traceDecodeTable = traceDecodeTable,
+      traceHalfWordsWidth = traceHalfWordsWidth
+    )
+    instrSizeCommit(i) := decodeTraceInstrCount(
+      traceIretire = rawInfo(i).traceBlockInPipe.iretire,
+      traceDecodeTable = traceDecodeTable,
+      traceInstrCountWidth = traceInstrCountWidth
+    )
+    formerInstrCntCommit(i) := decodeTraceInstrCount(
+      traceIretire = rawInfo(i).formerTraceIretire,
+      traceDecodeTable = traceDecodeTable,
+      traceInstrCountWidth = traceInstrCountWidth
+    )
+    formerHalfWordsCommit(i) := decodeTraceHalfWords(
+      traceIretire = rawInfo(i).formerTraceIretire,
+      traceDecodeTable = traceDecodeTable,
+      traceHalfWordsWidth = traceHalfWordsWidth
+    )
     latterInstrCntCommit(i) := Mux(
       CompressType.isNotNORMAL(rawInfo(i).entryPairType),
       instrSizeCommit(i) - formerInstrCntCommit(i),
       0.U
     )
-    formerLenCommit(i) := traceHalfWordsToBytes(formerHalfWordsCommit(i))
+    formerLenCommit(i) := traceHalfWordsToBytes(
+      halfWords = formerHalfWordsCommit(i),
+      traceByteCountWidth = traceByteCountWidth
+    )
     when(rawInfo(i).commit_v && CompressType.isNotNORMAL(rawInfo(i).entryPairType)) {
       assert(instrSizeCommit(i) >= formerInstrCntCommit(i))
     }
@@ -304,382 +641,228 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
   }
 
-  // Per-slot copy of the full enqueue uop for debug and difftest.
-  val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
-  val debug_lqIdx = Reg(Vec(RobSize, Vec(2, new LqPtr)))
-  val debug_sqIdx = Reg(Vec(RobSize, Vec(2, new SqPtr)))
-  val debug_exuData = Reg(Vec(RobSize, Vec(2, UInt(XLEN.W))))
-  val debug_exuDebug = Reg(Vec(RobSize, Vec(2, new DebugBundle)))
-  val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
-  val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
-  val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(VecInit(Seq.fill(2)(false.B))))
-  val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
-  val enqHalfWritten = RegInit(VecInit(Seq.fill(RobSize)(VecInit(Seq.fill(2)(false.B)))))
+  // Advance dequeue pointers using the current retirement window.
+  val deqPtrEntry = rawInfo(0)
+  val deqPtrEntryValid = deqPtrEntry.commit_v
+  val commit_vDeqGroup = VecInit(robDeqGroup.map(_.commit_v))
+  val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
+  deqPtrGenModule.in.state := state
+  deqPtrGenModule.in.deq_v := commit_vDeqGroup
+  deqPtrGenModule.in.deq_w := commit_wDeqGroup
+  deqPtrGenModule.in.exception_state := exceptionDataRead
+  deqPtrGenModule.in.intrBitSetReg := intrBitSetReg
+  deqPtrGenModule.in.hasNoSpecExec := hasWaitForward
+  deqPtrGenModule.in.allowOnlyOneCommit := allowOnlyOneCommit
+  deqPtrGenModule.in.interruptSafe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interruptSafe
+  deqPtrGenModule.in.blockCommit := blockCommit
+  deqPtrGenModule.in.hasCommitted := hasCommitted
+  deqPtrGenModule.in.allCommitted := allCommitted
+  deqPtrVec := deqPtrGenModule.out.ptrVec
+  deqPtrVec_next := deqPtrGenModule.out.nextPtrVec
+  out.robDeqPtr := deqPtr
+  val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
+  deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0).addEntries(i.U).asFormer }
+  val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
-  private def slotIndex(ptr: RobPtr): UInt = (!ptr.isFormer).asUInt
-  private def debugMeta(uop: EnqRobUop): RenameOutUopDebug =
-    uop.debug.getOrElse(0.U.asTypeOf(new RenameOutUopDebug))
+  /*
+   * Commit
+   * Retain already committed banks until the whole row retires.
+   */
+  when(allCommitted) {
+    hasCommitted := 0.U.asTypeOf(hasCommitted)
+  }.elsewhen(out.commits.isCommit){
+    for (i <- 0 until CommitWidth){
+      hasCommitted(i) := commitValidThisLine(i) || hasCommitted(i)
+    }
+  }
+  allCommitted := out.commits.isCommit && commitValidThisLine.last
 
-  val isEmpty = enqPtr.isSameEntry(deqPtr)
-  val snptEnq = in.enq.canAccept && in.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
-  val snapshotPtrVec = Wire(Vec(CommitWidth, new RobPtr))
+  // when mispredict branches writeback, stop commit in the next 2 cycles
+  // TODO: don't check all exu write back
+  val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
+    wb.bits.redirect.get.bits.isMisPred && wb.bits.redirect.get.valid && wb.valid
+  ).toSeq)).orR
+  val misPredBlockCounter = Reg(UInt(3.W))
+  misPredBlockCounter := Mux(misPredWb,
+    "b111".U,
+    misPredBlockCounter >> 1.U
+  )
+  val misPredBlock = misPredBlockCounter(0)
+
+  // Delay head flushes until redirect feedback has settled.
+  val deqFlushBlockCounter = Reg(UInt(3.W))
+  val deqFlushBlock = deqFlushBlockCounter(0)
+  val deqHasCommitted = out.commits.isCommit && out.commits.commitValid(0)
+  // TODO *** WARNING ***
+  // Blocking commit. Don't change this before we fully understand the logic.
+  val deqHitRedirectReg = RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)) ||
+    RegNext(RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)))
+  val criticalErrorState = in.csr.criticalErrorState
+  when(deqNeedFlush && deqHitRedirectReg){
+    deqFlushBlockCounter := "b111".U
+  }.otherwise{
+    deqFlushBlockCounter := deqFlushBlockCounter >> 1.U
+  }
+  when(deqHasCommitted){
+    deqHasFlushed := false.B
+  }.elsewhen(deqNeedFlush && out.flushOut.valid && !out.flushOut.bits.flushItself()){
+    deqHasFlushed := true.B
+  }
+
+  // Combine global retirement blockers before selecting the ready prefix.
+  val traceBlock = out.trace.blockCommit
+  blockCommit := misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
+    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
+
+
+  out.commits.isWalk := state === s_walk
+  out.commits.isCommit := state === s_idle && !blockCommit
+  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U)).asFormer
+  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
+  allowOnlyOneCommit := VecInit(robDeqGroup.map { x =>
+    x.commit_v && (x.slotNeedFlushMask(0) ||
+      x.slotNeedFlushMask(1) && CompressType.isNotNORMAL(x.entryPairType))
+  }).asUInt.orR || intrBitSetReg || diffTrapPending
+
+  // for instructions that may block others, we don't allow them to commit
+  out.commits.commitValid := PriorityMux(
+    commitValidThisLine,
+    (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(out.commits.commitValid))
+  )
+  for (i <- 0 until CommitWidth) {
+    // defaults: state === s_idle and instructions commit
+    // when intrBitSetReg, allow only one instruction to commit at each clock cycle
+    val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
+    val isBlockedByOlder = if (i != 0) {
+      commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR
+    } else {
+      false.B
+    }
+    commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) &&
+      !isBlocked && !isBlockedByOlder && !hasCommitted(i)
+    out.commits.info(i) := commitInfo(i)
+    out.commits.robIdx(i) := deqPtrVec(i)
+  }
+  val commitCnt = PopCount(out.commits.commitValid)
+
+  /*
+   * Recovery
+   * Save the enqueue pointer group for recovery snapshots.
+   */
   snapshotPtrVec(0) := in.enq.req(0).bits.robIdx
   for (i <- 1 until CommitWidth) {
     snapshotPtrVec(i) := snapshotPtrVec(0).addEntries(i.U).asFormer
   }
-  val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, in.snpt.snptDeq, in.redirect.valid, in.snpt.flushVec)
-  val debug_lsIssue = WireDefault(debug_lsIssued)
-  debug_lsIssue(deqPtr.value) := in.debugHeadLsIssue
 
-  /**
-   * states of Rob
-   */
-  val s_idle :: s_walk :: Nil = Enum(2)
-  val state = RegInit(s_idle)
-  val state_next = Wire(chiselTypeOf(state))
+  // T redirect.valid, T+1 use walkPtrVec read robEntries, T+2 start walk, shouldWalkVec used in T+2
+  val shouldWalkVec = Wire(Vec(CommitWidth,Bool()))
+  val walkingPtrVec = RegNext(walkPtrVec)
+  when(in.redirect.valid){
+    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
+  }.elsewhen(RegNext(in.redirect.valid)){
+    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
+  }.elsewhen(state === s_walk){
+    shouldWalkVec := VecInit(walkingPtrVec
+      .map(_.isNotAfterSlot(lastWalkPtr))
+      .zip(donotNeedWalk)
+      .map(x => x._1 && !x._2))
+  }.otherwise(
+    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
+  )
 
-  val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
-  val tip_state = WireInit(0.U(4.W))
-  when(!isEmpty) {  // One or more inst in ROB
-    when(state === s_walk || in.redirect.valid) {
-      tip_state := tip_walk
-    }.elsewhen(out.commits.isCommit && PopCount(out.commits.commitValid) =/= 0.U) {
-      tip_state := tip_computing
-    }.otherwise {
-      tip_state := tip_stalled
-    }
-  }.otherwise {
-    tip_state := tip_drained
+  // Wait for ROB, RAB, and VTB recovery to finish.
+  val walkFinished = walkPtrTrue.isAfterSlot(lastWalkPtr)
+  val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
+  state_next := Mux(
+    in.redirect.valid || RegNext(in.redirect.valid), s_walk,
+    Mux(
+      state === s_walk && walkFinished && rab.in.status.walkEnd && vtypeBuffer.in.status.walkEnd, s_idle,
+      state
+    )
+  )
+  state := state_next
+
+  // Restart at the selected snapshot or advance to the next walk row.
+  val deqPtrReadBank = deqPtrVec_next(0).lineHeadPtr
+  val deqPtrVecForWalk = VecInit((0 until CommitWidth).map(i => deqPtrReadBank.addEntries(i.U).asFormer))
+  val snapPtrReadBank = snapshots(in.snpt.snptSelect)(0).lineHeadPtr
+  val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank.addEntries(i.U).asFormer))
+  val walkPtrVec_next: Vec[RobPtr] = Mux(in.redirect.valid,
+    Mux(in.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
+    Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
+  )
+  val walkPtrTrue_next: RobPtr = Mux(in.redirect.valid,
+    Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0), deqPtrVec_next(0)),
+    Mux((state === s_walk) && !walkFinished, walkPtrVec_next.head, walkPtrTrue)
+  )
+  walkPtrHead := walkPtrVec_next.head
+  walkPtrVec := walkPtrVec_next
+  walkPtrTrue := walkPtrTrue_next
+
+  // T in.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
+  val walkPtrLowBits = Reg(UInt(bankAddrWidth.W))
+  when(in.redirect.valid){
+    walkPtrLowBits := Mux(
+      in.snpt.useSnpt,
+      snapshots(in.snpt.snptSelect)(0).value(bankAddrWidth - 1, 0),
+      deqPtrVec_next(0).value(bankAddrWidth - 1, 0)
+    )
   }
-  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry)
-  val tip_data = Wire(new TipEntry())
-  tip_data.state := tip_state
-  tip_data.commits := out.commits
-  tip_data.redirect := in.redirect
-  tip_data.redirect_pc := debugMeta(debug_microOp(in.redirect.bits.robIdx.value)(slotIndex(in.redirect.bits.robIdx))).pc
-  tip_data.debugLsInfo := debug_lsInfo(out.commits.robIdx(0).value)
-  tip_table.log(tip_data, true.B, "", clock, reset)
-
-  val exceptionGen = Module(new ExceptionGen(params))
-  val exceptionDataRead = exceptionGen.out.state
-  out.robDeqPtr := deqPtr
-
-  /**
-   * connection of [[rab]]
-   */
-  rab.in.redirect := in.redirect.valid
-
-  rab.in.req.zip(in.enq.req).map { case (dest, src) =>
-    dest.bits := src.bits
-    dest.valid := src.valid && in.enq.canAccept
+  when(in.redirect.valid) {
+    donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
+  }.elsewhen(RegNext(in.redirect.valid)){
+    donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
+  }.otherwise{
+    donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
   }
 
-  // TODO:
-  val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
-  val realDestSizeSeq = VecInit(robDeqGroup.zip(hasCommitted).map{case (r, h) => Mux(h, 0.U, r.realDestSize)})
-  val walkDestSizeSeq = VecInit(robDeqGroup.zip(donotNeedWalk).map{case (r, d) => Mux(d, 0.U, r.realDestSize)})
-  val commitSizeSumSeq = VecInit((0 until CommitWidth).map(i => realDestSizeSeq.take(i + 1).reduce(_ +& _)))
-  val walkSizeSumSeq   = VecInit((0 until CommitWidth).map(i => walkDestSizeSeq.take(i + 1).reduce(_ +& _)))
-  val commitSizeSumCond = VecInit(commitValidThisLine.zip(hasCommitted).map{case (c,h) => (c || h) && out.commits.isCommit})
-  val walkSizeSumCond   = VecInit(out.commits.walkValid.zip(donotNeedWalk).map{case (w,d) => (w || d) && out.commits.isWalk})
-  val commitSizeSum = PriorityMuxDefault(commitSizeSumCond.reverse.zip(commitSizeSumSeq.reverse), 0.U)
-  val walkSizeSum   = PriorityMuxDefault(walkSizeSumCond.reverse.zip(walkSizeSumSeq.reverse), 0.U)
+  // Capture the last surviving entry and the delayed invalidation range.
+  val redirectWalkDistance = distanceBetween(in.redirect.bits.robIdx, deqPtrVec_next(0))
+  when(in.redirect.valid) {
+    // TODO: lastWalkPtr points the last valid entry
+    lastWalkPtr := Mux(
+      in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself(),
+      in.redirect.bits.robIdx.subEntries(1.U).asFormer,
+      in.redirect.bits.robIdx
+    )
+  }
+  when(in.redirect.valid){
+    redirectBegin := Mux(in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself(),
+      Mux(in.redirect.bits.robIdx.value === 0.U, (RobSize - 1).U, in.redirect.bits.robIdx.value - 1.U),
+      in.redirect.bits.robIdx.value
+    )
+    redirectEnd := enqPtr.value
+    // Only former+flushItself removes the redirect entry itself.  A latter-slot
+    // redirect must retain the former slot even when the physical range wraps.
+    redirectAll := in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself() &&
+      (in.redirect.bits.robIdx.value === enqPtr.value) && (in.redirect.bits.robIdx.flag ^ enqPtr.flag)
+  }
 
+  // Publish the next read window and valid recovery lanes.
+  val commitReadAddr_next = Mux(state_next === s_idle,
+    VecInit(deqPtrVec_next.map(_.value)),
+    VecInit(walkPtrVec_next.map(_.value))
+  )
+  for (i <- 0 until CommitWidth) {
+    out.commits.walkValid(i) := shouldWalkVec(i)
+    XSError(
+      state === s_walk &&
+      out.commits.isWalk && state === s_walk && shouldWalkVec(i) &&
+      !walk_v(i),
+      s"The walking entry($i) should be valid\n")
+  }
+
+  /*
+   * Exception
+   * Select the faulting slot at the ROB head.
+   */
+  val vecExcpInfo = RegInit(ValidIO(new VecExcpInfo).Lit(
+    _.valid -> false.B,
+  ))
   val deqVlsExceptionNeedCommit = RegInit(false.B)
   val deqVlsExceptionCommitSize = RegInit(0.U(log2Up(MaxUopSize + 1).W))
   val deqVlsCanCommit= RegInit(false.B)
-  rab.in.fromRob.commitSize := Mux(deqVlsExceptionNeedCommit, deqVlsExceptionCommitSize, commitSizeSum)
-  rab.in.fromRob.walkSize := walkSizeSum
-  rab.in.fromRob.vecLoadExcp.valid := RegNext(exceptionDataRead.valid && exceptionDataRead.bits.isVecLoad)
-  rab.in.fromRob.vecLoadExcp.bits.isStrided := RegEnable(exceptionDataRead.bits.isStrided, exceptionDataRead.valid)
-  rab.in.fromRob.vecLoadExcp.bits.isVlm := RegEnable(exceptionDataRead.bits.isVlm, exceptionDataRead.valid)
-  rab.in.snpt := in.snpt
-  rab.in.snpt.snptEnq := snptEnq
-
-  // pipe rab commits for better timing and area
-  out.rabCommits := RegNext(rab.out.commits)
-  out.vlCommits := RegNext(vtypeBuffer.out.commits)
-
-  /**
-   * connection of [[vtypeBuffer]]
-   */
-
-  vtypeBuffer.in.redirect := in.redirect.valid
-
-  vtypeBuffer.in.req.zip(in.enq.req).map { case (sink, source) =>
-    sink.valid := source.valid && in.enq.canAccept
-    sink.bits := source.bits
-  }
-
-  private val commitIsVTypeVec = VecInit(out.commits.commitValid.zip(out.commits.info).map { case (valid, info) => out.commits.isCommit && valid && info.needVTB })
-  private val walkIsVTypeVec = VecInit(out.commits.walkValid.zip(walkInfo).map { case (valid, info) => out.commits.isWalk && valid && info.needVTB })
-  vtypeBuffer.in.fromRob.commitSize := PopCount(commitIsVTypeVec)
-  vtypeBuffer.in.fromRob.walkSize := PopCount(walkIsVTypeVec)
-  vtypeBuffer.in.snpt := in.snpt
-  vtypeBuffer.in.snpt.snptEnq := snptEnq
-  out.toDecode.walkToArchVType := vtypeBuffer.out.toDecode.walkToArchVType
-  out.toDecode.commitVType := vtypeBuffer.out.toDecode.commitVType
-  out.toDecode.walkVType := vtypeBuffer.out.toDecode.walkVType
-
-  // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
-  // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
-  // TODO: How about a lot of fence instr and XSTrap instr
-  val hasWB = VecInit(exuWBs.map(wb => wb.valid)).asUInt.orR
-  //  when(isEmpty || (hasBlockBackward && hasWB)) {
-  when(isEmpty) {
-    hasBlockBackward := false.B
-  }
-  // When any instruction commits, hasNoSpecExec should be set to false.B
-  when(out.commits.hasWalkInstr || out.commits.hasCommitInstr) {
-    hasWaitForward := false.B
-  }
-
-  out.debugWaitForward.foreach(_ := hasWaitForward)
-  out.debugBlockBackward.foreach(_ := hasBlockBackward)
-
-  // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
-  // in.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
-  // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
-  val hasWFI = RegInit(false.B)
-  val wfiSafe = out.wfi.safeFromMem && out.wfi.safeFromFrontend
-  out.wfi.wfiReq := hasWFI
-  out.cpu_wfi := hasWFI && wfiSafe
-  // WFI Timeout: 2^20 = 1M cycles
-  val wfi_cycles = RegInit(0.U(20.W))
-  if (wfiResume) {
-    when(hasWFI) {
-      wfi_cycles := wfi_cycles + 1.U
-    }.elsewhen(!hasWFI && RegNext(hasWFI)) {
-      wfi_cycles := 0.U
-    }
-  }
-  val wfi_timeout = wfi_cycles.andR
-  when(RegNext(RegNext(in.csr.wfiEvent)) || out.flushOut.valid || wfi_timeout) {
-    hasWFI := false.B
-  }
-
-  for (i <- 0 until RenameWidth) {
-    // we don't check whether in.redirect is valid here since redirect has higher priority
-    val hasEarlierSameHalf =
-      if (i == 0) {
-        false.B
-      } else {
-        VecInit((0 until i).map { j =>
-          in.enq.canAccept &&
-          in.enq.req(j).valid &&
-          in.enq.req(j).bits.robIdx.isSameSlot(in.enq.req(i).bits.robIdx)
-        }).asUInt.orR
-      }
-    val hasEarlierEntryReset =
-      if (i == 0) {
-        false.B
-      } else {
-        VecInit((0 until i).map { j =>
-          in.enq.canAccept &&
-          in.enq.req(j).valid &&
-          in.enq.req(j).bits.firstUop &&
-          in.enq.req(j).bits.robIdx.isSameEntry(in.enq.req(i).bits.robIdx)
-        }).asUInt.orR
-      }
-    when(in.enq.canAccept && in.enq.req(i).valid) {
-      val enqUop = in.enq.req(i).bits
-      val enqIndex = in.enq.req(i).bits.robIdx.value
-      val subIndex = !in.enq.req(i).bits.robIdx.isFormer
-      val slotWritten = Mux(enqUop.firstUop || hasEarlierEntryReset, false.B, enqHalfWritten(enqIndex)(subIndex))
-      when(enqUop.firstUop && !hasEarlierEntryReset) {
-        enqHalfWritten(enqIndex)(0) := false.B
-        enqHalfWritten(enqIndex)(1) := false.B
-      }
-      when(!hasEarlierSameHalf && !slotWritten) {
-        // Keep the first instruction metadata in each rob-half.  The functional
-        // fields feed exception handling; the full uop is only for debug/difftest.
-        slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
-        slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
-        slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
-        debug_microOp(enqIndex)(subIndex) := enqUop
-        debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
-          debug.perfDebugInfo.dispatchTime := timer
-          debug.perfDebugInfo.enqRsTime := timer
-          debug.perfDebugInfo.selectTime := timer
-          debug.perfDebugInfo.issueTime := timer
-          debug.perfDebugInfo.writebackTime := timer
-          debug.perfDebugInfo.tlbFirstReqTime := timer
-          debug.perfDebugInfo.tlbRespTime := timer
-        }
-        when(enqUop.robIdx.isFormer) {
-          robEntries(enqIndex).perfDebugInfo.foreach(_.dispatchTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.enqRsTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.selectTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.issueTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.writebackTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbFirstReqTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbRespTime := timer)
-        }
-        debug_lqIdxValid(enqIndex)(subIndex) := false.B
-        enqHalfWritten(enqIndex)(subIndex) := true.B
-      }
-      when(enqUop.firstUop && !hasEarlierEntryReset) {
-        debug_lsInfo(enqIndex) := DebugLsInfo.init
-        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
-        debug_lsIssued(enqIndex) := false.B
-      }
-      when(enqUop.waitForward) {
-        hasWaitForward := true.B
-      }
-      val enqTriggerActionIsDebugMode = TriggerAction.isDmode(in.enq.req(i).bits.trigger)
-      val enqHasException = enqUop.exceptionVec.orR
-      when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
-        hasWFI := true.B
-      }
-    }
-  }
-
-  for (i <- 0 until RenameWidth) {
-    val enqUop = in.enq.req(i)
-    when(enqUop.valid && enqUop.bits.blockBackward && in.enq.canAccept) {
-      hasBlockBackward := true.B
-    }
-  }
-
-  val dispatchNum = Mux(in.enq.canAccept, PopCount(in.enq.req.map(req => req.valid && req.bits.firstUop)), 0.U)
-  in.enq.isEmpty := RegNext(isEmpty && !VecInit(in.enq.req.map(_.valid)).asUInt.orR)
-
-  when(!in.wfi_enable) {
-    hasWFI := false.B
-  }
-  // sel vsetvl's flush position
-  val vs_idle :: vs_waitVinstr :: vs_waitFlush :: Nil = Enum(3)
-  val vsetvlState = RegInit(vs_idle)
-
-  val firstVInstrFtqPtr = RegInit(0.U.asTypeOf(new FtqPtr))
-  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(FetchBlockInstOffsetWidth.W)))
-  val firstVInstrRobIdx = RegInit(RobPtr(false.B, 0.U))
-
-  val enq0 = in.enq.req(0)
-  val enq0IsVset = enq0.bits.isVset && enq0.bits.lastUop && canEnqueue(0)
-  val enq0IsVsetFlush = enq0IsVset && enq0.bits.flushPipe
-  val enqIsVInstrVec = in.enq.req.zip(canEnqueue).map { case (req, fire) => FuType.isVArith(req.bits.fuType) && fire }
-  // for vs_idle
-  val firstVInstrIdle = PriorityMux(enqIsVInstrVec.zip(in.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(in.enq.req(0).cloneType)))
-  // for vs_waitVinstr
-  val enqIsVInstrOrVset = (enqIsVInstrVec(0) || enq0IsVset) +: enqIsVInstrVec.drop(1)
-  val firstVInstrWait = PriorityMux(enqIsVInstrOrVset, in.enq.req)
-  when(vsetvlState === vs_idle) {
-    firstVInstrFtqPtr := firstVInstrIdle.bits.ftqPtr
-    firstVInstrFtqOffset := firstVInstrIdle.bits.ftqOffset
-    firstVInstrRobIdx := firstVInstrIdle.bits.robIdx
-  }.elsewhen(vsetvlState === vs_waitVinstr) {
-    when(Cat(enqIsVInstrOrVset).orR) {
-      firstVInstrFtqPtr := firstVInstrWait.bits.ftqPtr
-      firstVInstrFtqOffset := firstVInstrWait.bits.ftqOffset
-      firstVInstrRobIdx := firstVInstrWait.bits.robIdx
-    }
-  }
-
-  val hasVInstrAfterI = Cat(enqIsVInstrVec(0)).orR
-  when(vsetvlState === vs_idle && !in.redirect.valid) {
-    when(enq0IsVsetFlush) {
-      vsetvlState := Mux(hasVInstrAfterI, vs_waitFlush, vs_waitVinstr)
-    }
-  }.elsewhen(vsetvlState === vs_waitVinstr) {
-    when(in.redirect.valid) {
-      vsetvlState := vs_idle
-    }.elsewhen(Cat(enqIsVInstrOrVset).orR) {
-      vsetvlState := vs_waitFlush
-    }
-  }.elsewhen(vsetvlState === vs_waitFlush) {
-    when(in.redirect.valid) {
-      vsetvlState := vs_idle
-    }
-  }
-
-  // lqEnq
-  in.debugEnqLsq.needAlloc.map(_(0)).zip(in.debugEnqLsq.req).foreach { case (alloc, req) =>
-    when(in.debugEnqLsq.canAccept && alloc && req.valid) {
-      val ptr = req.bits.uop.robIdx
-      debug_lqIdx(ptr.value)(slotIndex(ptr)) := req.bits.uop.lqIdx
-      debug_lqIdxValid(ptr.value)(slotIndex(ptr)) := true.B
-      when(ptr.isFormer) {
-        robEntries(ptr.value).debug_lqIdx.foreach(_ := req.bits.uop.lqIdx)
-      }
-    }
-  }
-
-  // lsIssue
-  when(in.debugHeadLsIssue) {
-    debug_lsIssued(deqPtr.value) := true.B
-  }
-
-  /**
-   * Writeback (from execution units)
-   */
-  for (wb <- exuWBs) {
-    val wbIdx = wb.bits.robIdx.value
-    val subIdx = slotIndex(wb.bits.robIdx)
-    when(wb.valid) {
-      debug_exuData(wbIdx)(subIdx) := wb.bits.data
-      debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
-      wb.bits.perfDebugInfo.foreach { x =>
-        debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
-          slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
-          slotDebug.perfDebugInfo.selectTime := x.selectTime
-          slotDebug.perfDebugInfo.issueTime := x.issueTime
-          slotDebug.perfDebugInfo.writebackTime := x.writebackTime
-          slotDebug.perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
-          slotDebug.perfDebugInfo.tlbRespTime := x.tlbRespTime
-        }
-        when(wb.bits.robIdx.isFormer) {
-          robEntries(wbIdx).perfDebugInfo.foreach(_.enqRsTime := x.enqRsTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.selectTime := x.selectTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.issueTime := x.issueTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.writebackTime := x.writebackTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbFirstReqTime := x.tlbFirstReqTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbRespTime := x.tlbRespTime)
-        }
-      }
-      debug_lqIdx(wbIdx)(subIdx) := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
-      debug_sqIdx(wbIdx)(subIdx) := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
-      when(wb.bits.robIdx.isFormer) {
-        robEntries(wbIdx).debug_lqIdx.foreach(_ := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr)))
-        robEntries(wbIdx).debug_sqIdx.foreach(_ := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
-      }
-    }
-    val debug_Uop = debug_microOp(wbIdx)(subIdx)
-    val debug = debugMeta(debug_Uop)
-    XSInfo(wb.valid,
-      p"writebacked pc 0x${Hexadecimal(debug.pc)} wen ${debug_Uop.rfWen} " +
-        p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
-        p"skip ${wb.bits.debug.isSkipDiff} robIdx: ${wb.bits.robIdx}\n"
-    )
-  }
-
-  // The entry-level trace block describes the youngest instruction in the
-  // surviving compressed entry, while debug/difftest keep both slots exact.
-  for (wb <- branchWBs) {
-    val wbIdx = wb.bits.robIdx.value
-    val subIdx = slotIndex(wb.bits.robIdx)
-    when(wb.valid && wb.bits.redirect.get.bits.taken &&
-      Itype.isNonTaken(debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype)) {
-      debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype := Itype.Taken
-    }
-    when(wb.valid && wb.bits.robIdx.isFormer && wb.bits.redirect.get.bits.taken &&
-      Itype.isNonTaken(robEntries(wbIdx).formerTraceBlockInPipe.itype)) {
-      robEntries(wbIdx).formerTraceBlockInPipe.itype := Itype.Taken
-    }
-  }
-
-  val writebackNum = PopCount(exuWBs.map(_.valid))
-  XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
-
-
-  /**
-   * RedirectOut: Interrupt and Exceptions
-   */
-  val deqPtrEntry = rawInfo(0)
-  val deqPtrEntryValid = deqPtrEntry.commit_v
-  val deqHasFlushed = RegInit(false.B)
-  val intrBitSetReg = RegNext(in.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interruptSafe && !deqHasFlushed
+  intrEnable := intrBitSetReg && !hasWaitForward && deqPtrEntry.interruptSafe && !deqHasFlushed
   val deqPtrFormer = Wire(new RobPtr)
   val deqPtrLatter = Wire(new RobPtr)
   deqPtrFormer := deqPtr
@@ -692,13 +875,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqExceptionRobIdx = Mux(deqPtrEntry.slotNeedFlushMask(0), deqPtrFormer, deqPtrLatter)
   val formerNotFlush = !deqPtrFormer.needFlush(in.redirect)
   val latterNotFlush = !deqPtrLatter.needFlush(in.redirect)
-  val deqNeedFlush = (deqPtrEntry.slotNeedFlushMask(0) && formerNotFlush || deqPtrEntry.slotNeedFlushMask(1) && CompressType.isNotNORMAL(deqPtrEntry.entryPairType) && latterNotFlush) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
+  deqNeedFlush := (deqPtrEntry.slotNeedFlushMask(0) && formerNotFlush ||
+    deqPtrEntry.slotNeedFlushMask(1) && CompressType.isNotNORMAL(deqPtrEntry.entryPairType) && latterNotFlush) &&
+    deqPtrEntry.commit_v && deqPtrEntry.commit_w
+
+  // Match head flush requests with the precise exception record.
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx.isSameSlot(deqExceptionRobIdx)
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
-  val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
+  val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.orR ||
+    exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
   val commit_w_delay = RegNext(deqPtrEntry.commit_w)
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && commit_w_delay
-  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && commit_w_delay
+  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState &&
+    exceptionDataRead.bits.flushPipe && !deqHasException && commit_w_delay
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
   val deqIsVlsException = deqHasException && deqExceptionUop.isVectorMemory && !exceptionDataRead.bits.isEnqExcp
   val deqIsVlsFlushPipe = deqHasFlushPipe && deqExceptionUop.isVectorMemory
@@ -708,7 +897,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // vls exception can be committed only when RAB commit all its reg pairs
   deqVlsCanCommit := RegNext(RegNext(deqPtrEntry.commit_w)) && rab.in.status.commitEnd
 
-  // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
+  // Issue one RAB mapping-drain request per vector memory exception.
   val deqVlsExcpLock = RegInit(false.B)
   val handleVlsExcp = deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock && state === s_idle
   when(handleVlsExcp) {
@@ -717,7 +906,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqVlsExcpLock := false.B
   }
 
-  // Only assert once when deqVlsExcp occurs until condition not assert to avoid multi message passed to RAB
+  // Pulse the mapping-drain request after the exception lock is acquired.
   when (deqVlsExceptionNeedCommit) {
     deqVlsExceptionNeedCommit := false.B
   }.elsewhen(handleVlsExcp){
@@ -725,53 +914,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqVlsExceptionNeedCommit := true.B
   }
 
-  val hasCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
-  val retiredSlotPtrs = out.commits.robIdx.zip(out.commits.info).map { case (ptr, info) =>
-    val retired = WireDefault(ptr)
-    retired.isFormer := CompressType.isNORMAL(info.entryPairType)
-    retired
-  }
-  val newestCommit = PriorityMuxDefault(
-    out.commits.commitValid.zip(retiredSlotPtrs).reverse,
-    deqPtr
-  )
-  out.diffRatCommitRobIdx.foreach { commitRobIdx =>
-    commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
-    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr.asFormer, newestCommit)
-  }
-  out.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
-    assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
-    for (i <- 0 until CommitWidth) {
-      commitRobIdxVec(i).valid := out.commits.isCommit && out.commits.commitValid(i) &&
-        !deqVlsExceptionNeedCommit
-      commitRobIdxVec(i).bits := retiredSlotPtrs(i)
-    }
-    when(deqVlsExceptionNeedCommit) {
-      commitRobIdxVec.head.valid := true.B
-      commitRobIdxVec.head.bits := deqPtr.asFormer
-    }
-  }
-
-  XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
-  XSDebug(deqHasException && TriggerAction.isDmode(exceptionDataRead.bits.trigger), "Debug Mode: Deq has trigger entry debug Mode\n")
-
+  // Build the flush target from the surviving slot boundary.
   val isFlushPipe = deqPtrEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
-
-  // vsetvl instruction need another one cycle to write to vtype gen
-  val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushed && exceptionDataRead.bits.isVset
-  val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
-  //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
-  out.isVsetFlushPipe := isVsetFlushPipe
-  out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || isVsetFlushPipeReg
-  // out.flushOut will trigger redirect at the next cycle.
-  // Block any redirect or commit at the next cycle.
-  val lastCycleFlush = RegNext(out.flushOut.valid)
-
-  out.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException || deqCanFlushPipe) && !lastCycleFlush
+  out.flushOut.valid := (state === s_idle) && deqPtrEntryValid &&
+    (intrEnable || deqCanException || deqCanFlushPipe) && !lastCycleFlush
   out.flushOut.bits := DontCare
   val flushIsFormer = intrEnable || deqPtrEntry.slotNeedFlushMask(0)
-  val flushBaseIsRVC = Mux(flushIsFormer, deqPtrEntry.slotHeadRvcMask(0), Mux(deqPtrEntry.predTaken, deqPtrEntry.slotHeadRvcMask(1), deqPtrEntry.slotHeadRvcMask(0)))
+  val flushBaseIsRVC = Mux(
+    flushIsFormer,
+    deqPtrEntry.slotHeadRvcMask(0),
+    Mux(deqPtrEntry.predTaken, deqPtrEntry.slotHeadRvcMask(1), deqPtrEntry.slotHeadRvcMask(0))
+  )
   out.flushOut.bits.isRVC := flushBaseIsRVC
   out.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
   out.flushOut.bits.robIdx.isFormer := Mux(needModifyFtqIdxOffset, true.B, flushIsFormer)
@@ -813,20 +967,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // TODO: it could use the former instr's ftqIdx and ftqOffset to calculate the latter instr's PC
   // rather than calculate the latter instr's ftqIdx and ftqOffset which could be wrong!!!
 
-  out.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
+  out.flushOut.bits.level := Mux(
+    deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset,
+    RedirectLevel.flush,
+    RedirectLevel.flushAfter
+  ) // TODO use this to implement "exception next"
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
-  XSPerfAccumulate("flush_num", out.flushOut.valid)
-  XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
-  XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
-  XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
-  XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
+  // Register the precise exception report for CSR.
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   val exceptionIsFormer = deqExceptionIsFormer
   val exceptionUop = deqExceptionUop
-  val exceptionDebug = debugMeta(Mux(exceptionIsFormer,
-    debug_microOp(deqPtr.value)(0), debug_microOp(deqPtr.value)(1)))
+  val exceptionDebug = debugMeta(Mux(
+    exceptionIsFormer,
+    debug_microOp(deqPtr.value)(0),
+    debug_microOp(deqPtr.value)(1)
+  ))
   out.exception.valid := RegNext(exceptionHappen)
   out.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
@@ -836,7 +993,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.isFormer := RegEnable(exceptionIsFormer, exceptionHappen)
   out.exception.bits.isStore := RegEnable(FuType.isStore(exceptionUop.fuType), exceptionHappen)
   out.exception.bits.exceptionVec extendFrom RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
-  out.exception.bits.satpFlushFirstFetchFault := RegEnable(exceptionDataRead.bits.satpFlushFirstFetchFault && deqHasException, exceptionHappen)
+  out.exception.bits.satpFlushFirstFetchFault := RegEnable(
+    exceptionDataRead.bits.satpFlushFirstFetchFault && deqHasException,
+    exceptionHappen
+  )
   // fetch trigger fire or execute ebreak
   out.exception.bits.isPcBkpt := RegEnable(
     exceptionDataRead.bits.exceptionVec(ExceptionNO.EX_BP) && (
@@ -845,7 +1005,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ),
     exceptionHappen,
   )
-  out.exception.bits.isFetchMalAddr := RegEnable(exceptionDataRead.bits.isFetchMalAddr && deqHasException, exceptionHappen)
+  out.exception.bits.isFetchMalAddr := RegEnable(
+    exceptionDataRead.bits.isFetchMalAddr && deqHasException,
+    exceptionHappen
+  )
   out.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   out.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   out.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
@@ -853,74 +1016,231 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.vls := RegEnable(exceptionUop.isVectorMemory, exceptionHappen)
   out.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
-  // A latter exception flushes itself but preserves its older former slot.
-  // Hold only the difftest observation until that slot really retires after walk.
-  val diffTrapPending = WireDefault(false.B)
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    val pending = RegInit(false.B)
-    val pendingPtr = Reg(new RobPtr)
-    val release = pending && out.commits.isCommit && out.commits.commitValid.head &&
-      deqPtr.isSameEntry(pendingPtr)
-    when(exceptionHappen && !exceptionIsFormer) {
-      assert(!pending, "A latter exception observation is already pending")
-      assert(!exceptionUop.isVectorMemory, "Vector memory instructions must not be compressed")
-      pending := true.B
-      pendingPtr := deqPtr
-    }.elsewhen(release) {
-      pending := false.B
-    }
-    when(release) {
-      assert(CompressType.isNORMAL(out.commits.info.head.entryPairType))
-      assert(PopCount(out.commits.commitValid) === 1.U)
-      assert(in.diffArchEvent.get.valid && in.diffArchEvent.get.bits,
-        "The surviving former and its latter exception must be observed together")
-    }
-    diffTrapPending := pending
-    out.diffCommitForTrap.get := release
-  }
-
-  // data will be one cycle after valid
+  // Request the guest physical address for the exception report.
   out.readGPAMemAddr.valid := exceptionHappen
   out.readGPAMemAddr.bits.ftqPtr := exceptionDataRead.bits.ftqPtr
   out.readGPAMemAddr.bits.ftqOffset := exceptionDataRead.bits.ftqOffset
   out.readGPAMemAddr.bits.isRVC := exceptionDataRead.bits.isRVC
 
-  XSDebug(out.flushOut.valid,
-    p"generate redirect: pc 0x${Hexadecimal(out.exception.bits.pc)} intr $intrEnable " +
-      p"excp $deqHasException flushPipe $isFlushPipe " +
-      p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
+  // Capture vector restart metadata for exception recovery.
+  vecExcpInfo.valid := exceptionHappen && !intrEnable && exceptionDataRead.bits.vstartEn &&
+    exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
+  when (exceptionHappen) {
+    vecExcpInfo.bits.nf := exceptionDataRead.bits.nf
+    vecExcpInfo.bits.vsew := exceptionDataRead.bits.vsew
+    vecExcpInfo.bits.veew := exceptionDataRead.bits.veew
+    vecExcpInfo.bits.vlmul := exceptionDataRead.bits.vlmul
+    vecExcpInfo.bits.isStride := exceptionDataRead.bits.isStrided
+    vecExcpInfo.bits.isIndexed := exceptionDataRead.bits.isIndexed
+    vecExcpInfo.bits.isWhole := exceptionDataRead.bits.isWhole
+    vecExcpInfo.bits.isVlm := exceptionDataRead.bits.isVlm
+    vecExcpInfo.bits.vstart := exceptionDataRead.bits.vstart
+  }
+  out.toVecExcpMod.excpInfo := vecExcpInfo
 
+  // Feed enqueue exceptions and redirect control into the selector.
+  exceptionGen.in.redirect <> in.redirect
+  exceptionGen.in.flush := out.flushOut.valid
 
-  /**
-   * Commits (and walk)
-   * They share the same width.
+  val canEnqueueEG = uopCanEnqueue
+  for (i <- 0 until RenameWidth) {
+    exceptionGen.in.enq(i).valid := canEnqueueEG(i)
+    exceptionGen.in.enq(i).bits.robIdx := in.enq.req(i).bits.robIdx
+    exceptionGen.in.enq(i).bits.ftqPtr := in.enq.req(i).bits.ftqPtr
+    exceptionGen.in.enq(i).bits.ftqOffset := in.enq.req(i).bits.ftqOffset
+    exceptionGen.in.enq(i).bits.isRVC := in.enq.req(i).bits.isRVC
+    exceptionGen.in.enq(i).bits.exceptionVec := in.enq.req(i).bits.exceptionVec
+    exceptionGen.in.enq(i).bits.satpFlushFirstFetchFault := in.enq.req(i).bits.satpFlushFirstFetchFault
+    exceptionGen.in.enq(i).bits.hasException := in.enq.req(i).bits.hasException
+    exceptionGen.in.enq(i).bits.isEnqExcp := in.enq.req(i).bits.hasException
+    exceptionGen.in.enq(i).bits.isFetchMalAddr := in.enq.req(i).bits.isFetchMalAddr
+    exceptionGen.in.enq(i).bits.flushPipe := in.enq.req(i).bits.flushPipe
+    exceptionGen.in.enq(i).bits.satpFlush := false.B
+    exceptionGen.in.enq(i).bits.isVset := in.enq.req(i).bits.isVset
+    exceptionGen.in.enq(i).bits.replayInst := false.B
+    XSError(canEnqueue(i) && in.enq.req(i).bits.replayInst, "enq should not set replayInst")
+    exceptionGen.in.enq(i).bits.singleStep := in.enq.req(i).bits.singleStep
+    exceptionGen.in.enq(i).bits.crossPageIPFFix := in.enq.req(i).bits.crossPageIPFFix
+    exceptionGen.in.enq(i).bits.trigger := in.enq.req(i).bits.trigger
+    exceptionGen.in.enq(i).bits.vstartEn := false.B //DontCare
+    exceptionGen.in.enq(i).bits.vstart := 0.U //DontCare
+    exceptionGen.in.enq(i).bits.vuopIdx := 0.U
+    exceptionGen.in.enq(i).bits.isVecLoad := false.B
+    exceptionGen.in.enq(i).bits.isVlm := false.B
+    exceptionGen.in.enq(i).bits.isStrided := false.B
+    exceptionGen.in.enq(i).bits.isIndexed := false.B
+    exceptionGen.in.enq(i).bits.isWhole := false.B
+    exceptionGen.in.enq(i).bits.nf := 0.U
+    exceptionGen.in.enq(i).bits.vsew := 0.U
+    exceptionGen.in.enq(i).bits.veew := 0.U
+    exceptionGen.in.enq(i).bits.vlmul := 0.U
+  }
+
+  // Feed execution exceptions into the selector.
+  println(s"ExceptionGen:")
+  println(s"num of exceptions: ${params.numException}")
+  require(exceptionWBs.length == exceptionGen.in.wb.length,
+    f"exceptionWBs.length: ${exceptionWBs.length}, " +
+      f"exceptionGen.in.wb.length: ${exceptionGen.in.wb.length}")
+  for (((wb, exc_wb), i) <- exceptionWBs.zip(exceptionGen.in.wb).zipWithIndex) {
+    exc_wb.valid       := wb.valid
+    exc_wb.bits.robIdx := wb.bits.robIdx
+    // only enq inst use ftqPtr to read gpa
+    exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
+    exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
+    exc_wb.bits.isRVC           := false.B
+    exc_wb.bits.exceptionVec    := wb.bits.exceptionVec
+    exc_wb.bits.satpFlushFirstFetchFault := false.B
+    exc_wb.bits.hasException    := wb.bits.exceptionVec.orR // Todo: use in.writebackNeedFlush(i) instead
+    exc_wb.bits.isEnqExcp       := false.B
+    exc_wb.bits.isFetchMalAddr  := false.B
+    exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
+    exc_wb.bits.satpFlush       := wb.bits.satpFlush.getOrElse(false.B)
+    exc_wb.bits.isVset          := false.B
+    exc_wb.bits.replayInst      := wb.bits.replay.getOrElse(false.B)
+    exc_wb.bits.singleStep      := false.B
+    exc_wb.bits.crossPageIPFFix := false.B
+    val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
+    exc_wb.bits.trigger := trigger
+    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isStrided := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isIndexed := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isWhole := false.B // Todo[Vector]: remove it
+    exc_wb.bits.nf := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vsew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
+  }
+
+  /*
+   * RAB
+   * Forward accepted mapping requests and redirect control.
    */
-  // T redirect.valid, T+1 use walkPtrVec read robEntries, T+2 start walk, shouldWalkVec used in T+2
-  val shouldWalkVec = Wire(Vec(CommitWidth,Bool()))
-  val walkingPtrVec = RegNext(walkPtrVec)
-  when(in.redirect.valid){
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(RegNext(in.redirect.valid)){
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(state === s_walk){
-    shouldWalkVec := VecInit(walkingPtrVec.map(_.isNotAfterSlot(lastWalkPtr)).zip(donotNeedWalk).map(x => x._1 && !x._2))
-  }.otherwise(
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  )
-  val walkFinished = walkPtrTrue.isAfterSlot(lastWalkPtr)
+  rab.in.redirect := in.redirect.valid
+
+  rab.in.req.zip(in.enq.req).map { case (dest, src) =>
+    dest.bits := src.bits
+    dest.valid := src.valid && in.enq.canAccept
+  }
+
+  // Count register mappings covered by the commit and walk prefixes.
+  val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
+  val realDestSizeSeq = VecInit(robDeqGroup.zip(hasCommitted).map{case (r, h) => Mux(h, 0.U, r.realDestSize)})
+  val walkDestSizeSeq = VecInit(robDeqGroup.zip(donotNeedWalk).map{case (r, d) => Mux(d, 0.U, r.realDestSize)})
+  val commitSizeSumSeq = VecInit((0 until CommitWidth).map(i => realDestSizeSeq.take(i + 1).reduce(_ +& _)))
+  val walkSizeSumSeq   = VecInit((0 until CommitWidth).map(i => walkDestSizeSeq.take(i + 1).reduce(_ +& _)))
+  val commitSizeSumCond = VecInit(commitValidThisLine.zip(hasCommitted).map { case (c,h) =>
+    (c || h) && out.commits.isCommit
+  })
+  val walkSizeSumCond   = VecInit(out.commits.walkValid.zip(donotNeedWalk).map { case (w,d) =>
+    (w || d) && out.commits.isWalk
+  })
+  val commitSizeSum = PriorityMuxDefault(commitSizeSumCond.reverse.zip(commitSizeSumSeq.reverse), 0.U)
+  val walkSizeSum   = PriorityMuxDefault(walkSizeSumCond.reverse.zip(walkSizeSumSeq.reverse), 0.U)
+  rab.in.fromRob.commitSize := Mux(deqVlsExceptionNeedCommit, deqVlsExceptionCommitSize, commitSizeSum)
+  rab.in.fromRob.walkSize := walkSizeSum
+
+  // Share vector exception and snapshot boundaries with RAB.
+  rab.in.fromRob.vecLoadExcp.valid := RegNext(exceptionDataRead.valid && exceptionDataRead.bits.isVecLoad)
+  rab.in.fromRob.vecLoadExcp.bits.isStrided := RegEnable(exceptionDataRead.bits.isStrided, exceptionDataRead.valid)
+  rab.in.fromRob.vecLoadExcp.bits.isVlm := RegEnable(exceptionDataRead.bits.isVlm, exceptionDataRead.valid)
+  rab.in.snpt := in.snpt
+  rab.in.snpt.snptEnq := snptEnq
+
+  // pipe rab commits for better timing and area
+  out.rabCommits := RegNext(rab.out.commits)
   rab.in.fromRob.walkEnd := state === s_walk && walkFinished
+  walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
+    case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
+  }
+  out.toVecExcpMod.logicPhyRegMap := rab.out.toVecExcpMod.logicPhyRegMap
+
+  /*
+   * VTB
+   * Forward VTYPE requests and pipeline VL mapping notifications.
+   */
+  out.vlCommits := RegNext(vtypeBuffer.out.commits)
+  vtypeBuffer.in.redirect := in.redirect.valid
+
+  vtypeBuffer.in.req.zip(in.enq.req).map { case (sink, source) =>
+    sink.valid := source.valid && in.enq.canAccept
+    sink.bits := source.bits
+  }
+
+  // Retire or recover the VTYPE updates in each selected prefix.
+  private val commitIsVTypeVec = VecInit(out.commits.commitValid.zip(out.commits.info).map {
+    case (valid, info) => out.commits.isCommit && valid && info.needVTB
+  })
+  private val walkIsVTypeVec = VecInit(out.commits.walkValid.zip(walkInfo).map {
+    case (valid, info) => out.commits.isWalk && valid && info.needVTB
+  })
+  vtypeBuffer.in.fromRob.commitSize := PopCount(commitIsVTypeVec)
+  vtypeBuffer.in.fromRob.walkSize := PopCount(walkIsVTypeVec)
+  vtypeBuffer.in.snpt := in.snpt
+  vtypeBuffer.in.snpt.snptEnq := snptEnq
+  out.toDecode.walkToArchVType := vtypeBuffer.out.toDecode.walkToArchVType
+  out.toDecode.commitVType := vtypeBuffer.out.toDecode.commitVType
+  out.toDecode.walkVType := vtypeBuffer.out.toDecode.walkVType
   vtypeBuffer.in.fromRob.walkEnd := state === s_walk && walkFinished
 
-  require(RenameWidth <= CommitWidth)
+  // Track the first vector instruction following a flushing vsetvl.
+  val vs_idle :: vs_waitVinstr :: vs_waitFlush :: Nil = Enum(3)
+  val vsetvlState = RegInit(vs_idle)
+  val enq0 = in.enq.req(0)
+  val enq0IsVset = enq0.bits.isVset && enq0.bits.lastUop && canEnqueue(0)
+  val enq0IsVsetFlush = enq0IsVset && enq0.bits.flushPipe
+  val enqIsVInstrVec = in.enq.req.zip(canEnqueue).map { case (req, fire) => FuType.isVArith(req.bits.fuType) && fire }
+  // for vs_idle
+  val firstVInstrIdle = PriorityMux(
+    enqIsVInstrVec.zip(in.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(in.enq.req(0).cloneType))
+  )
+  // for vs_waitVinstr
+  val enqIsVInstrOrVset = (enqIsVInstrVec(0) || enq0IsVset) +: enqIsVInstrVec.drop(1)
+  val firstVInstrWait = PriorityMux(enqIsVInstrOrVset, in.enq.req)
+  when(vsetvlState === vs_idle) {
+    firstVInstrFtqPtr := firstVInstrIdle.bits.ftqPtr
+    firstVInstrFtqOffset := firstVInstrIdle.bits.ftqOffset
+    firstVInstrRobIdx := firstVInstrIdle.bits.robIdx
+  }.elsewhen(vsetvlState === vs_waitVinstr) {
+    when(Cat(enqIsVInstrOrVset).orR) {
+      firstVInstrFtqPtr := firstVInstrWait.bits.ftqPtr
+      firstVInstrFtqOffset := firstVInstrWait.bits.ftqOffset
+      firstVInstrRobIdx := firstVInstrWait.bits.robIdx
+    }
+  }
 
-  // wiring to csr
-  // update when enq
-  val enqFlagTracker = Module(new RobSetFlagTracker(
-    2,
-    in.enq.req.size,
-    CommitWidth,
-    orderedUpdatePorts = true
-  ))
+  // Wait for a vector instruction or a redirect to complete vsetvl tracking.
+  val hasVInstrAfterI = Cat(enqIsVInstrVec(0)).orR
+  when(vsetvlState === vs_idle && !in.redirect.valid) {
+    when(enq0IsVsetFlush) {
+      vsetvlState := Mux(hasVInstrAfterI, vs_waitFlush, vs_waitVinstr)
+    }
+  }.elsewhen(vsetvlState === vs_waitVinstr) {
+    when(in.redirect.valid) {
+      vsetvlState := vs_idle
+    }.elsewhen(Cat(enqIsVInstrOrVset).orR) {
+      vsetvlState := vs_waitFlush
+    }
+  }.elsewhen(vsetvlState === vs_waitFlush) {
+    when(in.redirect.valid) {
+      vsetvlState := vs_idle
+    }
+  }
+  // vsetvl instruction need another one cycle to write to vtype gen
+  val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushed && exceptionDataRead.bits.isVset
+  val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
+  //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
+  out.isVsetFlushPipe := isVsetFlushPipe
+  out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || isVsetFlushPipeReg
+
+  /*
+   * CSR
+   * Retain enqueue-side dirty flags until the matching slots retire.
+   */
   enqFlagTracker.in.update.zip(in.enq.req).zip(uopCanEnqueue).foreach {
     case ((update, req), canEnqueue) =>
       update.valid := canEnqueue
@@ -936,34 +1256,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val dirty_fs = enqFlagTracker.out.commitSetMask(0)
   val dirty_vs = enqFlagTracker.out.commitSetMask(1)
 
+  // Accept writeback flags only from live slots in the current ROB window.
   val deqPtrCmp = Wire(new RobPtr)
   val enqPtrCmp = Wire(new RobPtr)
   deqPtrCmp := deqPtr
   enqPtrCmp := enqPtr
   deqPtrCmp.isFormer := true.B
   enqPtrCmp.isFormer := true.B
-  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
-    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
-    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.entryPairType))
-  }
-
-  // update when writeback
-  val fflagsWidth = 5
-
-  private val writebackFflagsCandidates = (0 until in.writeback.size).filter { index =>
-    in.writeback(index).bits.fflags.nonEmpty
-  }
-  private val writebackVxsatCandidates = (0 until in.writeback.size).filter { index =>
-    in.writeback(index).bits.vxsat.nonEmpty
-  }
-  private val writebackFlagCandidates =
-    Seq.fill(fflagsWidth)(writebackFflagsCandidates) :+ writebackVxsatCandidates
-  val writebackFlagTracker = Module(new RobSetFlagTracker(
-    fflagsWidth + 1,
-    in.writeback.size,
-    CommitWidth,
-    writebackFlagCandidates
-  ))
   writebackFlagTracker.in.update.zip(in.writeback).foreach { case (update, wb) =>
     val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
     update.valid := wb.valid && wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
@@ -982,133 +1281,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       commit.bits := robIdx
   }
 
+  // Register architectural CSR flag updates at retirement.
   val resetVstart = dirty_vs && !in.vstartIsZero
-
-  vecExcpInfo.valid := exceptionHappen && !intrEnable && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
-  when (exceptionHappen) {
-    vecExcpInfo.bits.nf := exceptionDataRead.bits.nf
-    vecExcpInfo.bits.vsew := exceptionDataRead.bits.vsew
-    vecExcpInfo.bits.veew := exceptionDataRead.bits.veew
-    vecExcpInfo.bits.vlmul := exceptionDataRead.bits.vlmul
-    vecExcpInfo.bits.isStride := exceptionDataRead.bits.isStrided
-    vecExcpInfo.bits.isIndexed := exceptionDataRead.bits.isIndexed
-    vecExcpInfo.bits.isWhole := exceptionDataRead.bits.isWhole
-    vecExcpInfo.bits.isVlm := exceptionDataRead.bits.isVlm
-    vecExcpInfo.bits.vstart := exceptionDataRead.bits.vstart
-  }
-
   out.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
   out.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
-
-  // when mispredict branches writeback, stop commit in the next 2 cycles
-  // TODO: don't check all exu write back
-  val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
-    wb.bits.redirect.get.bits.isMisPred && wb.bits.redirect.get.valid && wb.valid
-  ).toSeq)).orR
-  val misPredBlockCounter = Reg(UInt(3.W))
-  misPredBlockCounter := Mux(misPredWb,
-    "b111".U,
-    misPredBlockCounter >> 1.U
-  )
-  val misPredBlock = misPredBlockCounter(0)
-  val deqFlushBlockCounter = Reg(UInt(3.W))
-  val deqFlushBlock = deqFlushBlockCounter(0)
-  val deqHasCommitted = out.commits.isCommit && out.commits.commitValid(0)
-  // TODO *** WARNING ***
-  // Blocking commit. Don't change this before we fully understand the logic.
-  val deqHitRedirectReg = RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)) ||
-    RegNext(RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)))
-  val criticalErrorState = in.csr.criticalErrorState
-  when(deqNeedFlush && deqHitRedirectReg){
-    deqFlushBlockCounter := "b111".U
-  }.otherwise{
-    deqFlushBlockCounter := deqFlushBlockCounter >> 1.U
-  }
-  when(deqHasCommitted){
-    deqHasFlushed := false.B
-  }.elsewhen(deqNeedFlush && out.flushOut.valid && !out.flushOut.bits.flushItself()){
-    deqHasFlushed := true.B
-  }
-  val traceBlock = out.trace.blockCommit
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
-    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
-
-  out.commits.isWalk := state === s_walk
-  out.commits.isCommit := state === s_idle && !blockCommit
-
-  val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
-  val commit_vDeqGroup = VecInit(robDeqGroup.map(_.commit_v))
-  val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
-  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U)).asFormer
-  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && (x.slotNeedFlushMask(0) || x.slotNeedFlushMask(1) && CompressType.isNotNORMAL(x.entryPairType)))).asUInt.orR || intrBitSetReg || diffTrapPending
-  // for instructions that may block others, we don't allow them to commit
-  out.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(out.commits.commitValid)))
-
-  for (i <- 0 until CommitWidth) {
-    // defaults: state === s_idle and instructions commit
-    // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
-    val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
-    commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
-    out.commits.info(i) := commitInfo(i)
-    out.commits.robIdx(i) := deqPtrVec(i)
-    val deqDebugInst = debug_microOp(deqPtrVec(i).value).head
-    deqDebugInst.debug.foreach { debug =>
-      PerfCCT.commitInstMeta(i.U, debug.debug_seqNum.seqNum, commitInstrCntByEntry(i), out.commits.isCommit && out.commits.commitValid(i), clock, reset)
-    }
-
-    out.commits.walkValid(i) := shouldWalkVec(i)
-    XSError(
-      state === s_walk &&
-      out.commits.isWalk && state === s_walk && shouldWalkVec(i) &&
-      !walk_v(i),
-      s"The walking entry($i) should be valid\n")
-
-    XSInfo(out.commits.isCommit && out.commits.commitValid(i),
-      "retired pc %x wen %d ldest %d pdest %x data %x\n",
-      debugMeta(debug_microOp(deqPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
-      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
-      out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
-      debug_exuData(deqPtrVec(i).value)(0)
-    )
-    XSInfo(state === s_walk && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
-      debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
-      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
-      debug_exuData(walkPtrVec(i).value)(0)
-    )
-  }
-
-  val noCommitCycleCnt = RegInit(0.U(20.W))
-  when(out.commits.isCommit && out.commits.commitValid(0)) {
-    noCommitCycleCnt := 0.U
-  }.otherwise {
-    noCommitCycleCnt := noCommitCycleCnt + 1.U
-  }
-  // Read the architectural ROB entry explicitly for the debug-only counters.
-  // `robDeqGroup` is a `RobCommitEntryBundle`, which intentionally no longer
-  // carries the shadow uop state used to derive these values.
-  val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
-  val deqPtrFormerUopNum = deqPtrRobEntry.decodeFormerUopNum(
-    deqPtrRobEntry.entryPairType,
-    deqPtrRobEntry.uopState
-  )
-  val deqPtrLatterUopNum = deqPtrRobEntry.decodeLatterUopNum(
-    deqPtrRobEntry.entryPairType,
-    deqPtrRobEntry.uopState
-  )
-  when(noCommitCycleCnt === 14999.U) {
-    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
-      p"realDest=${deqPtrEntry.realDestSize} " +
-      p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
-      p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
-      p"formerUopNum=${deqPtrFormerUopNum} latterUopNum=${deqPtrLatterUopNum} " +
-      p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
-      p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
-  }
-
   // sync fflags/dirty_fs/vxsat to csr
   for(i <- 0 until fflagsWidth) {
     out.csr.fflags(i) := RegNext(writebackFlagTracker.out.commitSetMask(i), false.B)
@@ -1117,7 +1293,39 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.csr.dirty_vs := GatedValidRegNext(dirty_vs)
   out.csr.vxsat    := RegNext(writebackFlagTracker.out.commitSetMask(fflagsWidth), false.B)
 
-  // commit load/store to lsq
+  // Count retired instructions, including fused and compressed instructions.
+  val isCommit = out.commits.isCommit
+  val isCommitReg = GatedValidRegNext(out.commits.isCommit)
+  val instrCntReg = RegInit(0.U(64.W))
+  val fusionCommitCountNow = out.commits.commitValid.zip(out.commits.info).zip(deqPtrVec).map {
+    case ((valid, info), ptr) =>
+      val formerFusionCount = debugMeta(debug_microOp(ptr.value)(0)).fusionNum
+      val latterFusionCount = debugMeta(debug_microOp(ptr.value)(1)).fusionNum
+      val survivingFusionCount = formerFusionCount +& Mux(
+        CompressType.isNotNORMAL(info.entryPairType),
+        latterFusionCount,
+        0.U
+      )
+      Mux(valid, survivingFusionCount, 0.U)
+  }.reduce(_ +& _)
+  val fuseCommitCnt = RegEnable(fusionCommitCountNow, isCommit)
+  val trueCommitCnt = RegEnable(
+    out.commits.commitValid.zip(commitInstrCntByEntry).map {
+      case (v, instrCnt) => Mux(v, instrCnt, 0.U)
+    }.reduce(_ +& _),
+    isCommit
+  )
+  val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
+  val instrCnt = instrCntReg + retireCounter
+  when(isCommitReg){
+    instrCntReg := instrCnt
+  }
+  out.csr.perfinfo.retiredInstr := retireCounter
+
+  /*
+   * LSQ
+   * Count retired load slots and identify scalar store retirement.
+   */
   val ldCommitVec = VecInit((0 until CommitWidth).flatMap { i =>
     (0 until 2).map { j =>
       val slotValid = out.commits.commitValid(i) && (j == 0).B ||
@@ -1126,14 +1334,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   })
   // TODO: Check if meet the require that only set scommit when commit scala store uop
-//  val stCommitVec = VecInit((0 until CommitWidth).map(i => out.commits.commitValid(i) && out.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
-  val newStCommit = VecInit((0 until CommitWidth).map(i => out.commits.commitValid(i) && out.commits.info(i).entryHasStore && !robEntries(deqPtrVec(i).value).vls)).asUInt.orR
+//  val stCommitVec = VecInit((0 until CommitWidth).map(i =>
+//    out.commits.commitValid(i) && out.commits.info(i).commitType === CommitType.STORE &&
+//      !robEntries(deqPtrVec(i).value).vls))
+  val newStCommit = VecInit((0 until CommitWidth).map { i =>
+    out.commits.commitValid(i) && out.commits.info(i).entryHasStore && !robEntries(deqPtrVec(i).value).vls
+  }).asUInt.orR
   out.lsq.lcommit := RegNext(Mux(out.commits.isCommit, PopCount(ldCommitVec), 0.U))
 //  out.lsq.scommit := RegNext(Mux(out.commits.isCommit, PopCount(stCommitVec), 0.U))
 //  out.lsq.scommit := RegNext(Mux(out.commits.isCommit && newStCommit, 1.U, 0.U))
 
   out.lsq.commit := RegNext(out.commits.isCommit && out.commits.commitValid(0))
 
+  // Select the oldest pending memory slot at the ROB head.
   val pendingEntry = robEntries(deqPtr.value)
 
   val pendingBackPtr = Wire(new RobPtr)
@@ -1188,154 +1401,268 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       pendingEntry.formerUopNum === 0.U &&
       pendingEntry.latterUopNum =/= 0.U, 1.U, 0.U))
 
-  /**
-   * state changes
-   * (1) redirect: switch to s_walk
-   * (2) walk: when walking comes to the end, switch to s_idle
+  /*
+   * Serialization and WFI
+   * Clear serialization state when the blocking work leaves the ROB.
    */
-  state_next := Mux(
-    in.redirect.valid || RegNext(in.redirect.valid), s_walk,
-    Mux(
-      state === s_walk && walkFinished && rab.in.status.walkEnd && vtypeBuffer.in.status.walkEnd, s_idle,
-      state
-    )
-  )
-  XSPerfAccumulate("s_idle_to_idle", state === s_idle && state_next === s_idle)
-  XSPerfAccumulate("s_idle_to_walk", state === s_idle && state_next === s_walk)
-  XSPerfAccumulate("s_walk_to_idle", state === s_walk && state_next === s_idle)
-  XSPerfAccumulate("s_walk_to_walk", state === s_walk && state_next === s_walk)
-  state := state_next
-
-  /**
-   * pointers and counters
-   */
-  val deqPtrGenModule = Module(new RobDeqPtrWrapper)
-  deqPtrGenModule.in.state := state
-  deqPtrGenModule.in.deq_v := commit_vDeqGroup
-  deqPtrGenModule.in.deq_w := commit_wDeqGroup
-  deqPtrGenModule.in.exception_state := exceptionDataRead
-  deqPtrGenModule.in.intrBitSetReg := intrBitSetReg
-  deqPtrGenModule.in.hasNoSpecExec := hasWaitForward
-  deqPtrGenModule.in.allowOnlyOneCommit := allowOnlyOneCommit
-  deqPtrGenModule.in.interruptSafe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interruptSafe
-  deqPtrGenModule.in.blockCommit := blockCommit
-  deqPtrGenModule.in.hasCommitted := hasCommitted
-  deqPtrGenModule.in.allCommitted := allCommitted
-  deqPtrVec := deqPtrGenModule.out.ptrVec
-  deqPtrVec_next := deqPtrGenModule.out.nextPtrVec
-
-  val enqPtrGenModule = Module(new RobEnqPtrWrapper)
-  enqPtrGenModule.in.redirect := in.redirect
-  enqPtrGenModule.in.allowEnqueue := allowEnqueue && rab.in.canEnq && !in.fromVecExcpMod.busy
-  enqPtrGenModule.in.hasBlockBackward := hasBlockBackward
-  enqPtrGenModule.in.enq := VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop))
-  enqPtrVec := enqPtrGenModule.out.ptrVec
-
-  // next walkPtrVec:
-  // (1) redirect occurs: update according to state
-  // (2) walk: move forwards
-  val deqPtrReadBank = deqPtrVec_next(0).lineHeadPtr
-  val deqPtrVecForWalk = VecInit((0 until CommitWidth).map(i => deqPtrReadBank.addEntries(i.U).asFormer))
-  val snapPtrReadBank = snapshots(in.snpt.snptSelect)(0).lineHeadPtr
-  val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank.addEntries(i.U).asFormer))
-  val walkPtrVec_next: Vec[RobPtr] = Mux(in.redirect.valid,
-    Mux(in.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
-    Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
-  )
-  val walkPtrTrue_next: RobPtr = Mux(in.redirect.valid,
-    Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0), deqPtrVec_next(0)),
-    Mux((state === s_walk) && !walkFinished, walkPtrVec_next.head, walkPtrTrue)
-  )
-  walkPtrHead := walkPtrVec_next.head
-  walkPtrVec := walkPtrVec_next
-  walkPtrTrue := walkPtrTrue_next
-  // T in.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
-  val walkPtrLowBits = Reg(UInt(bankAddrWidth.W))
-  when(in.redirect.valid){
-    walkPtrLowBits := Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0).value(bankAddrWidth-1, 0), deqPtrVec_next(0).value(bankAddrWidth-1, 0))
+  // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
+  // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
+  // TODO: How about a lot of fence instr and XSTrap instr
+  val hasWB = VecInit(exuWBs.map(wb => wb.valid)).asUInt.orR
+  //  when(isEmpty || (hasBlockBackward && hasWB)) {
+  when(isEmpty) {
+    hasBlockBackward := false.B
   }
-  when(in.redirect.valid) {
-    donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
-  }.elsewhen(RegNext(in.redirect.valid)){
-    donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
-  }.otherwise{
-    donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
-  }
-  walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
-    case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
-  }
-  val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val commitCnt = PopCount(out.commits.commitValid)
-
-  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
-  allowEnqueueForDispatch := numValidEntries + dispatchNum <= (RobSize - 2 * RenameWidth).U
-
-  val redirectWalkDistance = distanceBetween(in.redirect.bits.robIdx, deqPtrVec_next(0))
-  when(in.redirect.valid) {
-    // TODO: lastWalkPtr points the last valid entry
-    lastWalkPtr := Mux(
-      in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself(),
-      in.redirect.bits.robIdx.subEntries(1.U).asFormer,
-      in.redirect.bits.robIdx
-    )
+  // When any instruction commits, hasNoSpecExec should be set to false.B
+  when(out.commits.hasWalkInstr || out.commits.hasCommitInstr) {
+    hasWaitForward := false.B
   }
 
+  out.debugWaitForward.foreach(_ := hasWaitForward)
+  out.debugBlockBackward.foreach(_ := hasBlockBackward)
 
-  /**
-   * States
-   * We put all the stage bits changes here.
-   *
-   * All events: (1) enqueue (dispatch); (2) writeback; (3) cancel; (4) dequeue (commit);
-   * All states: (1) valid; (2) writebacked; (3) flagBkup
-   */
-
-  val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
-  deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0).addEntries(i.U).asFormer }
-  val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
-
-  val redirectValidReg = RegNext(in.redirect.valid)
-  val redirectBegin = Reg(UInt(log2Up(RobSize).W))
-  val redirectEnd = Reg(UInt(log2Up(RobSize).W))
-  val redirectAll = RegInit(false.B)
-  when(in.redirect.valid){
-    redirectBegin := Mux(in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself(),
-      Mux(in.redirect.bits.robIdx.value === 0.U, (RobSize - 1).U, in.redirect.bits.robIdx.value - 1.U),
-      in.redirect.bits.robIdx.value
-    )
-    redirectEnd := enqPtr.value
-    // Only former+flushItself removes the redirect entry itself.  A latter-slot
-    // redirect must retain the former slot even when the physical range wraps.
-    redirectAll := in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself() &&
-      (in.redirect.bits.robIdx.value === enqPtr.value) && (in.redirect.bits.robIdx.flag ^ enqPtr.flag)
+  // Request WFI quiescence and resume on wakeup, flush, or timeout.
+  val wfiSafe = out.wfi.safeFromMem && out.wfi.safeFromFrontend
+  out.wfi.wfiReq := hasWFI
+  out.cpu_wfi := hasWFI && wfiSafe
+  // WFI Timeout: 2^20 = 1M cycles
+  val wfi_cycles = RegInit(0.U(20.W))
+  if (wfiResume) {
+    when(hasWFI) {
+      wfi_cycles := wfi_cycles + 1.U
+    }.elsewhen(!hasWFI && RegNext(hasWFI)) {
+      wfi_cycles := 0.U
+    }
+  }
+  val wfi_timeout = wfi_cycles.andR
+  when(RegNext(RegNext(in.csr.wfiEvent)) || out.flushOut.valid || wfi_timeout) {
+    hasWFI := false.B
   }
 
-  // update robEntries valid
-  val enqOHByEntry = (0 until RobSize).map { i =>
-    VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map {
-      case (valid, ptrMatch) => valid && ptrMatch
-    })
+  // Accepted uops set serialization state after wakeup clears it.
+  for (i <- 0 until RenameWidth) {
+    when(in.enq.canAccept && in.enq.req(i).valid) {
+      val enqUop = in.enq.req(i).bits
+      when(enqUop.waitForward) {
+        hasWaitForward := true.B
+      }
+      val enqTriggerActionIsDebugMode = TriggerAction.isDmode(in.enq.req(i).bits.trigger)
+      val enqHasException = enqUop.exceptionVec.orR
+      when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
+        hasWFI := true.B
+      }
+    }
   }
-  for (i <- 0 until RobSize) {
-    val enqOH = enqOHByEntry(i)
-    val commitCond = out.commits.isCommit && out.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
-    assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
-    // TODO: fix the needFlush logic for CROB
-    // redirectBegin is still valid, but redirectBegin+1 is invalid
-    val needFlush = redirectValidReg && (Mux(
-      redirectEnd > redirectBegin,
-      (i.U > redirectBegin) && (i.U < redirectEnd),
-      (i.U > redirectBegin) || (i.U < redirectEnd)
-    ) || redirectAll)
-    when(commitCond) {
-      robEntries(i).valid := false.B
-    }.elsewhen(enqOH.asUInt.orR && !in.redirect.valid) {
-      robEntries(i).valid := true.B
-    }.elsewhen(needFlush){
-      robEntries(i).valid := false.B
+  for (i <- 0 until RenameWidth) {
+    val enqUop = in.enq.req(i)
+    when(enqUop.valid && enqUop.bits.blockBackward && in.enq.canAccept) {
+      hasBlockBackward := true.B
     }
   }
 
-  // debug_inst update
+  // WFI disable has final priority over same-cycle enqueue.
+  when(!in.wfi_enable) {
+    hasWFI := false.B
+  }
+
+  /*
+   * Instance helpers
+   * Read ROB state after the functional control paths and before the observers.
+   */
+  // Check that a writeback still targets a live slot.
+  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
+    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
+    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.entryPairType))
+  }
+
+  // Gate a counter with the current retirement enable.
+  private def ifCommit(counter: UInt): UInt = Mux(isCommit, counter, 0.U)
+
+  // Gate a counter with the registered retirement enable.
+  private def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
+
+  /*
+   * Retirement observation aliases
+   * Share slot metadata and latency samples across observers.
+   */
+  val timer = GTimer()
+  val debug_lsIssue = WireDefault(debug_lsIssued)
+  debug_lsIssue(deqPtr.value) := in.debugHeadLsIssue
+
+  // Normal RTL view used by the always-on performance events.
+  val commitSlotInfo = deqPtrVec.map(_.value).map(slotUopBuf(_)).flatten
+  // Debug/difftest-only view of the full uop.
+  val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
+  val commitSlotValid = out.commits.commitValid.zip(out.commits.info).flatMap { case (valid, info) =>
+    Seq(valid, valid && !CompressType.isNORMAL(info.entryPairType))
+  }
+  val executeLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.writebackTime - debugMeta(uop).perfDebugInfo.issueTime
+  }
+  val tlbLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.tlbRespTime - debugMeta(uop).perfDebugInfo.tlbFirstReqTime
+  }
+
+  /*
+   * Diagnostics and Database
+   * Record execution positions and the current ROB activity state.
+   */
+  if (backendParams.debugEn){
+    PerfCCT.tick(clock, reset)
+    in.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
+      PerfCCT.updateInstPos(wb.bits.debug_seqNum.get, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+    }
+  }
+  val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
+  val tip_state = WireInit(0.U(4.W))
+  when(!isEmpty) {  // One or more inst in ROB
+    when(state === s_walk || in.redirect.valid) {
+      tip_state := tip_walk
+    }.elsewhen(out.commits.isCommit && PopCount(out.commits.commitValid) =/= 0.U) {
+      tip_state := tip_computing
+    }.otherwise {
+      tip_state := tip_stalled
+    }
+  }.otherwise {
+    tip_state := tip_drained
+  }
+  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry)
+  val tip_data = Wire(new TipEntry())
+  tip_data.state := tip_state
+  tip_data.commits := out.commits
+  tip_data.redirect := in.redirect
+  tip_data.redirect_pc := debugMeta(debug_microOp(in.redirect.bits.robIdx.value)(slotIndex(in.redirect.bits.robIdx))).pc
+  tip_data.debugLsInfo := debug_lsInfo(out.commits.robIdx(0).value)
+  tip_table.log(tip_data, true.B, "", clock, reset)
+
+  // Capture the first instruction metadata in each allocated slot.
+  for (i <- 0 until RenameWidth) {
+    // we don't check whether in.redirect is valid here since redirect has higher priority
+    val hasEarlierSameHalf =
+      if (i == 0) {
+        false.B
+      } else {
+        VecInit((0 until i).map { j =>
+          in.enq.canAccept &&
+          in.enq.req(j).valid &&
+          in.enq.req(j).bits.robIdx.isSameSlot(in.enq.req(i).bits.robIdx)
+        }).asUInt.orR
+      }
+    val hasEarlierEntryReset =
+      if (i == 0) {
+        false.B
+      } else {
+        VecInit((0 until i).map { j =>
+          in.enq.canAccept &&
+          in.enq.req(j).valid &&
+          in.enq.req(j).bits.firstUop &&
+          in.enq.req(j).bits.robIdx.isSameEntry(in.enq.req(i).bits.robIdx)
+        }).asUInt.orR
+      }
+    when(in.enq.canAccept && in.enq.req(i).valid) {
+      val enqUop = in.enq.req(i).bits
+      val enqIndex = in.enq.req(i).bits.robIdx.value
+      val subIndex = !in.enq.req(i).bits.robIdx.isFormer
+      val slotWritten = Mux(enqUop.firstUop || hasEarlierEntryReset, false.B, enqHalfWritten(enqIndex)(subIndex))
+      when(enqUop.firstUop && !hasEarlierEntryReset) {
+        enqHalfWritten(enqIndex)(0) := false.B
+        enqHalfWritten(enqIndex)(1) := false.B
+      }
+      when(!hasEarlierSameHalf && !slotWritten) {
+        // Keep the first instruction metadata in each rob-half. The functional
+        // fields feed exception handling; the full uop is only for debug/difftest.
+        slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
+        slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
+        slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
+        debug_microOp(enqIndex)(subIndex) := enqUop
+        debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
+          debug.perfDebugInfo.dispatchTime := timer
+          debug.perfDebugInfo.enqRsTime := timer
+          debug.perfDebugInfo.selectTime := timer
+          debug.perfDebugInfo.issueTime := timer
+          debug.perfDebugInfo.writebackTime := timer
+          debug.perfDebugInfo.tlbFirstReqTime := timer
+          debug.perfDebugInfo.tlbRespTime := timer
+        }
+        when(enqUop.robIdx.isFormer) {
+          robEntries(enqIndex).perfDebugInfo.foreach(_.dispatchTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.enqRsTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.selectTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.issueTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.writebackTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbFirstReqTime := timer)
+          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbRespTime := timer)
+        }
+        debug_lqIdxValid(enqIndex)(subIndex) := false.B
+        enqHalfWritten(enqIndex)(subIndex) := true.B
+      }
+      when(enqUop.firstUop && !hasEarlierEntryReset) {
+        debug_lsInfo(enqIndex) := DebugLsInfo.init
+        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
+        debug_lsIssued(enqIndex) := false.B
+      }
+    }
+  }
+
+  // Retain load queue indices assigned after ROB allocation.
+  in.debugEnqLsq.needAlloc.map(_(0)).zip(in.debugEnqLsq.req).foreach { case (alloc, req) =>
+    when(in.debugEnqLsq.canAccept && alloc && req.valid) {
+      val ptr = req.bits.uop.robIdx
+      debug_lqIdx(ptr.value)(slotIndex(ptr)) := req.bits.uop.lqIdx
+      debug_lqIdxValid(ptr.value)(slotIndex(ptr)) := true.B
+      when(ptr.isFormer) {
+        robEntries(ptr.value).debug_lqIdx.foreach(_ := req.bits.uop.lqIdx)
+      }
+    }
+  }
+
+  // Capture memory issue and execution writeback metadata.
+  when(in.debugHeadLsIssue) {
+    debug_lsIssued(deqPtr.value) := true.B
+  }
+  for (wb <- exuWBs) {
+    val wbIdx = wb.bits.robIdx.value
+    val subIdx = slotIndex(wb.bits.robIdx)
+    when(wb.valid) {
+      debug_exuData(wbIdx)(subIdx) := wb.bits.data
+      debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
+      wb.bits.perfDebugInfo.foreach { x =>
+        debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
+          slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
+          slotDebug.perfDebugInfo.selectTime := x.selectTime
+          slotDebug.perfDebugInfo.issueTime := x.issueTime
+          slotDebug.perfDebugInfo.writebackTime := x.writebackTime
+          slotDebug.perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
+          slotDebug.perfDebugInfo.tlbRespTime := x.tlbRespTime
+        }
+        when(wb.bits.robIdx.isFormer) {
+          robEntries(wbIdx).perfDebugInfo.foreach(_.enqRsTime := x.enqRsTime)
+          robEntries(wbIdx).perfDebugInfo.foreach(_.selectTime := x.selectTime)
+          robEntries(wbIdx).perfDebugInfo.foreach(_.issueTime := x.issueTime)
+          robEntries(wbIdx).perfDebugInfo.foreach(_.writebackTime := x.writebackTime)
+          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbFirstReqTime := x.tlbFirstReqTime)
+          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbRespTime := x.tlbRespTime)
+        }
+      }
+      debug_lqIdx(wbIdx)(subIdx) := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+      debug_sqIdx(wbIdx)(subIdx) := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+      when(wb.bits.robIdx.isFormer) {
+        robEntries(wbIdx).debug_lqIdx.foreach(_ := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr)))
+        robEntries(wbIdx).debug_sqIdx.foreach(_ := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
+      }
+    }
+    val debug_Uop = debug_microOp(wbIdx)(subIdx)
+    val debug = debugMeta(debug_Uop)
+    XSInfo(wb.valid,
+      p"writebacked pc 0x${Hexadecimal(debug.pc)} wen ${debug_Uop.rfWen} " +
+        p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
+        p"skip ${wb.bits.debug.isSkipDiff} robIdx: ${wb.bits.robIdx}\n"
+    )
+  }
+  val writebackNum = PopCount(exuWBs.map(_.valid))
+  XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
+
+  // Accumulate memory pipeline observations and retirement diagnostics.
   for (i <- 0 until (LduCnt + StaCnt)) {
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(in.debug_ls.debugLsInfo(i))
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(in.debug_ls.debugLsInfo(i))
@@ -1345,424 +1672,43 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     debug_lsTopdownInfo(in.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(in.lsTopdownInfo(i))
     debug_lsTopdownInfo(in.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(in.lsTopdownInfo(i))
   }
-
-  // status field: writebacked
-  // enqueue logic set 6 writebacked to false
-
-  // writeback logic set numWbPorts writebacked to true
-
-  // if the first uop of an instruction is valid , write writebackedCounter
-  val uopEnqValidSeq = in.enq.req.map(req => in.enq.canAccept && req.valid)
-  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
-  val enqHasExcpSeq = in.enq.req.map(_.bits.hasException)
-  val enqRobIdxSeq = in.enq.req.map(req => req.bits.robIdx.value)
-  val enqWBNumVec = VecInit(in.enq.req.map(req => req.bits.numWB))
-  private val enqWriteStdVec = VecInit(in.enq.req.map(req => req.bits.stdwriteNeed))
-  val enqFormerWBNumVec = VecInit(in.enq.req.map(req => req.bits.formerNumWB))
-  val enqLatterWBNumVec = VecInit(in.enq.req.map(req => req.bits.latterNumWB))
-
-  private def saturatingDecPacked(value: UInt, decRaw: UInt): UInt = {
-    val compareWidth = math.max(value.getWidth, decRaw.getWidth)
-    val valueExt = value.pad(compareWidth)
-    val decExt = decRaw.pad(compareWidth)
-    val clippedDec = Mux(decExt > valueExt, valueExt, decExt)
-    (valueExt - clippedDec)(value.getWidth - 1, 0)
-  }
-
-  private def calcNextPackedUopState(
-    entryValid: Bool,
-    entryUopState: UInt,
-    entryCompressType: UInt,
-    redirectClearsLatter: Bool,
-    needFlushWriteBackFormer: Bool,
-    needFlushWriteBackLater: Bool,
-    instCanEnqFlag: Bool,
-    enqState: UInt,
-    formerWbCntRaw: UInt,
-    latterWbCntRaw: UInt
-  ): UInt = {
-    val normalFormerState = entryUopState(NormalUopNumWidth - 1, 0)
-    val compressedFormerState = entryUopState(CompressedSlotUopNumWidth - 1, 0)
-    val compressedLatterState = entryUopState(
-      2 * CompressedSlotUopNumWidth - 1,
-      CompressedSlotUopNumWidth
-    )
-    val currentIsNormal = CompressType.isNORMAL(entryCompressType)
-    val currentFormerForNormal = Mux(
-      currentIsNormal,
-      normalFormerState,
-      compressedFormerState.pad(NormalUopNumWidth)
-    )
-
-    val normalFormerAfterWb = saturatingDecPacked(currentFormerForNormal, formerWbCntRaw)
-    val compressedFormerAfterWb = saturatingDecPacked(compressedFormerState, formerWbCntRaw)
-    val compressedLatterAfterWb = saturatingDecPacked(compressedLatterState, latterWbCntRaw)
-
-    val normalFormerNext = Mux(needFlushWriteBackFormer, 0.U, normalFormerAfterWb)
-    val compressedFormerNext = Mux(needFlushWriteBackFormer, 0.U, compressedFormerAfterWb)
-    val compressedLatterNext = Mux(
-      needFlushWriteBackLater || redirectClearsLatter,
-      0.U,
-      compressedLatterAfterWb
-    )
-
-    val nextEntryPairType = Mux(
-      redirectClearsLatter,
-      CompressType.NORMAL,
-      entryCompressType
-    )
-    val nextNormalState = Cat(0.U(1.W), normalFormerNext)
-    val nextCompressedState = Cat(compressedLatterNext, compressedFormerNext)
-    val stateAfterWriteback = Mux(
-      CompressType.isNORMAL(nextEntryPairType),
-      nextNormalState,
-      nextCompressedState
-    )
-    val currentCanonicalState = Mux(
-      currentIsNormal,
-      Cat(0.U(1.W), normalFormerState),
-      Cat(compressedLatterState, compressedFormerState)
-    )
-    val clearBothByFormerExceptionFlush =
-      needFlushWriteBackFormer && CompressType.isNotNORMAL(entryCompressType)
-
-    val nextState = Wire(UInt(entryUopState.getWidth.W))
-    nextState := currentCanonicalState
-    when(!entryValid && instCanEnqFlag) {
-      nextState := enqState
-    }.elsewhen(entryValid) {
-      nextState := Mux(
-        clearBothByFormerExceptionFlush,
-        0.U(entryUopState.getWidth.W),
-        stateAfterWriteback
-      )
-    }
-    nextState
-  }
-
-  for (i <- 0 until RobSize) {
-
-    val enqOH = enqOHByEntry(i)
-    val robIdxMatchSeq = in.enq.req.map(_.bits.robIdx.value === i.U)
-    val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
-    val instCanEnqFlag = enqOH.asUInt.orR
-    val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
-    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
-    val entryPairType = robEntries(i).entryPairType
-    val redirectIsFormer = in.redirect.bits.robIdx.isFormer
-    val redirectFlushItSelf = in.redirect.bits.flushItself()
-    when(isFirstEnq){
-      robEntries(i).realDestSize := realDestEnqNum
-    }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
-      robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
-    }.elsewhen(in.redirect.valid && in.redirect.bits.robIdx.value === i.U){
-      val clearsLatter = CompressType.isNotNORMAL(entryPairType) && (
-        redirectIsFormer && !redirectFlushItSelf ||
-        !redirectIsFormer && redirectFlushItSelf
-      )
-      when(clearsLatter && (CompressType.isCC(entryPairType) || CompressType.isCS(entryPairType))){
-        robEntries(i).realDestSize := robEntries(i).complexSlotHasDest
-      }.elsewhen(clearsLatter && CompressType.isSC(entryPairType)){
-        robEntries(i).realDestSize := robEntries(i).realDestSize - robEntries(i).complexSlotHasDest
-      }
-    }
-    val enqFormerWBNum = Mux1H(enqOH, enqFormerWBNumVec)
-    val enqLatterWBNum = Mux1H(enqOH, enqLatterWBNumVec)
-    val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer))
-    val latterWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && !writeback.bits.robIdx.isFormer))
-    val slotNeedFlushMask = robEntries(i).slotNeedFlushMask
-    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
-      writeback.valid && needFlushWb && writeback.bits.robIdx.value === i.U
-    }
-    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
-      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
-    }
-    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
-      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
-    }
-    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
-    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
-    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
-    when(robEntries(i).valid && needFlushWriteBack){
-      slotNeedFlushMask := slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
-    }
-
-    val redirectHitThisEntry = robEntries(i).valid &&
-      in.redirect.valid &&
-      in.redirect.bits.robIdx.value === i.U
-    val redirectClearsLatter = redirectHitThisEntry &&
-      CompressType.isNotNORMAL(entryPairType) && (
-        in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
-        !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
-      )
-    val enqEntryPairType = Mux1H(enqOH, in.enq.req.map(_.bits.entryPairType))
-    val nextPackedUopState = calcNextPackedUopState(
-      entryValid = robEntries(i).valid,
-      entryUopState = robEntries(i).uopState,
-      entryCompressType = robEntries(i).entryPairType,
-      redirectClearsLatter = redirectClearsLatter,
-      needFlushWriteBackFormer = needFlushWriteBackFormer,
-      needFlushWriteBackLater = needFlushWriteBackLater,
-      instCanEnqFlag = instCanEnqFlag,
-      enqState = robEntries(i).encodeUopState(enqEntryPairType, enqFormerWBNum, enqLatterWBNum),
-      formerWbCntRaw = formerWbCnt,
-      latterWbCntRaw = latterWbCnt
-    )
-    robEntries(i).uopState := nextPackedUopState
-
-    // trace
-    val youngestSlotIsFormer = CompressType.isNORMAL(robEntries(i).entryPairType) || redirectClearsLatter
-    val taken = branchWBs.map(writeback =>
-      writeback.valid &&
-      writeback.bits.robIdx.value === i.U &&
-      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
-      writeback.bits.redirect.get.bits.taken
-    ).reduce(_ || _)
-    when(robEntries(i).valid && Itype.isNonTaken(robEntries(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      // TODO: In the future, there are two itype in trace
-      robEntries(i).traceBlockInPipe.itype := Itype.Taken
-    }
-  }
-
-  // begin update robBanksRdata
-  val robBanksRdata = VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
-  val needUpdate = Wire(Vec(2 * CommitWidth, new RobEntryBundle))
-  needUpdate := VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
-  val needUpdateRobIdx = robIdxThisLine ++ robIdxNextLine
-  for (i <- 0 until 2 * CommitWidth) {
-    val enqHeadOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === needUpdateRobIdx(i))).map {
-      case (valid, ptrMatch) => valid && ptrMatch
-    })
-    val robIdxMatchSeq = in.enq.req.map(_.bits.robIdx.value === needUpdateRobIdx(i))
-    val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
-    val instCanEnqFlag = enqHeadOH.asUInt.orR
-    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
-    when(!needUpdate(i).valid && instCanEnqFlag) {
-      needUpdate(i).realDestSize := realDestEnqNum
-    }.elsewhen(needUpdate(i).valid && instCanEnqFlag) {
-      needUpdate(i).realDestSize := robBanksRdata(i).realDestSize + realDestEnqNum
-    }
-    val enqFormerWBNum = Mux1H(enqHeadOH, enqFormerWBNumVec)
-    val enqLatterWBNum = Mux1H(enqHeadOH, enqLatterWBNumVec)
-    val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer))
-    val latterWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer))
-    val slotNeedFlushMask = robBanksRdata(i).slotNeedFlushMask
-    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
-      writeback.valid && needFlushWb && (writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    }
-    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
-      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
-    }
-    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
-      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
-    }
-    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
-    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
-    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
-    when(needUpdate(i).valid && needFlushWriteBack) {
-      needUpdate(i).slotNeedFlushMask := slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
-    }
-
-    val redirectHitThisEntry = needUpdate(i).valid &&
-      in.redirect.valid &&
-      in.redirect.bits.robIdx.value === needUpdateRobIdx(i)
-    val entryPairType = robBanksRdata(i).entryPairType
-    val redirectClearsLatter = redirectHitThisEntry &&
-      CompressType.isNotNORMAL(entryPairType) && (
-        in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
-        !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
-      )
-    val enqEntryPairType = Mux1H(enqHeadOH, in.enq.req.map(_.bits.entryPairType))
-    val nextPackedUopState = calcNextPackedUopState(
-      entryValid = needUpdate(i).valid,
-      entryUopState = robBanksRdata(i).uopState,
-      entryCompressType = robBanksRdata(i).entryPairType,
-      redirectClearsLatter = redirectClearsLatter,
-      needFlushWriteBackFormer = needFlushWriteBackFormer,
-      needFlushWriteBackLater = needFlushWriteBackLater,
-      instCanEnqFlag = instCanEnqFlag,
-      enqState = robBanksRdata(i).encodeUopState(enqEntryPairType, enqFormerWBNum, enqLatterWBNum),
-      formerWbCntRaw = formerWbCnt,
-      latterWbCntRaw = latterWbCnt
-    )
-    needUpdate(i).uopState := nextPackedUopState
-    needUpdateCommitW(i) := !nextPackedUopState.orR
-
-    // trace
-    val youngestSlotIsFormer = CompressType.isNORMAL(robBanksRdata(i).entryPairType) || redirectClearsLatter
-    val taken = branchWBs.map(writeback =>
-      writeback.valid &&
-      writeback.bits.robIdx.value === needUpdateRobIdx(i) &&
-      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
-      writeback.bits.redirect.get.bits.taken
-    ).reduce(_ || _)
-    when(robBanksRdata(i).valid && Itype.isNonTaken(robBanksRdata(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      needUpdate(i).traceBlockInPipe.itype := Itype.Taken
-    }
-  }
-  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(bankNum))
-  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(bankNum))
-  // end update robBanksRdata
-
-  // interruptSafe
-//  for (i <- 0 until RenameWidth) {
-//    when(canEnqueue(i)) {
-//      // For now, we allow non-load-store instructions to trigger interrupts
-//      // For MMIO instructions, they should not trigger interrupts since they may
-//      // be sent to lower level before it writes back.
-//      // However, we cannot determine whether a load/store instruction is MMIO.
-//      // Thus, we don't allow load/store instructions to trigger an interrupt.
-//      // TODO: support non-MMIO load-store instructions to trigger interrupts
-//      val allow_interrupts = !CommitType.isLoadStore(in.enq.req(i).bits.commitType) && !FuType.isFence(in.enq.req(i).bits.fuType) && !FuType.isCsr(in.enq.req(i).bits.fuType) && !FuType.isVset(in.enq.req(i).bits.fuType)
-//      robEntries(allocatePtrVec(i).value).interruptSafe := allow_interrupts
-//    }
-//  }
-
-  /**
-   * read and write of data modules
-   */
-  val commitReadAddr_next = Mux(state_next === s_idle,
-    VecInit(deqPtrVec_next.map(_.value)),
-    VecInit(walkPtrVec_next.map(_.value))
-  )
-
-  exceptionGen.in.redirect <> in.redirect
-  exceptionGen.in.flush := out.flushOut.valid
-
-  val canEnqueueEG = uopCanEnqueue
-  for (i <- 0 until RenameWidth) {
-    exceptionGen.in.enq(i).valid := canEnqueueEG(i)
-    exceptionGen.in.enq(i).bits.robIdx := in.enq.req(i).bits.robIdx
-    exceptionGen.in.enq(i).bits.ftqPtr := in.enq.req(i).bits.ftqPtr
-    exceptionGen.in.enq(i).bits.ftqOffset := in.enq.req(i).bits.ftqOffset
-    exceptionGen.in.enq(i).bits.isRVC := in.enq.req(i).bits.isRVC
-    exceptionGen.in.enq(i).bits.exceptionVec := in.enq.req(i).bits.exceptionVec
-    exceptionGen.in.enq(i).bits.satpFlushFirstFetchFault := in.enq.req(i).bits.satpFlushFirstFetchFault
-    exceptionGen.in.enq(i).bits.hasException := in.enq.req(i).bits.hasException
-    exceptionGen.in.enq(i).bits.isEnqExcp := in.enq.req(i).bits.hasException
-    exceptionGen.in.enq(i).bits.isFetchMalAddr := in.enq.req(i).bits.isFetchMalAddr
-    exceptionGen.in.enq(i).bits.flushPipe := in.enq.req(i).bits.flushPipe
-    exceptionGen.in.enq(i).bits.satpFlush := false.B
-    exceptionGen.in.enq(i).bits.isVset := in.enq.req(i).bits.isVset
-    exceptionGen.in.enq(i).bits.replayInst := false.B
-    XSError(canEnqueue(i) && in.enq.req(i).bits.replayInst, "enq should not set replayInst")
-    exceptionGen.in.enq(i).bits.singleStep := in.enq.req(i).bits.singleStep
-    exceptionGen.in.enq(i).bits.crossPageIPFFix := in.enq.req(i).bits.crossPageIPFFix
-    exceptionGen.in.enq(i).bits.trigger := in.enq.req(i).bits.trigger
-    exceptionGen.in.enq(i).bits.vstartEn := false.B //DontCare
-    exceptionGen.in.enq(i).bits.vstart := 0.U //DontCare
-    exceptionGen.in.enq(i).bits.vuopIdx := 0.U
-    exceptionGen.in.enq(i).bits.isVecLoad := false.B
-    exceptionGen.in.enq(i).bits.isVlm := false.B
-    exceptionGen.in.enq(i).bits.isStrided := false.B
-    exceptionGen.in.enq(i).bits.isIndexed := false.B
-    exceptionGen.in.enq(i).bits.isWhole := false.B
-    exceptionGen.in.enq(i).bits.nf := 0.U
-    exceptionGen.in.enq(i).bits.vsew := 0.U
-    exceptionGen.in.enq(i).bits.veew := 0.U
-    exceptionGen.in.enq(i).bits.vlmul := 0.U
-  }
-
-  println(s"ExceptionGen:")
-  println(s"num of exceptions: ${params.numException}")
-  require(exceptionWBs.length == exceptionGen.in.wb.length,
-    f"exceptionWBs.length: ${exceptionWBs.length}, " +
-      f"exceptionGen.in.wb.length: ${exceptionGen.in.wb.length}")
-  for (((wb, exc_wb), i) <- exceptionWBs.zip(exceptionGen.in.wb).zipWithIndex) {
-    exc_wb.valid       := wb.valid
-    exc_wb.bits.robIdx := wb.bits.robIdx
-    // only enq inst use ftqPtr to read gpa
-    exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
-    exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
-    exc_wb.bits.isRVC           := false.B
-    exc_wb.bits.exceptionVec    := wb.bits.exceptionVec
-    exc_wb.bits.satpFlushFirstFetchFault := false.B
-    exc_wb.bits.hasException    := wb.bits.exceptionVec.orR // Todo: use in.writebackNeedFlush(i) instead
-    exc_wb.bits.isEnqExcp       := false.B
-    exc_wb.bits.isFetchMalAddr  := false.B
-    exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
-    exc_wb.bits.satpFlush       := wb.bits.satpFlush.getOrElse(false.B)
-    exc_wb.bits.isVset          := false.B
-    exc_wb.bits.replayInst      := wb.bits.replay.getOrElse(false.B)
-    exc_wb.bits.singleStep      := false.B
-    exc_wb.bits.crossPageIPFFix := false.B
-    val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
-    exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isStrided := false.B // Todo[Vector]: remove it
-    exc_wb.bits.isIndexed := false.B // Todo[Vector]: remove it
-    exc_wb.bits.isWhole := false.B // Todo[Vector]: remove it
-    exc_wb.bits.nf := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vsew := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
-  }
-
-  val isCommit = out.commits.isCommit
-  val isCommitReg = GatedValidRegNext(out.commits.isCommit)
-  val instrCntReg = RegInit(0.U(64.W))
-  val fusionCommitCountNow = out.commits.commitValid.zip(out.commits.info).zip(deqPtrVec).map {
-    case ((valid, info), ptr) =>
-      val formerFusionCount = debugMeta(debug_microOp(ptr.value)(0)).fusionNum
-      val latterFusionCount = debugMeta(debug_microOp(ptr.value)(1)).fusionNum
-      val survivingFusionCount = formerFusionCount +& Mux(
-        CompressType.isNotNORMAL(info.entryPairType),
-        latterFusionCount,
-        0.U
-      )
-      Mux(valid, survivingFusionCount, 0.U)
-  }.reduce(_ +& _)
-  val fuseCommitCnt = RegEnable(fusionCommitCountNow, isCommit)
-  val trueCommitCnt = RegEnable(out.commits.commitValid.zip(commitInstrCntByEntry).map { case (v, instrCnt) => Mux(v, instrCnt, 0.U) }.reduce(_ +& _), isCommit)
-  val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
-  val instrCnt = instrCntReg + retireCounter
-  when(isCommitReg){
-    instrCntReg := instrCnt
-  }
-  out.csr.perfinfo.retiredInstr := retireCounter
-  out.robFull := !allowEnqueue
-
-  out.toVecExcpMod.logicPhyRegMap := rab.out.toVecExcpMod.logicPhyRegMap
-  out.toVecExcpMod.excpInfo := vecExcpInfo
-
-  /**
-   * trace
-   */
-
-  // trace output
-  val traceValids = out.trace.traceCommitInfo.blocks.map(_.valid)
-  val traceBlocks = out.trace.traceCommitInfo.blocks
-  val traceBlockInPipe = out.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
-
   for (i <- 0 until CommitWidth) {
-    traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
-    traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
-    traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
-    traceBlockInPipe(i).iretire := iretireCommit(i)
-    traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
-    traceValids(i) := out.commits.isCommit && out.commits.commitValid(i)
-    // exception only occur in block(0).
-    if(i == 0) {
-      when(out.exception.valid){ // trace exception
-        traceBlocks(i).bits.tracePipe.itype := Mux(out.exception.bits.isInterrupt,
-          Itype.Interrupt,
-          Itype.Exception
-        )
-        traceValids(i) := true.B
-        traceBlockInPipe(i).iretire := 0.U
-      }
+    val deqDebugInst = debug_microOp(deqPtrVec(i).value).head
+    deqDebugInst.debug.foreach { debug =>
+      PerfCCT.commitInstMeta(
+        i.U,
+        debug.debug_seqNum.seqNum,
+        commitInstrCntByEntry(i),
+        out.commits.isCommit && out.commits.commitValid(i),
+        clock,
+        reset
+      )
     }
+    XSInfo(out.commits.isCommit && out.commits.commitValid(i),
+      "retired pc %x wen %d ldest %d pdest %x data %x\n",
+      debugMeta(debug_microOp(deqPtrVec(i).value).head).pc,
+      out.commits.info(i).rfWen,
+      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
+      out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
+      debug_exuData(deqPtrVec(i).value)(0)
+    )
+    XSInfo(state === s_walk && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
+      debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
+      out.commits.info(i).rfWen,
+      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
+      debug_exuData(walkPtrVec(i).value)(0)
+    )
   }
-
-  /**
-   * debug info
-   */
+  XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
+  XSDebug(
+    deqHasException && TriggerAction.isDmode(exceptionDataRead.bits.trigger),
+    "Debug Mode: Deq has trigger entry debug Mode\n"
+  )
+  XSDebug(out.flushOut.valid,
+    p"generate redirect: pc 0x${Hexadecimal(out.exception.bits.pc)} intr $intrEnable " +
+      p"excp $deqHasException flushPipe $isFlushPipe " +
+      p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} " +
+      p"exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
   XSDebug(p"enqPtr ${enqPtr} deqPtr ${deqPtr}\n")
   XSDebug("")
   XSError(enqPtr.isBeforeSlot(deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
@@ -1781,171 +1727,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSDebug(false, robEntries(i).valid && !robEntries(i).isWritebacked, "v ")
     if (i % 4 == 3) XSDebug(false, true.B, "\n")
   }
-
-  def ifCommit(counter: UInt): UInt = Mux(isCommit, counter, 0.U)
-
-  def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
-
-  // Normal RTL view used by the always-on performance events.
-  val commitSlotInfo = deqPtrVec.map(_.value).map(slotUopBuf(_)).flatten
-  // Debug/difftest-only view of the full uop.
-  val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
-  val commitSlotValid = out.commits.commitValid.zip(out.commits.info).flatMap { case (valid, info) =>
-    Seq(valid, valid && !CompressType.isNORMAL(info.entryPairType))
-  }
-  XSPerfAccumulate("clock_cycle", 1.U, XSPerfLevel.CRITICAL)
-  QueuePerf(RobSize, numValidEntries, numValidEntries === RobSize.U)
-  XSPerfAccumulate("commitUop", ifCommit(commitCnt))
-  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt), XSPerfLevel.CRITICAL)
-  XSPerfRolling("ipc", ifCommitReg(trueCommitCnt), 1000, clock, reset)
-  XSPerfRolling("cpi", perfCnt = 1.U /*Cycle*/ , eventTrigger = ifCommitReg(trueCommitCnt), granularity = 1000, clock, reset)
-  XSPerfAccumulate("commitInstrFused", ifCommitReg(fuseCommitCnt))
-  val commitIsLoad = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.LOAD)
-  val commitLoadValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && uop.commitType === CommitType.LOAD }
-  XSPerfAccumulate("commitInstrLoad", ifCommit(PopCount(commitLoadValid)))
-  val commitIsBranch = deqPtrVec.map(ptr => FuType.isBrh(debug_microOp(ptr.value)(0).fuType))
-  val commitBranchValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && FuType.isBrh(uop.fuType) }
-  XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
-  val commitIsStore = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.STORE)
-  val commitStoreValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && uop.commitType === CommitType.STORE }
-  XSPerfAccumulate("commitInstrStore", ifCommit(PopCount(commitStoreValid)))
-  XSPerfAccumulate("writeback", PopCount((0 until RobSize).map(i => robEntries(i).valid && robEntries(i).isWritebacked)))
-  // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire)))
-  // XSPerfAccumulate("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
-  XSPerfAccumulate("walkInstr", Mux(out.commits.isWalk, PopCount(out.commits.walkValid), 0.U))
-  XSPerfAccumulate("walkCycleTotal", state === s_walk)
-  XSPerfAccumulate("waitRabWalkEnd", state === s_walk && walkFinished && !rab.in.status.walkEnd)
-  private val walkCycle = RegInit(0.U(8.W))
-  private val waitRabWalkCycle = RegInit(0.U(8.W))
-  walkCycle := Mux(in.redirect.valid, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
-  waitRabWalkCycle := Mux(state === s_walk && walkFinished, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
-
-  XSPerfHistogram("walkRobCycleHist", walkCycle, state === s_walk && walkFinished, 0, 32)
-  XSPerfHistogram("walkRabExtraCycleHist", waitRabWalkCycle, state === s_walk && walkFinished && rab.in.status.walkEnd, 0, 32)
-  XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
-
-  private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
-  private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
-  private val deqHeadInfo = debug_microOp(deqPtr.value).head
-  private val deqHeadInfoFuType = deqHeadInfo.fuType
-  val deqUopCommitType = deqHeadInfo.commitType
-
-  XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.alu.U)
-  XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mul.U)
-  XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.div.U)
-  XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.brh.U)
-  XSPerfAccumulate("waitJmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.jmp.U)
-  XSPerfAccumulate("waitLinkCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.link.U)
-  XSPerfAccumulate("waitCsrCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.csr.U)
-  XSPerfAccumulate("waitFenCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fence.U)
-  XSPerfAccumulate("waitBkuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.bku.U)
-  XSPerfAccumulate("waitLduCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.ldu.U)
-  XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.stu.U)
-  XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mou.U)
-
-  XSPerfAccumulate("waitfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.falu.U)
-  XSPerfAccumulate("waitfmulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmul.U)
-  XSPerfAccumulate("waitfcvtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcvt.U)
-  XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
-  XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
-
-  XSPerfAccumulate("waitVfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfmac.U)
-  XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
-
-  XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
-  XSPerfAccumulate("waitBranchCycle", deqNotWritebacked && FuType.isBrh(deqHeadInfoFuType))
-  XSPerfAccumulate("waitLoadCycle", deqNotWritebacked   && deqUopCommitType === CommitType.LOAD)
-  XSPerfAccumulate("waitStoreCycle", deqNotWritebacked  && deqUopCommitType === CommitType.STORE)
-  XSPerfReference("robHeadPC",
-    RegEnable(out.commits.info(0).debug_pc.getOrElse(0.U),
-              0.U,
-              out.commits.isCommit && out.commits.commitValid(0)))
-  XSPerfAccumulate("commitCompressCntAll", PopCount(out.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => out.commits.isCommit && valid && instrCnt > 1.U }))
-  (1 to RenameWidth).foreach(i =>
-    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(out.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => out.commits.isCommit && valid && instrCnt === i.U }))
-  )
-  XSPerfAccumulate("compressSize", out.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => Mux(out.commits.isCommit && valid && instrCnt > 1.U, instrCnt, 0.U) }.reduce(_ +& _))
-  val compressTypeIsNORMAL = out.commits.commitValid.zip(out.commits.info).map(x => x._1 && CompressType.isNORMAL(x._2.entryPairType))
-  val compressTypeIsCC = out.commits.commitValid.zip(out.commits.info).map(x => x._1 && CompressType.isCC(x._2.entryPairType))
-  val compressTypeIsCS = out.commits.commitValid.zip(out.commits.info).map(x => x._1 && CompressType.isCS(x._2.entryPairType))
-  val compressTypeIsSC = out.commits.commitValid.zip(out.commits.info).map(x => x._1 && CompressType.isSC(x._2.entryPairType))
-  XSPerfAccumulate("compressType_NORMAL", ifCommit(PopCount(compressTypeIsNORMAL)))
-  XSPerfAccumulate("compressType_CC", ifCommit(PopCount(compressTypeIsCC)))
-  XSPerfAccumulate("compressType_CS", ifCommit(PopCount(compressTypeIsCS)))
-  XSPerfAccumulate("compressType_SC", ifCommit(PopCount(compressTypeIsSC)))
-  XSPerfAccumulate("RobEntriesCommited", ifCommit(PopCount(out.commits.commitValid)))
-
-  // By CommitType
-//  val commitIsLoad   = out.commits.info.map(x => x.commitType === CommitType.LOAD)
-//  val commitIsStore  = out.commits.info.map(x => x.commitType === CommitType.STORE)
-//  val commitIsBranch = out.commits.info.map(x => x.commitType === CommitType.BRANCH)
-  val commitIsNormal = out.commits.info.map(x => x.commitType === CommitType.NORMAL)
-
-  XSPerfAccumulate("NoCompressIsLoad", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsLoad).map(x => x._1 && x._2))))
-  XSPerfAccumulate("NoCompressIsStore", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsStore).map(x => x._1 && x._2))))
-  XSPerfAccumulate("NoCompressIsBranch", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsBranch).map(x => x._1 && x._2))))
-  XSPerfAccumulate("NoCompressIsNORMAL", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsNormal).map(x => x._1 && x._2))))
-
-  // By FuType
-  for (fuType <- FuType.functionNameMap.keys) {
-    val fuName = FuType.functionNameMap(fuType)
-    val commitIsFuType = compressTypeIsNORMAL.zip(deqPtrVec.map(ptr => debug_microOp(ptr.value).head)).map {
-      case (commit, uop) => commit && uop.fuType === fuType.U
-    }
-    XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
-    val NoCompress_Source = commitIsFuType.zip(out.commits.info).map {
-      case (valid, info) =>
-        val noEnoughInstr  = valid && info.noCompressReason === NoCompressReason.noEnoughInstr
-        val flushedHalf    = valid && info.noCompressReason === NoCompressReason.flushedHalf
-        val cannotCompress = valid && info.noCompressReason === NoCompressReason.cannotCompress
-        (noEnoughInstr, flushedHalf, cannotCompress)
-    }
-    XSPerfAccumulate(s"NoCompress_${fuName}_by_noEnoughInstr", ifCommit(PopCount(NoCompress_Source.map(_._1))))
-    XSPerfAccumulate(s"NoCompress_${fuName}_by_flushedHalf", ifCommit(PopCount(NoCompress_Source.map(_._2))))
-    XSPerfAccumulate(s"NoCompress_${fuName}_by_cannotCompress", ifCommit(PopCount(NoCompress_Source.map(_._3))))
-  }
-
-  val dispatchLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.dispatchTime - debugMeta(uop).perfDebugInfo.renameTime)
-  val enqRsLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.enqRsTime - debugMeta(uop).perfDebugInfo.dispatchTime)
-  val selectLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.selectTime - debugMeta(uop).perfDebugInfo.enqRsTime)
-  val issueLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.issueTime - debugMeta(uop).perfDebugInfo.selectTime)
-  val executeLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.writebackTime - debugMeta(uop).perfDebugInfo.issueTime)
-  val rsFuLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.writebackTime - debugMeta(uop).perfDebugInfo.enqRsTime)
-  val commitLatency = commitDebugUop.map(uop => timer - debugMeta(uop).perfDebugInfo.writebackTime)
-  val tlbLatency = commitDebugUop.map(uop => debugMeta(uop).perfDebugInfo.tlbRespTime - debugMeta(uop).perfDebugInfo.tlbFirstReqTime)
-
-  def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
-    cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)
-  }
-
-  for (fuType <- FuType.functionNameMap.keys) {
-    val fuName = FuType.functionNameMap(fuType)
-    val commitIsFuType = commitSlotValid.zip(commitDebugUop).map(x => x._1 && x._2.fuType === fuType.U)
-    XSPerfRolling(s"ipc_futype_${fuName}", ifCommit(PopCount(commitIsFuType)), 1000, clock, reset)
-    XSPerfAccumulate(s"${fuName}_instr_cnt", ifCommit(PopCount(commitIsFuType)))
-    XSPerfAccumulate(s"${fuName}_latency_dispatch", ifCommit(latencySum(commitIsFuType, dispatchLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_enq_rs", ifCommit(latencySum(commitIsFuType, enqRsLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_select", ifCommit(latencySum(commitIsFuType, selectLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_issue", ifCommit(latencySum(commitIsFuType, issueLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_execute", ifCommit(latencySum(commitIsFuType, executeLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_enq_rs_execute", ifCommit(latencySum(commitIsFuType, rsFuLatency)))
-    XSPerfAccumulate(s"${fuName}_latency_commit", ifCommit(latencySum(commitIsFuType, commitLatency)))
-  }
-  XSPerfAccumulate(s"redirect_use_snapshot", in.redirect.valid && in.snpt.useSnpt)
-
-  // top-down info
-  out.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
-  out.debugTopDown.toCore.robHeadVaddr.bits := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
-  out.debugTopDown.toCore.robHeadPaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
-  out.debugTopDown.toCore.robHeadPaddr.bits := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
-  out.debugTopDown.toDispatch.robTrueCommit := ifCommitReg(trueCommitCnt)
-  out.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
-  out.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)(0)
-  out.debugTopDown.robHeadLqIdx.bits := debug_lqIdx(deqPtr.value)(0)
-
-  // rolling
-  out.debugRolling.robTrueCommit := ifCommitReg(trueCommitCnt)
-
   // debug trigger for simulation
   if (backendParams.debugEn) {
     val debug_sim_trig = dontTouch(Wire(Bool()))
@@ -1997,7 +1778,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // log when committing
-  val load_debug_table = ChiselDB.createTable("LoadDebugTable" + p(XSCoreParamsKey).HartId.toString, new LoadInfoEntry, basicDB = true)
+  val load_debug_table = ChiselDB.createTable(
+    "LoadDebugTable" + p(XSCoreParamsKey).HartId.toString,
+    new LoadInfoEntry,
+    basicDB = true
+  )
   for (i <- 0 until CommitWidth) {
     val commit_index = out.commits.robIdx(i).value
     for (j <- 0 until 2) {
@@ -2022,172 +1807,190 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     }
   }
-
-  val debug_VecOtherPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(8)(0.U(PhyRegIdxWidth.W))))
-
-  // topdown
-  val notIssue = !debug_lsIssue(deqPtr.value)
-  val tlbReplay = in.debugTopDown.fromCore.fromMem.robHeadTlbReplay
-  val tlbMiss = in.debugTopDown.fromCore.fromMem.robHeadTlbMiss
-  val vioReplay = in.debugTopDown.fromCore.fromMem.robHeadLoadVio
-  val mshrReplay = in.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
-  val l1Miss = in.debugTopDown.fromCore.fromMem.robHeadMissInDCache
-  val l2Miss = in.debugTopDown.fromCore.l2MissMatch
-  val l3Miss = in.debugTopDown.fromCore.l3MissMatch
-  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
-    Mux(l2Miss, LoadL3Stall.id.U,
-      Mux(l1Miss, LoadL2Stall.id.U,
-        Mux(notIssue, MemNotReadyStall.id.U,
-          Mux(tlbMiss, LoadTLBStall.id.U,
-            Mux(tlbReplay, LoadTLBStall.id.U,
-              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
-                Mux(vioReplay, LoadVioReplayStall.id.U,
-                  LoadL1Stall.id.U))))))))
-
-
-  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
-  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
-  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
-  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
-  val sortedFulatency = sortedFuConfigs.map(_.latency.latencyVal.getOrElse(4).asUInt)
-  val bypassLatency = 3.U
-  val writeBackLatency = 1.U
-
-
+  // dontTouch for debug
   if (backendParams.debugEn) {
-    val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(backendParams.iqEntryNum, RobSize))
-    topdownRobInfoCollect.io.in.zip(in.topdownIQInfoVec.get).foreach{ case (sink, source) =>
-      sink.valid := source.valid
-      sink.robIdx := source.bits.robIdx.value
-      sink.robFlag := source.bits.robIdx.flag
-      sink.issued := source.bits.issued
-      sink.cancelSource := source.bits.cancelSource
-      sink.idealIssueTime := source.bits.idealIssueTime
-    }
-    val topdownRobCandidate = topdownRobInfoCollect.io.out
+    // Unpack the compressed ROB writeback state only for debug builds.
+    val debugFormerUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
+    val debugLatterUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
     for (i <- 0 until RobSize) {
-      when(robEntries(i).valid){
-        val hasWriteBack = robEntries(i).isWritebacked
-        val isRobHead = i.U === deqPtr.value
-
-        val topdownIQInfoCandidate = Mux(topdownRobCandidate(i).valid, topdownRobCandidate(i),
-          0.U.asTypeOf(new TopdownRobInfo))
-        val topdownIQInfoValid = topdownIQInfoCandidate.valid
-        val topdownIQIssued = topdownIQInfoCandidate.issued
-        val topdownIQIdealIssue = topdownIQInfoCandidate.idealIssueTime
-
-        val topdownIQCancelSource = topdownIQInfoCandidate.cancelSource
-
-        val topdownIssuedUpdate = topdownIQIssued || robEntries(i).topdownIssued.get
-        val topdownCanceled= !topdownIQIssued && robEntries(i).topdownIssued.get && topdownIQInfoValid &&
-          topdownIQCancelSource =/= IQCancelSource.none
-        val topdownCanceledUpdate = topdownCanceled || robEntries(i).topdownCanceled.get
-        val topdownRobHeadUpdate = isRobHead || robEntries(i).topdownRobHead.get
-        val topdownIdealIssueUpdate = topdownIQIdealIssue || robEntries(i).topdownIdealIssue.get
-        val topdownCancelSrcUpdate = Mux(topdownCanceled, topdownIQCancelSource,
-          robEntries(i).topdownCancelSource.get)
-        val topdownCancelTimeUpdate = topdownCanceled
-        robEntries(i).topdownCanceled.foreach(_ := topdownCanceledUpdate)
-        robEntries(i).topdownIssued.foreach(_ := topdownIssuedUpdate)
-        robEntries(i).topdownRobHead.foreach(_ := topdownRobHeadUpdate)
-        robEntries(i).topdownIdealIssue.foreach(_ := topdownIdealIssueUpdate)
-
-        robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          robEntries(i).topdownIssueTime.get +& topdownIssuedUpdate))
-        robEntries(i).topdownLastIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          Mux(topdownCanceled, 0.U,
-            robEntries(i).topdownLastIssueTime.get +& topdownIssuedUpdate)
-        ))
-        robEntries(i).topdownRobHeadTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          robEntries(i).topdownRobHeadTime.get +& topdownRobHeadUpdate))
-        // only caculate rising edge of ideal issue
-        robEntries(i).topdownIdealIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          Mux(topdownIQIdealIssue && !robEntries(i).topdownIdealIssue.get , 1.U,
-            robEntries(i).topdownIdealIssueTime.get +& robEntries(i).topdownIdealIssue.get)
-        ))
-        robEntries(i).topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
-        robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
-          val cancelMatch = topdownCancelSrcUpdate === index.asUInt
-          cancelTime := Mux(hasWriteBack, 0.U,
-            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get + 1.U,
-              robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
-        })
-      }
+      debugFormerUopNum(i) := robEntries(i).formerUopNum
+      debugLatterUopNum(i) := robEntries(i).latterUopNum
     }
-    out.debugRobHeadStall.foreach{ case stall =>
-      val deqEntry = robEntries(deqPtr.value)
-      val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
-      val issueTime = deqEntry.topdownIssueTime.get
-      val lastIssueTime = deqEntry.topdownLastIssueTime.get
-      val idealIssueTime = deqEntry.topdownIdealIssueTime.get
-      val robHeadTime = deqEntry.topdownRobHeadTime.get
+    dontTouch(debugFormerUopNum)
+    dontTouch(debugLatterUopNum)
+    dontTouch(enqPtrVec)
+    dontTouch(deqPtrVec)
+    dontTouch(robEntries)
+    dontTouch(robDeqGroup)
+    dontTouch(robBanks)
+    dontTouch(robBanksRaddrThisLine)
+    dontTouch(robBanksRaddrNextLine)
+    dontTouch(robBanksRdataThisLine)
+    dontTouch(robBanksRdataNextLine)
+    dontTouch(robBanksRdataThisLineUpdate)
+    dontTouch(robBanksRdataNextLineUpdate)
+    dontTouch(needUpdate)
+    val exceptionWBsVec = MixedVecInit(exceptionWBs)
+    dontTouch(exceptionWBsVec)
+    dontTouch(commit_wDeqGroup)
+    dontTouch(commit_vDeqGroup)
+    dontTouch(commitSizeSumSeq)
+    dontTouch(walkSizeSumSeq)
+    dontTouch(commitSizeSumCond)
+    dontTouch(walkSizeSumCond)
+    dontTouch(commitSizeSum)
+    dontTouch(walkSizeSum)
+    dontTouch(realDestSizeSeq)
+    dontTouch(walkDestSizeSeq)
+    dontTouch(out.commits)
+    dontTouch(commitIsVTypeVec)
+    dontTouch(walkIsVTypeVec)
+    dontTouch(commitValidThisLine)
+    dontTouch(commitReadAddr_next)
+    dontTouch(donotNeedWalk)
+    dontTouch(walkPtrVec_next)
+    dontTouch(walkPtrVec)
+    dontTouch(deqPtrVec_next)
+    dontTouch(deqPtrVecForWalk)
+    dontTouch(snapPtrReadBank)
+    dontTouch(snapPtrVecForWalk)
+    dontTouch(shouldWalkVec)
+    dontTouch(walkFinished)
+    dontTouch(changeBankAddrToDeqPtr)
+  }
+  if (env.EnableDifftest || env.FullBasicDiff) {
+    out.commits.info.map(info => dontTouch(info.debug_pc.get))
+  }
 
-      val topdownIQInfoCandidate = topdownRobCandidate(deqPtr.value)
-      val issued = topdownIQInfoCandidate.issued && topdownIQInfoCandidate.valid
+  /*
+   * Trace
+   * Repair branch outcomes after enqueue and writeback metadata updates.
+   */
+  // The entry-level trace block describes the youngest instruction in the
+  // surviving compressed entry, while debug/difftest keep both slots exact.
+  for (wb <- branchWBs) {
+    val wbIdx = wb.bits.robIdx.value
+    val subIdx = slotIndex(wb.bits.robIdx)
+    when(wb.valid && wb.bits.redirect.get.bits.taken &&
+      Itype.isNonTaken(debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype)) {
+      debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype := Itype.Taken
+    }
+    when(wb.valid && wb.bits.robIdx.isFormer && wb.bits.redirect.get.bits.taken &&
+      Itype.isNonTaken(robEntries(wbIdx).formerTraceBlockInPipe.itype)) {
+      robEntries(wbIdx).formerTraceBlockInPipe.itype := Itype.Taken
+    }
+  }
+  for (i <- 0 until RobSize) {
+    val entryPairType = robEntries(i).entryPairType
+    val redirectHitThisEntry = robEntries(i).valid &&
+      in.redirect.valid && in.redirect.bits.robIdx.value === i.U
+    val redirectClearsLatter = redirectHitThisEntry &&
+      CompressType.isNotNORMAL(entryPairType) && (
+        in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
+        !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
+      )
 
-      when(deqEntry.valid){
-        assert(issueTime >= lastIssueTime)
-        assert(issueTime <= idealIssueTime)
-      }
-      val waitTime = idealIssueTime - robHeadTime
-      val idealWaitTime = idealIssueTime - issueTime
-      val robHeadFutype = deqEntry.debug_fuType.get
-      val robHeadExecStall = deqEntry.valid && (lastIssueTime > deqEntryNormalLatency) && (lastIssueTime > waitTime)
-      val robHeadNotIssued = deqEntry.valid && (!deqEntry.topdownIssued.get && !issued)
-      val robHeadIssueCancel = deqEntry.valid && deqEntry.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
-      // issueDelay priority than cancel; only calculate idealWaitTime stall
-      val robHeadIssueDelay = deqEntry.valid && (idealIssueTime > deqEntryNormalLatency) &&
-        (robHeadTime < idealWaitTime)
-      val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
-        FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
-        FuType.isStore(robHeadFutype)  -> StoreStall.id.U           ,
-        FuType.isLoad(robHeadFutype)    -> ldReason                  ,
-        FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
-        FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
-        FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
-      ))
-
-      val robHeadCancelSource = deqEntry.topdownCancelSource.get
-
-      val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
-      val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
-      val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
-        Mux(time < fix, 0.U, Mux((time === fix) && time.orR, 1.U, time - fix))
-      }
-      val maxCancelTime = fixedCancelTimeVec.reduce{ (a,b) => Mux(a > b, a, b)}
-      val maxCancelTimeVec = VecInit(fixedCancelTimeVec.map(_ === maxCancelTime)).asUInt
-      val lastMaxCancelTimeOH = Reverse(PriorityEncoderOH(Reverse(maxCancelTimeVec)))
-      val lastMaxIdx = OHToUInt(lastMaxCancelTimeOH)
-      val cancelTimeFixUpdateVec = VecInit(cancelTimeFixVec.zip(lastMaxCancelTimeOH.asBools).map{
-        case (time, hit) => time +& hit
-      })
-
-      if (backendParams.debugEn){
-        dontTouch(VecInit(lastMaxCancelTimeOH.asBools))
-      }
-
-
-      val cancelStallReason = MuxCase(IssueCancelStallOther.id.U, Seq(
-        IQCancelSource.isog0(lastMaxIdx) -> IssueCancelStallOg0.id.U  ,
-        IQCancelSource.isog1(lastMaxIdx) -> IssueCancelStallOg1.id.U  ,
-        IQCancelSource.isld(lastMaxIdx)  -> IssueCancelStallLd.id.U   ,
-        IQCancelSource.isst(lastMaxIdx)  -> IssueCancelStallSt.id.U   ,
-      ))
-      deqEntry.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
-
-
-      stall.valid := robHeadExecStall || robHeadNotIssued || robHeadIssueCancel || robHeadIssueDelay
-      stall.bits := MuxCase(BackendOtherCoreStall.id.U, Seq(
-        robHeadNotIssued                    -> RobHeadNotIssued.id.U     ,
-        robHeadExecStall                    -> robHeadExecStallReason    ,
-        robHeadIssueDelay                   -> IssueDelayStall.id.U      ,
-        robHeadIssueCancel                  -> cancelStallReason         ,
-      ))
+    // Correct the surviving trace tail with the resolved branch outcome.
+    val youngestSlotIsFormer = CompressType.isNORMAL(robEntries(i).entryPairType) || redirectClearsLatter
+    val taken = branchWBs.map(writeback =>
+      writeback.valid &&
+      writeback.bits.robIdx.value === i.U &&
+      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
+      writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    when(robEntries(i).valid && Itype.isNonTaken(robEntries(i).traceBlockInPipe.itype) && taken){
+      // BranchType code(notaken itype = 4) must be correctly replaced!
+      // TODO: In the future, there are two itype in trace
+      robEntries(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
 
-  //difftest signals
-  val firstValidCommit = deqPtr.addEntries(PriorityMux(out.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
+  // Emit retirement traces and the exception flush boundary.
+  val traceValids = out.trace.traceCommitInfo.blocks.map(_.valid)
+  val traceBlocks = out.trace.traceCommitInfo.blocks
+  val traceBlockInPipe = out.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
+
+  for (i <- 0 until CommitWidth) {
+    traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
+    traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
+    traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
+    traceBlockInPipe(i).iretire := iretireCommit(i)
+    traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
+    traceValids(i) := out.commits.isCommit && out.commits.commitValid(i)
+    // exception only occur in block(0).
+    if(i == 0) {
+      when(out.exception.valid){ // trace exception
+        traceBlocks(i).bits.tracePipe.itype := Mux(out.exception.bits.isInterrupt,
+          Itype.Interrupt,
+          Itype.Exception
+        )
+        traceValids(i) := true.B
+        traceBlockInPipe(i).iretire := 0.U
+      }
+    }
+  }
+
+  /*
+   * Difftest
+   * Select architectural RAT and slot boundaries at retirement.
+   */
+  val hasCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
+  val retiredSlotPtrs = out.commits.robIdx.zip(out.commits.info).map { case (ptr, info) =>
+    val retired = WireDefault(ptr)
+    retired.isFormer := CompressType.isNORMAL(info.entryPairType)
+    retired
+  }
+  val newestCommit = PriorityMuxDefault(
+    out.commits.commitValid.zip(retiredSlotPtrs).reverse,
+    deqPtr
+  )
+  out.diffRatCommitRobIdx.foreach { commitRobIdx =>
+    commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
+    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr.asFormer, newestCommit)
+  }
+  out.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
+    assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
+    for (i <- 0 until CommitWidth) {
+      commitRobIdxVec(i).valid := out.commits.isCommit && out.commits.commitValid(i) &&
+        !deqVlsExceptionNeedCommit
+      commitRobIdxVec(i).bits := retiredSlotPtrs(i)
+    }
+    when(deqVlsExceptionNeedCommit) {
+      commitRobIdxVec.head.valid := true.B
+      commitRobIdxVec.head.bits := deqPtr.asFormer
+    }
+  }
+  // A latter exception flushes itself but preserves its older former slot.
+  // Hold only the difftest observation until that slot really retires after walk.
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val pending = RegInit(false.B)
+    val pendingPtr = Reg(new RobPtr)
+    val release = pending && out.commits.isCommit && out.commits.commitValid.head &&
+      deqPtr.isSameEntry(pendingPtr)
+    when(exceptionHappen && !exceptionIsFormer) {
+      assert(!pending, "A latter exception observation is already pending")
+      assert(!exceptionUop.isVectorMemory, "Vector memory instructions must not be compressed")
+      pending := true.B
+      pendingPtr := deqPtr
+    }.elsewhen(release) {
+      pending := false.B
+    }
+    when(release) {
+      assert(CompressType.isNORMAL(out.commits.info.head.entryPairType))
+      assert(PopCount(out.commits.commitValid) === 1.U)
+      assert(in.diffArchEvent.get.valid && in.diffArchEvent.get.bits,
+        "The surviving former and its latter exception must be observed together")
+    }
+    diffTrapPending := pending
+    out.diffCommitForTrap.get := release
+  }
+  val debug_VecOtherPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(8)(0.U(PhyRegIdxWidth.W))))
+
+  // Report architectural commit, load, and trap events.
+  val firstValidCommit = deqPtr.addEntries(PriorityMux(
+    out.commits.commitValid,
+    VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W)))
+  )).value
 
   val wdata = Wire(Vec(2 * CommitWidth, UInt(XLEN.W)))
   val wpc = Wire(Vec(2 * CommitWidth, UInt(XLEN.W)))
@@ -2323,17 +2126,415 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  //store evetn difftest information
+  // Report store ordering information for the queried slot.
   in.storeDebugInfo := DontCare
   if (env.EnableDifftest || env.FullBasicDiff) {
     in.storeDebugInfo.map{port =>
       port.pc := debugMeta(debug_microOp(port.robidx.value)(slotIndex(port.robidx))).pc
-      port.storeOffset.foreach(_ := decodeTraceInstrCount(robEntries(port.robidx.value).traceBlockInPipe.iretire) - 1.U)
+      // The store offset counts earlier instructions in the compressed entry.
+      port.storeOffset.foreach(_ := decodeTraceInstrCount(
+        traceIretire = robEntries(port.robidx.value).traceBlockInPipe.iretire,
+        traceDecodeTable = traceDecodeTable,
+        traceInstrCountWidth = traceInstrCountWidth
+      ) - 1.U)
       // Conservatively include stores from the current head entry, even when it retires this cycle.
       port.preCommit.foreach(_ := port.robidx.isSameEntry(deqPtr))
     }
   }
 
+  /*
+   * TopDown
+   * Forward core occupancy and memory stall observations.
+   */
+  out.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
+  out.debugTopDown.toCore.robHeadVaddr.bits := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
+  out.debugTopDown.toCore.robHeadPaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
+  out.debugTopDown.toCore.robHeadPaddr.bits := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
+  out.debugTopDown.toDispatch.robTrueCommit := ifCommitReg(trueCommitCnt)
+  out.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
+  out.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)(0)
+  out.debugTopDown.robHeadLqIdx.bits := debug_lqIdx(deqPtr.value)(0)
+
+  // Retain issue and cancellation history for head-stall attribution.
+  val notIssue = !debug_lsIssue(deqPtr.value)
+  val tlbReplay = in.debugTopDown.fromCore.fromMem.robHeadTlbReplay
+  val tlbMiss = in.debugTopDown.fromCore.fromMem.robHeadTlbMiss
+  val vioReplay = in.debugTopDown.fromCore.fromMem.robHeadLoadVio
+  val mshrReplay = in.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
+  val l1Miss = in.debugTopDown.fromCore.fromMem.robHeadMissInDCache
+  val l2Miss = in.debugTopDown.fromCore.l2MissMatch
+  val l3Miss = in.debugTopDown.fromCore.l3MissMatch
+  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
+    Mux(l2Miss, LoadL3Stall.id.U,
+      Mux(l1Miss, LoadL2Stall.id.U,
+        Mux(notIssue, MemNotReadyStall.id.U,
+          Mux(tlbMiss, LoadTLBStall.id.U,
+            Mux(tlbReplay, LoadTLBStall.id.U,
+              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
+                Mux(vioReplay, LoadVioReplayStall.id.U,
+                  LoadL1Stall.id.U))))))))
+
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+  val sortedFulatency = sortedFuConfigs.map(_.latency.latencyVal.getOrElse(4).asUInt)
+  val bypassLatency = 3.U
+  val writeBackLatency = 1.U
+
+
+  if (backendParams.debugEn) {
+    val collector = topdownRobInfoCollect.get
+    collector.io.in.zip(in.topdownIQInfoVec.get).foreach{ case (sink, source) =>
+      sink.valid := source.valid
+      sink.robIdx := source.bits.robIdx.value
+      sink.robFlag := source.bits.robIdx.flag
+      sink.issued := source.bits.issued
+      sink.cancelSource := source.bits.cancelSource
+      sink.idealIssueTime := source.bits.idealIssueTime
+    }
+    val topdownRobCandidate = collector.io.out
+    for (i <- 0 until RobSize) {
+      when(robEntries(i).valid){
+        val hasWriteBack = robEntries(i).isWritebacked
+        val isRobHead = i.U === deqPtr.value
+
+        val topdownIQInfoCandidate = Mux(topdownRobCandidate(i).valid, topdownRobCandidate(i),
+          0.U.asTypeOf(new TopdownRobInfo))
+        val topdownIQInfoValid = topdownIQInfoCandidate.valid
+        val topdownIQIssued = topdownIQInfoCandidate.issued
+        val topdownIQIdealIssue = topdownIQInfoCandidate.idealIssueTime
+
+        val topdownIQCancelSource = topdownIQInfoCandidate.cancelSource
+
+        val topdownIssuedUpdate = topdownIQIssued || robEntries(i).topdownIssued.get
+        val topdownCanceled= !topdownIQIssued && robEntries(i).topdownIssued.get && topdownIQInfoValid &&
+          topdownIQCancelSource =/= IQCancelSource.none
+        val topdownCanceledUpdate = topdownCanceled || robEntries(i).topdownCanceled.get
+        val topdownRobHeadUpdate = isRobHead || robEntries(i).topdownRobHead.get
+        val topdownIdealIssueUpdate = topdownIQIdealIssue || robEntries(i).topdownIdealIssue.get
+        val topdownCancelSrcUpdate = Mux(topdownCanceled, topdownIQCancelSource,
+          robEntries(i).topdownCancelSource.get)
+        val topdownCancelTimeUpdate = topdownCanceled
+        robEntries(i).topdownCanceled.foreach(_ := topdownCanceledUpdate)
+        robEntries(i).topdownIssued.foreach(_ := topdownIssuedUpdate)
+        robEntries(i).topdownRobHead.foreach(_ := topdownRobHeadUpdate)
+        robEntries(i).topdownIdealIssue.foreach(_ := topdownIdealIssueUpdate)
+
+        robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          robEntries(i).topdownIssueTime.get +& topdownIssuedUpdate))
+        robEntries(i).topdownLastIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          Mux(topdownCanceled, 0.U,
+            robEntries(i).topdownLastIssueTime.get +& topdownIssuedUpdate)
+        ))
+        robEntries(i).topdownRobHeadTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          robEntries(i).topdownRobHeadTime.get +& topdownRobHeadUpdate))
+        // only caculate rising edge of ideal issue
+        robEntries(i).topdownIdealIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          Mux(topdownIQIdealIssue && !robEntries(i).topdownIdealIssue.get , 1.U,
+            robEntries(i).topdownIdealIssueTime.get +& robEntries(i).topdownIdealIssue.get)
+        ))
+        robEntries(i).topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
+        robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
+          val cancelMatch = topdownCancelSrcUpdate === index.asUInt
+          cancelTime := Mux(hasWriteBack, 0.U,
+            Mux(
+              topdownCanceled && cancelMatch,
+              robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get + 1.U,
+              robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)
+            ))
+        })
+      }
+    }
+    out.debugRobHeadStall.foreach{ case stall =>
+      val deqEntry = robEntries(deqPtr.value)
+      val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
+      val issueTime = deqEntry.topdownIssueTime.get
+      val lastIssueTime = deqEntry.topdownLastIssueTime.get
+      val idealIssueTime = deqEntry.topdownIdealIssueTime.get
+      val robHeadTime = deqEntry.topdownRobHeadTime.get
+
+      val topdownIQInfoCandidate = topdownRobCandidate(deqPtr.value)
+      val issued = topdownIQInfoCandidate.issued && topdownIQInfoCandidate.valid
+
+      when(deqEntry.valid){
+        assert(issueTime >= lastIssueTime)
+        assert(issueTime <= idealIssueTime)
+      }
+      val waitTime = idealIssueTime - robHeadTime
+      val idealWaitTime = idealIssueTime - issueTime
+      val robHeadFutype = deqEntry.debug_fuType.get
+      val robHeadExecStall = deqEntry.valid && (lastIssueTime > deqEntryNormalLatency) && (lastIssueTime > waitTime)
+      val robHeadNotIssued = deqEntry.valid && (!deqEntry.topdownIssued.get && !issued)
+      val robHeadIssueCancel = deqEntry.valid && deqEntry.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
+      // issueDelay priority than cancel; only calculate idealWaitTime stall
+      val robHeadIssueDelay = deqEntry.valid && (idealIssueTime > deqEntryNormalLatency) &&
+        (robHeadTime < idealWaitTime)
+      val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
+        FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
+        FuType.isStore(robHeadFutype)  -> StoreStall.id.U           ,
+        FuType.isLoad(robHeadFutype)    -> ldReason                  ,
+        FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
+        FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
+        FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
+      ))
+
+      val robHeadCancelSource = deqEntry.topdownCancelSource.get
+
+      val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
+      val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
+      val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
+        Mux(time < fix, 0.U, Mux((time === fix) && time.orR, 1.U, time - fix))
+      }
+      val maxCancelTime = fixedCancelTimeVec.reduce{ (a,b) => Mux(a > b, a, b)}
+      val maxCancelTimeVec = VecInit(fixedCancelTimeVec.map(_ === maxCancelTime)).asUInt
+      val lastMaxCancelTimeOH = Reverse(PriorityEncoderOH(Reverse(maxCancelTimeVec)))
+      val lastMaxIdx = OHToUInt(lastMaxCancelTimeOH)
+      val cancelTimeFixUpdateVec = VecInit(cancelTimeFixVec.zip(lastMaxCancelTimeOH.asBools).map{
+        case (time, hit) => time +& hit
+      })
+
+      if (backendParams.debugEn){
+        dontTouch(VecInit(lastMaxCancelTimeOH.asBools))
+      }
+
+      val cancelStallReason = MuxCase(IssueCancelStallOther.id.U, Seq(
+        IQCancelSource.isog0(lastMaxIdx) -> IssueCancelStallOg0.id.U  ,
+        IQCancelSource.isog1(lastMaxIdx) -> IssueCancelStallOg1.id.U  ,
+        IQCancelSource.isld(lastMaxIdx)  -> IssueCancelStallLd.id.U   ,
+        IQCancelSource.isst(lastMaxIdx)  -> IssueCancelStallSt.id.U   ,
+      ))
+      deqEntry.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
+
+
+      stall.valid := robHeadExecStall || robHeadNotIssued || robHeadIssueCancel || robHeadIssueDelay
+      stall.bits := MuxCase(BackendOtherCoreStall.id.U, Seq(
+        robHeadNotIssued                    -> RobHeadNotIssued.id.U     ,
+        robHeadExecStall                    -> robHeadExecStallReason    ,
+        robHeadIssueDelay                   -> IssueDelayStall.id.U      ,
+        robHeadIssueCancel                  -> cancelStallReason         ,
+      ))
+    }
+  }
+
+  /*
+   * Performance
+   * Count flushes, recovery transitions, and retirement throughput.
+   */
+  XSPerfAccumulate("flush_num", out.flushOut.valid)
+  XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
+  XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
+  XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
+  XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
+  XSPerfAccumulate("s_idle_to_idle", state === s_idle && state_next === s_idle)
+  XSPerfAccumulate("s_idle_to_walk", state === s_idle && state_next === s_walk)
+  XSPerfAccumulate("s_walk_to_idle", state === s_walk && state_next === s_idle)
+  XSPerfAccumulate("s_walk_to_walk", state === s_walk && state_next === s_walk)
+  XSPerfAccumulate("clock_cycle", 1.U, XSPerfLevel.CRITICAL)
+  QueuePerf(RobSize, numValidEntries, numValidEntries === RobSize.U)
+  XSPerfAccumulate("commitUop", ifCommit(commitCnt))
+  XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt), XSPerfLevel.CRITICAL)
+  XSPerfRolling("ipc", ifCommitReg(trueCommitCnt), 1000, clock, reset)
+  XSPerfRolling(
+    "cpi",
+    perfCnt = 1.U /*Cycle*/,
+    eventTrigger = ifCommitReg(trueCommitCnt),
+    granularity = 1000,
+    clock,
+    reset
+  )
+  XSPerfAccumulate("commitInstrFused", ifCommitReg(fuseCommitCnt))
+  val commitIsLoad = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.LOAD)
+  val commitLoadValid = commitSlotValid.zip(commitSlotInfo).map {
+    case (v, uop) =>
+      v && uop.commitType === CommitType.LOAD
+  }
+  XSPerfAccumulate("commitInstrLoad", ifCommit(PopCount(commitLoadValid)))
+  val commitIsBranch = deqPtrVec.map(ptr => FuType.isBrh(debug_microOp(ptr.value)(0).fuType))
+  val commitBranchValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && FuType.isBrh(uop.fuType) }
+  XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
+  val commitIsStore = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.STORE)
+  val commitStoreValid = commitSlotValid.zip(commitSlotInfo).map {
+    case (v, uop) =>
+      v && uop.commitType === CommitType.STORE
+  }
+  XSPerfAccumulate("commitInstrStore", ifCommit(PopCount(commitStoreValid)))
+  XSPerfAccumulate(
+    "writeback",
+    PopCount((0 until RobSize).map(i => robEntries(i).valid && robEntries(i).isWritebacked))
+  )
+  // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire)))
+  // XSPerfAccumulate("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
+
+  // Measure recovery work and extra RAB drain cycles.
+  XSPerfAccumulate("walkInstr", Mux(out.commits.isWalk, PopCount(out.commits.walkValid), 0.U))
+  XSPerfAccumulate("walkCycleTotal", state === s_walk)
+  XSPerfAccumulate("waitRabWalkEnd", state === s_walk && walkFinished && !rab.in.status.walkEnd)
+  private val walkCycle = RegInit(0.U(8.W))
+  private val waitRabWalkCycle = RegInit(0.U(8.W))
+  walkCycle := Mux(in.redirect.valid, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
+  waitRabWalkCycle := Mux(state === s_walk && walkFinished, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
+
+  XSPerfHistogram("walkRobCycleHist", walkCycle, state === s_walk && walkFinished, 0, 32)
+  XSPerfHistogram(
+    "walkRabExtraCycleHist",
+    waitRabWalkCycle,
+    state === s_walk && walkFinished && rab.in.status.walkEnd,
+    0,
+    32
+  )
+  XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
+
+  // Attribute retirement stalls to the head instruction type.
+  private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
+  private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
+  private val deqHeadInfo = debug_microOp(deqPtr.value).head
+  private val deqHeadInfoFuType = deqHeadInfo.fuType
+  val deqUopCommitType = deqHeadInfo.commitType
+
+  XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.alu.U)
+  XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mul.U)
+  XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.div.U)
+  XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.brh.U)
+  XSPerfAccumulate("waitJmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.jmp.U)
+  XSPerfAccumulate("waitLinkCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.link.U)
+  XSPerfAccumulate("waitCsrCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.csr.U)
+  XSPerfAccumulate("waitFenCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fence.U)
+  XSPerfAccumulate("waitBkuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.bku.U)
+  XSPerfAccumulate("waitLduCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.ldu.U)
+  XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.stu.U)
+  XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mou.U)
+
+  XSPerfAccumulate("waitfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.falu.U)
+  XSPerfAccumulate("waitfmulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmul.U)
+  XSPerfAccumulate("waitfcvtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcvt.U)
+  XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
+  XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
+
+  XSPerfAccumulate("waitVfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfmac.U)
+  XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
+
+  XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
+  XSPerfAccumulate("waitBranchCycle", deqNotWritebacked && FuType.isBrh(deqHeadInfoFuType))
+  XSPerfAccumulate("waitLoadCycle", deqNotWritebacked   && deqUopCommitType === CommitType.LOAD)
+  XSPerfAccumulate("waitStoreCycle", deqNotWritebacked  && deqUopCommitType === CommitType.STORE)
+  XSPerfReference("robHeadPC",
+    RegEnable(out.commits.info(0).debug_pc.getOrElse(0.U),
+              0.U,
+              out.commits.isCommit && out.commits.commitValid(0)))
+
+  // Count compression sizes and pair types at retirement.
+  XSPerfAccumulate("commitCompressCntAll", PopCount(out.commits.commitValid.zip(commitInstrCntByEntry).map {
+    case (valid, instrCnt) => out.commits.isCommit && valid && instrCnt > 1.U
+  }))
+  (1 to RenameWidth).foreach(i =>
+    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(out.commits.commitValid.zip(commitInstrCntByEntry).map {
+      case (valid, instrCnt) => out.commits.isCommit && valid && instrCnt === i.U
+    }))
+  )
+  XSPerfAccumulate("compressSize", out.commits.commitValid.zip(commitInstrCntByEntry).map {
+    case (valid, instrCnt) => Mux(out.commits.isCommit && valid && instrCnt > 1.U, instrCnt, 0.U)
+  }.reduce(_ +& _))
+  val compressTypeIsNORMAL = out.commits.commitValid.zip(out.commits.info).map { x =>
+    x._1 && CompressType.isNORMAL(x._2.entryPairType)
+  }
+  val compressTypeIsCC = out.commits.commitValid.zip(out.commits.info).map { x =>
+    x._1 && CompressType.isCC(x._2.entryPairType)
+  }
+  val compressTypeIsCS = out.commits.commitValid.zip(out.commits.info).map { x =>
+    x._1 && CompressType.isCS(x._2.entryPairType)
+  }
+  val compressTypeIsSC = out.commits.commitValid.zip(out.commits.info).map { x =>
+    x._1 && CompressType.isSC(x._2.entryPairType)
+  }
+  XSPerfAccumulate("compressType_NORMAL", ifCommit(PopCount(compressTypeIsNORMAL)))
+  XSPerfAccumulate("compressType_CC", ifCommit(PopCount(compressTypeIsCC)))
+  XSPerfAccumulate("compressType_CS", ifCommit(PopCount(compressTypeIsCS)))
+  XSPerfAccumulate("compressType_SC", ifCommit(PopCount(compressTypeIsSC)))
+  XSPerfAccumulate("RobEntriesCommited", ifCommit(PopCount(out.commits.commitValid)))
+
+  // By CommitType
+//  val commitIsLoad   = out.commits.info.map(x => x.commitType === CommitType.LOAD)
+//  val commitIsStore  = out.commits.info.map(x => x.commitType === CommitType.STORE)
+//  val commitIsBranch = out.commits.info.map(x => x.commitType === CommitType.BRANCH)
+  val commitIsNormal = out.commits.info.map(x => x.commitType === CommitType.NORMAL)
+
+  XSPerfAccumulate(
+    "NoCompressIsLoad",
+    ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsLoad).map(x => x._1 && x._2)))
+  )
+  XSPerfAccumulate(
+    "NoCompressIsStore",
+    ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsStore).map(x => x._1 && x._2)))
+  )
+  XSPerfAccumulate(
+    "NoCompressIsBranch",
+    ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsBranch).map(x => x._1 && x._2)))
+  )
+  XSPerfAccumulate(
+    "NoCompressIsNORMAL",
+    ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsNormal).map(x => x._1 && x._2)))
+  )
+
+  // By FuType
+  for (fuType <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(fuType)
+    val commitIsFuType = compressTypeIsNORMAL.zip(deqPtrVec.map(ptr => debug_microOp(ptr.value).head)).map {
+      case (commit, uop) => commit && uop.fuType === fuType.U
+    }
+    XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
+    val NoCompress_Source = commitIsFuType.zip(out.commits.info).map {
+      case (valid, info) =>
+        val noEnoughInstr  = valid && info.noCompressReason === NoCompressReason.noEnoughInstr
+        val flushedHalf    = valid && info.noCompressReason === NoCompressReason.flushedHalf
+        val cannotCompress = valid && info.noCompressReason === NoCompressReason.cannotCompress
+        (noEnoughInstr, flushedHalf, cannotCompress)
+    }
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_noEnoughInstr", ifCommit(PopCount(NoCompress_Source.map(_._1))))
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_flushedHalf", ifCommit(PopCount(NoCompress_Source.map(_._2))))
+    XSPerfAccumulate(s"NoCompress_${fuName}_by_cannotCompress", ifCommit(PopCount(NoCompress_Source.map(_._3))))
+  }
+
+  // Accumulate per-function-unit latency from retired slot metadata.
+  val dispatchLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.dispatchTime - debugMeta(uop).perfDebugInfo.renameTime
+  }
+  val enqRsLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.enqRsTime - debugMeta(uop).perfDebugInfo.dispatchTime
+  }
+  val selectLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.selectTime - debugMeta(uop).perfDebugInfo.enqRsTime
+  }
+  val issueLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.issueTime - debugMeta(uop).perfDebugInfo.selectTime
+  }
+  val rsFuLatency = commitDebugUop.map { uop =>
+    debugMeta(uop).perfDebugInfo.writebackTime - debugMeta(uop).perfDebugInfo.enqRsTime
+  }
+  val commitLatency = commitDebugUop.map(uop => timer - debugMeta(uop).perfDebugInfo.writebackTime)
+
+  for (fuType <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(fuType)
+    val commitIsFuType = commitSlotValid.zip(commitDebugUop).map(x => x._1 && x._2.fuType === fuType.U)
+    XSPerfRolling(s"ipc_futype_${fuName}", ifCommit(PopCount(commitIsFuType)), 1000, clock, reset)
+    XSPerfAccumulate(s"${fuName}_instr_cnt", ifCommit(PopCount(commitIsFuType)))
+    XSPerfAccumulate(s"${fuName}_latency_dispatch",
+      ifCommit(latencySum(cond = commitIsFuType, latency = dispatchLatency))
+    )
+    XSPerfAccumulate(s"${fuName}_latency_enq_rs", ifCommit(latencySum(cond = commitIsFuType, latency = enqRsLatency)))
+    XSPerfAccumulate(s"${fuName}_latency_select", ifCommit(latencySum(cond = commitIsFuType, latency = selectLatency)))
+    XSPerfAccumulate(s"${fuName}_latency_issue", ifCommit(latencySum(cond = commitIsFuType, latency = issueLatency)))
+    XSPerfAccumulate(s"${fuName}_latency_execute",
+      ifCommit(latencySum(cond = commitIsFuType, latency = executeLatency))
+    )
+    XSPerfAccumulate(s"${fuName}_latency_enq_rs_execute",
+      ifCommit(latencySum(cond = commitIsFuType, latency = rsFuLatency))
+    )
+    XSPerfAccumulate(s"${fuName}_latency_commit", ifCommit(latencySum(cond = commitIsFuType, latency = commitLatency)))
+  }
+  XSPerfAccumulate(s"redirect_use_snapshot", in.redirect.valid && in.snpt.useSnpt)
+  // rolling
+  out.debugRolling.robTrueCommit := ifCommitReg(trueCommitCnt)
   val misPred = in.redirect.valid && in.redirect.bits.isMisPred
   val brhJump = PopCount(isBrhOrJmpWBs.map(wb => wb.valid))
 
@@ -2341,6 +2542,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("br_mis_pred", misPred)
   XSPerfAccumulate("total_flush", in.redirect.valid)
 
+  // Publish hardware performance events.
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
   val commitStoreVec = VecInit(commitStoreValid)
@@ -2368,13 +2570,40 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   require(perfEvents.length == out.perfEvents.length)
   generatePerfEvent()
 
-  // max commit-stuck cycle
+  /*
+   * Watchdog
+   * Print head completion state after a sustained retirement stall.
+   */
+  val noCommitCycleCnt = RegInit(0.U(20.W))
+  when(out.commits.isCommit && out.commits.commitValid(0)) {
+    noCommitCycleCnt := 0.U
+  }.otherwise {
+    noCommitCycleCnt := noCommitCycleCnt + 1.U
+  }
+  // Read completion counts from the entry array for diagnostics.
+  val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
+  val deqPtrFormerUopNum = deqPtrRobEntry.decodeFormerUopNum(
+    entryPairType = deqPtrRobEntry.entryPairType,
+    uopState = deqPtrRobEntry.uopState
+  )
+  val deqPtrLatterUopNum = deqPtrRobEntry.decodeLatterUopNum(
+    entryPairType = deqPtrRobEntry.entryPairType,
+    uopState = deqPtrRobEntry.uopState
+  )
+  when(noCommitCycleCnt === 14999.U) {
+    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
+      p"realDest=${deqPtrEntry.realDestSize} " +
+      p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
+      p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
+      p"formerUopNum=${deqPtrFormerUopNum} latterUopNum=${deqPtrLatterUopNum} " +
+      p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
+      p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
+  }
+
+  // Qualify the watchdog with MMIO, WFI, and runtime enable state.
   val mmioBusy = out.lsq.mmioBusy // lsq know uncache request is rob head
-  val commitStuck = (!out.commits.commitValid.reduce(_ || _) || !out.commits.isCommit) && !mmioBusy && (wfiResume.B || !hasWFI)
-  val commitStuckCounter = Module(new CommitStuckCounter(
-    width = log2Up(maxCommitStuck),
-    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
-  ))
+  val commitStuck = (!out.commits.commitValid.reduce(_ || _) || !out.commits.isCommit) &&
+    !mmioBusy && (wfiResume.B || !hasWFI)
   val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
   commitStuckCounter.in.stuck := commitStuck
   commitStuckCounter.in.runtimeEnable := in.commit_stuck_check_enable
@@ -2387,65 +2616,144 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   )
   require(criticalErrors.length == out.criticalErrors.length)
   generateCriticalErrors()
-
-
-  // dontTouch for debug
-  if (backendParams.debugEn) {
-    // Unpack the compressed ROB writeback state only for debug builds.
-    val debugFormerUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
-    val debugLatterUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
-    for (i <- 0 until RobSize) {
-      debugFormerUopNum(i) := robEntries(i).formerUopNum
-      debugLatterUopNum(i) := robEntries(i).latterUopNum
-    }
-    dontTouch(debugFormerUopNum)
-    dontTouch(debugLatterUopNum)
-    dontTouch(enqPtrVec)
-    dontTouch(deqPtrVec)
-    dontTouch(robEntries)
-    dontTouch(robDeqGroup)
-    dontTouch(robBanks)
-    dontTouch(robBanksRaddrThisLine)
-    dontTouch(robBanksRaddrNextLine)
-    dontTouch(robBanksRdataThisLine)
-    dontTouch(robBanksRdataNextLine)
-    dontTouch(robBanksRdataThisLineUpdate)
-    dontTouch(robBanksRdataNextLineUpdate)
-    dontTouch(needUpdate)
-    val exceptionWBsVec = MixedVecInit(exceptionWBs)
-    dontTouch(exceptionWBsVec)
-    dontTouch(commit_wDeqGroup)
-    dontTouch(commit_vDeqGroup)
-    dontTouch(commitSizeSumSeq)
-    dontTouch(walkSizeSumSeq)
-    dontTouch(commitSizeSumCond)
-    dontTouch(walkSizeSumCond)
-    dontTouch(commitSizeSum)
-    dontTouch(walkSizeSum)
-    dontTouch(realDestSizeSeq)
-    dontTouch(walkDestSizeSeq)
-    dontTouch(out.commits)
-    dontTouch(commitIsVTypeVec)
-    dontTouch(walkIsVTypeVec)
-    dontTouch(commitValidThisLine)
-    dontTouch(commitReadAddr_next)
-    dontTouch(donotNeedWalk)
-    dontTouch(walkPtrVec_next)
-    dontTouch(walkPtrVec)
-    dontTouch(deqPtrVec_next)
-    dontTouch(deqPtrVecForWalk)
-    dontTouch(snapPtrReadBank)
-    dontTouch(snapPtrVecForWalk)
-    dontTouch(shouldWalkVec)
-    dontTouch(walkFinished)
-    dontTouch(changeBankAddrToDeqPtr)
-  }
-  if (env.EnableDifftest || env.FullBasicDiff) {
-    out.commits.info.map(info => dontTouch(info.debug_pc.get))
-  }
 }
 
 object Rob {
+  // Decode the number of instructions represented by a trace retirement code.
+  private[rob] def decodeTraceInstrCount(
+    traceIretire: UInt,
+    traceDecodeTable: Seq[(Int, Int)],
+    traceInstrCountWidth: Int
+  ): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      traceIretire,
+      TruthTable(
+        traceDecodeTable.zipWithIndex.map { case ((instrNum, _), encode) =>
+          BitPat((encode + 1).U(traceIretire.getWidth.W)) -> BitPat(instrNum.U(traceInstrCountWidth.W))
+        },
+        BitPat.N(traceInstrCountWidth)
+      )
+    )
+  }
+
+  // Decode the number of half-words represented by a trace retirement code.
+  private[rob] def decodeTraceHalfWords(
+    traceIretire: UInt,
+    traceDecodeTable: Seq[(Int, Int)],
+    traceHalfWordsWidth: Int
+  ): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      traceIretire,
+      TruthTable(
+        traceDecodeTable.zipWithIndex.map { case ((_, halfWords), encode) =>
+          BitPat((encode + 1).U(traceIretire.getWidth.W)) -> BitPat(halfWords.U(traceHalfWordsWidth.W))
+        },
+        BitPat.N(traceHalfWordsWidth)
+      )
+    )
+  }
+
+  // Convert half-word counts to the byte width used by flush PC reconstruction.
+  private[rob] def traceHalfWordsToBytes(halfWords: UInt, traceByteCountWidth: Int): UInt = {
+    Cat(halfWords, 0.U(1.W))(traceByteCountWidth - 1, 0)
+  }
+
+  // Map former and latter slots to their metadata array indices.
+  private[rob] def slotIndex(ptr: RobPtr): UInt = (!ptr.isFormer).asUInt
+
+  // Read optional debug metadata with a zero-valued fallback.
+  private[rob] def debugMeta(uop: EnqRobUop)(implicit p: Parameters): RenameOutUopDebug =
+    uop.debug.getOrElse(0.U.asTypeOf(new RenameOutUopDebug))
+
+  // Decrement a packed completion field without unsigned underflow.
+  private def saturatingDecPacked(value: UInt, decRaw: UInt): UInt = {
+    val compareWidth = math.max(value.getWidth, decRaw.getWidth)
+    val valueExt = value.pad(compareWidth)
+    val decExt = decRaw.pad(compareWidth)
+    val clippedDec = Mux(decExt > valueExt, valueExt, decExt)
+    (valueExt - clippedDec)(value.getWidth - 1, 0)
+  }
+
+  // Apply enqueue, writeback, exception, and redirect updates to packed completion counts.
+  private[rob] def calcNextPackedUopState(
+    entryValid: Bool,
+    entryUopState: UInt,
+    entryCompressType: UInt,
+    redirectClearsLatter: Bool,
+    needFlushWriteBackFormer: Bool,
+    needFlushWriteBackLater: Bool,
+    instCanEnqFlag: Bool,
+    enqState: UInt,
+    formerWbCntRaw: UInt,
+    latterWbCntRaw: UInt
+  )(implicit p: Parameters): UInt = {
+    val normalFormerState = entryUopState(NormalUopNumWidth - 1, 0)
+    val compressedFormerState = entryUopState(CompressedSlotUopNumWidth - 1, 0)
+    val compressedLatterState = entryUopState(
+      2 * CompressedSlotUopNumWidth - 1,
+      CompressedSlotUopNumWidth
+    )
+    val currentIsNormal = CompressType.isNORMAL(entryCompressType)
+    val currentFormerForNormal = Mux(
+      currentIsNormal,
+      normalFormerState,
+      compressedFormerState.pad(NormalUopNumWidth)
+    )
+
+    // Saturate each slot before applying exception and redirect clears.
+    val normalFormerAfterWb = saturatingDecPacked(value = currentFormerForNormal, decRaw = formerWbCntRaw)
+    val compressedFormerAfterWb = saturatingDecPacked(value = compressedFormerState, decRaw = formerWbCntRaw)
+    val compressedLatterAfterWb = saturatingDecPacked(value = compressedLatterState, decRaw = latterWbCntRaw)
+
+    val normalFormerNext = Mux(needFlushWriteBackFormer, 0.U, normalFormerAfterWb)
+    val compressedFormerNext = Mux(needFlushWriteBackFormer, 0.U, compressedFormerAfterWb)
+    val compressedLatterNext = Mux(
+      needFlushWriteBackLater || redirectClearsLatter,
+      0.U,
+      compressedLatterAfterWb
+    )
+
+    // Repack the surviving slots after a compressed-entry downgrade.
+    val nextEntryPairType = Mux(
+      redirectClearsLatter,
+      CompressType.NORMAL,
+      entryCompressType
+    )
+    val nextNormalState = Cat(0.U(1.W), normalFormerNext)
+    val nextCompressedState = Cat(compressedLatterNext, compressedFormerNext)
+    val stateAfterWriteback = Mux(
+      CompressType.isNORMAL(nextEntryPairType),
+      nextNormalState,
+      nextCompressedState
+    )
+    val currentCanonicalState = Mux(
+      currentIsNormal,
+      Cat(0.U(1.W), normalFormerState),
+      Cat(compressedLatterState, compressedFormerState)
+    )
+    val clearBothByFormerExceptionFlush =
+      needFlushWriteBackFormer && CompressType.isNotNORMAL(entryCompressType)
+
+    // Enqueue initializes an invalid entry; valid entries consume writebacks.
+    val nextState = Wire(UInt(entryUopState.getWidth.W))
+    nextState := currentCanonicalState
+    when(!entryValid && instCanEnqFlag) {
+      nextState := enqState
+    }.elsewhen(entryValid) {
+      nextState := Mux(
+        clearBothByFormerExceptionFlush,
+        0.U(entryUopState.getWidth.W),
+        stateAfterWriteback
+      )
+    }
+    nextState
+  }
+
+  // Sum latency samples selected by the corresponding validity mask.
+  private[rob] def latencySum(cond: Seq[Bool], latency: Seq[UInt]): UInt = {
+    cond.zip(latency).map(x => Mux(x._1, x._2, 0.U)).reduce(_ +& _)
+  }
+
   private val PerfEventCount = 19
   private val CriticalErrorCount = 1
 
@@ -2511,7 +2819,9 @@ object Rob {
     val debugTopDown = new RobTopDownInIO
 
     // Issue queue TopDown samples.
-    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn) {
+      Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo()))))
+    }
 
     // Load pipeline TopDown samples.
     val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
@@ -2584,7 +2894,9 @@ object Rob {
     val debugTopDown = new RobTopDownOutIO
 
     // ROB head stall reason.
-    val debugRobHeadStall = Option.when(backendParams.debugEn)(ValidIO(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+    val debugRobHeadStall = Option.when(backendParams.debugEn) {
+      ValidIO(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W))
+    }
 
     // Rolling retirement statistics.
     val debugRolling = new RobDebugRollingIO
