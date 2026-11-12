@@ -169,18 +169,18 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val itlbVAddr  = Mux(s1_needItlb, s1_req(0).startVAddr, s0_req(0).startVAddr)
   private val itlbFullVa = itlbVAddr.signExt(XLEN).toUInt
 
-  toItlb.valid             := s1_needItlb || s0_valid
-  toItlb.bits              := DontCare
-  toItlb.bits.size         := 3.U
-  toItlb.bits.vaddr        := itlbVAddr.toUInt(VAddrBits - 1, 0)
-  toItlb.bits.debug.pc     := itlbFullVa
-  toItlb.bits.cmd          := TlbCmd.exec
+  toItlb.valid               := s1_needItlb || s0_valid
+  toItlb.bits                := DontCare
+  toItlb.bits.size           := 3.U
+  toItlb.bits.vaddr          := itlbVAddr.toUInt(VAddrBits - 1, 0)
+  toItlb.bits.debug.pc       := itlbFullVa
+  toItlb.bits.cmd            := TlbCmd.exec
   toItlb.bits.fromHwPrefetch := false.B
-  toItlb.bits.no_translate := false.B
-  toItlb.bits.fullva       := itlbFullVa
-  toItlb.bits.checkfullva  := true.B
-  fromItlb.ready           := true.B
-  io.itlb.req_kill         := false.B
+  toItlb.bits.no_translate   := false.B
+  toItlb.bits.fullva         := itlbFullVa
+  toItlb.bits.checkfullva    := true.B
+  fromItlb.ready             := true.B
+  io.itlb.req_kill           := false.B
 
   /**
     ******************************************************************************
