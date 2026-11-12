@@ -774,7 +774,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       div_addrs(i) === line_div_addr &&
       set_addrs(i) =/= line_set_addr
     }
-    rrl_bank_conflict(i) := judge && io.readline.valid
+    rrl_bank_conflict(i) := judge && io.readline.fire
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
   val wr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x =>
@@ -863,9 +863,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       })))
       val readline_match = Wire(Bool())
       if (ReduceReadlineConflict) {
-        readline_match := io.readline.valid && io.readline.bits.rmask(bank_index) && line_div_addr === div_index.U
+        readline_match := io.readline.fire && io.readline.bits.rmask(bank_index) && line_div_addr === div_index.U
       } else {
-        readline_match := io.readline.valid && line_div_addr === div_index.U
+        readline_match := io.readline.fire && line_div_addr === div_index.U
       }
       val bank_set_addr = Mux(readline_match,
         line_set_addr,
