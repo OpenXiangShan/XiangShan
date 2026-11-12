@@ -20,11 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import utility._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
 
 class PTWReapterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new TlbPtwIO(Width))
@@ -148,8 +145,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val canenq = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val enqidx = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
-
-  //val selectCount = RegInit(0.U(log2Up(Width).W))
 
   val entryIsMatchVec = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
