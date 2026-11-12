@@ -10,7 +10,8 @@ import sqlite3
 from native_perf import read_blocks, unique_counters
 import tea_visualize as tea
 import dip_analyze as dip
-from tea_dip_query_endpoint_evidence import verify
+from tea_dip_query_endpoint_evidence import endpoint, verify
+from tea_dip_clock_alignment import core_native_alignment
 from tea_dip_wb_protocol_micro import digest, write
 
 
@@ -47,8 +48,8 @@ def dip_measure(dense, sparse, start, end, period, phase, reference_cpi):
                 scope='DIP budgets and actual-phase resolved joint PC/cause profile only; other DIP phases are not enumerated.')
 
 
-def measure(dense, sparse, period):
-    calibration = json.loads((dense / 'sampling-calibration.json').read_text())
+def measure(dense, sparse, period, calibration_path=None, *, full_roi=False):
+    calibration = json.loads((calibration_path or dense / 'sampling-calibration.json').read_text())
     assert calibration['passed'] and calibration['all_native_multivalues_equal']
     assert calibration['terminal_counts_equal'] and all(calibration['auxiliary_tables_equal'].values())
     blocks = read_blocks(dense / 'simulator_err.txt'); assert len(blocks) == 2
@@ -60,12 +61,23 @@ def measure(dense, sparse, period):
         return values[0]
     with sqlite3.connect((dense / 'simulator.db').resolve().as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
-        snapshots = db.execute('SELECT * FROM TeaCycleSummary_0 WHERE CYCLE>=? AND CYCLE<=? ORDER BY CYCLE',
-                               (stamps[0] + 1, stamps[-1] + 1)).fetchall()
-    first, last = snapshots[0], snapshots[-1]
-    start, end = first['CYCLE'], last['CYCLE']
-    retired = last['RETIRED'] - first['RETIRED']; assert retired > 0 and end > start
-    exact = {state: last['STATES_' + str(i)] - first['STATES_' + str(i)] for i, state in enumerate(tea.STATES)}
+        clock = core_native_alignment(db, dense / 'simulator_err.txt')
+        offset = clock['core_to_native_offset']
+        if not full_roi:
+            snapshots = db.execute('SELECT * FROM TeaCycleSummary_0 WHERE CYCLE>=? AND CYCLE<=? ORDER BY CYCLE',
+                                   (stamps[0] + 1 - offset, stamps[-1] + 1 - offset)).fetchall()
+    if full_roi:
+        evidence = endpoint(dense)
+        assert evidence['native_roi_cycle_duration_matches']
+        start, end = [frame['tea_cycle'] for frame in evidence['frames']]
+        retired = evidence['roi']['native_reported_retired']
+        exact = evidence['roi']['states']
+    else:
+        first, last = snapshots[0], snapshots[-1]
+        start, end = first['CYCLE'], last['CYCLE']
+        retired = last['RETIRED'] - first['RETIRED']
+        exact = {state: last['STATES_' + str(i)] - first['STATES_' + str(i)] for i, state in enumerate(tea.STATES)}
+    assert retired > 0 and end > start
     assert sum(exact.values()) == end - start
     counts = [Counter() for _ in range(period)]; rows = [0] * period
     hashes = [hashlib.sha256() for _ in range(period)]; states = Counter()
@@ -97,7 +109,8 @@ def measure(dense, sparse, period):
     for counter in counts:
         total.update(counter)
     cpi = (end - start) / retired
-    return dict(reference=dict(start=start, end=end, cycles=end-start, retired=retired, cpi=cpi,
+    return dict(clock_alignment=clock, reference=dict(window='full_native_ROI' if full_roi else 'SQL_summary_interior',
+                               start=start, end=end, cycles=end-start, retired=retired, cpi=cpi,
                                native_ROI_cpi=native_value('clock_cycle')/native_value('commitInstr'),
                                omitted_native_edge_cycles=native_value('clock_cycle')-(end-start)),
                 actual_phase=actual_phase, actual_sparse_resolved_rows_reproduced=reproduced,
@@ -115,10 +128,12 @@ def main():
     parser.add_argument('--sparse', type=Path, required=True)
     parser.add_argument('--period', type=int, default=1000)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--full-roi', action='store_true',
+                        help='Use exact native dump endpoints and retirement count instead of the summary interior')
     args = parser.parse_args()
     for root in [args.dense, args.sparse]:
         closed(root)
-    runs = [measure(args.dense / v, args.sparse / v, args.period) for v in ['control', 'candidate']]
+    runs = [measure(args.dense / v, args.sparse / v, args.period, full_roi=args.full_roi) for v in ['control', 'candidate']]
     assert runs[0][0]['actual_phase'] == runs[1][0]['actual_phase']
     def costs(run, counter, nrows):
         scale = run[0]['reference']['cpi'] / nrows
@@ -146,7 +161,7 @@ def main():
                             receipt_sha256=[digest(root/'closure-receipt.json')for root in [args.dense,args.sparse]],
                             tool_sha256=digest(Path(__file__)), parser_sha256=digest(Path(tea.__file__)),
                             DIP_parser_sha256=digest(Path(dip.__file__)),
-                            scope='Deterministic phase enumeration over independently validated TeaCycleSummary interiors. Reference windows and retirement counts differ between variants; no whole-ROI gain, confidence interval, unique critical path, or suite score. Sign epsilon1e-12 handles floating-point zero only.'))
+                            scope='Deterministic phase enumeration over the explicitly selected exact native ROI or TeaCycleSummary interior. Reference windows and own retirement counts differ between variants; omitted edges remain explicit. Dense and sparse same-binary neutrality is required. Phase ranges are not confidence intervals, unique critical paths or suite scores. Sign epsilon1e-12 handles floating-point zero only.'))
 
 
 if __name__ == '__main__':
