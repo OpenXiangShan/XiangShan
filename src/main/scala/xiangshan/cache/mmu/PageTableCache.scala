@@ -905,7 +905,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         refill_prefetch_dup(2),
         s2xlate = refill.req_info_dup(2).s2xlate
       )
-      ptwl2replace.access(l3RefillIdx)
+      ptwl3replace.get.access(l3RefillIdx)
       l3v.get := l3v.get | l3RfOH
       // g bit in G-stage PTEs should be ignored by hardware
       l3g.get := (l3g.get & ~l3RfOH) | Mux(memPte(2).perm.g && refill.req_info_dup(2).s2xlate =/= onlyStage2, l3RfOH, 0.U)
