@@ -118,7 +118,6 @@ class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Paramet
   val flush = Input(Bool())
   val refill = Output(Bool())
   val getGpa = Output(Bool())
-  val memidx = Output(new MemBlockidxBundle)
   val fastResp = if (hasHint) Some(Flipped(ValidIO(new PtwRespS2))) else None
   val fastHint = if (hasHint) Some(ValidIO(new TLBHintResp)) else None
 }
@@ -145,7 +144,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val mptOnly = Option.when(HasMptCheck) (RegInit(Vec(Size, Bool()), 0.U.asTypeOf(Vec(Size, Bool()))))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
-  val memidx = Reg(Vec(Size, new MemBlockidxBundle))
 
   val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val canenq = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -164,10 +162,9 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   // DontCare
   io.tlb.req.map(_.ready := true.B)
   io.tlb.resp.valid := false.B
-  io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2withMemIdx)
+  io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2WithGpa)
   io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
   io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
-  io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   io.getGpa := 0.U
 
   require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
@@ -210,7 +207,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       }
       s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
       getGpa(enqidx(i)) := io.tlb.req(i).bits.getGpa
-      memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
     }
   }
 
@@ -231,7 +227,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   when (io.ptw.resp.fire) {
     v.zip(ptwResp_EntryMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
-    io.memidx := memidx(ptwResp_EntryMatchFirst)
     io.getGpa := getGpa(ptwResp_EntryMatchFirst)
   }
 
@@ -356,7 +351,6 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   if (HasMptCheck) {
     io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
-  io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
   // However, it is only necessary to distinguish between different DTLB now
@@ -386,15 +380,12 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
 
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B
-    io.tlb.resp.bits.data.memidx := load_filter(0).memidx
   }
   when (store_filter(0).refill) {
     io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := true.B
-    io.tlb.resp.bits.data.memidx := store_filter(0).memidx
   }
   when (prefetch_filter(0).refill) {
     io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := true.B
-    io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   }
 
   val ptw_arb = Module(new RRArbiterInit(new PtwReq, 3))
@@ -430,7 +421,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val mptOnly = Option.when(HasMptCheck)(Reg(Vec(Size,Bool())))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
-  val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
   val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
@@ -494,7 +484,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   def filter_req() = {
     val reqs =  tlb_req.indices.map{ i =>
-      val req = Wire(ValidIO(new PtwReqwithMemIdx()))
+      val req = Wire(ValidIO(new PtwReqWithGpa()))
       val merge = canMerge(i)
       req.bits := tlb_req(i).bits
       req.valid := !merge && tlb_req(i).valid
@@ -530,7 +520,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   if (HasMptCheck) {
     io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
-  io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
   io.tlb.resp.bits.vector := resp_vector
   io.tlb.resp.bits.data.getGpa := RegNext(PriorityMux(ptwResp_OldMatchVec, getGpa))
   io.tlb.resp.bits.getGpa := DontCare
@@ -555,7 +544,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
         }
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         getGpa(enqPtrVec(i)) := req.bits.getGpa
-        memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }
   }

@@ -410,9 +410,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.hlvx := tlbHlvx
   io.tlbReq.bits.size := DontCare
   io.tlbReq.bits.kill := noQuery
-  io.tlbReq.bits.memidx.is_ld := true.B
-  io.tlbReq.bits.memidx.is_st := false.B
-  io.tlbReq.bits.memidx.idx := uop.lqIdx.value
   io.tlbReq.bits.isPrefetch := isPrefetch
   io.tlbReq.bits.no_translate := noQuery
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq

@@ -51,7 +51,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
   val pmp = io.pmp
-  val refill_to_mem = io.refill_to_mem
 
   /** Sfence.vma & Svinval
     * Sfence.vma will 1. flush old entries 2. flush inflight 3. flush pipe
@@ -168,7 +167,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   // mpt only mode also returns and save to l1tlb
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
 
-  refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, csr.satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
@@ -318,7 +316,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     resp(i).bits.gpaddr := result.gpaddr
     resp(i).bits.miss := result.miss
     resp(i).bits.ptwBack := ptw.resp.fire
-    resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
     resp(i).bits.fastMiss := !result.hit && enable
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${result.hit} miss:${result.miss} ppn:${Hexadecimal(ppn(0))} perm:${result.perm(0)}\n")
@@ -414,7 +411,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.getGpa := ptw_getGpa
-    io.ptw.req(idx).bits.memidx := req_out(idx).memidx
   }
 
   // Bypass the PTW response when the corresponding TLB entry is still being refilled
