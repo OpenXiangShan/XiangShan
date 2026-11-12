@@ -1079,9 +1079,10 @@ class FrontendEnv:
         hgatp_ppn: Optional[int] = None,
         priv_imode: Optional[int] = None,
         priv_virt: Optional[int] = None,
+        priv_fence_virt: Optional[int] = None,
         cycles: int = 1,
     ) -> dict:
-        """Update exposed TLB translation context fields and pulse affected changed pins."""
+        """Update translation context; fence virtualization is independent of data virtualization."""
         prepared = self.prepare_translation_context_change(
             satp_mode=satp_mode,
             satp_asid=satp_asid,
@@ -1094,6 +1095,7 @@ class FrontendEnv:
             hgatp_ppn=hgatp_ppn,
             priv_imode=priv_imode,
             priv_virt=priv_virt,
+            priv_fence_virt=priv_fence_virt,
         )
         pulse_cycles = max(1, int(cycles)) if any(prepared["changed"].values()) else 0
         if pulse_cycles:
@@ -1102,11 +1104,19 @@ class FrontendEnv:
                 self.current_cycle = max(int(self.current_cycle), int(end_cycle))
         self.release_translation_context_change(prepared)
         record = {"changed": prepared["changed"], "cycles": pulse_cycles}
+        if priv_fence_virt is not None:
+            record["priv_fence_virt"] = int(priv_fence_virt)
         self._emit_event("control.translation_context", {**record, "translation_epoch": int(self.translation_epoch)})
         return record
 
     def prepare_translation_context_change(self, **kwargs) -> dict:
         """Drive translation context fields and changed pins without stepping."""
+        fence_virt = kwargs.get("priv_fence_virt")
+        if fence_virt is not None:
+            if fence_virt not in (0, 1):
+                raise ValueError("priv_fence_virt must be 0 or 1")
+            if isinstance(self.tlb_csr_if.io_tlbCsr_priv_fenceVirt, DummySignal):
+                raise RuntimeError("DUT does not expose priv_fenceVirt")
         groups = {
             "satp": ((kwargs.get("satp_mode"), self.tlb_csr_if.io_tlbCsr_satp_mode), (kwargs.get("satp_asid"), self.tlb_csr_if.io_tlbCsr_satp_asid), (kwargs.get("satp_ppn"), self.tlb_csr_if.io_tlbCsr_satp_ppn)),
             "vsatp": ((kwargs.get("vsatp_mode"), self.tlb_csr_if.io_tlbCsr_vsatp_mode), (kwargs.get("vsatp_asid"), self.tlb_csr_if.io_tlbCsr_vsatp_asid), (kwargs.get("vsatp_ppn"), self.tlb_csr_if.io_tlbCsr_vsatp_ppn)),
@@ -1118,6 +1128,8 @@ class FrontendEnv:
             for value, signal in members:
                 if value is not None:
                     self._write(signal, int(value))
+        if fence_virt is not None:
+            self._write(self.tlb_csr_if.io_tlbCsr_priv_fenceVirt, int(fence_virt))
         control = self.prepare_tlb_csr_changes(**changed_groups)
         return {**control, "changed": changed_groups}
 

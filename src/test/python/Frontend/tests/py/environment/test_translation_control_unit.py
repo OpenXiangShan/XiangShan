@@ -142,6 +142,34 @@ def test_update_translation_context_updates_values_and_pulses_affected_groups() 
     assert events[-1]["type"] == "control.translation_context"
 
 
+@pytest.mark.parametrize("data_virt,fence_virt", [(0, 1), (1, 0)])
+def test_fence_virtualization_is_independent_of_data_virtualization(data_virt, fence_virt) -> None:
+    env, _events = _env_with_events()
+    env.update_translation_context(priv_virt=data_virt)
+    epoch = env.translation_epoch
+
+    result = TranslationScenarioSequence(actions=(TranslationContextAction(priv_fence_virt=fence_virt),)).run(env)
+
+    assert env.dut.io_tlbCsr_priv_virt.value == data_virt
+    assert env.dut.io_tlbCsr_priv_fenceVirt.value == fence_virt
+    assert env.translation_epoch == epoch
+    assert result[0]["record"]["priv_fence_virt"] == fence_virt
+    assert not any(result[0]["record"]["changed"].values())
+
+
+def test_fence_virtualization_rejects_invalid_or_missing_pin_before_other_writes() -> None:
+    from toffee.bundle import DummySignal
+
+    env, _events = _env_with_events()
+    with pytest.raises(ValueError, match="must be 0 or 1"):
+        env.update_translation_context(priv_fence_virt=2, satp_mode=8)
+    assert env.dut.io_tlbCsr_satp_mode.value == 0
+    env.tlb_csr_if.io_tlbCsr_priv_fenceVirt = DummySignal()
+    with pytest.raises(RuntimeError, match="does not expose"):
+        env.update_translation_context(priv_fence_virt=1, satp_mode=8)
+    assert env.dut.io_tlbCsr_satp_mode.value == 0
+
+
 def test_translation_sequence_exposes_control_actions_without_a_testcase_local_driver() -> None:
     env, _events = _env_with_events()
     entry = TranslationPmpPmaEntry(

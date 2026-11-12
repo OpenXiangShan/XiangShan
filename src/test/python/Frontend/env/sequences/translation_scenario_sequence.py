@@ -62,6 +62,7 @@ class TranslationContextAction:
     priv_imode: int | None = None
     priv_virt: int | None = None
     cycles: int = 1
+    priv_fence_virt: int | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,7 @@ class TranslationScenarioSequence:
                     hgatp_ppn=action.hgatp_ppn,
                     priv_imode=action.priv_imode,
                     priv_virt=action.priv_virt,
+                    priv_fence_virt=action.priv_fence_virt,
                     cycles=int(action.cycles),
                 )
                 results.append({"kind": "translation_context", "record": record})
