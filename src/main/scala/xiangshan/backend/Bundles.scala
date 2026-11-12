@@ -365,7 +365,7 @@ object Bundles {
     val st   = 4.U(3.W)
 
     val all = Seq(og0, og1, ld, st)
-    val num = all.length
+    val num = all.length + 1
 
     def isnone(cancelSource: UInt): Bool = cancelSource === none
     def isog0(cancelSource: UInt): Bool = cancelSource === og0
