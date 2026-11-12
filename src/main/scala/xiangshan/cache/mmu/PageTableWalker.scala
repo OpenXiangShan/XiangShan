@@ -818,7 +818,16 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
-  XSError(io.in.fire && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
+  // Cached-PTE bitmap requests and ordinary memory requests may coexist for
+  // the same PTE cache line, including after a bitmap request reaches mem_out.
+  // Their routing candidates need not be exclusive: enq_state_normal supplies
+  // the ordinary-request priority, while jmp_bitmap_check has its own path.
+  // ParallelMux must still select a consistent response ID for memory waiters.
+  val dup_wait_id_conflict = dup_vec_wait.zip(entries).map { case (d, entry) =>
+    d && entry.wait_id =/= wait_id
+  }
+  XSError(io.in.fire && (if (HasBitmapCheck) !io.in.bits.bitmapCheck.get.jmp_bitmap_check else true.B) &&
+    Cat(dup_wait_id_conflict).orR, "llptw duplicate memory waiters have conflicting response IDs")
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = MuxCase(state_addr_check, Seq(
     to_mem_out -> state_mem_out, // same to the blew, but the mem resp now
