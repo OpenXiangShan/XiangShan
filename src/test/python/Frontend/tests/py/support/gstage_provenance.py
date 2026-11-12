@@ -54,7 +54,6 @@ def run_gstage_provenance(
     env,
     scenario: TranslationScenario,
     expected_fault: str,
-    expect_gpaddr_write: bool,
 ) -> None:
     scenario = _randomize_ptw_response_timing(
         env,
@@ -64,15 +63,12 @@ def run_gstage_provenance(
             "gpa": scenario.gpa,
             "expected_path": "fault",
             "expected_fault": expected_fault,
-            "expect_gpaddr_write": expect_gpaddr_write,
         },
     )
     initialize_frontend(
         env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
     )
     state = TranslationScenarioBuilder(env).build(scenario)
-    gpaddr_writes = []
-
     def arm_before_reset_release() -> None:
         env.monitor.clear()
         env.monitor.set_expected_pc(scenario.va)
@@ -82,14 +78,6 @@ def run_gstage_provenance(
 
     for _ in range(6000):
         env.step(1)
-        gpaddr_if = env.backend_from_ifu_if
-        if int(gpaddr_if.gpaddr_mem_wen.value):
-            gpaddr_writes.append(
-                (
-                    int(gpaddr_if.gpaddr_mem_gpaddr.value),
-                    int(gpaddr_if.gpaddr_mem_is_for_vs_nonleaf_pte.value),
-                )
-            )
         active = env.translation_oracle.get_active()
         if active is not None and (
             active["fault_seen"]
@@ -99,11 +87,10 @@ def run_gstage_provenance(
             break
 
     assert state.expected_page_outcomes[0]["outcome"] == expected_fault
+    checker_errors = env.translation_oracle.get_stats()["errors"]
+    if checker_errors:
+        raise AssertionError(f"translation checker failed: {checker_errors}")
     assert env.monitor.exception_mark_count > 0
-    if expect_gpaddr_write:
-        assert gpaddr_writes == [(GPA, 1)]
-    else:
-        assert not gpaddr_writes
     observations_after_fault = len(env.monitor.observations)
     env.step(64)
     assert len(env.monitor.observations) == observations_after_fault

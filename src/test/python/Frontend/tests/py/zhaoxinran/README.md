@@ -23,7 +23,7 @@ tests/py/
     │   ├── __init__.py
     │   ├── test_address_translation_context_switch.py
     │   ├── test_address_translation_fault.py
-    │   ├── test_address_translation_gstage_provenance.py
+    │   ├── test_gstage_faults.py
     │   ├── test_address_translation_normal.py
     │   ├── test_address_translation_pte_permission.py
     │   ├── test_address_translation_ptw_timing.py

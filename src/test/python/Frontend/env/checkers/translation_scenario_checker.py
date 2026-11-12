@@ -124,7 +124,7 @@ class TranslationScenarioChecker:
             }
             for page in ptw_pages
         ]
-        if expected_fault == "instruction_guest_page_fault" and int(state.scenario.s2xlate) == 3:
+        if expect_ptw and expected_fault == "instruction_guest_page_fault" and int(state.scenario.s2xlate) == 3:
             guest_fault_pages = tuple(
                 page
                 for page, outcome in zip(selected_pages, page_outcomes)
@@ -142,6 +142,18 @@ class TranslationScenarioChecker:
             )
         expected_fetches = []
         allowed_out_of_scope_fetches = []
+        expected_gpaddr_writes = []
+        for page, outcome in zip(selected_pages, page_outcomes):
+            if str(outcome.get("outcome")) != "instruction_guest_page_fault":
+                continue
+            fault_va = int(outcome["va"])
+            guest_base = int(state.scenario.gpa) if s2xlate == 3 else int(state.scenario.va)
+            expected_gpaddr_writes.append({
+                "page": int(page),
+                "vpn": self.env.page_table.normalize_ptw_vpn(fault_va >> 12),
+                "gpaddr": guest_base + fault_va - int(state.scenario.va),
+                "nonleaf": None,
+            })
         payload_end = int(state.scenario.va) + len(state.scenario.payload)
         selected_page_set = set(selected_pages)
         for page, outcome in enumerate(all_page_outcomes):
@@ -182,6 +194,9 @@ class TranslationScenarioChecker:
             "expected_outcome": dict(page_outcomes[0]),
             "selected_pages": list(selected_pages),
             "expected_page_outcomes": page_outcomes,
+            "expected_gpaddr_writes": expected_gpaddr_writes,
+            "observed_gpaddr_writes": [],
+            "fault_ftq_value": None,
             "expected_fetches": expected_fetches,
             "allowed_out_of_scope_fetches": allowed_out_of_scope_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
@@ -371,6 +386,50 @@ class TranslationScenarioChecker:
             self.active["responded_ptw_request_keys"].append(response_key)
         if int(actual["vpn"]) not in self.active["responded_ptw_vpns"]:
             self.active["responded_ptw_vpns"].append(int(actual["vpn"]))
+        if not int(get_gpa):
+            for item in self.active["expected_gpaddr_writes"]:
+                if int(vpn) != int(item["vpn"]):
+                    continue
+                is_fake_pte = not int(response.get("s1_entry_v", 0))
+                is_nonleaf = not any(int(response.get(f"s1_entry_perm_{perm}", 0)) for perm in "rwx")
+                item["nonleaf"] = int(
+                    int(s2xlate) == 3 and not int(response.get("s1_pf", 0))
+                    and not int(response.get("s1_af", 0)) and (is_fake_pte or is_nonleaf)
+                )
+                level = int(response.get("s1_entry_level", 0))
+                if item["nonleaf"] and is_nonleaf and not is_fake_pte and level > 0:
+                    lane = int(vpn) & 7
+                    low = int(response["s1_ppn_low"][lane])
+                    table_ppn = (int(response["s1_entry_ppn"]) << 3) | low
+                    pte_index = (int(vpn) >> (9 * (level - 1))) & 0x1FF
+                    item["gpaddr"] = (table_ppn << 12) + pte_index * 8
+
+    def observe_gpaddr_write(self, cycle: int, *, wen: int, waddr: int, gpaddr: int, nonleaf: int) -> None:
+        if self.active is None or not int(wen):
+            return
+        actual = {"waddr": int(waddr), "gpaddr": int(gpaddr), "nonleaf": int(nonleaf)}
+        if not self._observation_ready(cycle) or (
+            self.active["expected_ptw_requests"] and not self.active["response_seen"]
+        ):
+            self._record(cycle, "pre_response_gpaddr_write", actual=actual)
+            return
+        self._record(cycle, "gpaddr_write", actual=actual)
+        expected = self.active["expected_gpaddr_writes"]
+        if not expected:
+            self._error(cycle, "unexpected_gpaddr_write", actual=actual)
+            return
+        if not any(
+            int(item["gpaddr"]) == actual["gpaddr"]
+            and (item["nonleaf"] is None or int(item["nonleaf"]) == actual["nonleaf"])
+            for item in expected
+        ):
+            self._error(cycle, "gpaddr_write_mismatch", expected=expected, actual=actual)
+            return
+        ftq_value = self.active["fault_ftq_value"]
+        if ftq_value is not None and actual["waddr"] != int(ftq_value):
+            self._error(cycle, "gpaddr_write_ftq_mismatch", expected_ftq_value=ftq_value, actual=actual)
+            return
+        self.active["observed_gpaddr_writes"].append({"cycle": int(cycle), **actual})
 
     def observe_fetch_request(self, cycle: int, *, path: str, pa: int, mem_page_type_nc: Optional[int] = None) -> None:
         if self.active is None:
@@ -489,6 +548,7 @@ class TranslationScenarioChecker:
         exception_bits: dict[int, int],
         cross_page: bool = False,
         folded_pc: Optional[int] = None,
+        ftq_value: Optional[int] = None,
     ) -> None:
         if self.active is None:
             return
@@ -566,6 +626,11 @@ class TranslationScenarioChecker:
         if actual_fault != expected_fault:
             self._error(cycle, "cfvec_exception_type_mismatch", expected_fault=expected_fault, actual_fault=actual_fault, pc=int(pc))
             return
+        if actual_fault == "instruction_guest_page_fault" and ftq_value is not None:
+            self.active["fault_ftq_value"] = int(ftq_value)
+            for write in self.active["observed_gpaddr_writes"]:
+                if int(write["waddr"]) != int(ftq_value):
+                    self._error(cycle, "gpaddr_write_ftq_mismatch", expected_ftq_value=int(ftq_value), actual=write)
         self.active["fault_seen"] = True
 
     def on_clock_edge(self, cycle: int) -> None:
@@ -596,6 +661,15 @@ class TranslationScenarioChecker:
                 get_gpa=int(expectation.get("get_gpa", 0)),
                 response=dict(expectation["resp"]),
             )
+        gpaddr_if = self.env.backend_from_ifu_if
+        if int(gpaddr_if.gpaddr_mem_wen.value):
+            self.observe_gpaddr_write(
+                cycle,
+                wen=1,
+                waddr=int(gpaddr_if.gpaddr_mem_waddr.value),
+                gpaddr=int(gpaddr_if.gpaddr_mem_gpaddr.value),
+                nonleaf=int(gpaddr_if.gpaddr_mem_is_for_vs_nonleaf_pte.value),
+            )
         icache_records = self.env.icache_agent.request_records
         for record in icache_records[self._icache_cursor :]:
             self.observe_fetch_request(record["cycle"], path="icache", pa=record["address"])
@@ -625,6 +699,7 @@ class TranslationScenarioChecker:
                     for bit in _EXCEPTION_BITS
                 },
                 cross_page=bool(sampled_cfvec.cross_page_ipf_fix),
+                ftq_value=int(sampled_cfvec.ftq_value),
             )
 
     def assert_complete(self) -> dict:
@@ -650,6 +725,10 @@ class TranslationScenarioChecker:
             ]
             if missing_fetches:
                 missing.append(f"fetch_block_{missing_fetches}")
+        observed_gpaddrs = {int(item["gpaddr"]) for item in self.active["observed_gpaddr_writes"]}
+        for expected in self.active["expected_gpaddr_writes"]:
+            if int(expected["gpaddr"]) not in observed_gpaddrs:
+                missing.append(f"gpaddr_write_page_{expected['page']}")
         if missing:
             self._error(getattr(self.env, "current_cycle", 0), "missing_observation", missing=missing)
         if self.errors:

@@ -151,9 +151,7 @@ def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
                   ("s1_pf", 0), ("s1_af", 0)),
         gpf=1, gaf=0,
     )
-    gstage.run_gstage_provenance(
-        env, scenario, "instruction_guest_page_fault", True
-    )
+    gstage.run_gstage_provenance(env, scenario, "instruction_guest_page_fault")
     delivered = []
     for record in records:
         if not record["io_toIBuffer_ready"] or not record["gpaddr"]["wen"]:

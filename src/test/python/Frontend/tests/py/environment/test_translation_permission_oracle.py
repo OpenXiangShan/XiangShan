@@ -26,6 +26,122 @@ def test_translation_checker_keeps_env_alias() -> None:
     assert env.translation_oracle is env.translation_checker
 
 
+def _gpaddr_oracle(*, s2xlate: int = 3, gpf: int = 1):
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="gpaddr-write-contract",
+        va=0x8020_0404,
+        gpa=0x8060_0404 if s2xlate == 3 else None,
+        pa=0x8040_0404,
+        payload=b"\x13\x00\x00\x00",
+        mode="sv39" if s2xlate == 3 else "bare",
+        s2xlate=s2xlate,
+        priv_virt=1,
+        s2_gpf=gpf,
+        expected_path="fault" if gpf else "cacheable",
+        expected_result="guest_fault" if gpf else "normal",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state, expect_ptw=False)
+    return env, scenario
+
+
+@pytest.mark.parametrize("s2xlate,expected_gpa", [(2, 0x8020_0404), (3, 0x8060_0404)])
+def test_gpaddr_write_is_checked_automatically_from_scenario(s2xlate, expected_gpa) -> None:
+    env, scenario = _gpaddr_oracle(s2xlate=s2xlate)
+    gp = env.backend_from_ifu_if
+    gp.gpaddr_mem_wen.value = 1
+    gp.gpaddr_mem_waddr.value = 7
+    gp.gpaddr_mem_gpaddr.value = expected_gpa
+    gp.gpaddr_mem_is_for_vs_nonleaf_pte.value = 0
+
+    env.monitor.capture_cycle_observation(20)
+    env.translation_oracle.on_clock_edge(20)
+    env.translation_oracle.observe_cfvec(21, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
+
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert env.translation_oracle.active["observed_gpaddr_writes"][0]["gpaddr"] == expected_gpa
+
+
+def test_gpaddr_write_wrong_gpa_fails_even_if_a_correct_write_follows() -> None:
+    env, scenario = _gpaddr_oracle()
+    env.translation_oracle.observe_gpaddr_write(20, wen=1, waddr=7, gpaddr=scenario.gpa + 2, nonleaf=0)
+    env.translation_oracle.observe_gpaddr_write(21, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=0)
+    env.translation_oracle.observe_cfvec(22, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
+
+    with pytest.raises(AssertionError, match="gpaddr_write_mismatch"):
+        env.assert_translation_scenario()
+
+
+def test_gpaddr_write_missing_or_wrong_ftq_is_reported_at_completion() -> None:
+    env, scenario = _gpaddr_oracle()
+    env.translation_oracle.observe_cfvec(21, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
+    with pytest.raises(AssertionError, match="gpaddr_write_page_0"):
+        env.assert_translation_scenario()
+
+    env, scenario = _gpaddr_oracle()
+    env.translation_oracle.observe_gpaddr_write(20, wen=1, waddr=6, gpaddr=scenario.gpa, nonleaf=0)
+    env.translation_oracle.observe_cfvec(21, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
+    with pytest.raises(AssertionError, match="gpaddr_write_ftq_mismatch"):
+        env.assert_translation_scenario()
+
+
+def test_non_gpf_scenario_rejects_gpaddr_write() -> None:
+    env, scenario = _gpaddr_oracle(gpf=0)
+    env.translation_oracle.observe_gpaddr_write(20, wen=1, waddr=0, gpaddr=scenario.gpa, nonleaf=0)
+    assert env.translation_oracle.errors[-1]["reason"] == "unexpected_gpaddr_write"
+
+
+def test_gpaddr_nonleaf_expectation_comes_from_driven_ptw_response() -> None:
+    env, scenario = _gpaddr_oracle()
+    request = env.translation_oracle.active["expected_ptw_request"]
+    env.translation_oracle.active["expected_ptw_requests"] = [request]
+    env.translation_oracle.observe_ptw_request(10, **{
+        key: request[key] for key in ("vpn", "s2xlate", "get_gpa")
+    })
+    response = env.page_table.build_ptw_resp(request["vpn"], s2xlate=3)
+    response.update(s1_entry_v=0, s1_pf=0, s1_af=0)
+    env.translation_oracle.observe_ptw_response(11, **{
+        key: request[key] for key in ("vpn", "s2xlate", "get_gpa")
+    }, response=response)
+
+    env.translation_oracle.observe_gpaddr_write(20, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=0)
+    assert env.translation_oracle.errors[-1]["reason"] == "gpaddr_write_mismatch"
+    env.translation_oracle.observe_gpaddr_write(21, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=1)
+    assert len(env.translation_oracle.active["observed_gpaddr_writes"]) == 1
+
+
+def test_gpaddr_nonleaf_pte_address_comes_from_driven_ptw_response() -> None:
+    env, scenario = _gpaddr_oracle()
+    checker = env.translation_oracle
+    request = checker.active["expected_ptw_request"]
+    checker.active["expected_ptw_requests"] = [request]
+    keys = {key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}
+    checker.observe_ptw_request(10, **keys)
+    response = env.page_table.build_ptw_resp(request["vpn"], s2xlate=3)
+    table_gpa = 0x8003F000
+    response.update(
+        s1_entry_level=1,
+        s1_entry_ppn=(table_gpa >> 12) >> 3,
+        s1_entry_v=1,
+        s1_entry_perm_r=0,
+        s1_entry_perm_w=0,
+        s1_entry_perm_x=0,
+        s1_pf=0,
+        s1_af=0,
+        s2_gpf=1,
+    )
+    lane = request["vpn"] & 7
+    response["s1_ppn_low"][lane] = (table_gpa >> 12) & 7
+    checker.observe_ptw_response(11, **keys, response=response)
+    expected_pte_gpa = table_gpa + ((request["vpn"] & 0x1FF) * 8)
+    wrong_fetch_gpa = table_gpa | (scenario.va & 0xFFF)
+    checker.observe_gpaddr_write(20, wen=1, waddr=7, gpaddr=wrong_fetch_gpa, nonleaf=1)
+    assert checker.errors[-1]["reason"] == "gpaddr_write_mismatch"
+    checker.observe_gpaddr_write(21, wen=1, waddr=7, gpaddr=expected_pte_gpa, nonleaf=1)
+    assert checker.active["observed_gpaddr_writes"][-1]["gpaddr"] == expected_pte_gpa
+
+
 class _PmpProbeDut(FakeDUTFrontend):
     _is_fake_frontend_dut = False
 
@@ -794,6 +910,9 @@ def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
         )
         env.translation_oracle.observe_ptw_request(cycle, **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")})
         env.translation_oracle.observe_ptw_response(cycle + 1, **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=response)
+    env.translation_oracle.observe_gpaddr_write(
+        13, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=0,
+    )
     env.translation_oracle.observe_cfvec(14, pc=scenario.va, exception_bits={20: 1})
 
     stats = env.assert_translation_scenario()
