@@ -458,7 +458,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new KunminghuV2Config(1)
 )
 
-class DefaultConfig(n: Int = 1) extends Config(
+class DefaultBaseConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
@@ -481,7 +481,7 @@ class WithCHI extends Config((_, _, _) => {
 
 class KunminghuV2Config(n: Int = 1) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
-    ++ new DefaultConfig(n)
+    ++ new DefaultBaseConfig(n)
     ++ new WithCHI
 )
 
@@ -489,7 +489,7 @@ class KunminghuV2Config(n: Int = 1) extends Config(
   * The SoC address/PMA map, interrupt count, and module prefix match NHV3A.
   * CPU and XSTile microarchitecture parameters are inherited from KunminghuV2Config.
   */
-class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
+class DefaultConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
     case MonitorsEnabled => false
     case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
@@ -522,6 +522,8 @@ class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
     )
   })
 )
+
+class KunminghuV2WithoutLLCConfig(n: Int = 1) extends DefaultConfig(n)
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
   (L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
