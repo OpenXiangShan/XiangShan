@@ -16,14 +16,14 @@ from env.sequences import InjectRedirectSequence
 from env.support import fold_pc
 from tests.py.support import uncache_scenarios as probes
 from tests.py.zhaoxinran import test_redirect_flush_recovery_scenarios as rfr
-from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
+from tests.py.support import backend_fault_recovery as faults
 
 
 _SIGNALS = {
     "way_exception": "inner_icache.wayLookup.exceptionEntry_valid",
     # ICache.sv connects this input and WayLookup.io_write_0_ready to one wire.
     "way_ready": "inner_icache.prefetcher.io_wayLookupWrite_0_ready",
-    "way_flush": "inner_icache.__Vtogcov__io_fromFtq_redirectFlush",
+    "way_flush": "inner_ftq.redirect_1_valid",
     "backend_exception": "inner_ftq.backendException_value",
 }
 
