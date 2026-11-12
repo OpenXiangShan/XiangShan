@@ -94,6 +94,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val bankNum = 8
   assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
   val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
+  // Per-slot functional state used by exception handling and performance
+  // accounting.
+  val slotUopBuf = Reg(Vec(RobSize, Vec(2, new RobSlotInfo)))
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
@@ -301,8 +304,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
   }
 
-  // data for debug
-  // Warn: debug_* prefix should not exist in generated verilog.
+  // Per-slot copy of the full enqueue uop for debug and difftest.
   val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
   val debug_lqIdx = Reg(Vec(RobSize, Vec(2, new LqPtr)))
   val debug_sqIdx = Reg(Vec(RobSize, Vec(2, new SqPtr)))
@@ -489,7 +491,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         enqHalfWritten(enqIndex)(1) := false.B
       }
       when(!hasEarlierSameHalf && !slotWritten) {
-        // Keep the first instruction metadata in each rob-half for difftest/debug.
+        // Keep the first instruction metadata in each rob-half.  The functional
+        // fields feed exception handling; the full uop is only for debug/difftest.
+        slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
+        slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
+        slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
         debug_microOp(enqIndex)(subIndex) := enqUop
         debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
           debug.perfDebugInfo.dispatchTime := timer
@@ -610,8 +616,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (wb <- exuWBs) {
     val wbIdx = wb.bits.robIdx.value
     val subIdx = slotIndex(wb.bits.robIdx)
-    val debug_Uop = debug_microOp(wbIdx)(subIdx)
-    val debug = debugMeta(debug_Uop)
     when(wb.valid) {
       debug_exuData(wbIdx)(subIdx) := wb.bits.data
       debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
@@ -640,6 +644,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         robEntries(wbIdx).debug_sqIdx.foreach(_ := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
       }
     }
+    val debug_Uop = debug_microOp(wbIdx)(subIdx)
+    val debug = debugMeta(debug_Uop)
     XSInfo(wb.valid,
       p"writebacked pc 0x${Hexadecimal(debug.pc)} wen ${debug_Uop.rfWen} " +
         p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
@@ -669,8 +675,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * RedirectOut: Interrupt and Exceptions
    */
-  val debug_deqUop = debug_microOp(deqPtr.value).head
-
   val deqPtrEntry = rawInfo(0)
   val deqPtrEntryValid = deqPtrEntry.commit_v
   val deqHasFlushed = RegInit(false.B)
@@ -683,7 +687,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrFormer.isFormer := true.B
   deqPtrLatter.isFormer := false.B
   val deqExceptionIsFormer = intrEnable || deqPtrEntry.slotNeedFlushMask(0)
-  val deqExceptionUop = Mux(deqExceptionIsFormer, debug_microOp(deqPtr.value)(0), debug_microOp(deqPtr.value)(1))
+  val deqExceptionUop = Mux(deqExceptionIsFormer, slotUopBuf(deqPtr.value)(0), slotUopBuf(deqPtr.value)(1))
   // Select the exact slot (former/latter) that should provide exception state for the head entry.
   val deqExceptionRobIdx = Mux(deqPtrEntry.slotNeedFlushMask(0), deqPtrFormer, deqPtrLatter)
   val formerNotFlush = !deqPtrFormer.needFlush(in.redirect)
@@ -821,7 +825,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   val exceptionIsFormer = deqExceptionIsFormer
   val exceptionUop = deqExceptionUop
-  val exceptionDebug = debugMeta(exceptionUop)
+  val exceptionDebug = debugMeta(Mux(exceptionIsFormer,
+    debug_microOp(deqPtr.value)(0), debug_microOp(deqPtr.value)(1)))
   out.exception.valid := RegNext(exceptionHappen)
   out.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
@@ -1117,7 +1122,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     (0 until 2).map { j =>
       val slotValid = out.commits.commitValid(i) && (j == 0).B ||
         out.commits.commitValid(i) && !CompressType.isNORMAL(out.commits.info(i).entryPairType)
-      slotValid && debug_microOp(deqPtrVec(i).value)(j).commitType === CommitType.LOAD
+      slotValid && slotUopBuf(deqPtrVec(i).value)(j).commitType === CommitType.LOAD
     }
   })
   // TODO: Check if meet the require that only set scommit when commit scala store uop
@@ -1781,6 +1786,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
 
+  // Normal RTL view used by the always-on performance events.
+  val commitSlotInfo = deqPtrVec.map(_.value).map(slotUopBuf(_)).flatten
+  // Debug/difftest-only view of the full uop.
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
   val commitSlotValid = out.commits.commitValid.zip(out.commits.info).flatMap { case (valid, info) =>
     Seq(valid, valid && !CompressType.isNORMAL(info.entryPairType))
@@ -1793,13 +1801,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfRolling("cpi", perfCnt = 1.U /*Cycle*/ , eventTrigger = ifCommitReg(trueCommitCnt), granularity = 1000, clock, reset)
   XSPerfAccumulate("commitInstrFused", ifCommitReg(fuseCommitCnt))
   val commitIsLoad = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.LOAD)
-  val commitLoadValid = commitSlotValid.zip(commitDebugUop).map { case (v, uop) => v && uop.commitType === CommitType.LOAD }
+  val commitLoadValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && uop.commitType === CommitType.LOAD }
   XSPerfAccumulate("commitInstrLoad", ifCommit(PopCount(commitLoadValid)))
   val commitIsBranch = deqPtrVec.map(ptr => FuType.isBrh(debug_microOp(ptr.value)(0).fuType))
-  val commitBranchValid = commitSlotValid.zip(commitDebugUop).map { case (v, uop) => v && FuType.isBrh(uop.fuType) }
+  val commitBranchValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && FuType.isBrh(uop.fuType) }
   XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
   val commitIsStore = deqPtrVec.map(ptr => debug_microOp(ptr.value)(0).commitType === CommitType.STORE)
-  val commitStoreValid = commitSlotValid.zip(commitDebugUop).map { case (v, uop) => v && uop.commitType === CommitType.STORE }
+  val commitStoreValid = commitSlotValid.zip(commitSlotInfo).map { case (v, uop) => v && uop.commitType === CommitType.STORE }
   XSPerfAccumulate("commitInstrStore", ifCommit(PopCount(commitStoreValid)))
   XSPerfAccumulate("writeback", PopCount((0 until RobSize).map(i => robEntries(i).valid && robEntries(i).isWritebacked)))
   // XSPerfAccumulate("enqInstr", PopCount(io.dp1Req.map(_.fire)))
@@ -1881,7 +1889,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // By FuType
   for (fuType <- FuType.functionNameMap.keys) {
     val fuName = FuType.functionNameMap(fuType)
-    val commitIsFuType = compressTypeIsNORMAL.zip(deqPtrVec.map(_.value).map(debug_microOp(_).head)).map {
+    val commitIsFuType = compressTypeIsNORMAL.zip(deqPtrVec.map(ptr => debug_microOp(ptr.value).head)).map {
       case (commit, uop) => commit && uop.fuType === fuType.U
     }
     XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
@@ -2234,7 +2242,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     for (i <- 0 until CommitWidth; j <- 0 until 2) {
       val index = 2 * i + j
       val ptr = deqPtrVec(i).value
-      val uop = debug_microOp(ptr)(j)
+      val uop = commitDebugUop(index)
       val uopDebug = debugMeta(uop)
       val exuOut = dt_exuDebug(ptr)(j)
       val basicDebug = dt_basicDebug(ptr)(j)

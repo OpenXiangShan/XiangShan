@@ -54,6 +54,22 @@ class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
+/**
+ * Functional per-slot information kept by the ROB for exception handling and
+ * performance accounting.  This used to live in a debug-named copy of the full
+ * enqueue uop; only these fields are actually required by the RTL.
+ */
+class RobSlotInfo(implicit p: Parameters) extends XSBundle {
+  val commitType = CommitType()
+  val fuType = FuType()
+  val fuOpType = FuOpType()
+
+  def isVectorMemory: Bool = FuType.isLoadStore(fuType) && LSUOpType.isVecMemOp(fuOpType)
+
+  def isHls: Bool = (fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType)) ||
+    (fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType))
+}
+
 class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
 
