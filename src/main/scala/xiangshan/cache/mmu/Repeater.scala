@@ -45,48 +45,6 @@ class PTWReapterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
 
 }
 
-class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
-  val io = IO(new PTWReapterIO(Width))
-
-  val req_in = if (Width == 1) {
-    io.tlb.req(0)
-  } else {
-    val arb = Module(new RRArbiterInit(io.tlb.req(0).bits.cloneType, Width))
-    arb.io.in <> io.tlb.req
-    arb.io.out
-  }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed, FenceDelay))
-  val req = RegEnable(req_in.bits, req_in.fire)
-  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
-  val haveOne = BoolStopWatch(req_in.fire, tlb.resp.fire || flush)
-  val sent = BoolStopWatch(ptw.req(0).fire, req_in.fire || flush)
-  val recv = BoolStopWatch(ptw.resp.fire && haveOne, req_in.fire || flush)
-
-  req_in.ready := !haveOne
-  ptw.req(0).valid := haveOne && !sent
-  ptw.req(0).bits := req
-
-  tlb.resp.bits := resp
-  tlb.resp.valid := haveOne && recv
-  ptw.resp.ready := !recv
-
-  XSPerfAccumulate("req_count", ptw.req(0).fire)
-  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(req_in.fire, tlb.resp.fire || flush))
-  XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire, ptw.resp.fire || flush))
-
-  XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${flush} req:${req} resp:${resp}")
-  XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
-  XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
-  assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
-  XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
-  XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.s1.entry.tag), "ptw repeater recv resp with wrong tag")
-  XSError(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
-}
-
-/* dtlb
- *
- */
-
 class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PTWReapterIO(Width))
 
@@ -100,7 +58,6 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
   val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed, FenceDelay))
   /* sent: tlb -> repeater -> ptw
    * recv: ptw -> repeater -> tlb
-   * different from PTWRepeater
    */
 
   // tlb -> repeater -> ptw
@@ -674,31 +631,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
   XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
-}
-
-object PTWRepeater {
-  def apply(fenceDelay: Int,
-    tlb: TlbPtwIO,
-    sfence: SfenceBundle,
-    csr: TlbCsrBundle
-  )(implicit p: Parameters) = {
-    val width = tlb.req.size
-    val repeater = Module(new PTWRepeater(width, fenceDelay))
-    repeater.io.apply(tlb, sfence, csr)
-    repeater
-  }
-
-  def apply(fenceDelay: Int,
-    tlb: TlbPtwIO,
-    ptw: TlbPtwIO,
-    sfence: SfenceBundle,
-    csr: TlbCsrBundle
-  )(implicit p: Parameters) = {
-    val width = tlb.req.size
-    val repeater = Module(new PTWRepeater(width, fenceDelay))
-    repeater.io.apply(tlb, ptw, sfence, csr)
-    repeater
-  }
 }
 
 object PTWRepeaterNB {
