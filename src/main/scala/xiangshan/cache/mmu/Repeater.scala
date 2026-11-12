@@ -165,12 +165,13 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
   require(Size >= Width && ((Size & (Size-1)) == 0), s"DTLB Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
   val step = Size / Width
-  for(i <- 0 until (Width - 1)) {
-    canenq(i) := !(Cat(VecInit(v.slice(i * step, (i + 1) * step))).andR)
-    enqidx(i) := firstValidIndex(v.slice(i * step, (i + 1) * step), false.B) + (i * step).U
+  for (i <- 0 until Width) {
+    val start = i * step
+    val end = if (i == Width - 1) Size else (i + 1) * step
+    val partition = v.slice(start, end)
+    canenq(i) := !Cat(partition).andR
+    enqidx(i) := firstValidIndex(partition, false.B) + start.U
   }
-  canenq(Width-1) := !(Cat(VecInit(v.slice((Width - 1) * step, Size))).andR)
-  enqidx(Width-1) := firstValidIndex(v.slice((Width - 1) * step, Size), false.B) + ((Width - 1) * step).U
 
   for (i <- 0 until Width) {
     enqvalid(i) := io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && canenq(i)
