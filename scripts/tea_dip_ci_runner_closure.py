@@ -49,15 +49,15 @@ def runner_completion(identity, run, job, point, runner_text):
                 run_status_at_collection=run['status'], job_status_at_collection=job['status'])
 
 
-def closed_receipt(identity, run, job, point, runner_text):
+def closed_receipt(identity, run, job, point, runner_text, protocol_dir=None):
     receipt = runner_completion(identity, run, job, point, runner_text)
     if not receipt['ready']:
         return receipt
-    protocol = Path(identity['protocol_dir'])
+    protocol = Path(protocol_dir) if protocol_dir is not None else Path(identity['protocol_dir'])
     for name, expected in PROTOCOL.items():
         assert digest(protocol / name) == expected, name
     root = Path(identity['report'])
-    assert list(root.glob('runner*.log')) == [root / identity['runner_log']], 'Ambiguous runner session'
+    assert (root / identity['runner_log']).read_text() == runner_text, 'Pinned runner log differs'
     for name, expected in [('emu-gsim', identity['emu_sha256']),
                            ('riscv64-nemu-interpreter-so', identity['reference_sha256'])]:
         assert digest(root / name) == expected, name
@@ -83,7 +83,7 @@ def closed_receipt(identity, run, job, point, runner_text):
     return dict(receipt, utc=datetime.now(timezone.utc).isoformat(), original_process_live=False,
                 actual_seed=int(seed), sampler_flags=flags, difftest_passed=True, files=files,
                 artifact_sha256=dict(emu=identity['emu_sha256'], reference=identity['reference_sha256'],
-                                     cst=identity['cst_sha256']), protocol_sha256=PROTOCOL,
+                                     cst=identity['cst_sha256']), protocol_sha256=PROTOCOL, protocol_source_dir=str(protocol),
                 tool_sha256=digest(Path(__file__)), database_opened=False,
                 scope='Closure is proved by the audited foreground SSH/emu runner returning zero before '
                       'its succeeded log event, together with the pinned official run/job and artifact hashes. '
@@ -100,12 +100,13 @@ def main():
     parser.add_argument('--runner-log', type=Path, required=True)
     parser.add_argument('--point', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--protocol-dir', type=Path, help='Explicit archived copy of the same SHA-pinned runner protocol')
     args = parser.parse_args()
     jobs = json.loads(args.jobs.read_text())['jobs']
     assert len(jobs) == 1
     assert not args.output.exists()
     write(args.output, closed_receipt(json.loads(args.identity.read_text()), json.loads(args.run.read_text()),
-                                     jobs[0], args.point, args.runner_log.read_text()))
+                                     jobs[0], args.point, args.runner_log.read_text(), args.protocol_dir))
 
 
 if __name__ == '__main__':
