@@ -91,7 +91,8 @@ PREFETCH_DEPTH_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
         _MAINPIPE + "__Vtogcov__io_fromWayLookup_ready",
     ),
     "global_flush": (
-        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+        # Ftq drives ICache redirectFlush directly from redirect_1_valid.
+        _FTQ + "redirect_1_valid",
     ),
     "bpu_flush_match": (
         _WAYLOOKUP + "bpuS3FlushValid",
@@ -477,12 +478,14 @@ def sample_bpu_v3_cycle(
 
 
 def sample_prefetch_depth_cycle(
-    reader: Callable[[str], int | None],
+    reader: Callable[[str], int | None], *, require_native: bool = False,
 ) -> PrefetchDepthCycle:
     values: dict[str, int] = {}
     paths: dict[str, str] = {}
     for key, candidates in PREFETCH_DEPTH_SIGNAL_GROUPS.items():
-        values[key], paths[key] = _read_required(reader, key, candidates)
+        values[key], paths[key] = _read_required(
+            reader, key, candidates, native_only=require_native
+        )
 
     return PrefetchDepthCycle(
         num_valid_entries=int(values["num_valid_entries"]),

@@ -131,3 +131,29 @@ def test_prefetch_sampler_requires_shared_ready_and_uses_it_for_dual_write() -> 
     assert not sample_prefetch_depth_cycle(values.get).dual_write_fire
     values[ready] = 1
     assert sample_prefetch_depth_cycle(values.get).dual_write_fire
+
+
+def test_prefetch_global_flush_uses_current_ftq_redirect_not_toggle_history():
+    groups = PREFETCH_DEPTH_SIGNAL_GROUPS
+    assert groups["global_flush"] == ("Frontend_top.Frontend.inner_ftq.redirect_1_valid",)
+    values = {names[0]: 0 for names in groups.values()}
+    values[groups["global_flush"][0]] = 1
+    sample = sample_prefetch_depth_cycle(values.get)
+    assert sample.global_flush == 1
+    assert sample.signal_paths["global_flush"] == groups["global_flush"][0]
+    del values[groups["global_flush"][0]]
+    with pytest.raises(BpuV3SignalUnavailable) as exc_info:
+        sample_prefetch_depth_cycle(values.get)
+    assert exc_info.value.key == "global_flush"
+
+
+def test_prefetch_native_sampler_rejects_toggle_only_values():
+    groups = PREFETCH_DEPTH_SIGNAL_GROUPS
+    values = {names[0]: 0 for names in groups.values()}
+    native, toggle = groups["num_valid_entries"]
+    del values[native]
+    values[toggle] = 1
+    assert sample_prefetch_depth_cycle(values.get).num_valid_entries == 1
+    with pytest.raises(BpuV3SignalUnavailable) as exc_info:
+        sample_prefetch_depth_cycle(values.get, require_native=True)
+    assert exc_info.value.key == "num_valid_entries"

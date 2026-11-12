@@ -160,7 +160,7 @@ def test_prefetch_depth_full_wrap_and_flush_recovery_canary(env) -> None:
     for _ in range(_cycle_limit("TB_PREFETCH_DEPTH_FILL_MAX_CYCLES", 4096)):
         env.step(1)
         try:
-            sample = sample_prefetch_depth_cycle(reader)
+            sample = sample_prefetch_depth_cycle(reader, require_native=True)
         except BpuV3SignalUnavailable as exc:
             pytest.fail(str(exc), pytrace=False)
         max_occupancy = max(max_occupancy, sample.num_valid_entries)
@@ -232,7 +232,7 @@ def test_prefetch_depth_full_wrap_and_flush_recovery_canary(env) -> None:
     cleared_cycle = None
     for _ in range(_cycle_limit("TB_PREFETCH_DEPTH_FLUSH_MAX_CYCLES", 512)):
         env.step(1)
-        sample = sample_prefetch_depth_cycle(reader)
+        sample = sample_prefetch_depth_cycle(reader, require_native=True)
         if sample.global_flush == 1 and flush_cycle is None:
             flush_cycle = int(env.current_cycle)
         if flush_cycle is not None and sample.num_valid_entries == 0:
@@ -258,7 +258,7 @@ def test_prefetch_depth_full_wrap_and_flush_recovery_canary(env) -> None:
     recovered = False
     for _ in range(_cycle_limit("TB_PREFETCH_DEPTH_RECOVERY_MAX_CYCLES", 1024)):
         env.step(1)
-        sample = sample_prefetch_depth_cycle(reader)
+        sample = sample_prefetch_depth_cycle(reader, require_native=True)
         if sample.num_valid_entries > 0 or (
             sample.to_mainpipe_valid == 1 and sample.to_mainpipe_ready == 1
         ):
