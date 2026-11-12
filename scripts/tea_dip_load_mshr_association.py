@@ -11,6 +11,7 @@ import hashlib
 import json
 import sqlite3
 
+from tea_dip_clock_alignment import core_native_alignment
 from tea_dip_query_endpoint_evidence import verify
 from tea_dip_mshr_lifecycle import analyze as lifecycle
 
@@ -53,14 +54,16 @@ def analyze(folder, receipt_path):
     rows = []
     with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
+        clock = core_native_alignment(db, folder / 'simulator_err.txt')
+        offset = clock['core_to_native_offset']
         for item in db.execute('SELECT * FROM InstTable0 ORDER BY STAMP,ID'):
             item = dict(item)
-            assert item['WRITEBACKTIME'] == item['STAMP'], 'WB/native clock alignment differs'
+            assert item['WRITEBACKTIME'] == item['STAMP'], 'WB/core table clock alignment differs'
             counts['all_writebacks'] += 1
             counts['nonzero_writeback_addresses'] += bool(item['DPADDR'])
             writebacks[item['ROBIDX'], item['WBTEARANK']].append(item)
         for item in db.execute('SELECT * FROM TeaDelayedFinal_0'):
-            assert item['CYCLE'] == item['STAMP'], 'TEA/native clock alignment differs'
+            assert item['CYCLE'] == item['STAMP'], 'TEA/core table clock alignment differs'
             key = tuple(item['MEMBER_TARGET_' + suffix] for suffix in ['ALLOCATIONCYCLE', 'ROBINDEX', 'RANK'])
             finals[key].append(dict(item))
         active = {}
@@ -116,27 +119,29 @@ def analyze(folder, receipt_path):
                         if not wb['ISSUETIME'] <= cycle < wb['WRITEBACKTIME']:
                             row['status'] = 'outside_final_issue_writeback_interval'
                         else:
-                            owners = live_owners(episodes, wb['DPADDR'], cycle)
+                            owners = live_owners(episodes, wb['DPADDR'], cycle + offset)
                             if len(owners) != 1:
                                 row['status'] = 'no_unique_same_line_live_owner'
                             else:
                                 owner = owners[0]
                                 cpu = bool(owner['channel'] & 1 and owner['miss'] and
                                     (owner['source'] == 2 or (owner.get('merge_source') == 2 and
-                                                            owner['merge_cycle'] < cycle)))
+                                                            owner['merge_cycle'] < cycle + offset)))
                                 row.update(status='same_line_live_owner_candidate', owner=owner,
                                            CPU_load_owner_or_preexisting_merge=cpu)
+            row['native_sample_cycle'] = cycle + offset
             rows.append(row)
     assert counts['all_writebacks'] > 0
     statuses = dict(Counter(row['status'] for row in rows))
     assert sum(statuses.values()) == len(rows)
     return dict(passed=True, point=folder.name, source=result['source'], counts=dict(counts),
-                sampled_stalled_targets=len(rows), statuses=statuses, samples=rows,
+                clock_alignment=clock, sampled_stalled_targets=len(rows), statuses=statuses, samples=rows,
                 native_lifecycle_cohorts_passed=True,
                 source_sha256={str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-                               for p in [receipt_path, database, Path(__file__)]},
+                               for p in [receipt_path, database, Path(__file__), Path(__file__).with_name('tea_dip_clock_alignment.py')]},
                 scope='Captured valid Stalled TEA samples only. ROB index/rank plus allocation-to-final '
                       'lifetime and unique representative generation/member/uop recover a load address. '
+                      'Core samples are mapped to native owner timestamps using same-dump clock anchors. '
                       'Same-line active MSHRs are candidates; no end-to-end CPU request tag, data-return '
                       'timestamp, unique critical delay, CPU-cycle attribution or full sampling coverage '
                       'is established. Four-bank64B DefaultConfig only. Ambiguous, cancelled, missing '

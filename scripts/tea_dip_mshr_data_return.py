@@ -49,8 +49,8 @@ def annotate(samples, returned):
         else:
             event, = events
             row['last_downstream_data_cycle'] = event
-            stage = ('before_last_data' if row['sample_cycle'] < event else
-                     'same_cycle_as_last_data' if row['sample_cycle'] == event else
+            stage = ('before_last_data' if row['native_sample_cycle'] < event else
+                     'same_cycle_as_last_data' if row['native_sample_cycle'] == event else
                      'after_last_data_before_free')
         row['downstream_data_stage'] = stage
         counts[stage] += 1
@@ -68,7 +68,8 @@ def analyze(folder, receipt):
     data['owners_with_last_data_events'] = len(returned)
     data['last_data_event_count'] = sum(map(len, returned.values()))
     data['scope'] += (' Last-downstream-data events are tied to the owner generation, with same-edge '
-                      'return/free/reallocation ordering checked. Before/at/after-last-data stages '
+                      'return/free/reallocation ordering checked. Core samples use the measured native '
+                      'clock translation before comparison with downstream events. Before/at/after-last-data stages '
                       'do not establish CPU data return, request identity or recoverable CPI. '
                       'Owners without a logged event or with multiple events remain explicit.')
     return data

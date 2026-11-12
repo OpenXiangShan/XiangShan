@@ -16,7 +16,7 @@ def event(cycle, *, allocate=None, returned=None, freed=None):
 
 
 def sample(cycle, start=100):
-    return dict(status='same_line_live_owner_candidate', sample_cycle=cycle,
+    return dict(status='same_line_live_owner_candidate', sample_cycle=cycle - 3, native_sample_cycle=cycle,
                 owner=dict(bank=1, entry=2, start=start))
 
 
