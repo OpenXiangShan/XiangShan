@@ -120,8 +120,6 @@ class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Paramet
 }
 
 class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
-  private val LdExuCnt = backendParams.LdExuCnt
-
   val io = IO(new PTWFilterEntryIO(Width, hasHint))
   require(isPow2(Size), s"Filter Size ($Size) must be a power of 2")
 
@@ -232,7 +230,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     val hintIO = io.hint.getOrElse(new TlbHintIO)
     val fastResp = io.fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
     val fastHint = io.fastHint.getOrElse(ValidIO(new TLBHintResp))
-    for (i <- 0 until LdExuCnt) {
+    for (i <- hintIO.req.indices) {
       hintIO.req(i).id := enqidx(i)
       hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
     }
