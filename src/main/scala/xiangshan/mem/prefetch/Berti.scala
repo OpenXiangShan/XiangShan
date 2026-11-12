@@ -915,7 +915,6 @@ extends DCacheModule {
     tlbReqArb.io.in(i).bits.no_translate := false.B
     tlbReqArb.io.in(i).bits.fullva := 0.U
     tlbReqArb.io.in(i).bits.checkfullva := false.B
-    tlbReqArb.io.in(i).bits.memidx := DontCare
     tlbReqArb.io.in(i).bits.debug := DontCare
     tlbReqArb.io.in(i).bits.hlvx := DontCare
     tlbReqArb.io.in(i).bits.hyperinst := DontCare
