@@ -107,8 +107,8 @@ class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) 
 
 }
 
-class PTWNewFilterIO(Width: Int)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint = true) {
-  val fastHint = ValidIO(new TLBHintResp)
+class PTWNewFilterIO(Width: Int, hasHint: Boolean = true)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint) {
+  val fastHint = Option.when(hasHint)(ValidIO(new TLBHintResp))
 }
 
 class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint){
@@ -160,8 +160,8 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
   io.getGpa := false.B
 
-  require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
-  require(Size >= Width && ((Size & (Size-1)) == 0), s"DTLB Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
+  require(Width > 0 && Width <= 4, s"Filter Width ($Width) must equal or less than 4")
+  require(Size >= Width && ((Size & (Size-1)) == 0), s"Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
   val step = Size / Width
   for (i <- 0 until Width) {
     val start = i * step
@@ -289,117 +289,95 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
 }
 
-class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
+class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int, isITLB: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(Size >= Width)
 
-  private val LduCnt = backendParams.LduCnt
-  private val HyuCnt = backendParams.HyuCnt
-  private val StaCnt = backendParams.StaCnt
-  // all load execute units, including ldu and hyu
   private val LdExuCnt = backendParams.LdExuCnt
-  // all store address execute units, including sta and hyu
-  private val StaExuCnt = backendParams.StaExuCnt
+  private val StaCnt = backendParams.StaCnt
+  private val loadWidth = LdExuCnt + PfNumInDtlbLD
+  private val groupWidths = if (isITLB) Seq(Width) else Seq(loadWidth, StaCnt, PfNumInDtlbPF)
+  private val groupStarts =
+    if (isITLB) Seq(0)
+    else Seq(0, loadWidth, loadWidth + StaCnt)
+  require(Width == groupWidths.sum)
 
-  val io = IO(new PTWNewFilterIO(Width))
+  val io = IO(new PTWNewFilterIO(Width, hasHint = !isITLB))
 
-  val load_filter = VecInit(Seq.fill(1) {
-    val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + PfNumInDtlbLD, Size = loadfiltersize, hasHint = true))
-    load_entry.io
-  })
-
-  val store_filter = VecInit(Seq.fill(1) {
-    val store_entry = Module(new PTWFilterEntry(Width = StaCnt, Size = storefiltersize))
-    store_entry.io
-  })
-
-  val prefetch_filter = VecInit(Seq.fill(1) {
-    val prefetch_entry = Module(new PTWFilterEntry(Width = PfNumInDtlbPF, Size = prefetchfiltersize))
-    prefetch_entry.io
-  })
-
-  val filter = load_filter ++ store_filter ++ prefetch_filter
-
-  load_filter.map(_.tlb.req := io.tlb.req.take(LdExuCnt + PfNumInDtlbLD))
-  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD).take(StaCnt))
-  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD + StaCnt))
+  val filters = if (isITLB) {
+    Seq(Module(new PTWFilterEntry(Width, Size)).io)
+  } else {
+    Seq(
+      Module(new PTWFilterEntry(loadWidth, loadfiltersize, hasHint = true)).io,
+      Module(new PTWFilterEntry(StaCnt, storefiltersize)).io,
+      Module(new PTWFilterEntry(PfNumInDtlbPF, prefetchfiltersize)).io
+    )
+  }
+  for (((filter, start), width) <- filters.zip(groupStarts).zip(groupWidths)) {
+    for ((request, input) <- filter.tlb.req.zip(io.tlb.req.slice(start, start + width))) {
+      request.valid := input.valid
+      request.bits := input.bits
+    }
+  }
 
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed, FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
-  val ptwResp_valid = Cat(filter.map(_.refill)).orR
-  filter.map(_.tlb.resp.ready := true.B)
-  filter.map(_.ptw.resp.valid := RegNext(io.ptw.resp.fire, init = false.B))
-  filter.map(_.ptw.resp.bits := ptwResp)
-  filter.map(_.flush := flush)
-  filter.map(_.sfence := io.sfence)
-  filter.map(_.csr := io.csr)
-  filter.map(_.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr)
+  val ptwRespValid = RegNext(io.ptw.resp.fire, init = false.B)
+  for (filter <- filters) {
+    filter.tlb.resp.ready := true.B
+    filter.ptw.resp.valid := ptwRespValid
+    filter.ptw.resp.bits := ptwResp
+    filter.flush := flush
+    filter.sfence := io.sfence
+    filter.csr := io.csr
+    filter.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  }
 
   io.tlb.req.map(_.ready := true.B)
-  io.tlb.resp.valid := ptwResp_valid
+  io.tlb.resp.valid := Cat(filters.map(_.refill)).orR
   io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
-  io.tlb.resp.bits.data.getGpa := DontCare // not used
+  if (isITLB) {
+    io.tlb.resp.bits.data.getGpa := filters.head.getGpa
+  } else {
+    io.tlb.resp.bits.data.getGpa := DontCare // DTLBs use the per-group getGpa vector
+  }
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
   if (HasMptCheck) {
     io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
-  // vector used to represent different requestors of DTLB
-  // (e.g. the store DTLB has StuCnt requestors)
-  // However, it is only necessary to distinguish between different DTLB now
-  for (i <- 0 until Width) {
-    io.tlb.resp.bits.vector(i) := false.B
-    io.tlb.resp.bits.getGpa(i) := false.B
-  }
-  io.tlb.resp.bits.vector(0) := load_filter(0).refill
-  io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := store_filter(0).refill
-  io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := prefetch_filter(0).refill
-  io.tlb.resp.bits.getGpa(0) := load_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(LdExuCnt + PfNumInDtlbLD) := store_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(LdExuCnt + PfNumInDtlbLD + StaCnt) := prefetch_filter(0).getGpa
-
-  val hintIO = io.hint.getOrElse(new TlbHintIO)
-  val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
-  val load_fastResp = load_filter(0).fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
-  val load_fastHint = load_filter(0).fastHint.getOrElse(ValidIO(new TLBHintResp))
-  load_fastResp.valid := io.ptw.resp.fire
-  load_fastResp.bits := io.ptw.resp.bits
-  io.fastHint := load_fastHint
-  for (i <- 0 until LdExuCnt) {
-    hintIO.req(i) := RegNext(load_hintIO.req(i))
-  }
-  hintIO.resp.valid := RegNext(load_hintIO.resp.valid)
-  hintIO.resp.bits := RegEnable(load_hintIO.resp.bits, load_hintIO.resp.valid)
-
-  when (load_filter(0).refill) {
-    io.tlb.resp.bits.vector(0) := true.B
-  }
-  when (store_filter(0).refill) {
-    io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := true.B
-  }
-  when (prefetch_filter(0).refill) {
-    io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := true.B
+  // Only each DTLB group's first port marks that group's refill/GPA result
+  for (port <- 0 until Width) {
+    val group = groupStarts.indexOf(port)
+    io.tlb.resp.bits.vector(port) := (if (group >= 0) filters(group).refill else false.B)
+    io.tlb.resp.bits.getGpa(port) := (if (group >= 0) filters(group).getGpa else false.B)
   }
 
-  val ptw_arb = Module(new RRArbiterInit(new PtwReq, 3))
-  for (i <- 0 until 3) {
-    ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
-    ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
-    ptw_arb.io.in(i).bits.s2xlate := filter(i).ptw.req(0).bits.s2xlate
-    if (HasMptCheck) {
-      ptw_arb.io.in(i).bits.mptOnly.get := filter(i).ptw.req(0).bits.mptOnly.get
+  if (!isITLB) {
+    val loadFilter = filters.head
+    val hint = io.hint.get
+    val loadHint = loadFilter.hint.get
+    loadFilter.fastResp.get.valid := io.ptw.resp.fire
+    loadFilter.fastResp.get.bits := io.ptw.resp.bits
+    io.fastHint.get := loadFilter.fastHint.get
+    for (i <- hint.req.indices) {
+      hint.req(i) := RegNext(loadHint.req(i))
     }
-    filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
+    hint.resp.valid := RegNext(loadHint.resp.valid)
+    hint.resp.bits := RegEnable(loadHint.resp.bits, loadHint.resp.valid)
   }
-  ptw_arb.io.out.ready := io.ptw.req(0).ready
-  io.ptw.req(0).valid := ptw_arb.io.out.valid
-  io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
-  io.ptw.req(0).bits.s2xlate := ptw_arb.io.out.bits.s2xlate
-  if (HasMptCheck) {
-    io.ptw.req(0).bits.mptOnly.get := ptw_arb.io.out.bits.mptOnly.get
+
+  if (isITLB) {
+    io.ptw.req(0) <> filters.head.ptw.req(0)
+  } else {
+    val ptwArb = Module(new RRArbiterInit(new PtwReq, 3))
+    for ((input, filter) <- ptwArb.io.in.zip(filters)) {
+      input <> filter.ptw.req(0)
+    }
+    io.ptw.req(0) <> ptwArb.io.out
   }
   io.ptw.resp.ready := true.B
 
-  io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
+  io.rob_head_miss_in_tlb := Cat(filters.map(_.rob_head_miss_in_tlb)).orR
 }
 
 class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -666,27 +644,31 @@ object PTWFilter {
 }
 
 object PTWNewFilter {
-  def apply(fenceDelay: Int,
-            tlb: VectorTlbPtwIO,
-            ptw: TlbPtwIO,
-            sfence: SfenceBundle,
-            csr: TlbCsrBundle,
-            size: Int
-           )(implicit p: Parameters) = {
+  def apply(
+    fenceDelay: Int,
+    tlb: VectorTlbPtwIO,
+    ptw: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle,
+    size: Int,
+    isITLB: Boolean
+  )(implicit p: Parameters) = {
     val width = tlb.req.size
-    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay, isITLB))
     filter.io.apply(tlb, ptw, sfence, csr)
     filter
   }
 
-  def apply(fenceDelay: Int,
-            tlb: VectorTlbPtwIO,
-            sfence: SfenceBundle,
-            csr: TlbCsrBundle,
-            size: Int
-           )(implicit p: Parameters) = {
+  def apply(
+    fenceDelay: Int,
+    tlb: VectorTlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle,
+    size: Int,
+    isITLB: Boolean
+  )(implicit p: Parameters) = {
     val width = tlb.req.size
-    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay, isITLB))
     filter.io.apply(tlb, sfence, csr)
     filter
   }
