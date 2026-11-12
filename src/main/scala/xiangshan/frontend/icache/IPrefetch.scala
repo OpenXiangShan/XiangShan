@@ -174,7 +174,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     val vaddr = Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
     toITLB(i).valid               := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
     toITLB(i).bits                := DontCare
-    toITLB(i).bits.size           := 3.U
+    toITLB(i).bits.size           := 1.U
     toITLB(i).bits.vaddr          := vaddr
     toITLB(i).bits.debug.pc       := SignExt(vaddr, XLEN)
     toITLB(i).bits.cmd            := TlbCmd.exec
@@ -411,7 +411,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
     p.valid     := s1_valid // !ExceptionType.hasException(s1_itlb_exception(i))
     p.bits.addr := s1_req_paddr(i)
-    p.bits.size := 3.U
+    p.bits.size := 1.U
     p.bits.cmd  := TlbCmd.exec
   }
 
