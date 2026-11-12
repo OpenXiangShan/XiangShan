@@ -1102,7 +1102,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
     //stout
     when(uncacheState === UncacheState.waitResp) {
-      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.corrupt
+      // the uncache buffer reports bus errors in nderr (denied) and error (corrupt && !denied), as for loads
+      // (LoadQueueUncache); its denied/corrupt fields are never driven (DontCare), so stores never faulted
+      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.error
     }.elsewhen(cboState === CboState.waitResp){
       hasHardwareError := io.toDCache.resp.fire && io.toDCache.resp.bits.corrupt
     }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
@@ -1110,7 +1112,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     when(uncacheState === UncacheState.waitResp) {
-      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.denied
+      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.nderr
     }.elsewhen(cboState === CboState.waitResp){
       hasAccessFault := io.toDCache.resp.fire && io.toDCache.resp.bits.denied
     }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
