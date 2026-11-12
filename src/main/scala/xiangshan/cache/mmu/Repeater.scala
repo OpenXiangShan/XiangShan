@@ -162,7 +162,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2WithGpa)
   io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
   io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
-  io.getGpa := 0.U
+  io.getGpa := false.B
   io.fromHwPrefetch := false.B
 
   require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
