@@ -1,0 +1,35 @@
+name: Stop superseded L2 experiments
+run-name: Stop superseded L2 experiments at 5a76c2701
+"on":
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    runs-on: perf
+    timeout-minutes: 5
+    steps:
+      - name: Stop only the two canceled experiment binaries
+        shell: bash
+        run: |
+          python3 - <<'PY_CLEANUP'
+          import concurrent.futures, json, shlex, subprocess
+          remote = 'import os, signal, time, json, pwd\nfrom pathlib import Path\nif pwd.getpwuid(os.getuid()).pw_name != "ci-runner":\n    raise SystemExit("Expected the existing CI account on this host")\nallowed = {\n    "/nfs/home/ci-runner/perf-report/cr261111-5a76c2701-SDBPLRUConfig/emu-verilator",\n    "/nfs/home/ci-runner/perf-report/cr261111-5a76c2701-SDBPConfig/emu-verilator",\n}\ndef identity(pid):\n    path = Path("/proc") / str(pid)\n    try:\n        if path.stat().st_uid != os.getuid(): return None\n        command = (path / "cmdline").read_bytes().split(b"\\0")[0].decode()\n        fields = (path / "stat").read_text().split(") ", 1)[1].split()\n        if command not in allowed or fields[0] == "Z": return None\n        return fields[19]\n    except (FileNotFoundError, ProcessLookupError, PermissionError): return None\ntargets = {int(path.name): identity(int(path.name)) for path in Path("/proc").iterdir() if path.name.isdigit()}\ntargets = {pid: start for pid, start in targets.items() if start is not None}\ndef remaining():\n    return [pid for pid, start in targets.items() if identity(pid) == start]\nfor sig, timeout in [(signal.SIGINT, 10), (signal.SIGTERM, 3), (signal.SIGKILL, 3)]:\n    for pid in remaining():\n        try: os.kill(pid, sig)\n        except ProcessLookupError: pass\n    end = time.monotonic() + timeout\n    while remaining() and time.monotonic() < end: time.sleep(0.2)\n    if not remaining(): break\nleft = remaining()\nprint(json.dumps({"target_pids": sorted(targets), "remaining_pids": left}))\nif left: raise SystemExit(1)\n'
+          hosts = ["open24", "open27", "open25", "open12"]
+          def stop(host):
+              try:
+                  result = subprocess.run([
+                      "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                      "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=5",
+                      "-o", "ServerAliveCountMax=2", host,
+                      "python3 -c " + shlex.quote(remote),
+                  ], capture_output=True, text=True, timeout=40)
+                  return {"host": host, "returncode": result.returncode,
+                          "stdout": result.stdout, "stderr": result.stderr}
+              except subprocess.TimeoutExpired:
+                  return {"host": host, "returncode": 124, "stderr": "SSH cleanup timed out"}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+              results = list(pool.map(stop, hosts))
+          for result in results: print(json.dumps(result), flush=True)
+          if any(result["returncode"] != 0 for result in results): raise SystemExit(1)
+          PY_CLEANUP
