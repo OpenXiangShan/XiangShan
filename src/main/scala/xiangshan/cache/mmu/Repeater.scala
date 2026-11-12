@@ -160,7 +160,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2WithGpa)
   io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
   io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
-  io.getGpa := 0.U
+  io.getGpa := false.B
 
   require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
   require(Size >= Width && ((Size & (Size-1)) == 0), s"DTLB Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
