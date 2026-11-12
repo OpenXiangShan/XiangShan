@@ -124,8 +124,6 @@ class IttageTable(
   def getBankIndex(pc: Pc): UInt =
     if (BankIdxWidth == 0) 0.U else getUnhashedIdx(pc)(BankIdxWidth - 1, 0)
 
-  private val powerOnResetState = RegInit(true.B)
-
   private val s0_startPc     = io.req.bits.startPc
   private val s0_unhashedIdx = getUnhashedIdx(io.req.bits.startPc)
   private val (s0_bankIdx, s0_setIdx, s0_tag) =
@@ -142,7 +140,7 @@ class IttageTable(
   private val (t0_bankIdx, t0_setIdx, t0_tag) =
     computeTagAndHash(t0_unhashedIdx, io.trainReq.bits.foldedHist)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
-  private val t0_reqValid = io.trainReq.valid && !powerOnResetState
+  private val t0_reqValid = io.trainReq.valid && io.sramResetDone
 
   private val t1_tag      = RegEnable(t0_tag, t0_reqValid)
   private val t1_bankMask = RegEnable(t0_bankMask, t0_reqValid)
@@ -242,11 +240,12 @@ class IttageTable(
 
   // Reads and ordinary updates take priority over background useful-counter clears.
   // Each bank sweeps independently, advancing only when the SRAM accepts a clear.
-  tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
-    val readPort                            = writeBuffer.io.read.head
-    val usefulResetActive                   = RegInit(false.B)
-    val usefulResetCandidate                = usefulResetActive && !writeBuffer.io.write.head.valid
-    val usefulResetFire                     = bank.io.w.req.fire && !readPort.valid
+  tables.zip(writeBuffers).foreach { case (bank, writeBuffer) =>
+    val bufferRead        = writeBuffer.io.read.head
+    val bufferWrite       = writeBuffer.io.write.head
+    val usefulResetActive = RegInit(false.B)
+    val usefulResetValid  = !bank.io.r.req.valid && usefulResetActive && !bufferWrite.valid && !bufferRead.valid
+    val usefulResetFire   = bank.io.w.req.ready && usefulResetValid
     val (usefulResetSet, usefulResetFinish) = Counter(usefulResetFire, NumSetsPerBank)
     // Coalesce requests during a sweep; a request on its last write starts another sweep.
     when(io.update.resetUsefulCnt) {
@@ -255,34 +254,25 @@ class IttageTable(
       usefulResetActive := false.B
     }
 
-    val writeValid = !bank.io.r.req.valid && (readPort.valid || usefulResetCandidate)
-    // Select the payload independently of late read/update arbitration.
-    // An accepted write without a buffered entry is necessarily a background clear.
-    val writeEntry   = Mux(readPort.valid, readPort.bits.entry, usefulResetWdata)
-    val writeSetIdx  = Mux(readPort.valid, readPort.bits.setIdx, usefulResetSet)
-    val writeBitMask = Mux(readPort.valid, readPort.bits.bitmask, updateUsefulBitmask)
-    bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
-    readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
+    val writeValid = !bank.io.r.req.valid && bufferRead.valid
+
+    bank.io.w.apply(
+      writeValid || usefulResetValid,
+      Mux(bufferRead.valid, bufferRead.bits.entry, usefulResetWdata),
+      Mux(bufferRead.valid, bufferRead.bits.setIdx, usefulResetSet),
+      true.B,
+      Mux(bufferRead.valid, bufferRead.bits.bitmask, updateUsefulBitmask)
+    )
+    bufferRead.ready := bank.io.w.req.ready && !bank.io.r.req.valid
 
     // The buffer is drained and has no incoming update when a clear fires.
     // Forget the old write record only after SRAM has actually changed.
     writeBuffer.io.invalidate.get.valid := usefulResetFire
     writeBuffer.io.invalidate.get.bits  := usefulResetSet
-
-    XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_write", usefulResetFire)
-    XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_finish", usefulResetFinish)
   }
 
-  // Power-on reset
-  when(tables.map(_.io.r.req.ready).reduce(_ && _)) {
-    // When all the SRAM banks first reach ready state, we consider power-on reset is done
-    powerOnResetState := false.B
-  }
-  // Do not use table banks io.r.req.ready directly
-  // All table_banks are single port SRAM, ready := !wen
-  // We do not want write request block the whole BPU pipeline
-  // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
-  io.req.ready := !powerOnResetState
+  // Wait for SRAM initialization without letting writes backpressure prediction reads.
+  io.req.ready := io.sramResetDone
 
   private val oldCtr = io.update.oldCnt
   updateWdata.valid := true.B
