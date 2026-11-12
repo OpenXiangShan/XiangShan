@@ -106,7 +106,7 @@ def test_frontend_trigger_exported_config_and_pc_compare_canary(env):
         results.append(dict(phase=name, config=config, debug=debug, enabled=enabled,
                             sampled_outcomes=samples, non_target_configs_stable=True))
 
-    gap = recorder._raw_dict()["sampler_diagnostics"]["frontend_trigger_config_gap"]
+    gap = recorder._ifu_frontend_trigger_config_gap
     assert gap and gap["active"] and set(gap["missing"]) == {f"tdataVec_{slot}_timing" for slot in range(4)}
     assert gap["affected_bin_ids"] == ["BIN-1000"]
     assert recorder.hit_count_by_bin_id("BIN-1000") == 0
