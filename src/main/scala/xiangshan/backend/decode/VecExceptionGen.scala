@@ -289,7 +289,15 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val vs2AllowOverlap = (vs2Constraint1 || vs2Constraint2 || vs2Constraint3 || vdIsSingleElem) && !notAllowOverlapInst
   private val vs2vdOverlap = (SrcType.isVp(io.decodedInst.srcType(1)) && io.decodedInst.vecWen) && !vs2vdRegNotOverlap && !vs2AllowOverlap
 
-  private val regOverlapIllegal = v0Overlap || vs1vdOverlap || vs2vdOverlap
+  // A source register cannot be read with different EEWs in one instruction, including mask EEW=1.
+  private val vs1vs2RegNotOverlap = vs1RegHi < vs2RegLo || vs2RegHi < vs1RegLo
+  private val vs1vs2SameEew = vs1IsMask && vs2IsMask ||
+    !vs1IsMask && !vs2IsMask && vs1Eew === vs2Eew
+  private val vs1vs2Overlap = isVArithMem &&
+    SrcType.isVp(io.decodedInst.srcType(0)) && SrcType.isVp(io.decodedInst.srcType(1)) &&
+    !vs1vs2RegNotOverlap && !vs1vs2SameEew
+
+  private val regOverlapIllegal = v0Overlap || vs1vdOverlap || vs2vdOverlap || vs1vs2Overlap
 
   io.illegalInst := instIllegal || villIllegal || eewIllegal || emulIllegal || regNumIllegal || regOverlapIllegal || vstartIllegal
   dontTouch(instIllegal)
