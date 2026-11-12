@@ -447,7 +447,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
       ))
 
       // read
-      sramBank.io.r.req.valid := io.read(bank % 4).valid && masks(way)(bank)
+      // Read all ways of the selected bank; masksReg still selects the response way.
+      sramBank.io.r.req.valid := io.read(bank % 4).valid &&
+        Mux(lineSel(bank), bankSel(1)(bank), bankSel(0)(bank))
       sramBank.io.r.req.bits.apply(setIdx =
         Mux(lineSel(bank), io.read(bank % 4).bits.vSetIdx(1), io.read(bank % 4).bits.vSetIdx(0))
       )
