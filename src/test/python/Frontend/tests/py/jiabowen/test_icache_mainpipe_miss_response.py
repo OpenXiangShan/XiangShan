@@ -246,6 +246,34 @@ def _sample_bin906_slot(env, slot: int) -> dict:
     }
 
 
+def _is_bin907_truncation_candidate(sample: dict, identity: tuple[int, int]) -> bool:
+    return (
+        sample["s1_valid"] == sample["s1_fire"] == 1
+        and sample["s1_flush"] == sample["s1_req_uncache"] == 0
+        and sample["s1_merged_exception"] == 3
+        and sample["s1_raw_candidate_count"] > 1
+        and sample["s1_instr_count"] == 1
+        and (sample["s1_ftq_flag"], sample["s1_ftq_value"]) == identity
+    )
+
+
+def _check_bin907_truncation(truncation: dict, delivery: dict,
+                             identity: tuple[int, int]) -> None:
+    assert _is_bin907_truncation_candidate(truncation, identity), truncation
+    # s1_specInstrCount is the registered boundary PopCount before the late
+    # exception override. s1_instrCount is the post-exception count registered
+    # into s2. Compare independent raw boundaries; never expect spec == 1.
+    assert truncation["s1_spec_instr_count"] == truncation["s1_raw_candidate_count"] > 1
+    assert delivery["cycle"] > truncation["cycle"]
+    assert delivery["s2_valid"] == delivery["to_ibuffer_valid"] == delivery["to_ibuffer_ready"] == 1
+    assert delivery["s2_instr_count"] == truncation["s1_instr_count"] == 1
+    assert delivery["s2_exception"] == delivery["to_ibuffer_exception"] == 3
+    assert (delivery["s2_ftq_flag"], delivery["s2_ftq_value"]) == identity
+    mask = delivery["to_ibuffer_enq"]
+    assert 0 < mask < (1 << 36) and mask.bit_count() == 1
+    assert delivery["to_ibuffer_valid_mask"] == delivery["exception_mask"] == mask
+
+
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
     for _ in range(int(max_cycles)):
         if predicate():
@@ -969,15 +997,7 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
         sample = _sample_bin906_pipeline(env)
         release_tail.append(sample)
         release_tail = release_tail[-32:]
-        if (
-            sample["s1_valid"] == 1
-            and sample["s1_fire"] == 1
-            and sample["s1_flush"] == 0
-            and sample["s1_req_uncache"] == 0
-            and sample["s1_merged_exception"] == 3
-            and sample["s1_raw_candidate_count"] > 1
-            and sample["s1_instr_count"] == 1
-        ):
+        if truncation is None and _is_bin907_truncation_candidate(sample, stalled_identity):
             truncation = sample
         if (
             sample["to_ibuffer_valid"] == 1
@@ -985,6 +1005,7 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
             and sample["to_ibuffer_exception"] == 3
             and sample["s2_valid"] == 1
             and sample["s2_exception"] == 3
+            and (sample["s2_ftq_flag"], sample["s2_ftq_value"]) == stalled_identity
         ):
             delivery = sample
             enq = int(sample["to_ibuffer_enq"])
@@ -1045,7 +1066,7 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
     bin907_detail = recorder.hit_detail_by_bin_id("BIN-907")
     assert bin907_detail is not None
     bin907_observations = bin907_detail["evidence"][-1]["observations"]
-    assert truncation["s1_spec_instr_count"] == 1
+    _check_bin907_truncation(truncation, delivery, stalled_identity)
     assert bin907_observations["raw_candidate_count"] > 1
     assert bin907_observations["instr_count"] == 1
     assert tuple(bin907_observations["ftq_identity"]) == stalled_identity
