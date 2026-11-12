@@ -127,7 +127,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   def firstValidIndex(v: Seq[Bool], valid: Bool): UInt = {
     val index = WireInit(0.U(log2Up(Size).W))
-    for (i <- 0 until v.size) {
+    for (i <- v.indices.reverse) {
       when (v(i) === valid) {
         index := i.U
       }
