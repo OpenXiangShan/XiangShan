@@ -296,7 +296,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped do not do this now for timing
     p.valid     := s1_valid // && !ExceptionType.hasException(s1_itlb_exception(i))
     p.bits.addr := s1_req_paddr(i)
-    p.bits.size := 3.U
+    p.bits.size := 1.U
     p.bits.cmd  := TlbCmd.exec
   }
 
