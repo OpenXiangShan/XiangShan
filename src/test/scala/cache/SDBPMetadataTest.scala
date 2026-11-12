@@ -144,6 +144,12 @@ class SDBPMetadataTest extends AnyFlatSpec {
         }
         if (refill) dut.io.replResp.bits.retry.expect((mask == 0).B)
         dut.clock.step(); dut.io.sdbpCommit.valid.poke(false.B)
+        // MainPipe uses this victim throughout DataStorage's two-cycle request.
+        // A busy-way mask must remain effective after refillReqValid_s3 drops.
+        if (refill && mask != 0) {
+          dut.io.replResp.bits.validHold.expect(true.B)
+          dut.io.replResp.bits.way.expect(way.U)
+        }
         dut.clock.step(3)
         way
       }

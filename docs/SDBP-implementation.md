@@ -67,6 +67,12 @@ true-LRU state. Sampled Hints also use the existing MCP2 entrance interval;
 unsampled Hints retain their original behavior. Existing RequestBuffer
 same-set exclusion also protects replacement-state RAW dependencies.
 
+The SDBP victim is selected in s3 and retained through DataStorage's MCP2
+hold cycle. The refill-valid pulse ends before that hold cycle, and dead
+bits or L1I residency can change at the s3 commit edge; these changes must
+not recompute the victim of an already accepted request. Directory tests
+check the victim again during validHold, including an occupied invalid way.
+
 ## PC and L1 residency
 
 `PCValidKey` accompanies the existing `PCKey`. Implemented virtual PC bits
