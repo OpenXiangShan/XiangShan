@@ -51,6 +51,7 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
 
   val clock = IO(Input(Clock()))
   val reset = IO(Input(AsyncReset()))
+  val cold_reset = Option.when(socParams.EnableColdReset)(IO(Input(AsyncReset())))
 
   private val hasMbist = p(DFTOptionsKey).EnableMbist
   private val hasSramCtl = p(DFTOptionsKey).EnableSramCtl
@@ -72,7 +73,7 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    1. normal reset from SoC
    2. SoC initialize reset during Power on/off flow
    */
-  val cpuReset = reset.asBool || !soc_rst_n
+  val cpuReset = reset.asBool || !soc_rst_n || cold_reset.map(_.asBool).getOrElse(false.B)
   private val cpuResetGen = withClockAndReset(clock, cpuReset.asAsyncReset)(Module(new ResetGen))
   cpuResetGen.dft := io.dft_reset.getOrElse(0.U.asTypeOf(new DFTResetSignals))
   val cpuReset_sync = cpuResetGen.o_reset
@@ -251,6 +252,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   // core IO connection
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
+  core_with_l2.module.io.cold_reset.foreach(_ := cold_reset.get)
 
   tileio.riscv_halt := core_with_l2.module.io.cpu_halt
   tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error

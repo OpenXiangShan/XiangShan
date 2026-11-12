@@ -87,6 +87,8 @@ trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 {
+  require(!p(SoCParamsKey).EnableColdReset,
+    "EnableColdReset requires XSNoCTop or XSNoCDiffTop; XSTop/XSTileDiffTop simulation is not supported")
   private val useExternalLLC = p(UseExternalLLCKey)
   require(!useExternalLLC || enableCHI, "External LLC requires CHI")
 

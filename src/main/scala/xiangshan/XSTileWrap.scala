@@ -48,13 +48,18 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
+  val beuIntBuffer = Option.when(EnableColdReset)(LazyModule(new IntBuffer()))
   // instance clint timer
   val timer = Option.when(UsePrivateClint)(LazyModule(new TIMER(TIMERParams(IsSelfTest=false,soc.TIMERRange.base), 8))) // TL & sync
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(timer.get.intnode)
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
-  beuIntNode := IntBuffer() := tile.beu_int_source
+  if (EnableColdReset) {
+    beuIntNode := beuIntBuffer.get.node := tile.beu_int_source
+  } else {
+    beuIntNode := IntBuffer() := tile.beu_int_source
+  }
 
   // seperate TL bus
   println(s"SeperateBus = $SeperateBus")
@@ -71,6 +76,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
+      val cold_reset = Option.when(EnableColdReset)(Input(AsyncReset()))
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
@@ -105,6 +111,13 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val pwrdown_ack_n = Option.when(EnablePowerDown) (Output (Bool()))
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
+    val cold_reset_sync = Option.when(EnableColdReset) {
+      withClockAndReset(clock, io.cold_reset.get)(ResetGen())
+    }
+    tile.module.io.cold_reset.zip(cold_reset_sync).foreach { case (tileReset, wrapReset) =>
+      tileReset := wrapReset
+    }
+    cold_reset_sync.foreach(beuIntBuffer.get.module.reset := _)
 
     val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
