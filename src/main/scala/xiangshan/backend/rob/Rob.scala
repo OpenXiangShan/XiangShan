@@ -1932,6 +1932,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqUopCommitType = deqHeadInfo.commitType
 
   XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.alu.U)
+  // The legacy ALU label describes a whole entry; expose which packed member is still pending.
+  private val diagAluHeadWait = deqNotWritebacked && deqHeadInfoFuType === FuType.alu.U
+  private val diagAluFormerPending = robEntries(deqPtr.value).formerUopNum.orR
+  private val diagAluLatterPending = robEntries(deqPtr.value).latterUopNum.orR
+  private val diagAluLatterOnly = diagAluHeadWait && !diagAluFormerPending && diagAluLatterPending
+  XSPerfAccumulate("diag_rob_alu_head_former_only_cycles",
+    diagAluHeadWait && diagAluFormerPending && !diagAluLatterPending)
+  XSPerfAccumulate("diag_rob_alu_head_latter_only_cycles", diagAluLatterOnly)
+  XSPerfAccumulate("diag_rob_alu_head_both_pending_cycles",
+    diagAluHeadWait && diagAluFormerPending && diagAluLatterPending)
+  Seq("normal" -> CommitType.NORMAL, "branch" -> CommitType.BRANCH,
+    "load" -> CommitType.LOAD, "store" -> CommitType.STORE).foreach { case (name, commitType) =>
+    XSPerfAccumulate(s"diag_rob_alu_head_latter_only_${name}_cycles",
+      diagAluLatterOnly && debug_microOp(deqPtr.value)(1).commitType === commitType)
+  }
+
   XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mul.U)
   XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.div.U)
   XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.brh.U)
