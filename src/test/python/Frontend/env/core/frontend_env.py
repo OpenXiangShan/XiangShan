@@ -16,6 +16,7 @@ from ..checkers.frontend_flow_checker import FrontendFlowChecker
 from ..checkers.fallthrough_reference_checker import FallThroughReferenceChecker
 from ..checkers.mbtb_reference_checker import MbtbReferenceChecker
 from ..checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
+from ..checkers.ras_reference_checker import RasReferenceChecker
 from ..checkers.translation_scenario_checker import TranslationScenarioChecker
 from ..checkers.ubtb_reference_checker import UbtbReferenceChecker
 from .backend_model import BackendModel
@@ -74,6 +75,7 @@ class FrontendEnv:
         bp_ctrl_tage_enable: int = 1,
         bp_ctrl_sc_enable: int = 1,
         bp_ctrl_ittage_enable: int = 1,
+        bp_ctrl_ras_enable: int = 1,
         reference_model_enable: Optional[bool] = None,
         reference_model_strict: Optional[bool] = None,
     ) -> None:
@@ -104,6 +106,7 @@ class FrontendEnv:
         self.bp_ctrl_tage_enable = 1 if int(bp_ctrl_tage_enable) else 0
         self.bp_ctrl_sc_enable = 1 if int(bp_ctrl_sc_enable) else 0
         self.bp_ctrl_ittage_enable = 1 if int(bp_ctrl_ittage_enable) else 0
+        self.bp_ctrl_ras_enable = 1 if int(bp_ctrl_ras_enable) else 0
         self.memory = memory_model or MemoryModel()
         self.page_table = page_table_model or PageTableModel(mode=self.config.ptw.mode)
         self._create_interfaces()
@@ -126,6 +129,7 @@ class FrontendEnv:
         self.fallthrough_checker = None
         self.mbtb_checker = None
         self.ubtb_checker = None
+        self.ras_checker = None
         if self.reference_model_enabled and not getattr(dut, "_is_fake_frontend_dut", False):
             self.fallthrough_checker = FallThroughReferenceChecker(
                 strict=self.reference_model_strict
@@ -135,6 +139,8 @@ class FrontendEnv:
             self.register_cycle_observer(self.mbtb_checker.on_cycle)
             self.ubtb_checker = UbtbReferenceChecker(strict=self.reference_model_strict)
             self.register_cycle_observer(self.ubtb_checker.on_cycle)
+            self.ras_checker = RasReferenceChecker(strict=self.reference_model_strict)
+            self.register_cycle_observer(self.ras_checker.on_cycle)
 
         self._init_inputs()
         self._register_callbacks(register_callbacks)
@@ -551,6 +557,7 @@ class FrontendEnv:
             tage_enable=self.bp_ctrl_tage_enable,
             sc_enable=self.bp_ctrl_sc_enable,
             ittage_enable=self.bp_ctrl_ittage_enable,
+            ras_enable=self.bp_ctrl_ras_enable,
         )
         self.tlb_csr_if.drive_idle()
         self.dft_ctrl_if.drive_idle()
@@ -738,6 +745,7 @@ class FrontendEnv:
         tage_enable: Optional[int] = None,
         sc_enable: Optional[int] = None,
         ittage_enable: Optional[int] = None,
+        ras_enable: Optional[int] = None,
     ) -> dict:
         if ubtb_enable is not None:
             self.bp_ctrl_ubtb_enable = 1 if int(ubtb_enable) else 0
@@ -751,6 +759,8 @@ class FrontendEnv:
             self.bp_ctrl_sc_enable = 1 if int(sc_enable) else 0
         if ittage_enable is not None:
             self.bp_ctrl_ittage_enable = 1 if int(ittage_enable) else 0
+        if ras_enable is not None:
+            self.bp_ctrl_ras_enable = 1 if int(ras_enable) else 0
 
         self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable, self.bp_ctrl_ubtb_enable)
         self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_abtbEnable, self.bp_ctrl_abtb_enable)
@@ -758,6 +768,7 @@ class FrontendEnv:
         self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_tageEnable, self.bp_ctrl_tage_enable)
         self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_scEnable, self.bp_ctrl_sc_enable)
         self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ittageEnable, self.bp_ctrl_ittage_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_rasEnable, self.bp_ctrl_ras_enable)
 
         cfg = {
             "ubtb_enable": int(self.bp_ctrl_ubtb_enable),
@@ -766,6 +777,7 @@ class FrontendEnv:
             "tage_enable": int(self.bp_ctrl_tage_enable),
             "sc_enable": int(self.bp_ctrl_sc_enable),
             "ittage_enable": int(self.bp_ctrl_ittage_enable),
+            "ras_enable": int(self.bp_ctrl_ras_enable),
         }
         self.logger.info("bp ctrl config updated: %s", cfg)
         self._emit_event("control.bp_ctrl_enable", cfg)

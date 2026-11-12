@@ -81,6 +81,10 @@ def run_bin_trace(env) -> None:
     print(f"[frontend] uBTB reference comparisons: {checked}", flush=True)
     ubtb_mismatches = "disabled" if env.ubtb_checker is None else str(env.ubtb_checker.mismatch_count)
     print(f"[frontend] uBTB reference mismatches: {ubtb_mismatches}", flush=True)
+    ras_checked = "disabled" if env.ras_checker is None else str(env.ras_checker.checked_count)
+    print(f"[frontend] RAS reference comparisons: {ras_checked}", flush=True)
+    ras_mismatches = "disabled" if env.ras_checker is None else str(env.ras_checker.mismatch_count)
+    print(f"[frontend] RAS reference mismatches: {ras_mismatches}", flush=True)
     if result is not None:
         logger.info(
             "bin trace stop reason: status=%s completed=%s ok=%s cycles=%d cursor=%d/%d target_cursor=%d pending_work=%d monitor_errors=%d",

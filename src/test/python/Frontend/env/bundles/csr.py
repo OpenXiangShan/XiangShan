@@ -112,6 +112,7 @@ class CSRControlBundle(Bundle):
         tage_enable: int = 1,
         sc_enable: int = 1,
         ittage_enable: int = 1,
+        ras_enable: int = 1,
     ) -> None:
         for attr_name in (
             "io_csrCtrl_pf_ctrl_l1I_pf_enable", "io_csrCtrl_bp_ctrl_ubtbEnable",
@@ -151,3 +152,4 @@ class CSRControlBundle(Bundle):
         self.io_csrCtrl_bp_ctrl_tageEnable.value = int(tage_enable)
         self.io_csrCtrl_bp_ctrl_scEnable.value = int(sc_enable)
         self.io_csrCtrl_bp_ctrl_ittageEnable.value = int(ittage_enable)
+        self.io_csrCtrl_bp_ctrl_rasEnable.value = int(ras_enable)

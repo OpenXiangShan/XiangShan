@@ -24,6 +24,9 @@ def test_bare_mode_initialize_keeps_fetch_in_machine_mode() -> None:
     assert dut.io_tlbCsr_priv_virt.value == 0
     assert dut.io_tlbCsr_priv_imode.value == 3
     assert dut.io_tlbCsr_satp_mode.value == 0
+    assert dut.io_csrCtrl_bp_ctrl_rasEnable.value == 1
+    env.set_bp_ctrl_enable(ras_enable=0)
+    assert dut.io_csrCtrl_bp_ctrl_rasEnable.value == 0
 
 
 def test_sv39_config_initialize_uses_sv39_csr_defaults() -> None:
@@ -101,6 +104,7 @@ def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
     assert disabled.fallthrough_checker is None
     assert disabled.mbtb_checker is None
     assert disabled.ubtb_checker is None
+    assert disabled.ras_checker is None
 
     monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "1")
     enabled = FrontendEnv(dut, register_callbacks=False)
@@ -111,6 +115,8 @@ def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
     assert enabled.mbtb_checker.on_cycle in enabled._cycle_observers
     assert enabled.ubtb_checker is not None
     assert enabled.ubtb_checker.on_cycle in enabled._cycle_observers
+    assert enabled.ras_checker is not None
+    assert enabled.ras_checker.on_cycle in enabled._cycle_observers
 
 
 def test_reference_model_mismatches_are_non_fatal_by_default_and_strict_on_request(monkeypatch) -> None:
@@ -127,3 +133,4 @@ def test_reference_model_mismatches_are_non_fatal_by_default_and_strict_on_reque
     assert strict.fallthrough_checker.strict is True
     assert strict.mbtb_checker.strict is True
     assert strict.ubtb_checker.strict is True
+    assert strict.ras_checker.strict is True
