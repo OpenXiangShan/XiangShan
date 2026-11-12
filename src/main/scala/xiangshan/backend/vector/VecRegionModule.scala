@@ -81,6 +81,12 @@ class VecRegionImp(
   val issueQueues: Seq[VecIssueQueue] = wrapper.issueQueues.map(x => x.module.suggestName(x.param.getInstanceNameOfIQ))
   val issuePipes: Seq[Seq[IssuePipe]] = wrapper.issuePipes.map(_.map(x => x.module.suggestName(x.param.getInstanceNameOfPipe)))
 
+  // Match the integer/FP one-cycle issue observation, including vector store data.
+  val issued = issuePipes.flatten.map(_.in.is0Next.valid)
+  val storesIssued = issuePipes.flatten.filter(pipe => pipe.param.hasSta || pipe.param.hasStd || pipe.param.hasVStd)
+    .map(_.in.is0Next.valid)
+  out.toTopDownMod.uopTopDown := UopTopDown(issued, storesIssued)
+
   val vpWbDataPath = Module(new WbDataPath(backendParams.vfPregParams))
   val vlWbDataPath = Module(new WbDataPath(backendParams.vlPregParams))
   val v0WbDataPath = Module(new WbDataPath(backendParams.v0PregParams))
@@ -578,6 +584,10 @@ object VecRegionModule {
     }
 
     val toFltRegion = new ToFltRegion
+
+    val toTopDownMod = new Bundle {
+      val uopTopDown = new UopTopDown
+    }
 
     val toMem = new OutToMem
 

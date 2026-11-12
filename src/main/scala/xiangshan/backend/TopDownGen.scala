@@ -11,13 +11,13 @@ class TopDownGen(implicit p: Parameters) extends XSModule
   val io = IO(new TopDownGenIO)
 
   val uopsIssued = io.intTopDown.uopsIssued || io.fpTopDown.uopsIssued || io.vecTopDown.uopsIssued
-  val uopsIssuedCnt = io.intTopDown.uopsIssuedCnt + io.vecTopDown.uopsIssuedCnt
-  val noStoreIssued = io.intTopDown.noStoreIssued
+  val uopsIssuedCnt = io.intTopDown.uopsIssuedCnt +& io.fpTopDown.uopsIssuedCnt +& io.vecTopDown.uopsIssuedCnt
+  val noStoreIssued = io.intTopDown.noStoreIssued && io.fpTopDown.noStoreIssued && io.vecTopDown.noStoreIssued
 
   val fewUopsIssued = (0 until p(XSCoreParamsKey).fewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
 
   val stallLoad  = fewUopsIssued && !uopsIssued
-  val stallStore = fewUopsIssued && uopsIssued && RegNext(noStoreIssued)
+  val stallStore = fewUopsIssued && uopsIssued && noStoreIssued
 
   val stallLoadDly = RegNext(stallLoad)
   val stallStoreDly = RegNext(stallStore)
