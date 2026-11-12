@@ -209,13 +209,11 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val issuevec = v.zip(sent).map{ case (v, s) => v && !s}
   val issueindex = firstValidIndex(issuevec, true.B)
   val canissue = Cat(issuevec).orR
-  for (i <- 0 until Size) {
-    io.ptw.req(0).valid := canissue
-    io.ptw.req(0).bits.vpn := vpn(issueindex)
-    io.ptw.req(0).bits.s2xlate := s2xlate(issueindex)
-    if (HasMptCheck) {
-      io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issueindex)
-    }
+  io.ptw.req(0).valid := canissue
+  io.ptw.req(0).bits.vpn := vpn(issueindex)
+  io.ptw.req(0).bits.s2xlate := s2xlate(issueindex)
+  if (HasMptCheck) {
+    io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issueindex)
   }
   when (io.ptw.req(0).fire) {
     sent(issueindex) := true.B
