@@ -2,6 +2,11 @@ name: Stop superseded L2 experiments
 run-name: Stop superseded L2 experiments at 5a76c2701
 "on":
   workflow_dispatch:
+  push:
+    branches:
+      - experiment/l2-sdbp-lru-cov03-20261111
+    paths:
+      - .github/workflows/perf-l2-cleanup.yml
 permissions:
   contents: read
 jobs:
