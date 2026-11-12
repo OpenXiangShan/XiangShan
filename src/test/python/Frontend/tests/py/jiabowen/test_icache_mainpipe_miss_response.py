@@ -8,6 +8,7 @@ import pytest
 
 from env.agents.icache_agent import ICacheAgent
 from env.model import MemoryModel
+from env.funcov.py.ifu.cacheable_pipeline_funcov import _native_signal_names
 from env.monitors.frontend_monitor import FrontendMonitor
 from env.runtime.pylib import frontend_offset_path
 from env.support.pc_utils import fold_pc
@@ -27,10 +28,10 @@ _SIGNALS = {
     "last_fire_next": _aliases("Frontend_top.Frontend.inner_icache.missUnit.lastFireNext"),
     "miss_resp_valid": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.io_missResp_valid"),
     "miss_resp_corrupt": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_missResp_bits_corrupt"
+        "inner_icache.mainPipe.io_missResp_bits_corrupt"
     ),
     "miss_resp_denied": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_missResp_bits_denied"
+        "inner_icache.mainPipe.io_missResp_bits_denied"
     ),
     "s1_valid": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"),
     "s1_req1_valid": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_valid"),
@@ -53,7 +54,7 @@ _SIGNALS = {
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_ftqIdx_value"
     ),
     "s1_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_value"
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_0_value"
     ),
     "s1_mmio": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_isMmio"),
     "backend_redirect": _aliases(
@@ -62,12 +63,11 @@ _SIGNALS = {
     "s1_fire": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_fire"),
     "s1_flush": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_flush"),
     "to_ifu_valid": (
-        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_valid",
-        "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
+        "inner_icache.io_toIfu_req_valid",
     ),
     "to_ifu_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exceptionOut_value"
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_info_0_icacheMeta_exception_value"
     ),
 }
 
@@ -157,7 +157,8 @@ for _index in range(4):
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
-    for name in names:
+    # Toggle-coverage history is not the current value of a DUT signal.
+    for name in _native_signal_names(names):
         try:
             signal = getattr(env.dut, str(name), None)
             if signal is None:
@@ -399,8 +400,10 @@ def _find_registered_refill(samples: Sequence[dict]) -> tuple[int, int]:
 def test_icache_miss_response_signal_contract_matches_dut_inventory() -> None:
     offset = frontend_offset_path()
     assert offset.is_file(), "DUT signal inventory is required before signal-contract tests"
+    from env.funcov.registry import decode_signal_inventory_name
+
     registered = {
-        line[len("  - name: ") :].strip()
+        decode_signal_inventory_name(line[len("  - name: ") :])
         for line in offset.read_text(encoding="utf-8").splitlines()
         if line.startswith("  - name: ")
     }
@@ -411,7 +414,7 @@ def test_icache_miss_response_signal_contract_matches_dut_inventory() -> None:
             *_BIN906_SIGNALS.values(),
             *(aliases for slot in range(35) for aliases in _bin906_slot_signals(slot).values()),
         )
-        if not any(alias in registered for alias in aliases)
+        if not any(alias in registered for alias in _native_signal_names(aliases))
     ]
     assert not missing, {"missing_internal_signals": missing}
 
@@ -425,7 +428,7 @@ class _Signal:
 def test_bin906_pipeline_reads_complete_packed_exception_mask(exception_mask) -> None:
     dut = SimpleNamespace()
     for aliases in _BIN906_SIGNALS.values():
-        setattr(dut, aliases[0], _Signal())
+        setattr(dut, _native_signal_names(aliases)[0], _Signal())
     setattr(dut, _BIN906_SIGNALS["exception_mask"][0], _Signal(exception_mask))
     for index in range(32):
         setattr(
@@ -437,11 +440,27 @@ def test_bin906_pipeline_reads_complete_packed_exception_mask(exception_mask) ->
     assert sample["exception_mask"] == exception_mask
 
 
+@pytest.mark.parametrize("native,shadow", [(0, 1), (1, 0)])
+def test_signal_reader_prefers_live_value_over_toggle_history(native, shadow) -> None:
+    path = "Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_fire"
+    dut = SimpleNamespace()
+    setattr(dut, _native_signal_names((path,))[0], _Signal(native))
+    setattr(dut, path, _Signal(shadow))
+    assert _try_read(SimpleNamespace(dut=dut), (path,)) == native
+
+
+def test_signal_reader_rejects_toggle_history_without_live_value() -> None:
+    path = "Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_fire"
+    dut = SimpleNamespace()
+    setattr(dut, path, _Signal(1))
+    assert _try_read(SimpleNamespace(dut=dut), (path,)) is None
+
+
 def test_bin906_pipeline_requires_packed_exception_mask() -> None:
     dut = SimpleNamespace()
     for name, aliases in _BIN906_SIGNALS.items():
         if name != "exception_mask":
-            setattr(dut, aliases[0], _Signal())
+            setattr(dut, _native_signal_names(aliases)[0], _Signal())
     with pytest.raises(AssertionError, match="missing_internal_signals"):
         _sample_bin906_pipeline(SimpleNamespace(dut=dut, current_cycle=7))
 
@@ -450,7 +469,7 @@ def test_bin906_pipeline_rejects_toggle_only_exception_mask() -> None:
     dut = SimpleNamespace()
     for name, aliases in _BIN906_SIGNALS.items():
         if name != "exception_mask":
-            setattr(dut, aliases[0], _Signal())
+            setattr(dut, _native_signal_names(aliases)[0], _Signal())
     setattr(
         dut,
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask",
