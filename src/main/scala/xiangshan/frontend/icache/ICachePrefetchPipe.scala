@@ -169,18 +169,18 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val itlbVAddr  = Mux(s1_needItlb, s1_readMetaVAddr(0), s0_readMetaVAddr(0))
   private val itlbFullVa = itlbVAddr.signExt(XLEN).toUInt
 
-  toItlb.valid             := s1_needItlb || s0_valid
-  toItlb.bits              := DontCare
-  toItlb.bits.size         := 3.U
-  toItlb.bits.vaddr        := itlbVAddr.toUInt(VAddrBits - 1, 0)
-  toItlb.bits.debug.pc     := itlbFullVa
-  toItlb.bits.cmd          := TlbCmd.exec
+  toItlb.valid               := s1_needItlb || s0_valid
+  toItlb.bits                := DontCare
+  toItlb.bits.size           := 3.U
+  toItlb.bits.vaddr          := itlbVAddr.toUInt(VAddrBits - 1, 0)
+  toItlb.bits.debug.pc       := itlbFullVa
+  toItlb.bits.cmd            := TlbCmd.exec
   toItlb.bits.fromHwPrefetch := false.B
-  toItlb.bits.no_translate := false.B
-  toItlb.bits.fullva       := itlbFullVa
-  toItlb.bits.checkfullva  := true.B
-  fromItlb.ready           := true.B
-  io.itlb.req_kill         := false.B
+  toItlb.bits.no_translate   := false.B
+  toItlb.bits.fullva         := itlbFullVa
+  toItlb.bits.checkfullva    := true.B
+  fromItlb.ready             := true.B
+  io.itlb.req_kill           := false.B
 
   /**
     ******************************************************************************
@@ -198,8 +198,16 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // Guest page fault related: save tlb raw response, select later
   // NOTE: we don't use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
   private val s1_gpAddr = VecInit(
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(0).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse),
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(1).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse)
+    DataHoldBypass(
+      getGPAddr(fromItlb.bits.gpaddr.head, s1_req(0).startVAddr),
+      0.U(PAddrBitsMax.W),
+      tlbValidPulse
+    ),
+    DataHoldBypass(
+      getGPAddr(fromItlb.bits.gpaddr.head, s1_req(1).startVAddr),
+      0.U(PAddrBitsMax.W),
+      tlbValidPulse
+    )
   )
   private val s1_isForVSnonLeafPTE =
     DataHoldBypass(
