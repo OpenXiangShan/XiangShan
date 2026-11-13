@@ -18,8 +18,16 @@ class OverrideableQueue[T <: Data](gen: T, n: Int) extends Module {
   }
   // Overwrites can leave the read head empty while other slots remain valid.
   val advance_empty_head = !io.out.valid && io.out.ready && valids.reduce(_ || _)
-  when(io.out.fire || advance_empty_head){
+  val next_valid_ptr = Mux1H(
+    (0 until n).map(i => i.U === rd_ptr),
+    (0 until n).map(i => PriorityMux((1 until n).map(j =>
+      valids((i + j) % n) -> ((i + j) % n).U(log2Up(n).W)
+    )))
+  )
+  when(io.out.fire){
     rd_ptr := rd_ptr + 1.U
+  }.elsewhen(advance_empty_head){
+    rd_ptr := next_valid_ptr
   }
 
   val w_mask = (0 until n).map(i => i.U === wr_ptr)
