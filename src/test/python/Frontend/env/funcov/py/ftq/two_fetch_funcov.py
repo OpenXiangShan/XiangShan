@@ -107,7 +107,7 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_value",
     ),
     "bpu_s3_flush": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
+        "inner_icache.io_fromFtq_flushFromBpu_s3_valid",
     ),
     "prefetch_valid": (
         f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_valid",
@@ -117,7 +117,7 @@ _TWO_FETCH_SIGNALS = {
         f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_ready",
     ),
     "prefetch_case": (
-        "Frontend_top.Frontend.inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value_0",
+        "inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value",
     ),
     "way_req1_valid": (
         f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
@@ -136,10 +136,10 @@ _TWO_FETCH_SIGNALS = {
         f"{_MAINPIPE_PREFIX}s0_fire",
     ),
     "bpu_s3_flush_ptr_flag": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
+        "inner_icache.io_fromFtq_flushFromBpu_s3_bits_flag",
     ),
     "bpu_s3_flush_ptr_value": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
+        "inner_icache.io_fromFtq_flushFromBpu_s3_bits_value",
     ),
     "way_num_valid": (
         "Frontend_top.Frontend.inner_icache.wayLookup.numValidEntries",
@@ -212,20 +212,19 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_valid",
     ),
     "ifu_valid": (
-        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_valid",
+        "inner_icache.io_toIfu_req_valid",
     ),
     "ifu_ready": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_ready",
+        "inner_icache.io_toIfu_req_ready",
     ),
     "ifu_req1_valid": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_valid",
+        "inner_icache.io_toIfu_req_bits_info_1_valid",
     ),
     "ifu_req0_size": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_size",
+        "inner_icache.io_toIfu_req_bits_info_0_size",
     ),
     "ifu_first_taken": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_takenCfiOffset_valid",
+        "inner_icache.io_toIfu_req_bits_info_0_takenCfiOffset_valid",
     ),
     "ifu_first_invalid": (
         f"{_IFU_PREFIX}s1_invalidTaken_0",
@@ -289,31 +288,33 @@ _TWO_FETCH_SIGNALS = {
     "main_s1_flush": (
         f"{_MAINPIPE_PREFIX}s1_flush",
     ),
-    "main_s1_exception": (
-        f"{_MAINPIPE_PREFIX}s1_exception_value",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_exception_value",
+    "main_s1_exception0": (
+        f"{_MAINPIPE_PREFIX}s1_exception_0_value",
+    ),
+    "main_s1_exception1": (
+        f"{_MAINPIPE_PREFIX}s1_exception_1_value",
     ),
     "main_s1_mmio": (
         f"{_MAINPIPE_PREFIX}s1_isMmio",
         f"{_MAINPIPE_PREFIX}__Vtogcov__s1_isMmio",
     ),
     "ifu_req0_ftq_flag": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_flag",
+        "inner_icache.io_toIfu_req_bits_info_0_ftqIdx_flag",
     ),
     "ifu_req0_ftq_value": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_value",
+        "inner_icache.io_toIfu_req_bits_info_0_ftqIdx_value",
     ),
     "ifu_req1_ftq_flag": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_ftqIdx_flag",
+        "inner_icache.io_toIfu_req_bits_info_1_ftqIdx_flag",
     ),
     "ifu_req1_ftq_value": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_ftqIdx_value",
+        "inner_icache.io_toIfu_req_bits_info_1_ftqIdx_value",
     ),
     "ifu_req0_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_startVAddr_addr",
+        "inner_icache.io_toIfu_req_bits_info_0_startVAddr_addr",
     ),
     "ifu_req1_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_startVAddr_addr",
+        "inner_icache.io_toIfu_req_bits_info_1_startVAddr_addr",
     ),
     "ifu_s2_ftq0_flag": (
         f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_flag",
@@ -1070,7 +1071,14 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
 
     main_valid = _tf_read(recorder, "main_s1_valid")
     main_req1 = _tf_read(recorder, "main_req1_valid")
-    main_exception = _tf_read(recorder, "main_s1_exception")
+    main_exception0 = _tf_read(recorder, "main_s1_exception0")
+    main_exception1 = _tf_read(recorder, "main_s1_exception1")
+    # Current ICache has a separate exception for each request. A clean first
+    # request cannot qualify a dual fetch when the accepted second request
+    # faults or its exception probe is unavailable.
+    main_exceptions_clear = main_exception0 == 0 and (
+        main_req1 != 1 or main_exception1 == 0
+    )
     main_mmio = _tf_read(recorder, "main_s1_mmio")
     should_fetch = _tf_vector(recorder, "inner_icache.mainPipe", "s1_shouldFetch_{index}", 4)
     main_s1_tag = None
@@ -1084,7 +1092,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
     )
     if (
         is_new_main_transaction
-        and main_exception == 0
+        and main_exceptions_clear
         and main_mmio == 0
         and main_s1_flush != 1
         and backend_redirect != 1

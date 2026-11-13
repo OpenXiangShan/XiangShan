@@ -419,8 +419,10 @@ def _icache_response_records(env) -> list[dict]:
 def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
     offset = frontend_offset_path()
     assert offset.is_file(), "compile Frontend before running directed signal-contract tests"
+    from env.funcov.registry import decode_signal_inventory_name
+
     registered = {
-        line[len("  - name: ") :].strip()
+        decode_signal_inventory_name(line[len("  - name: "):])
         for line in offset.read_text(encoding="utf-8").splitlines()
         if line.startswith("  - name: ")
     }

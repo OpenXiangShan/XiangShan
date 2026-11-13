@@ -771,7 +771,8 @@ def test_waylookup_empty_write_observation_is_not_gated_by_two_fetch(tmp_path):
     assert not recorder.key_hit("two_fetch_waylookup_result", "single_fallback")
 
 
-def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
+@pytest.mark.parametrize("exception0,exception1", [(0, 0), (0, 1), (1, 0), (0, None)])
+def test_two_fetch_mainpipe_refill_completion_bin(tmp_path, exception0, exception1):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("main_s1_valid", 1)
     dut.set_key("main_req1_valid", 1)
@@ -779,7 +780,10 @@ def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
     dut.set_key("main_s1_ftq0_value", 3)
     dut.set_key("main_s1_ftq1_flag", 0)
     dut.set_key("main_s1_ftq1_value", 4)
-    dut.set_key("main_s1_exception", 0)
+    dut.set_key("main_s1_exception0", exception0)
+    if exception1 is not None:
+        dut.set_key("main_s1_exception1", exception1)
+    expected_completion = exception0 == exception1 == 0
     dut.set_key("main_s1_mmio", 0)
     dut.set_key("main_s1_flush", 0)
     dut.set_key("backend_redirect", 0)
@@ -792,6 +796,7 @@ def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
         dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_{index // 2}_{index % 2}", 0)
 
     sample_two_fetch_coverage(recorder, env, 1)
+    assert (recorder._two_fetch_refill_pending is not None) == expected_completion
 
     dut.set_key("main_s1_valid", 0)
     dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_1_0", 1)
@@ -808,8 +813,8 @@ def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
     dut.set_key("ifu_req1_ftq_value", 4)
     sample_two_fetch_coverage(recorder, env, 3)
 
-    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
-    assert recorder.key_hit("two_fetch_mainpipe_completion", "wait_refill_then_dual")
+    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss") == expected_completion
+    assert recorder.key_hit("two_fetch_mainpipe_completion", "wait_refill_then_dual") == expected_completion
 
 
 def test_two_fetch_checker_second_invalid_taken_bin(tmp_path):
@@ -984,8 +989,10 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
     if not offset.exists():
         return
 
+    from env.funcov.registry import decode_signal_inventory_name
+
     registered = {
-        line[len("  - name: ") :].strip()
+        decode_signal_inventory_name(line[len("  - name: "):])
         for line in offset.read_text(encoding="utf-8").splitlines()
         if line.startswith("  - name: ")
     }
