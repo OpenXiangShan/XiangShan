@@ -125,7 +125,7 @@ class SrnctlBundle extends CSRBundle {
 }
 
 class StsoctlBundle extends CSRBundle {
-  val TSO_ENABLE    = RW(0).withReset(true.B)
+  val TSO_ENABLE    = RW(0).withReset(false.B)
 }
 
 class McorepwrBundle extends CSRBundle {
