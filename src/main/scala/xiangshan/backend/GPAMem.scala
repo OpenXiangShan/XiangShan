@@ -35,11 +35,12 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
   private val gpaRvcOffset = Mux(isRVC, 0.U, 2.U)
   private val gpaOffset    = SignExt(gpaFtqOffset -& gpaRvcOffset, PAddrBitsMax)
 
+  private val isForVSnonLeafPTE = mem.io.rdata.head.isForVSnonLeafPTE
   private val gpabase = mem.io.rdata.head.gpaddr
   private val gpa = gpabase + gpaOffset
 
-  io.exceptionReadData.gpaddr := gpa
-  io.exceptionReadData.isForVSnonLeafPTE := mem.io.rdata.head.isForVSnonLeafPTE
+  io.exceptionReadData.gpaddr := Mux(isForVSnonLeafPTE, gpabase, gpa)
+  io.exceptionReadData.isForVSnonLeafPTE := isForVSnonLeafPTE
 
   def getGPAPage(vaddr: UInt): UInt = {
     require(vaddr.getWidth == GPAddrBits, s"The width of gpa should be $GPAddrBits")
