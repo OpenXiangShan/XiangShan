@@ -11,6 +11,7 @@ import dip_analyze as dip
 import tea_visualize as tea
 from native_perf import read_blocks, unique_counters
 from tea_dip_query_endpoint_evidence import digest, verify
+from tea_dip_clock_alignment import core_native_alignment
 from tea_dip_wb_protocol_micro import write
 
 GROUPS = ('Computing', 'Stalled_memory', 'Stalled_other_recorded', 'Stalled_incomplete', 'Flushed', 'Drained')
@@ -51,6 +52,11 @@ def analyze(folder, receipt_path):
         groups[cycle] = state
 
     database = folder / 'simulator.db'
+    with sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True) as db:
+        db.row_factory = sqlite3.Row
+        clock = core_native_alignment(db, folder / 'simulator_err.txt')
+    begin -= clock['core_to_native_offset']
+    end -= clock['core_to_native_offset']
     coverage = tea.sampling_coverage(database, (begin, end), periods[0])
     assert not any(coverage[k] for k in ['duplicate_sample_rows', 'off_grid_sample_rows', 'missing_interior_samples'])
     run = tea.load_data(database, folder.name,
@@ -86,7 +92,8 @@ def analyze(folder, receipt_path):
     assert sum(row['sampled_cycles'] for row in joint) == full['sampled_cycles']
     assert abs(sum(sum(row['joint_cost_per_native_retired'].values()) for row in joint) - cpi) < 1e-9
     return dict(point=folder.name, source=receipt['source'], native_CPI=cpi, native_cycles=cycles,
-                native_retired=retired, sample_period=periods[0], dispatch_width=width,
+                native_retired=retired, roi_begin=begin, roi_end=end, clock_alignment=clock,
+                sample_period=periods[0], dispatch_width=width,
                 sampled_cycles=full['sampled_cycles'], joint=joint,
                 final_DIP_cost={state: full['state_cycles'][state] / full['sampled_cycles'] * cpi for state in dip.STATES},
                 unresolved_DIP_slots=unresolved, partition_profiles_exactly_equal=True,
@@ -94,7 +101,7 @@ def analyze(folder, receipt_path):
                 receipt_sha256=digest(receipt_path), tool_sha256=digest(Path(__file__)),
                 consumer_sha256={name: digest(Path(__file__).parent / name)
                                  for name in ['dip_analyze.py', 'tea_visualize.py']},
-                scope='Same sampled source cycles, TEA resolved PSV and final DIP fate. All later final records retained; group profiles exactly sum to the full profile. Joint sampled slot cost is rescaled to native CPI, not an exact ROI event budget, critical path, saved cycles or proof of a branch/cache causal interaction.')
+                scope='Measured core-clock ROI, same sampled source cycles, TEA resolved PSV and final DIP fate. All later final records retained; group profiles exactly sum to the full profile. Joint sampled slot cost is rescaled to native CPI, not an exact ROI event budget, critical path, saved cycles or proof of a branch/cache causal interaction.')
 
 
 def main():
