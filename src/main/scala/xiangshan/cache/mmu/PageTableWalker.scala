@@ -125,7 +125,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val current_mode = current_satp.mode
   val mode = satp.mode
   val hgatp = io.csr.hgatp
-  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virtChanged || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   // changes in mpt flush all
   val s2xlate = enableS2xlate && !onlyS1xlate
   val level = RegInit(3.U(log2Up(Level + 1).W))
@@ -804,7 +804,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mbmc = io.csr.mbmc
   val bitmap_enable = (if (HasBitmapCheck) true.B else false.B) && mbmc.BME === 1.U && mbmc.CMODE === 0.U
 
-  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virtChanged || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: state_bitmap_check :: state_bitmap_resp :: stage_mpt_req ::stage_mpt_resp :: Nil = Enum(14)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
@@ -1389,7 +1389,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val hgatp = io.csr.hgatp
   val mpbmte = io.csr.mPBMTE
   val sfence = io.sfence
-  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.priv.virtChanged || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   val mode = hgatp.mode
 
   val mptEn = if (HasMptCheck) (io.csr.mmpt.mode =/= 0.U) else false.B // mpt bare mode will generate the circuit but not using it

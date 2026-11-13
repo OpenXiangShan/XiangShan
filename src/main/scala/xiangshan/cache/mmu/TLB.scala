@@ -62,7 +62,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val sfence = DelayN(io.sfence, q.fenceDelay)
   val csr = DelayN(io.csr, q.fenceDelay)
 
-  val flush_mmu = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed ||
+  val flush_mmu = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virtChanged ||
   (if (HasMptCheck) csr.mmpt.changed else false.B)
   val flush_pipe = io.flushPipe
   val redirect = io.redirect

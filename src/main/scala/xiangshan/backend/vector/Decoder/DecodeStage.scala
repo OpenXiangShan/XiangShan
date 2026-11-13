@@ -167,7 +167,7 @@ class DecodeStageImp(
         bits.canRobCompress := uopInfo.canRobCompress
         // Simple instructions may share a high-density CROB segment. Complex
         // scalar instructions retain their own segment and observation slot.
-        bits.simple := uopInfo.canRobCompress && in.fromCSR.custom.high_density_rob_compression_enable &&
+        bits.simple := uopInfo.canRobCompress && in.fromCSR.custom.highDensityRobCompressionEnable &&
           !FuType.isLoadStore(uopInfo.fuType) && !FuType.isBJU(uopInfo.fuType) &&
           !FuType.isAMO(uopInfo.fuType) && !FuType.isFence(uopInfo.fuType) &&
           !FuType.isCsr(uopInfo.fuType) && !FuType.isVset(uopInfo.fuType) &&
