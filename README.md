@@ -24,22 +24,26 @@ This paper is awarded all three available badges for artifact evaluation (Availa
 
 [More publications](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
 
-## Branch Maintenance Status
+## Versions
 
-| Generation-Version | Branch                                                                                  | Maintained?  | Active Development? |
-| ------------------ | --------------------------------------------------------------------------------------- | ------------ | ------------------- |
-| Yanqihu            | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                      | ✅ (minimum) |                     |
-| Nanhu-V2           | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                          | ✅ (minimum) |                     |
-| Nanhu-V3           | [Siudya/Nanhu](https://github.com/Siudya/Nanhu/tree/main)                               |              |                     |
-| Nanhu-V5           | [OpenXiangShan-Nanhu/OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | ✅           | ✅                  |
-| Kunminghu-V2       | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)            | ✅           |                     |
-| Kunminghu-V3       | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)            | ✅           | ✅                  |
+| Generation-Version | Branch                                                                                      | Support? | In dev? | Tape-out?                        |
+| ------------------ | ------------------------------------------------------------------------------------------- | -------- | ------- | -------------------------------- |
+| Yanqihu            | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                          | basic    |         | ✅ VCORE & PengCheng Lab          |
+| Nanhu-V2           | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                              | basic    |         |                                  |
+| Nanhu-V3           | [Siudya/Nanhu](https://github.com/Siudya/Nanhu/tree/main)                                   |          |         |                                  |
+| Nanhu-V5           | [OpenXiangShan-Nanhu/<br>OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | ✅        | ✅       | ✅ Innosilicon<br>✅ Moore Threads |
+| Kunminghu-V2       | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)                | ✅        |         | ✅ SpacemiT<br> More in progress  |
+| Kunminghu-V3       | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)                | ✅        | ✅       |                                  |
 
-At the moment, `kunminghu-v3` is still evolving rapidly and its functionality may not yet be stable. If you plan to use XiangShan for research, verification, or downstream applications, we recommend prioritizing `kunminghu-v2`.
+We recommend using different versions based on your needs:
+
+- `nanhu-v5` for performance-efficiency-balanced application scenarios.
+- `kunminghu-v2` for downstream researches, customizations, and high-performance or RVA23-compatible application scenarios.
+- `kunminghu-v3` for improving XiangShan itself. Please note that at the moment, `kunminghu-v3` is still evolving rapidly and its functionality may not yet be stable. Please also read [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
 
 This section is time-sensitive. If you believe any information here is outdated, please let us know in an issue and we will update it as soon as possible.
 
-Last updated: 2026/06/30
+Last updated: 2026/11/13
 
 ## Sub-directories Overview
 
