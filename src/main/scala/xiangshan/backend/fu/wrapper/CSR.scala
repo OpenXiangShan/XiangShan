@@ -105,6 +105,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.in match {
     case in =>
       in.valid := valid
+      in.bits.robIdx := thisRobIdx
       in.bits.wen := csrWen
       in.bits.ren := csrRen
       in.bits.op  := CSROpType.getCSROp(func)
@@ -133,8 +134,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Todo: shrink the width of trap vector.
   // We use 64bits trap vector in CSR, and 24 bits exceptionVec in exception bundle.
   csrMod.io.fromRob.trap.bits.trapVec := csrIn.exception.bits.exceptionVec.asUInt
-  csrMod.io.fromRob.trap.bits.isFetchBkpt := csrIn.exception.bits.isPcBkpt
-  csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
   csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
@@ -167,6 +166,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
   csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+  csrMod.io.icountEvent := csrIn.icountEvent
+  csrOut.icountResponse := RegNext(csrMod.io.status.icount, 0.U.asTypeOf(new IcountResponse))
 
   csrMod.io.fromRename.diffVl.zip(csrIn.vpu.diffVl).foreach { case (sink, source) =>
     sink := source
@@ -612,6 +613,11 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
     val wfi_enable = Bool()
     val commit_stuck_check_enable = Bool()
   }
+
+  // Pipeline action: OtherTrigger for native BP, DebugMode for Debug entry.
+  // Every accepted trap replaces the pending action; None acknowledges a trap
+  // with no matching itrigger/etrigger. Raw tdata1.action=0 stays inside CSR.
+  val trapTrigger = Valid(TriggerAction())
 
   // rename single step
   val singlestep = Bool()

@@ -37,6 +37,7 @@ import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
+import xiangshan.backend.fu.NewCSR.Tdata1Type
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobCommitEntryBundle
@@ -758,17 +759,32 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
 }
 
 object TriggerAction extends NamedUInt(4) {
-  // Put breakpoint Exception gererated by trigger in ExceptionVec[3].
-  def BreakpointExp = 0.U(width.W)  // raise breakpoint exception
-  def DebugMode     = 1.U(width.W)  // enter debug mode
-  def TraceOn       = 2.U(width.W)
-  def TraceOff      = 3.U(width.W)
-  def TraceNotify   = 4.U(width.W)
-  def None          = 15.U(width.W) // use triggerAction = 15.U to express that action is None;
+  // Pipeline actions share four bits; architectural mcontrol6.action = 0
+  // is distinguished by the fetch or memory trigger that fired.
+  def FetchTrigger  = 0.U(width.W) // mcontrol6 fetch trigger breakpoint exception
+  def DebugMode     = 1.U(width.W) // all type of trigger dmode
+  def TraceOn       = 2.U(width.W) // all type of trigger TraceOn
+  def TraceOff      = 3.U(width.W) // all type of trigger TraceOff
+  def TraceNotify   = 4.U(width.W) // all type of trigger TraceOff
+  def TraceReserved = 5.U(width.W)
+  def External0     = 8.U(width.W)
+  def External1     = 9.U(width.W)
+  def MemTrigger    = 10.U(width.W) // mcontrol6 mem trigger breakpoint exception
+  def SingleStep    = 11.U(width.W) // dcsr step, only to dmode
+  def Ebreak        = 12.U(width.W) // ebreak breakpoint or dmode
+  def OtherTrigger  = 13.U(width.W) // icount, itrigger, etrigger, tmexttrigger.. breakpoint exception
+  def DebugIntr     = 14.U(width.W) // debug intr, only to dmode
+  def None          = 15.U(width.W) // NONE
 
-  def isExp(action: UInt)   = action === BreakpointExp
+  def isFetch(action: UInt) = action === FetchTrigger
+  def isMem(action: UInt)   = action === MemTrigger
+  def isExp(action: UInt)   = isFetch(action) || isMem(action)
   def isDmode(action: UInt) = action === DebugMode
   def isNone(action: UInt)  = action === None
+  def isBreakpoint(action: UInt) = isExp(action) || isDmode(action)
+  def isDebug(action: UInt) = isDmode(action) || action === DebugIntr
+  def isException(action: UInt) = isBreakpoint(action) || isDebug(action) ||
+    action === SingleStep || action === Ebreak || action === OtherTrigger
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
@@ -806,15 +822,17 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: Tdata2Bundle): MatchTriggerIO = {
     val mcontrol6 = Wire(new Mcontrol6)
-    mcontrol6 := tdata1.DATA.asUInt
+    // A disabled or icount slot must also break any stale address-trigger chain.
+    // In particular, icount.COUNT[1] occupies the mcontrol6.CHAIN bit position.
+    mcontrol6 := Mux(tdata1.TYPE === Tdata1Type.Mcontrol6, tdata1.DATA.asUInt, 0.U)
     this.matchType := mcontrol6.MATCH.asUInt
     this.select    := mcontrol6.SELECT.asBool
     this.timing    := false.B
     this.action    := mcontrol6.ACTION.asUInt
-    this.chain     := mcontrol6.CHAIN.asBool
-    this.execute   := mcontrol6.EXECUTE.asBool
-    this.load      := mcontrol6.LOAD.asBool
-    this.store     := mcontrol6.STORE.asBool
+    this.chain     := tdata1.isMcontrol6 && mcontrol6.CHAIN.asBool
+    this.execute   := tdata1.isMcontrol6 && mcontrol6.EXECUTE.asBool
+    this.load      := tdata1.isMcontrol6 && mcontrol6.LOAD.asBool
+    this.store     := tdata1.isMcontrol6 && mcontrol6.STORE.asBool
     this.tdata2    := tdata2.asUInt
     this
   }

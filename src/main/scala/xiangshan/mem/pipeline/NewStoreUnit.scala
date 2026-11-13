@@ -364,8 +364,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   storeTrigger.io.isCbo.get := isCbo
 
   val triggerAction = storeTrigger.io.toLoadStore.triggerAction
-  val isDebugMode = TriggerAction.isDmode(triggerAction)
-  val isBreakPoint = TriggerAction.isExp(triggerAction)
+  val isBreakPoint = TriggerAction.isBreakpoint(triggerAction)
 
   // Unalign tail inject to s0
   val unalignTailInjectValid = fire && isUnalignHead
@@ -477,7 +476,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   // pointer-masked address from the TLB, reported in tval on a store fault
   stageInfo.fullva := fullva
   stageInfo.needRSReplay.get := needRSReplay
-  stageInfo.hasException.get := hasException || isDebugMode || isBreakPoint
+  stageInfo.hasException.get := hasException || isBreakPoint
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := isBreakPoint
   stageInfo.uop.exceptionVec(storePageFault) := pf

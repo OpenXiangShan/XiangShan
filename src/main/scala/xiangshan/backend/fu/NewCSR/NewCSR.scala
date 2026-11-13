@@ -75,6 +75,7 @@ object CSRConfig {
 }
 
 class NewCSRInput(implicit p: Parameters) extends Bundle {
+  val robIdx = new RobPtr
   val wen = Bool()
   val ren = Bool()
   val op = UInt(2.W)
@@ -143,8 +144,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
-        val isFetchBkpt = Bool()
-        val singleStep = Bool()
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
@@ -159,6 +158,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Bool())
     })
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
+    val icountEvent = Input(Valid(new IcountEvent))
 
     val fromRename = Input(new Bundle {
       val diffVl = Option.when(backendParams.basicDebugEn)(Vl())
@@ -200,6 +200,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       // trigger
       val frontendTrigger = new FrontendTdataDistributeIO()
       val memTrigger = new MemTdataDistributeIO()
+      val icount = new IcountResponse
       // Instruction fetch address translation type
       val instrAddrTransType = new AddrTransType
       // trace
@@ -282,10 +283,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val trigger = io.fromRob.trap.bits.trigger
-  val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
-  val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
   val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
 
@@ -294,8 +293,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldPrivState = io.oldPrivState
   val trapIsFormer = io.fromRob.trap.bits.isFormer
 
-  // debug_intrrupt
-  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
+  // Debug interrupt handling follows origin/kunminghu-v3's CSR path.
+  val debugIntrEnable = RegInit(true.B)
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
@@ -431,7 +430,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
-  val nmi = intrMod.io.out.nmi
+  val nmi = trapIsInterrupt && intrMod.io.out.nmi
   val virtualInterruptIsHvictlInject = intrMod.io.out.virtualInterruptIsHvictlInject
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
@@ -458,7 +457,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasTrap && !trapIsInterrupt && singleStep
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -863,7 +861,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
-        in.isFetchBkpt := trapIsFetchBkpt
+        in.trigger := trigger
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
         in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
@@ -1037,6 +1035,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val triggerFrontendChange = Wire(Bool())
   val triggerBpGateChange = Wire(Bool())
+  val icountConfigChange = Wire(Bool())
 
   val vstartChange = vstart.w.wen && (
     vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
@@ -1054,7 +1053,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
 
   val flushPipe = resetSatp ||
-    triggerFrontendChange || triggerBpGateChange || floatStatusOnOff || vectorStatusOnOff ||
+    triggerFrontendChange || triggerBpGateChange || icountConfigChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange || writeContext
 
   /**
@@ -1264,13 +1263,52 @@ class NewCSR(implicit val p: Parameters) extends Module
     medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
     medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
 
+  // Match the trap while its source mode/context is still current. DecodeDebug
+  // marks the handler's instructions before they split into uops.
+  val trapTriggerMatcher = Module(new TrapTriggerMatcher)
+  trapTriggerMatcher.in.trap.valid := hasTrap && nonDebugTrapEventValid
+  trapTriggerMatcher.in.trap.bits := Mux1H(Seq(
+    trapEntryMEvent.valid -> trapEntryMEvent.out.mcause.bits,
+    trapEntryMNEvent.valid -> trapEntryMNEvent.out.mncause.bits,
+    trapEntryHSEvent.valid -> trapEntryHSEvent.out.scause.bits,
+    trapEntryVSEvent.valid -> trapEntryVSEvent.out.vscause.bits,
+  ))
+  trapTriggerMatcher.in.isNmi := hasTrap && nmi
+  trapTriggerMatcher.in.privState := privState
+  trapTriggerMatcher.in.debugMode := debugMode
+  trapTriggerMatcher.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  trapTriggerMatcher.in.tdata1 := tdata1Vec
+  trapTriggerMatcher.in.tdata2 := VecInit(tdata2RegVec.map(_.rdata))
+  trapTriggerMatcher.in.tdata3 := tdata3Vec
+  trapTriggerMatcher.in.scontext := scontext.regOut.ALL.asUInt
+  trapTriggerMatcher.in.mhcontext := mcontext.regOut.HCONTEXT.asUInt
+  trapTriggerMatcher.in.satpAsid := satp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vsatpAsid := vsatp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vmid := hgatp.regOut.VMID.asUInt
+
+  // Native triggers also obey reentrancy protection in the handler mode.
+  // Trap entry clears that mode's xIE, so action0 is allowed only when the
+  // breakpoint goes to a higher privilege. RNMI retains MIE unchanged.
+  val handlerCanRaiseBreakpoint = MuxCase(false.B, Seq(
+    trapEntryMNEvent.valid -> mstatus.regOut.MIE.asBool,
+    trapEntryHSEvent.valid -> !medeleg.regOut.EX_BP.asBool,
+    trapEntryVSEvent.valid -> !(medeleg.regOut.EX_BP.asBool && hedeleg.regOut.EX_BP.asBool),
+  ))
+  val matchedTrapTriggerAction = trapTriggerMatcher.out.action
+  io.toDecode.trapTrigger.valid := hasTrap
+  // Convert architectural action0 to the pipeline's native-trigger BP code
+  // before leaving CSR. DebugMode and None already use pipeline encodings.
+  io.toDecode.trapTrigger.bits := Mux(
+    matchedTrapTriggerAction === TrigAction.BreakpointExp.asUInt,
+    Mux(handlerCanRaiseBreakpoint, TriggerAction.OtherTrigger, TriggerAction.None),
+    matchedTrapTriggerAction)
+
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.isDebugIntr := debug
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
-  debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.trapInfo.bits.criticalErrorState := criticalErrorState
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -1291,6 +1329,45 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
+  val icountMod = Module(new IcountController)
+  val csrRobIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
+  val icountWriteValid = RegInit(false.B)
+  val icountWritePtr = Reg(new RobPtr)
+  val modifyIcount = tdata1Update && tselect.rdata === 0.U &&
+    (tdata1Vec.head.TYPE === Tdata1Type.Icount || wdata(63, 60) === Tdata1Type.Icount.asUInt)
+  val ignoresIcountEvent = icountWriteValid && io.icountEvent.bits.robIdx.isSameSlot(icountWritePtr)
+  // An untracked configuration write has no icount event. Expire its exclusion
+  // once ROB passes it, before the slot can be reused. A saved completion still
+  // needs the exclusion until CSR receives that event.
+  val writePassed = icountWriteValid && !io.icountEvent.valid &&
+    io.fromRob.robDeqPtr.isAfterSlot(icountWritePtr)
+  when(io.icountEvent.valid || writePassed) {
+    icountWriteValid := false.B
+  }
+  when(modifyIcount) {
+    icountWriteValid := true.B
+    icountWritePtr := csrRobIdx
+  }
+  icountMod.in.tdata1 := tdata1Vec.head
+  icountMod.in.priv := privState
+  icountMod.in.contextMatch := debugMod.io.out.icountContextMatch
+  icountMod.in.debugMode := debugMode
+  icountMod.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  icountMod.in.modifyIcount := modifyIcount
+  icountMod.in.ignoreEvent := ignoresIcountEvent
+  icountMod.in.trap.valid := hasTrap
+  icountMod.in.trap.bits.isInterrupt := trapIsInterrupt
+  icountMod.in.trap.bits.breakpoint := trapVec(ExceptionNO.breakPoint)
+  icountMod.in.trap.bits.trigger := trigger
+  icountMod.in.trap.bits.toDebug := entryDebugMode
+  icountMod.in.event <> io.icountEvent
+  io.status.icount := icountMod.out.response
+  icountConfigChange := modifyIcount || tdata3Update && tselect.rdata === 0.U && tdata1Vec.head.TYPE === Tdata1Type.Icount
+  tdata1RegVec.zipWithIndex.foreach { case (mod: HasIcountUpdate, idx) =>
+    mod.icountUpdate.valid := (idx == 0).B && icountMod.out.update.valid
+    mod.icountUpdate.bits := icountMod.out.update.bits
+  }
+
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
   trapEntryDEvent.valid                           := entryDebugMode
@@ -1310,7 +1387,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
     mcontrol6Pre := tdata1Pre.DATA.asUInt
     val canWriteDmode = WireInit(false.B)
-    canWriteDmode := (if (idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    canWriteDmode := (if (idx > 0) (Mux(tdata1Pre.isMcontrol6 && mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool, true.B)) && debugMode else debugMode).asBool
 
     val tdata1Next = Wire(new Tdata1Bundle)
     tdata1Next := (if (idx < TriggerNum - 1) tdata1RegVec(idx + 1) else tdata1RegVec(idx)).rdata.asUInt
@@ -1346,7 +1423,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val vsstatusWriteSDT = menvcfg.regOut.DTE && henvcfg.regOut.DTE && vsstatus.w.wdataFields.SDT
   val vsstatusWriteSIE = vsstatus.w.wdataFields.SIE && !vsstatusWriteSDT
   // Only the current mode's delegated breakpoint gate is affected by its interrupt enable.
-  triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
+  triggerBpGateChange := (debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR || tdata1Vec.head.TYPE === Tdata1Type.Icount) && (
     privState.isModeM && mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
     privState.isModeHS && medeleg.regOut.EX_BP &&
       mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||

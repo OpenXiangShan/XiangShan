@@ -136,7 +136,6 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.orR
         current.satpFlush := s1_out_bits.satpFlush || current.satpFlush
         current.replayInst := s1_out_bits.replayInst || current.replayInst
-        current.singleStep := s1_out_bits.singleStep || current.singleStep
         current.trigger   := Mux(isVecUpdate, s1_out_bits.trigger,    current.trigger)
         current.vstart    := Mux(isVecUpdate, s1_out_bits.vstart,     current.vstart)
         current.vstartEn  := Mux(isVecUpdate, s1_out_bits.vstartEn,   current.vstartEn)

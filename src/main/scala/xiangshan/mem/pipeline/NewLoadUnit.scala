@@ -637,15 +637,14 @@ class LoadUnitS1(param: ExeUnitParams)(
   loadTrigger.io.isPrf.get := accessType.isPrefetch()
 
   val triggerAction = loadTrigger.io.toLoadStore.triggerAction
-  val isDebugMode = TriggerAction.isDmode(triggerAction)
-  val bp = TriggerAction.isExp(triggerAction)
+  val bp = TriggerAction.isBreakpoint(triggerAction)
   val vecVaddrOffset = Mux(
-    isDebugMode || bp,
+    bp,
     loadTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.get,
     vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.get
   )
   val vecTriggerMask = Mux(
-    isDebugMode || bp,
+    bp,
     loadTrigger.io.toLoadStore.triggerMask,
     0.U
   )
@@ -947,7 +946,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val hwe = uop.exceptionVec(hardwareError) || hweForwardCorrupt || hweBypassCorrupt
 
   val exceptionVec = uop.exceptionVec.selectByFu(LduCfg)
-  val exception = TriggerAction.isDmode(uop.trigger) || exceptionVec.orR
+  val exception = exceptionVec.orR
   exceptionVec(loadAddrMisaligned) := am
   exceptionVec(loadAccessFault) := af
   exceptionVec(hardwareError) := hwe
@@ -1429,7 +1428,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
   val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
-  val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
+  val s3Exception = s3ExceptionVec.orR
   val exceptionVec = ExceptSparseVec.mux2(
     s4HeadValid && s4HeadHasException,
     s4HeadExceptionVec,

@@ -18,7 +18,6 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val trapIsInterrupt = trapInfo.bits.isInterrupt
   private val isDebugIntr     = trapInfo.bits.isDebugIntr
   private val trapVec         = trapInfo.bits.trapVec
-  private val singleStep      = trapInfo.bits.singleStep
   private val trigger         = io.in.trapInfo.bits.trigger
 
   private val privState = io.in.privState
@@ -49,14 +48,12 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
    *    4. single step(debug module set dcsr.step before hart resume)
    *    5. critical error state(when dcsr.cetrig assert)
    */
-  // debug_intr
+  val breakPoint = hasTrap && !trapIsInterrupt && trapVec(ExceptionNO.breakPoint)
   val hasIntr = hasTrap && trapIsInterrupt
   val hasDebugIntr = hasIntr && isDebugIntr
 
   // debug_exception_ebreak
-  val hasExp = hasTrap && !trapIsInterrupt
-  val breakPoint = trapVec(ExceptionNO.breakPoint).asBool
-  val isEbreak = hasExp && breakPoint && !TriggerAction.isExp(trigger)
+  val isEbreak = breakPoint && trigger === TriggerAction.Ebreak
   val ebreakEnterDebugMode =
     (privState.isModeM && dcsr.EBREAKM.asBool) ||
       (privState.isModeHS && dcsr.EBREAKS.asBool) ||
@@ -82,10 +79,10 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   )
 
   val triggerCanRaiseBpExp = io.in.triggerCanRaiseBpExp
-  val triggerEnterDebugMode = hasExp && TriggerAction.isDmode(trigger)
+  val triggerEnterDebugMode = breakPoint && TriggerAction.isDmode(trigger)
 
   // debug_exception_single
-  val hasSingleStep = hasExp && singleStep
+  val hasSingleStep = breakPoint && trigger === TriggerAction.SingleStep
 
 
   // critical error state
@@ -95,7 +92,9 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val hasDebugTrap = hasDebugException || hasDebugIntr
 
   val tselect1H = UIntToOH(tselect.asUInt, TriggerNum).asBools
-  val chainVec = mcontrol6WireVec.map(_.CHAIN.asBool)
+  val chainVec = tdata1Vec.zip(mcontrol6WireVec).map { case (tdata1, mcontrol6) =>
+    tdata1.isMcontrol6 && mcontrol6.CHAIN.asBool
+  }
   val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
   val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
 
@@ -103,21 +102,20 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
 
   val mcontrol6Wdata = Wire(new Mcontrol6)
   mcontrol6Wdata := tdata1Wdata.DATA.asUInt
-  val tdata1TypeWdata = tdata1Wdata.TYPE
 
   val mcontrol6Selected = Wire(new Mcontrol6)
   mcontrol6Selected := tdata1Selected.DATA.asUInt
 
   val frontendTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isFetchTrigger ||
-      mcontrol6Selected.isFetchTrigger && (triggerUpdate || tdata3Update)
+    tdata1Update && tdata1Wdata.isMcontrol6 && mcontrol6Wdata.isFetchTrigger ||
+      tdata1Selected.isMcontrol6 && mcontrol6Selected.isFetchTrigger && (triggerUpdate || tdata3Update)
 
   val memTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isMemAccTrigger ||
-      mcontrol6Selected.isMemAccTrigger && triggerUpdate
+    tdata1Update && tdata1Wdata.isMcontrol6 && mcontrol6Wdata.isMemAccTrigger ||
+      tdata1Selected.isMcontrol6 && mcontrol6Selected.isMemAccTrigger && triggerUpdate
 
   val triggerEnableVec = tdata1Vec.zip(mcontrol6WireVec).zip(tdata3MatchVec).map { case((tdata1, mcontrol6), tdata3Match) =>
-    tdata1.TYPE.isLegal && tdata3Match && (
+    tdata1.isMcontrol6 && tdata3Match && (
       mcontrol6.M && privState.isModeM  ||
         mcontrol6.S && privState.isModeHS ||
         mcontrol6.U && privState.isModeHU ||
@@ -148,6 +146,8 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
 
   io.out.triggerFrontendChange  := frontendTriggerUpdate
   io.out.newTriggerChainIsLegal := newTriggerChainIsLegal
+  io.out.icountContextMatch := tdata3MatchVec.head
+  io.out.ebreakToDebug := ebreakEnterDebugMode
 
   io.out.hasDebugTrap                 := hasDebugTrap
   io.out.hasDebugIntr                 := hasDebugIntr
@@ -164,7 +164,6 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
       val trapVec = UInt(64.W)
       val isDebugIntr = Bool()
       val isInterrupt = Bool()
-      val singleStep = Bool()
       val trigger = TriggerAction()
       val criticalErrorState = Bool()
     })
@@ -195,6 +194,8 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     // trigger
     val triggerFrontendChange = Bool()
     val newTriggerChainIsLegal = Bool()
+    val icountContextMatch = Bool()
+    val ebreakToDebug = Bool()
     val memTrigger = new MemTdataDistributeIO()
     val frontendTrigger = new FrontendTdataDistributeIO()
 
@@ -277,12 +278,12 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
   val fireDebugModeVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
-  val fireBreakpointExpVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+  val fireBreakpointExpVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.FetchTrigger)
   val fireDebugMode = fireDebugModeVec.asUInt.orR
   val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
   triggerAction := MuxCase(TriggerAction.None, Seq(
     fireDebugMode -> TriggerAction.DebugMode,
-    breakPointExp -> TriggerAction.BreakpointExp,
+    breakPointExp -> TriggerAction.MemTrigger,
   ))
   val triggerFireVec = MuxCase(VecInit(Seq.fill(TriggerNum)(false.B)), Seq(
     fireDebugMode -> fireDebugModeVec,

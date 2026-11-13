@@ -186,6 +186,10 @@ trait CSRDocDump { self: NewCSR =>
         new Mcontrol6,
         s"${tdata1Mod.modName}(tdata1.DATA view)",
       )
+      if (idx == 0) {
+        dumpBundleCSV(writer, "D", "icount[0]", CSRs.tdata1, new Icount,
+          s"${tdata1Mod.modName}(tdata1.DATA view)")
+      }
       dumpBundleCSV(
         writer,
         "D",
@@ -194,6 +198,16 @@ trait CSRDocDump { self: NewCSR =>
         tdata2Mod.bundle.asInstanceOf[CSRBundle],
         tdata2Mod.modName,
       )
+      Seq("itrigger" -> new Itrigger, "etrigger" -> new Etrigger).foreach { case (name, bundle) =>
+        dumpBundleCSV(
+          writer,
+          "D",
+          s"$name[$idx]",
+          CSRs.tdata1,
+          bundle,
+          s"${tdata1Mod.modName}(tdata1.DATA view)",
+        )
+      }
     }
   }
 
