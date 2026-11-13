@@ -12,21 +12,31 @@ env:
   ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
 
 jobs:
-  run:
-    name: Run Performance Test
-    uses: ./.github/workflows/perf-template.yml
+  build:
+    name: Build EMU
+    uses: ./.github/workflows/perf-build.yml
     with:
       test_branch: kunminghu-v3
+
+  run:
+    name: Run Performance Test
+    needs: build
+    uses: ./.github/workflows/perf-run.yml
+    with:
+      spec_dir: ${{ needs.build.outputs.SPEC_DIR }}
       benchmark_type: spec06-rva23-novec-gcc16-0.3c
       servers: all
 
   select:
     name: Select random checkpoints
+    needs: build
     runs-on: perf
     outputs:
       RESULT_PATH: ${{ steps.select.outputs.RESULT_PATH }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.COMMIT_SHA }}
       - name: Select random checkpoints
         id: select
         run: |
@@ -46,13 +56,9 @@ jobs:
             --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_all.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE}/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" \
           )
-          # copy-pasted from perf-template.yml, is there a better way to do this?
-          SHORT_SHA=$(git rev-parse --short=9 HEAD)
-          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}-DefaultConfig"
           # save list
-          RESULT_PATH="${SPEC_DIR}/fuzz-$(date '+%y%m%d').f"
-          mkdir -p "${SPEC_DIR}"
+          RESULT_PATH="${{ needs.build.outputs.SPEC_DIR }}/fuzz-$(date '+%y%m%d').f"
+          mkdir -p "${{ needs.build.outputs.SPEC_DIR }}"
           echo "${RESULT_LIST}" > "${RESULT_PATH}"
           echo "RESULT_PATH=${RESULT_PATH}" >> "$GITHUB_OUTPUT"
           # display to log
@@ -60,11 +66,13 @@ jobs:
           cat "${RESULT_PATH}"
 
   run-fuzz:
-    needs: select
+    needs:
+      - build
+      - select
     name: Run Fuzz Test
-    uses: ./.github/workflows/perf-template.yml
+    uses: ./.github/workflows/perf-run.yml
     with:
-      test_branch: kunminghu-v3
+      spec_dir: ${{ needs.build.outputs.SPEC_DIR }}
       benchmark_type: custom
       json_path: ${{ needs.select.outputs.RESULT_PATH }}
       servers: all
@@ -72,20 +80,22 @@ jobs:
 
   report:
     name: Generate Report
-    needs: run
+    needs:
+      - build
+      - run
     runs-on: perf
     steps:
       - uses: actions/checkout@v7
       - name: Link current report
         run: |
-          if [ ! -L "/nfs/home/cirunner/perf-report/nightly-${{ needs.run.outputs.DATE }}" ]; then
-            ln -s "${{ needs.run.outputs.SPEC_DIR }}" "/nfs/home/cirunner/perf-report/nightly-${{ needs.run.outputs.DATE }}"
+          if [ ! -L "/nfs/home/cirunner/perf-report/nightly-${{ needs.build.outputs.DATE }}" ]; then
+            ln -s "${{ needs.build.outputs.SPEC_DIR }}" "/nfs/home/cirunner/perf-report/nightly-${{ needs.build.outputs.DATE }}"
           else
             echo "Symlink already exists"
           fi
       - name: Find previous commit
         run: |
-          PREV_DIR=$(find "/nfs/home/cirunner/perf-report" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.run.outputs.DATE }}" | sort | tail -n1)
+          PREV_DIR=$(find "/nfs/home/cirunner/perf-report" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.build.outputs.DATE }}" | sort | tail -n1)
           echo "Found previous report: $PREV_DIR"
           PREV_DIR=$(readlink -f "$PREV_DIR" || true)
           echo "Resolved to: $PREV_DIR"
