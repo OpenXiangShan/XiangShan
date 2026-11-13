@@ -4,29 +4,62 @@ package xiangshan
 
 import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
-import chisel3.util.experimental.BoringUtils.bore
 import org.chipsalliance.cde.config.Parameters
-import utility.{LogPerfIO, XSLog}
+import utility.{LogPerfIO, LogUtilsOptions, LogUtilsOptionsKey, XSLog}
 import org.scalatest.flatspec.AnyFlatSpec
 
 class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
   behavior of "TEA cycle statistics"
 
   class PerfHarness extends Module {
-    implicit val p: Parameters = Parameters.empty
+    implicit val p: Parameters = Parameters.empty.alterPartial {
+      case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
+    }
     val io = IO(new Bundle {
       val clean = Input(Bool())
       val dump = Input(Bool())
       val observed = Output(new LogPerfIO)
+      val retired = Input(UInt(16.W))
+      val summaryRetired = Output(Vec(2, UInt(64.W)))
     })
+    class StatsSource(enableXMR: Boolean) extends Module {
+      implicit val p: Parameters = Parameters.empty.alterPartial {
+        case LogUtilsOptionsKey => LogUtilsOptions(false, false, false, enableXMR)
+      }
+      val retired = IO(Input(UInt(16.W)))
+      val cycle = RegInit(0.U(64.W))
+      cycle := cycle + 1.U
+      var summaryRetired: UInt = null
+      XSLog.registerCaller { control =>
+        import utility.XSLog.tapOrGet
+        withClockAndReset(tapOrGet(clock), tapOrGet(reset)) {
+          val stats = Module(new TeaCycleStats)
+          stats.io.enable := true.B
+          stats.io.clean := control.clean
+          stats.io.dump := control.dump
+          stats.io.cycle := tapOrGet(cycle)
+          stats.io.retired := tapOrGet(retired)
+          stats.io.state := Mux(stats.io.retired.orR, TeaState.computing, TeaState.stalled)
+          stats.io.gapThreshold := 128.U
+          summaryRetired = stats.io.summary.bits.retired
+        }
+      }
+    }
+    val sources = Seq(true, false).map { enableXMR =>
+      val source = Module(new StatsSource(enableXMR))
+      source.retired := io.retired
+      source
+    }
     var control: LogPerfIO = null
     XSLog.registerCaller { source => control = source }
     XSLog.collect(123.U(64.W), true.B, io.clean, io.dump)
-    io.observed := bore(control)
+    io.observed := XSLog.tapOrGet(control)
+    io.summaryRetired := VecInit(sources.map(source => XSLog.tapOrGet(source.summaryRetired)))
   }
 
   it should "receive the existing performance controls through the counter callback" in {
     simulate(new PerfHarness) { dut =>
+      dut.io.retired.poke(3.U)
       for (clean <- Seq(false, true); dump <- Seq(false, true)) {
         dut.io.clean.poke(clean.B)
         dut.io.dump.poke(dump.B)
@@ -35,6 +68,17 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
         dut.io.observed.timer.expect(123.U)
         dut.io.observed.logEnable.expect(true.B)
       }
+      dut.io.clean.poke(true.B)
+      dut.clock.step()
+      dut.io.clean.poke(false.B)
+      dut.io.dump.poke(true.B)
+      dut.io.summaryRetired.foreach(_.expect(3.U))
+      dut.clock.step(2)
+      dut.io.summaryRetired.foreach(_.expect(9.U))
+      dut.io.clean.poke(true.B)
+      dut.clock.step()
+      dut.io.clean.poke(false.B)
+      dut.io.summaryRetired.foreach(_.expect(3.U))
     }
   }
 

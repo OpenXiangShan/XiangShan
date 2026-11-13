@@ -2210,18 +2210,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
       val teaStatsEnable = enableTeaStats.asBool || enableTea.asBool
       XSLog.registerCaller { control =>
-        import chisel3.util.experimental.BoringUtils.bore
-        val teaClock = bore(clock)
-        val teaReset = bore(reset)
+        import utility.XSLog.tapOrGet
+        val teaClock = tapOrGet(clock)
+        val teaReset = tapOrGet(reset)
         withClockAndReset(teaClock, teaReset) {
           val stats = Module(new TeaCycleStats)
-          stats.io.enable := bore(teaStatsEnable)
+          stats.io.enable := tapOrGet(teaStatsEnable)
           stats.io.clean := control.clean
           stats.io.dump := control.dump
-          stats.io.cycle := bore(teaCycle)
-          stats.io.state := bore(teaState)
-          stats.io.retired := bore(teaRetired)
-          stats.io.gapThreshold := bore(teaGapThreshold)
+          stats.io.cycle := tapOrGet(teaCycle)
+          stats.io.state := tapOrGet(teaState)
+          stats.io.retired := tapOrGet(teaRetired)
+          stats.io.gapThreshold := tapOrGet(teaGapThreshold)
           val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
           summaryTable.log(stats.io.summary, "summary", teaClock, teaReset)
           val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
