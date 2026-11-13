@@ -4,13 +4,19 @@ English | [中文](CONTRIBUTING.zh-cn.md)
 
 ## Table of Contents
 
-- [Before contributing](#before-contributing)
-- [Bug Report](#bug-report)
-- [Feature Request](#feature-request)
-- [Pull Request](#pull-request)
-- [Build and Usage Problems](#build-and-usage-problems)
-- [Other Question](#other-question)
-- [AI Use](#ai-use)
+- [Contributing to XiangShan](#contributing-to-xiangshan)
+  - [Table of Contents](#table-of-contents)
+  - [Before contributing](#before-contributing)
+  - [Bug Report](#bug-report)
+    - [Known issues](#known-issues)
+  - [Feature Request](#feature-request)
+  - [Pull Request](#pull-request)
+    - [Before commit](#before-commit)
+    - [Commit message](#commit-message)
+    - [Review/CI Process](#reviewci-process)
+  - [Build and Usage Problems](#build-and-usage-problems)
+  - [Other Question](#other-question)
+  - [AI Use](#ai-use)
 
 ## Before contributing
 
@@ -30,6 +36,8 @@ If you find a **bug in XiangShan RTL** (for example, a difftest failure), please
 Please fill in the issue template as completely and accurately as possible, including the branch, commit, observed behavior, environment, test workload, and other requested information. This helps us locate the problem and provide feedback more efficiently.
 
 You can use `./scripts/bug-report.sh` to generate the required attachments. This script collects system information, including the operating system, memory size, and toolchain versions. Please review the contents of `bug-report.tar.gz` before uploading it to ensure that no sensitive information is included.
+
+As required in issue templates, please try your best to find if there is already an issue or PR that describes/addresses the same problem. Please comment on the existing issue or PR to provide your finding/idea, rather than opening a new one. Any duplicate issues will be closed without further explanation.
 
 We also welcome pull requests that fix bugs. Please refer to the [Pull Request](#pull-request) section below.
 
@@ -55,13 +63,24 @@ We also welcome pull requests that implement new features. Please refer to the [
 
 ## Pull Request
 
-Before submitting a PR for a bug fix or a new feature, we recommend opening the corresponding type of issue first and discussing it with us and the community to avoid duplicated work.
+### Before commit
 
-Please run `make reformat` before committing to automatically format the code.
+1. Before submitting a PR, please open an issue first to discuss it with us and the community to avoid duplicated work.
+   1. PR that fix bugs -> [Bug report issue](#bug-report)
+   2. PR that implement new features -> [Feature request issue](#feature-request)
+2. Similar with issues, please search existing PRs to see if the same problem has already been or is being addressed. If so, please add your information to the existing PR instead of opening a new one. Duplicate PRs will be closed without further explanation.
+   1. The exception is if you believe the existing PR does not solve the problem in a proper way, you can submit your own PR after discussing with the community, also make sure to add link to the existing one (`Supersede #123456` in a new line) and describe why it is better.
+3. Please run `make reformat` before committing to automatically format the code.
+4. Please keep each commit / PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR.
+   1. A PR may include the main functional change together with necessary preparatory refactoring (such as reorganizing port structures), but please split them into separate commits to make review easier.
+5. Please configure your git `user.name` and `user.email` to match your GitHub account (use GitHub anonymous email is ok).
+   1. Please refer to the [official documentation](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address).
+   2. Run `git config user.{name,email}` to check your current configuration.
+   3. If you need to change your configuration, run `git config user.name "Your Name"` and `git config user.email "your.email@example.com"`.
 
-Please keep each PR focused on a single topic. Avoid mixing multiple unrelated changes in the same PR. A PR may include the main functional change together with necessary preparatory refactoring, such as reorganizing port structures, but we recommend splitting them into separate commits to make review easier.
+### Commit message
 
-This repository generally follows conventional commits. Commit messages and PR titles should follow the `type(scope): description` format, and the description should clearly explain what changed and why.
+This repository generally follows [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/). Commit messages and PR titles should follow the `type(scope): description` format, and the description should clearly explain what changed and why.
 
 Common `type` values include, but are not limited to:
 
@@ -88,7 +107,7 @@ In addition, please describe your changes sufficiently in the commit message and
 
 A complete example of a commit message:
 
-```
+```text
 fix(some-module): fix some bug
 
 The original design has a bug that blabla.
@@ -97,12 +116,18 @@ This commit fixes that by doing blabla.
 
 Fixes #123456
 
-Assisted-by: Some-AI-Agent:Model-Version
-Co-authored-by: Another Author <another.author@example.com>
 Link: url.to.related.information
+Assisted-by: Some-AI-Agent:Model-Version Some-MCP-TOOL
+Co-authored-by: Another Author <another.author@example.com>
 ```
 
-We recommend creating a `Draft Pull Request` first, and converting it to `Ready for review` only after rebasing onto the latest mainline, completing self-testing, and getting CI to pass. PRs from external contributors may not be able to trigger CI automatically. In that case, you can refer to [CODEOWNERS](.github/CODEOWNERS) and `@` the relevant maintainers for help triggering it manually. Once the PR is marked ready, we will start the review process; until then, you can continue refining it.
+### Review/CI Process
+
+We recommend creating a `Draft Pull Request` first, and converting it to `Ready for review` only after rebasing onto the latest mainline, completing self-testing, and getting CI to pass.
+
+PRs from external contributors may not be able to trigger CI automatically. In that case, you can refer to [CODEOWNERS](.github/CODEOWNERS) and `@` the relevant maintainers for help triggering it manually.
+
+Once the PR is marked ready, we will start the review process; until then, you can continue refining it.
 
 ## Build and Usage Problems
 
@@ -131,6 +156,10 @@ In addition, please disclose the use and scope of AI in the following situations
 
 - No extra disclosure is needed when AI is only used for simple auxiliary tasks such as translation, language polishing, or inline completion.
 - If AI is used to generate a complete bug report or similar textual content, please state that in the issue body.
-- If AI is used to generate complete code, please follow the [Linux kernel](https://docs.kernel.org/process/coding-assistants.html#attribution) guidance and add an `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` tag at the end of the commit message:
+- If AI is used to generate complete code, please add an `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` tag at the end of the commit message:
   - `AGENT_NAME`: the AI tool, framework, or agent name, such as Claude or Copilot.
   - `MODEL_VERSION`: the model name and version, such as GPT-4 or GPT-3.5.
+  - `[TOOL]`: extra tools used (e.g. MCP, skills), leave empty if not used.
+    - The `[]` symbol above indicates this is optional and should not need to be included in the commit message.
+    - Note this should not include built-in features/tools like `exec_command`, `apply_patch`、`web_search` etc., also should not include the build toolchain like `make`, `mill`, `clang` or `verilator` etc..
+  - Example: `Assisted-by: Codex:GPT-6.1-Sol-xhigh github-mcp-server`.

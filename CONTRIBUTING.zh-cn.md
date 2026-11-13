@@ -4,13 +4,19 @@
 
 ## 目录
 
-- [贡献前须知](#贡献前须知)
-- [Bug 报告](#bug-报告)
-- [功能请求](#功能请求)
-- [Pull Request](#pull-request)
-- [编译与使用问题](#编译与使用问题)
-- [其余疑问](#其余疑问)
-- [AI 使用](#ai-使用)
+- [XiangShan 贡献指南](#xiangshan-贡献指南)
+  - [目录](#目录)
+  - [贡献前须知](#贡献前须知)
+  - [Bug 报告](#bug-报告)
+    - [部分已知问题说明](#部分已知问题说明)
+  - [功能请求](#功能请求)
+  - [Pull Request](#pull-request)
+    - [提交前](#提交前)
+    - [提交信息](#提交信息)
+    - [Review/CI 流程](#reviewci-流程)
+  - [编译与使用问题](#编译与使用问题)
+  - [其余疑问](#其余疑问)
+  - [AI 使用](#ai-使用)
 
 ## 贡献前须知
 
@@ -30,6 +36,8 @@
 请尽可能完整、准确地填写 issue 模板要求的内容，包括分支、commit、现象、环境、测试用例等，帮助我们更快地定位问题和提供反馈。
 
 您可以使用 `./scripts/bug-report.sh` 脚本生成所需附件。该脚本会收集系统信息（包括操作系统、内存大小、编译工具链版本等）；上传前请先审查 `bug-report.tar.gz` 中的内容，确认不包含敏感信息。
+
+如 issue 模板中所要求的，请尽量查找是否已有 issue 或 PR 描述/解决了相同的问题。如果有，请在现有 issue 或 PR 中补充信息，而不要新开一个 issue。重复的 issue 将会被关闭，恕不另作说明。
 
 我们欢迎您通过 PR 提交修复，另请参考 [Pull Request](#pull-request) 章节的建议。
 
@@ -55,13 +63,24 @@
 
 ## Pull Request
 
-在正式通过 PR 提交 Bug 修复或新功能实现前，建议先提交对应类型的 issue 与我们及社区进行讨论，避免重复工作。
+### 提交前
 
-请在 commit 前运行 `make reformat` 自动格式化代码。
+1. 在正式提交 PR 之前，请先提交一个 issue 与我们和社区讨论，以避免重复工作。
+   1. 修复 bug 的 PR -> [Bug 报告 issue](#bug-报告)
+   2. 实现新特性的 PR -> [功能请求 issue](#功能请求)
+2. 和 issue 的要求类似，请搜索确认是否已有 PR 解决了或正在解决相同的问题。如果有，请在现有 PR 中补充信息，而不要新开一个 PR。重复的 PR 将会被关闭，恕不另作说明。
+   1. 例外情况：如果您认为现有 PR 并未以合适的方式解决问题，您可以在与社区讨论后提交自己的 PR。同时，请在新 PR 中附上现有 PR 的编号（单起一行 `Supersede #123456`），并说明为什么新方案更好。
+3. 请在 commit 前运行 `make reformat` 自动格式化代码。
+4. 请将每个 commit / PR 的改动控制在单一主题内，避免把多个不相关的功能修改混在同一个 PR 中。
+   1. 单个 PR 可以包含功能修复/改进及其必要的前置重构（如整理端口结构），但请将它们拆分到不同的 commit 中以便 review。
+5. 请将您的 git `user.name` 和 `user.email` 配置为您在 GitHub 上的用户名和邮箱（使用 GitHub 匿名邮箱也可以）。
+   1. 请参考 [官方文档](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)。
+   2. 运行 `git config user.{name,email}` 检查当前配置。
+   3. 如果需要修改配置，请运行 `git config user.name "Your Name"` 和 `git config user.email "your.email@example.com"`。
 
-请将改动控制在单一主题内，避免把多个不相关的功能修改混在同一个 PR 中。单个 PR 可以包含功能修复/改进及其必要的前置重构（如整理端口结构），但建议将它们拆分到不同的 commit 中以便 review。
+### 提交信息
 
-本仓库基本采用约定式提交。commit 与 PR 标题应遵循 `type(scope): description` 的格式。
+本仓库基本采用[约定式提交](https://www.conventionalcommits.org/zh-hans/v1.0.0/)。commit 与 PR 标题应遵循 `type(scope): description` 的格式。
 
 常见的 `type` 包括但不限于：
 
@@ -88,7 +107,7 @@
 
 一个完整的 commit message 示例：
 
-```
+```text
 fix(some-module): fix some bug
 
 The original design has a bug that blabla.
@@ -98,17 +117,24 @@ This commit fixes that by doing blabla.
 Fixes #123456
 
 Link: url.to.related.information
+Assisted-by: Some-AI-Agent:Model-Version Some-MCP-TOOL
 Co-authored-by: Another Author <another.author@example.com>
-Assisted-by: Some-AI-Agent:Model-Version
 ```
 
-建议优先创建 `Draft Pull Request`，待 rebase 到最新主线、自测结果符合预期、CI 通过后再转为 `Ready for review`。来自外部贡献者的 PR 可能无法自动触发 CI；您可以参考 [CODEOWNERS](.github/CODEOWNERS) 文件，`@` 相应维护者协助手动触发。PR 进入 ready 状态后，我们会开始 review；在此之前，您仍可继续完善内容。
+### Review/CI 流程
+
+建议优先创建 `Draft Pull Request`，待 rebase 到最新主线、自测结果符合预期、CI 通过后再转为 `Ready for review`。
+
+来自外部贡献者的 PR 可能无法自动触发 CI；您可以参考 [CODEOWNERS](.github/CODEOWNERS) 文件 `@` 相应维护者协助手动触发。
+
+PR 进入 ready 状态后，我们会开始 review；在此之前，您仍可继续完善内容。
 
 ## 编译与使用问题
 
 如果您遇到的是 **编译失败、EMU 运行问题、环境配置问题或使用流程问题**，请使用 [`Problem` 模板](https://github.com/OpenXiangShan/XiangShan/issues/new?template=3-problem.yaml)。
 
 如果您判断问题来自某个环境仓库或外部工具，建议直接在对应仓库提交 issue，例如：
+
 - [GSIM](https://github.com/OpenXiangShan/GSIM/issues)
 - [NEMU](https://github.com/OpenXiangShan/NEMU/issues)
 - [difftest](https://github.com/OpenXiangShan/difftest/issues)
@@ -130,6 +156,10 @@ Assisted-by: Some-AI-Agent:Model-Version
 
 - 使用 AI 做翻译、语言润色、行内补全等简单辅助性工作时，无需额外说明。
 - 使用 AI 生成完整的 Bug 报告等文本内容时，请在 issue 正文中说明。
-- 使用 AI 生成完整代码时，请参考 [Linux kernel](https://docs.kernel.org/process/coding-assistants.html#attribution) 的要求，在 commit message 尾部使用 `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` 标签标明：
-  - `AGENT_NAME`：AI 工具/框架/agent 名称，如 Claude、Copilot
-  - `MODEL_VERSION`：AI 工具的模型及版本，如 GPT-4、GPT-3.5
+- 使用 AI 生成完整代码时，请在 commit message 尾部使用 `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` 标签标明：
+  - `AGENT_NAME`：AI 工具/框架/agent 名称，如 Claude、Copilot。
+  - `MODEL_VERSION`：AI 模型及版本，如 GPT-4、GPT-3.5。
+  - `[TOOL]`：额外使用的工具（例如 MCP，skills），如未使用则留空。
+    - 上面的`[]`符号表示此项可选，不应该实际出现在 commit message 中。
+    - 注意，不应该包括 Agent 框架的内置功能或工具如 `exec_command`、`apply_patch` 或 `web_search` 等，也不应该包括构建工具链如 `make`、`mill`、`clang` 或 `verilator` 等。
+  - 例：`Assisted-by: Codex:GPT-6.1-Sol-xhigh github-mcp-server`。

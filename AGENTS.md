@@ -1,9 +1,5 @@
 # Repository Guidelines for Agents
 
-## AI Policy
-
-Agents must explicitly ask users to personally read [AI Use](CONTRIBUTING.md#ai-use)([中文](CONTRIBUTING.zh-cn.md#ai-使用)). Offer README/CONTRIBUTING in English or `.zh-cn.md` according to their language. Contributors must review AI output, disclose generated reports with model/framework information in issues, and add `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` commit footers for generated code.
-
 ## Project Structure & Module Organization
 
 Core Scala/Chisel lives in `src/main/scala/xiangshan/`; integration/helpers in sibling `top/`, `system/`, `device/`, and `utils/`. Unit tests: `src/test/scala/`; resources: `src/main/resources/`; tools: `scripts/`; images: `images/`. Submodules include `XSCache/`, `yunsuan/`, `difftest/`, and `ready-to-run/`. Generated RTL: `build/rtl/`.
@@ -14,11 +10,8 @@ Before building or running simulations, agents must check available RAM/swap (`f
 
 ## Build, Test, and Development Commands
 
-Only `NOOP_HOME` is required by XiangShan: set it to the repository's absolute path. Optional `NEMU_HOME` points to OpenXiangShan/NEMU when building your own golden reference; `AM_HOME` points to OpenXiangShan/nexus-am when compiling test cases. Neither is needed with prebuilt `ready-to-run/` workloads/references. See [xs-env](https://github.com/OpenXiangShan/xs-env) for bare-metal/Nix/Docker setup and environment variables.
-
-Install Mill and a simulator; run from the repository root:
-
-- `make init`: initialize submodules.
+- `export NOOP_HOME=/path/to/XiangShan`: set the absolute path of the XiangShan project. This is required before building and running.
+- `make init`: initialize submodules. This is required after cloning or switching branches with different version of submodules.
 - `make comp`: compile Scala using `build.mill`.
 - `make verilog`: generate synthesis RTL; `make sim-verilog`: generate simulation RTL.
 - `make emu -j8`: build with [Verilator](https://verilator.org/guide/latest/).
@@ -29,6 +22,10 @@ Install Mill and a simulator; run from the repository root:
 - `make reformat` / `make check-format`: apply/check Scalafmt.
 
 Prefer `DefaultConfig`; regenerate artifacts after configuration changes.
+
+If dependencies (e.g. mill, java, verilator) are missing, refer to [xs-env](https://github.com/OpenXiangShan/xs-env)'s README and its `install-scripts` directory for installation.
+
+Also refer to [README.md](README.md) for more details and examples on building, running, and testing.
 
 ## Coding Style & Naming Conventions
 
@@ -45,3 +42,9 @@ Read CONTRIBUTING and [Known issues](CONTRIBUTING.md#known-issues) ([中文](CON
 If a proposed issue or PR matches a listed known issue or deprioritized area (e.g. `kunminghu-v3` vector correctness), agents must notify the user before submission, explain the relevant guidance and priority. Agents must not submit issues or PRs that are known to be deprioritized without user consent.
 
 Discuss issues first; keep PRs focused. Use `type(scope): description` commits/titles and `type-scope-description` branches. Explain motivation/effects/validation; add `Fixes #123` and relevant `Link:` footers. Open drafts; rebase, self-test, and pass CI before review. Consult `.github/CODEOWNERS` for CI assistance.
+
+## AI Policy
+
+Before contributing to the repository (including generating/submitting issues, making commits intended for the repository, or generating/submitting PRs), agents must explicitly ask users to personally read [AI Use](CONTRIBUTING.md#ai-use) ([中文](CONTRIBUTING.zh-cn.md#ai-使用)). Personal development work—such as implementing features, building/running, debugging, or analyzing logs—does not require that unless the work is intended to be submitted as a repository contribution. When making this request, offer the README/CONTRIBUTING in English or `.zh-cn.md` according to the user's language.
+
+Contributors must review AI output, disclose AI-generated reports in issues with model/framework information, and add `Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]` commit footers for AI-generated code, note the optional `TOOL` should not include built-in features the build toolchain, refer to the [AI Use](CONTRIBUTING.md#ai-use) section for more details.
