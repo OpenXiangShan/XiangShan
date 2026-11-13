@@ -412,6 +412,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
   private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
   private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
+  private val s2_teaPsv = if (backendParams.teaPsvEn) {
+    val s1 = RegEnable(io.fromICache.req.bits.teaPsv, s0_fire)
+    RegEnable(s1, s1_fire)
+  } else 0.U
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 
@@ -814,6 +818,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
+  io.toIBuffer.bits.teaPsv                             := s2_teaPsv
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)

@@ -261,6 +261,7 @@ class FetchBlockInfo(implicit p: Parameters) extends ICacheBundle {
 }
 
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
+  val teaPsv:     UInt = UInt((if (backendParams.teaPsvEn) xiangshan.TeaEvent.width else 0).W)
   val firstRange: UInt = UInt(FetchBlockInstNum.W)
   val totalRange: UInt = UInt(FetchBlockInstNum.W)
   // aligned to the fetch coordinate (bit 0 = the first fetched instruction slot)
@@ -335,6 +336,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val pTag:        UInt      = UInt(tagBits.W)
   val isMmio:      Bool      = Bool()
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+  val teaItlbMiss: UInt      = UInt((if (backendParams.teaPsvEn) 1 else 0).W)
 
   val debug_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
   val debug_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())

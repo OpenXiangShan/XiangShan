@@ -15,6 +15,8 @@
 
 FROM ghcr.io/openxiangshan/xs-env:stable
 
+ENV COURSIER_REPOSITORIES=https://repo.maven.apache.org/maven2
+
 # override ENTRYPOINT in verilator image
 ENTRYPOINT [ "/bin/bash" ]
 ENV VERILATOR=/usr/local/bin/verilator-wrap.sh

@@ -127,7 +127,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val uopCanEnqueue = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   val canEnqueue = VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop && in.enq.canAccept))
   val timer = GTimer()
-
   private val traceInstrCountWidth = log2Ceil(RenameWidth + 1)
   private val traceEncodeTable = (1 to RenameWidth).flatMap { instrNum =>
     (0 to instrNum).map(nonRVCNum => (instrNum, nonRVCNum))
@@ -162,6 +161,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
   }
 
+  val hartId = p(XSCoreParamsKey).HartId
   // robEntries enqueue
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
@@ -890,7 +890,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       p"excp $deqHasException flushPipe $isFlushPipe " +
       p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
 
-
   /**
    * Commits (and walk)
    * They share the same width.
@@ -1337,15 +1336,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // debug_inst update
   for (i <- 0 until (LduCnt + StaCnt)) {
-    debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(in.debug_ls.debugLsInfo(i))
-    debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(in.debug_ls.debugLsInfo(i))
+    debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx.value).s1SignalEnable(in.debug_ls.debugLsInfo(i))
+    debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx.value).s2SignalEnable(in.debug_ls.debugLsInfo(i))
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(in.debug_ls.debugLsInfo(i))
   }
   for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(in.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(in.lsTopdownInfo(i))
     debug_lsTopdownInfo(in.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(in.lsTopdownInfo(i))
   }
-
   // status field: writebacked
   // enqueue logic set 6 writebacked to false
 
@@ -2034,6 +2032,213 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val l1Miss = in.debugTopDown.fromCore.fromMem.robHeadMissInDCache
   val l2Miss = in.debugTopDown.fromCore.l2MissMatch
   val l3Miss = in.debugTopDown.fromCore.l3MissMatch
+  val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
+  val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
+  if (!backendParams.teaTrackerEn) {
+    assert(!enableTea.asBool, "TEA tracker was not elaborated; rebuild with WITH_TEA=1")
+  }
+  if (!backendParams.teaCycleStatsEn) {
+    assert(!enableTeaStats.asBool, "TEA cycle stats were not elaborated; rebuild with WITH_TEA_STATS=1")
+  }
+  if (backendParams.teaTrackerEn || backendParams.dipEn || backendParams.teaCycleStatsEn) {
+    val teaCycle = Wire(UInt(64.W))
+    if (!backendParams.teaTrackerEn) {
+      val cycle = RegInit(0.U(64.W))
+      cycle := cycle + 1.U
+      teaCycle := cycle
+    }
+    val teaRedirectPtr = in.redirect.bits.robIdx
+    val teaFlushPtr = deqExceptionRobIdx
+    val teaRedirectCtrlMispred = in.redirect.valid &&
+      in.redirect.bits.debugIsCtrl && in.redirect.bits.isMisPred
+    val teaRedirectMemVio = in.redirect.valid && in.redirect.bits.debugIsMemVio
+    val teaExceptionFlush = out.flushOut.valid && deqHasException && !intrEnable
+    val teaRobFlushEcho = RegNext(out.flushOut.valid, false.B)
+    val hasTeaCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
+    val teaRetired = out.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, count) =>
+      Mux(out.commits.isCommit && valid, count, 0.U)
+    }.reduce(_ +& _)
+    val teaCommits = Wire(Vec(2 * CommitWidth, Valid(new RobPtr)))
+    for (slot <- 0 until 2 * CommitWidth) {
+      teaCommits(slot).valid := out.commits.isCommit && commitSlotValid(slot)
+      teaCommits(slot).bits := out.commits.robIdx(slot / 2)
+      teaCommits(slot).bits.isFormer := (slot % 2 == 0).B
+    }
+    // Recovery events identify the instruction; a compressed slot pointer alone does not.
+    // Control redirects carry the fetch-block PC; memory redirects already carry the instruction PC.
+    val teaRedirectInstrPc = in.redirect.bits.pc +
+      Mux(in.redirect.bits.debugIsCtrl, SignExt(in.redirect.bits.getPcOffset(), GuardedVAddrBits), 0.U)
+    val teaRedirectPc = in.debugInstrAddrTransType.extend(teaRedirectInstrPc(VAddrBits - 1, 0), XLEN)
+    val teaExceptionPc = in.debugInstrAddrTransType.extend(exceptionDebug.pc, XLEN)
+    val teaRedirectPsvDefault = Mux(teaRedirectCtrlMispred, TeaEvent.bit(TeaEvent.FL_MB),
+      Mux(teaRedirectMemVio, TeaEvent.bit(TeaEvent.FL_MO), TeaPsvOps.empty))
+    val teaRedirectPsv = WireDefault(teaRedirectPsvDefault)
+    val teaExceptionPsv = WireDefault(TeaEvent.bit(TeaEvent.FL_EX))
+
+    out.dip.foreach { dip =>
+      dip := 0.U.asTypeOf(new DipRob)
+      dip.cycle := teaCycle
+      dip.retired := teaRetired
+      dip.commits := teaCommits
+      // ROB flush is observed before the later redirect echo clears state.
+      dip.flush.valid := out.flushOut.valid || in.redirect.valid && !teaRobFlushEcho
+      dip.flush.bits.robIdx := Mux(out.flushOut.valid, out.flushOut.bits.robIdx, teaRedirectPtr)
+      dip.flush.bits.self := Mux(out.flushOut.valid, out.flushOut.bits.flushItself(), in.redirect.bits.flushItself())
+      dip.flush.bits.pc := Mux(out.flushOut.valid, teaExceptionPc, teaRedirectPc)
+      dip.flush.bits.cause := Mux(out.flushOut.valid,
+        Mux(teaExceptionFlush, 2.U, Mux(intrEnable, 16.U, 8.U)),
+        Mux(teaRedirectCtrlMispred, 1.U, Mux(teaRedirectMemVio, 4.U, 8.U)))
+    }
+
+    val teaVisibleCause = WireInit(0.U.asTypeOf(new TeaFlushCause))
+    if (backendParams.teaTrackerEn || backendParams.teaCycleStatsEn) {
+      val current = WireInit(0.U.asTypeOf(new TeaFlushCause))
+      when(teaRedirectCtrlMispred || teaRedirectMemVio) {
+        current.valid := true.B
+        current.pc := teaRedirectPc
+        current.psv := teaRedirectPsv
+      }.elsewhen(teaExceptionFlush) {
+        current.valid := true.B
+        current.pc := teaExceptionPc
+        current.psv := teaExceptionPsv
+      }
+      val invalid = out.flushOut.valid || in.redirect.valid && !teaRobFlushEcho
+      val refill = canEnqueue.asUInt.orR && !in.redirect.valid && state =/= s_walk
+      val saved = RegInit(0.U.asTypeOf(new TeaFlushCause))
+      when(current.valid) {
+        saved := current
+      }.elsewhen(invalid || refill) {
+        saved.valid := false.B
+      }
+      teaVisibleCause := saved
+      when(current.valid) {
+        teaVisibleCause := current
+      }.elsewhen(invalid) {
+        teaVisibleCause.valid := false.B
+      }
+    }
+    val teaState = TeaState.classify(isEmpty, state === s_walk || in.redirect.valid,
+      hasTeaCommit, teaVisibleCause.valid)
+    if (backendParams.teaTrackerEn) {
+      case class TeaPsvSetSource(valid: Bool, robIdx: RobPtr, mask: UInt)
+      val teaPsvSetSources = scala.collection.mutable.ArrayBuffer(
+        TeaPsvSetSource(teaRedirectCtrlMispred, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MB)),
+        TeaPsvSetSource(teaRedirectMemVio, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MO)),
+        TeaPsvSetSource(teaExceptionFlush, teaFlushPtr, TeaEvent.bit(TeaEvent.FL_EX))
+      )
+      for (i <- 0 until (LduCnt + StaCnt)) {
+        val lsInfo = in.debug_ls.debugLsInfo(i)
+        teaPsvSetSources += TeaPsvSetSource(lsInfo.s1_isTlbMiss, lsInfo.s1_robIdx, TeaEvent.bit(TeaEvent.ST_TLB))
+        teaPsvSetSources += TeaPsvSetSource(lsInfo.s2_isDcacheFirstMiss, lsInfo.s2_robIdx, TeaEvent.bit(TeaEvent.ST_L1))
+      }
+      val teaSelector = Module(new TeaSampleSelector)
+      teaSelector.io.enable := enableTea.asBool
+      teaSelector.io.samplePeriod := Constantin.createRecord(s"teaSamplePeriod$hartId", 256)
+      teaSelector.io.state := teaState
+      teaSelector.io.flushCause := teaVisibleCause
+      teaCycle := teaSelector.io.cycle
+      val tracker = Module(new TeaMemberTracker(in.writeback.size, teaPsvSetSources.length))
+      // Keep outstanding sampled members alive when new sampling is disabled.
+      val started = RegInit(false.B)
+      when(enableTea.asBool) { started := true.B }
+      tracker.io.enable := enableTea.asBool || started
+      tracker.io.cycle := teaCycle
+      tracker.io.addrTransType := in.debugInstrAddrTransType
+      tracker.io.head := deqPtr
+      tracker.io.redirect := in.redirect
+      tracker.io.readPtr(0) := teaRedirectPtr
+      tracker.io.readPtr(1) := teaFlushPtr
+      tracker.io.readPc(0) := teaRedirectPc
+      tracker.io.readPc(1) := teaExceptionPc
+      teaRedirectPsv := Mux(tracker.io.read(0).valid, tracker.io.read(0).bits, teaRedirectPsvDefault)
+      teaExceptionPsv := Mux(tracker.io.read(1).valid, tracker.io.read(1).bits, TeaEvent.bit(TeaEvent.FL_EX))
+      // Keep the helper input independent of its read-valid outputs used by state classification.
+      tracker.io.markStalled := teaSelector.io.sampleValid && !isEmpty &&
+        state =/= s_walk && !in.redirect.valid && !hasTeaCommit
+      teaSelector.io.stalledTarget := tracker.io.stalled
+
+      for (lane <- 0 until RenameWidth) {
+        val member = in.teaMembers.get(lane)
+        tracker.io.alloc(lane).valid := member.valid && !in.redirect.valid &&
+          VecInit(in.enq.req.zip(canEnqueue).map { case (req, accept) =>
+            accept && req.bits.robIdx.isSameEntry(member.bits.robIdx)
+          }).asUInt.orR
+        tracker.io.alloc(lane).bits := member.bits
+        val req = in.enq.req(lane)
+        tracker.io.enqPsv(lane).valid := uopCanEnqueue(lane) && !in.redirect.valid
+        tracker.io.enqPsv(lane).bits.robIdx := req.bits.robIdx
+        tracker.io.enqPsv(lane).bits.rank := req.bits.debug.get.perfDebugInfo.teaMemberRank
+        tracker.io.enqPsv(lane).bits.mask := req.bits.teaPsv
+      }
+      tracker.io.writeback.zip(in.writeback).foreach { case (sink, source) =>
+        sink.valid := source.valid
+        sink.bits.robIdx := source.bits.robIdx
+        sink.bits.rank := source.bits.perfDebugInfo.get.teaMemberRank
+      }
+      tracker.io.events.zip(teaPsvSetSources).foreach { case (sink, source) =>
+        sink.valid := source.valid
+        sink.bits.robIdx := source.robIdx
+        sink.bits.mask := source.mask
+      }
+      for (entry <- 0 until RobSize) {
+        tracker.io.slotReady(entry)(0) := !robEntries(entry).formerUopNum.orR
+        tracker.io.slotReady(entry)(1) := !robEntries(entry).latterUopNum.orR
+      }
+      tracker.io.commits := teaCommits
+      teaSelector.io.commitMask := VecInit(tracker.io.committed.map(_.valid)).asUInt
+      teaSelector.io.commitPc := VecInit(tracker.io.committed.map(_.bits.pc))
+      teaSelector.io.commitPsv := VecInit(tracker.io.committed.map(_.bits.psv))
+      for (lane <- 0 until CommitWidth) {
+        val observed = PopCount(tracker.io.committed.slice(lane * RenameWidth, (lane + 1) * RenameWidth).map(_.valid))
+        // Entries allocated before ROI have no profiling history.
+        when(out.commits.isCommit && out.commits.commitValid(lane) && observed.orR) {
+          assert(observed ===
+            commitInstrCntByEntry(lane), "TEA members disagree with architectural retirement count")
+        }
+      }
+      val sample = WireInit(teaSelector.io.sample)
+      sample.context.retired := teaRetired
+      // Bit order is part of the trace schema; preserve overlapping raw conditions.
+      sample.context.commitBlockMask := VecInit(Seq(misPredBlock, lastCycleFlush, hasWFI,
+        in.redirect.valid, deqNeedFlush && !deqHasFlushed, deqFlushBlock,
+        criticalErrorState, traceBlock, state === s_walk)).asUInt
+      sample.context.headReady := !isEmpty && robEntries(deqPtr.value).isWritebacked
+      sample.context.headReasonValid := !isEmpty && !hasTeaCommit && out.debugRobHeadStall.get.valid
+      sample.context.headReason := Mux(sample.context.headReasonValid, out.debugRobHeadStall.get.bits, 0.U)
+
+      val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
+      teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)
+      val finalTable = ChiselDB.createTable(s"TeaDelayedFinal_$hartId", new TeaDelayedFinal, basicDB = true)
+      tracker.io.finals.zipWithIndex.foreach { case (res, rank) =>
+        finalTable.log(res, s"member$rank", clock, reset)
+      }
+      finalTable.log(teaSelector.io.drainFinal, "drain", clock, reset)
+    }
+    if (backendParams.teaCycleStatsEn) {
+      val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
+      val teaStatsEnable = enableTeaStats.asBool || enableTea.asBool
+      XSLog.registerCaller { control =>
+        import utility.XSLog.tapOrGet
+        val teaClock = tapOrGet(clock)
+        val teaReset = tapOrGet(reset)
+        withClockAndReset(teaClock, teaReset) {
+          val stats = Module(new TeaCycleStats)
+          stats.io.enable := tapOrGet(teaStatsEnable)
+          stats.io.clean := control.clean
+          stats.io.dump := control.dump
+          stats.io.cycle := tapOrGet(teaCycle)
+          stats.io.state := tapOrGet(teaState)
+          stats.io.retired := tapOrGet(teaRetired)
+          stats.io.gapThreshold := tapOrGet(teaGapThreshold)
+          val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
+          summaryTable.log(stats.io.summary, "summary", teaClock, teaReset)
+          val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
+          intervalTable.log(stats.io.interval, "interval", teaClock, teaReset)
+        }
+      }
+
+    }
+  }
   val ldReason = Mux(l3Miss, LoadMemStall.id.U,
     Mux(l2Miss, LoadL3Stall.id.U,
       Mux(l1Miss, LoadL2Stall.id.U,
@@ -2455,6 +2660,7 @@ object Rob {
 
     // Enqueue requests and admission responses.
     val enq = new RobEnqIO
+    val teaMembers = Option.when(backendParams.teaTrackerEn)(Input(Vec(RenameWidth, Valid(new TeaRenameMember))))
 
     // Execution results without redirect filtering.
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
@@ -2520,6 +2726,7 @@ object Rob {
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
     // ROB occupancy.
     val robFull = Output(Bool())
+    val dip = Option.when(backendParams.dipEn)(Output(new DipRob))
 
     // ROB commit notifications.
     val commits = Output(new RobCommitIO)
