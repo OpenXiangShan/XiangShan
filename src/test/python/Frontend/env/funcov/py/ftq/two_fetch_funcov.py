@@ -39,49 +39,40 @@ _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
 
 _TWO_FETCH_SIGNALS = {
     "ftq_valid": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_valid",
+        'inner_icache.io_fromFtq_toMainPipe_valid',
     ),
     "ftq_ready": (
-        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_ready",
+        'inner_icache.io_fromFtq_toMainPipe_ready',
     ),
     "ftq_req1_valid": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_valid',
     ),
     "ftq_req0_start": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr',
     ),
     "ftq_req1_start": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_vAddr_0_addr",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_vAddr_0_addr',
     ),
     "ftq_req0_ftq_flag": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_flag",
-        "Frontend_top.Frontend.inner_icache."
-        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag',
     ),
     "ftq_req0_ftq_value": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_value",
-        "Frontend_top.Frontend.inner_icache."
-        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value',
     ),
     "ftq_req1_ftq_flag": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_ftqIdx_flag",
-        "Frontend_top.Frontend.inner_icache."
-        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_ftqIdx_flag",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_ftqIdx_flag',
     ),
     "ftq_req1_ftq_value": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_ftqIdx_value",
-        "Frontend_top.Frontend.inner_icache."
-        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_ftqIdx_value",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_ftqIdx_value',
     ),
     "ftq_req0_end": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_endPosition",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_0_endPosition',
     ),
     "ftq_req1_end": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_endPosition",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_endPosition',
     ),
     "ftq_req0_exception": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_hasBackendException",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_0_hasBackendException',
     ),
     "ftq_backend_exception": (
         "Frontend_top.Frontend.inner_ftq.backendException_value",
@@ -120,14 +111,13 @@ _TWO_FETCH_SIGNALS = {
         "inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value",
     ),
     "way_req1_valid": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
+        'inner_icache.io_fromFtq_toMainPipe_bits_req_1_valid',
     ),
     "way_out_valid": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_valid",
+        'inner_icache.io_fromFtq_toMainPipe_valid',
     ),
     "way_out_ready": (
-        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_ready",
+        'inner_icache.io_fromFtq_toMainPipe_ready',
     ),
     "way_real_two": (
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",

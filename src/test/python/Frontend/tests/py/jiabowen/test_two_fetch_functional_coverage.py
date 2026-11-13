@@ -21,7 +21,7 @@ from env.funcov.py.ftq.sampler import (
     _TWO_FETCH_SIGNALS,
     sample_two_fetch_coverage,
 )
-from env.funcov.py.ftq.two_fetch_funcov import _tf_ptr_at_or_after
+from env.funcov.py.ftq.two_fetch_funcov import _tf_ptr_at_or_after, _tf_read
 from env.funcov.py.ifu.cfvec_toffee import IfuCfvecToffeeCoverage
 from env.support.pc_utils import fold_pc
 from env.funcov.py.ftq.checker_funcov import (
@@ -101,6 +101,25 @@ class _FakeDut:
     def set_key(self, key, value):
         self.set(_TWO_FETCH_SIGNALS[str(key)][0], value)
 
+
+
+@pytest.mark.parametrize("key", [
+    "ftq_valid", "ftq_ready", "ftq_req1_valid", "ftq_req0_start",
+    "ftq_req1_start", "ftq_req0_ftq_flag", "ftq_req0_ftq_value",
+    "ftq_req1_ftq_flag", "ftq_req1_ftq_value", "ftq_req0_end",
+    "ftq_req1_end", "ftq_req0_exception", "way_req1_valid", "way_out_valid",
+    "way_out_ready",
+])
+@pytest.mark.parametrize("native,shadow", [(0, 1), (1, 0), (None, 1)])
+def test_ftq_ingress_reads_live_signal_not_toggle(tmp_path, key, native, shadow):
+    recorder, _env, dut = _make_recorder(tmp_path)
+    name = _TWO_FETCH_SIGNALS[key][0]
+    assert name.startswith("inner_icache.io_fromFtq_toMainPipe_")
+    shadow_name = "Frontend_top.Frontend.inner_icache.__Vtogcov__" + name.removeprefix("inner_icache.")
+    dut.set(shadow_name, shadow)
+    if native is not None:
+        dut.set(name, native)
+    assert _tf_read(recorder, key) == native
 
 def _set_raw_two_fetch_window(dut, first_size: int) -> None:
     base = "Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_"

@@ -31,3 +31,29 @@ def test_two_fetch_current_native_aliases_are_readable(env):
         )
         assert offset is not None
         assert values["ifu_req0_size"] == ((offset + 1) & 0x3F)
+
+
+@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")
+def test_ftq_ingress_native_aliases_match_live_sources(env):
+    recorder = env.functional_coverage
+    source_by_key = {
+        'ftq_valid': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_valid',
+        'ftq_ready': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_ready',
+        'ftq_req1_valid': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_1_valid',
+        'ftq_req0_start': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_0_vAddr_0_addr',
+        'ftq_req1_start': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_1_vAddr_0_addr',
+        'ftq_req0_ftq_flag': 'Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_flag',
+        'ftq_req0_ftq_value': 'Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_value',
+        'ftq_req1_ftq_flag': 'Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_1_flag',
+        'ftq_req1_ftq_value': 'Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_1_value',
+        'ftq_req0_end': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_0_endPosition',
+        'ftq_req1_end': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_1_endPosition',
+        'ftq_req0_exception': 'Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_0_hasBackendException',
+    }
+    for _ in range(16):
+        env.step(1)
+        for key, source in source_by_key.items():
+            native = recorder._read_first_dut_signal(env.dut, _TWO_FETCH_SIGNALS[key])
+            live_source = recorder._read_first_dut_signal(env.dut, (source,))
+            assert native is not None and live_source is not None, key
+            assert native == live_source, key
