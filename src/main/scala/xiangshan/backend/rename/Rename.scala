@@ -81,6 +81,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vlReadPorts  = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new RenameOutUop))
+    val dipStall = Option.when(backendParams.dipEn)(Output(UInt(DipCause.width.W)))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
@@ -1012,6 +1013,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val robHeadStall = io.debugRobHeadStall.map(_.valid).getOrElse(false.B)
   val robHeadStallReason = io.debugRobHeadStall.map(_.bits).getOrElse(0.U)
 
+  io.dipStall.foreach { cause =>
+    val waiting = io.in.map(_.valid).reduce(_ || _) && !io.rabCommits.isWalk && !io.vlCommits.isWalk
+    cause := Mux(waiting,
+      Mux(intFlStall || fpFlStall || vecFlStall || vlFlStall, DipCause.bit(DipCause.rename), 0.U) |
+      Mux(lsqStall, DipCause.bit(DipCause.lsq), 0.U), 0.U)
+  }
   val freelistStall = intFlStall || fpFlStall || vecFlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
     robHeadStall   -> robHeadStallReason,

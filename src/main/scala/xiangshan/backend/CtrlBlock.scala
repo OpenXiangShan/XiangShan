@@ -806,6 +806,50 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.in.enq.needAlloc := enqRob.needAlloc
   rob.in.enq.req := enqRob.req
+  if (backendParams.dipEn) {
+    val hartId = p(XSCoreParamsKey).HartId
+    val dip = Module(new DipSampler)
+    dip.io.enable := Constantin.createRecord(s"enableDip$hartId", false).asBool
+    dip.io.period := Constantin.createRecord(s"dipSamplePeriod$hartId", 256)
+    val perf = rob.out.perfInfo.get
+    dip.io.rob.cycle := perf.cycle
+    dip.io.rob.retired := perf.retired
+    dip.io.rob.commits := perf.commits
+    // Ignore the later redirect echo of a ROB-originated flush.
+    dip.io.rob.flush.valid := perf.flush.valid || perf.redirect.valid && !perf.flushEcho
+    dip.io.rob.flush.bits.robIdx := Mux(perf.flush.valid, perf.flush.bits.robIdx, perf.redirect.bits.robIdx)
+    dip.io.rob.flush.bits.self := Mux(perf.flush.valid, perf.flush.bits.self, perf.redirect.bits.self)
+    dip.io.rob.flush.bits.pc := Mux(perf.flush.valid, perf.flush.bits.pc, perf.redirect.bits.pc)
+    dip.io.rob.flush.bits.cause := Mux(perf.flush.valid,
+      Mux(perf.flush.bits.isException, 2.U, Mux(perf.flush.bits.isInterrupt, 16.U, 8.U)),
+      Mux(perf.redirect.bits.isCtrlMispred, 1.U, Mux(perf.redirect.bits.isMemVio, 4.U, 8.U)))
+    dip.io.dispatch := dispatch.io.dip.get
+    // The pipe's valid registers clear on the redirect edge; these lanes are
+    // already cancelled, including the delayed echo of a ROB-originated flush.
+    when(s1_s3_redirect.valid) {
+      dip.io.dispatch.validMask := 0.U
+      dip.io.dispatch.fireMask := 0.U
+    }
+    val renameCause = RegNext(rename.io.dipStall.get, 0.U)
+    when(!dispatch.io.dip.get.validMask.orR) {
+      dip.io.dispatch.stallCause := renameCause
+    }
+    for (lane <- 0 until RenameWidth) {
+      dip.io.dispatch.uops(lane).pc := rob.in.debugInstrAddrTransType.extend(
+        dispatch.io.dip.get.uops(lane).pc(VAddrBits - 1, 0), XLEN)
+    }
+    val table = ChiselDB.createTable(s"Dip_$hartId", new DipEntry, basicDB = true)
+    table.log(dip.io.trace, "", clock, reset)
+    val finalTable = ChiselDB.createTable(s"DipDelayedFinal_$hartId", new DipDelayedFinal, basicDB = true)
+    dip.io.finals.zipWithIndex.foreach { case (event, lane) =>
+      finalTable.log(event, s"event$lane", clock, reset)
+    }
+  } else {
+    val hartId = p(XSCoreParamsKey).HartId
+    val enableDip = Constantin.createRecord(s"enableDip$hartId", false)
+    assert(!enableDip.asBool, "DIP was not elaborated; rebuild with WITH_DIP=1")
+  }
+
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpFp  := io.toDispatch.wakeUpFp
