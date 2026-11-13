@@ -22,22 +22,27 @@
 
 [更多论文](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
 
-## 分支维护情况
+## 版本
 
-| 代际-版本 | 分支                                                                                    | 维护?        | 开发?        |
-| --------- | --------------------------------------------------------------------------------------- | ------------ | ------------ |
-| 雁栖湖    | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                      | ✅(minimum)  |              |
-| 南湖-V2   | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                          | ✅(minimum)  |              |
-| 南湖-V3   | [Siudya/Nanhu](https://github.com/Siudya/Nanhu/tree/main)                               |              |              |
-| 南湖-V5   | [OpenXiangShan-Nanhu/OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | ✅           | ✅           |
-| 昆明湖-V2 | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)            | ✅           |              |
-| 昆明湖-V3 | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)            | ✅           | ✅           |
+| 代际-版本       | 分支                                                                                        | 维护? | 开发? | [流片?](https://docs.xiangshan.cc/zh-cn/latest/tapeout/)                                    |
+| --------------- | ------------------------------------------------------------------------------------------- | ----- | ----- | ------------------------------------------------------------------------------------------- |
+| 雁栖湖 (YQH)    | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                          | basic |       | ✅ [微核芯 & 鹏城实验室](https://docs.xiangshan.cc/zh-cn/latest/tapeout/#gen1-yanqihu-yqh)   |
+| 南湖 (NH)-V2    | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                              | basic |       | ✅ 企业 A<br>✅ 企业 B                                                                        |
+| 南湖 (NH)-V3    | [OpenXiangShan-Nanhu/<br>Nanhu-V3](https://github.com/OpenXiangShan-Nanhu/Nanhu-V3)         | basic |       | ✅ [芯动科技](https://docs.xiangshan.cc/zh-cn/latest/tapeout/#v3-nanhu-v3)<br>✅ 企业 B       |
+| 南湖 (NH)-V5    | [OpenXiangShan-Nanhu/<br>OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | basic |       |                                                                                             |
+| 昆明湖 (KMH)-V1 | [kunminghu](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu/)                     | basic |       | ✅ 企业 C                                                                                    |
+| 昆明湖 (KMH)-V2 | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)                | ✅     |       | ✅ [进迭时空](https://docs.xiangshan.cc/zh-cn/latest/tapeout/#v2-kunminghu-v2)<br>更多进行中 |
+| 昆明湖 (KMH)-V3 | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)                | ✅     | ✅     |                                                                                             |
 
-目前昆明湖 V3 仍处于快速迭代阶段，功能不稳定，如您希望基于香山进行研究、验证或应用，建议优先考虑昆明湖 V2。
+我们推荐根据您的需求使用不同的版本：
+
+- `nanhu-v5` 适用于性能与能效均衡的应用场景。
+- `kunminghu-v2` 适用于下游研究、定制及高性能 / RVA23 兼容的应用场景。
+- `kunminghu-v3` 适用于改进香山本身。请注意，目前 `kunminghu-v3` 仍在快速迭代中，其功能可能尚未稳定。请同时阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 获取更多信息。
 
 本节内容时效性较强，如果您认为内容可能过时，欢迎在 issue 中提出，我们会尽快更新。
 
-更新日期：2026/06/30
+更新日期：2026/11/20
 
 ## 目录概览
 
