@@ -17,8 +17,9 @@ PAYLOAD = ['index', 'tag', 'offset', 'region']
 PIPE = ['s1_valid', 's1_update', 's1_index', 's2_valid', 's2_update', 's2_index', 's3_valid', 's3_update', 'raw_hazard', 'write_busy']
 
 
-def queue_owners(rows, policy):
+def queue_owners(rows, policy, read_policy='hold_empty'):
     assert policy in ['update_priority', 'existing_S1_type_alternation']
+    assert read_policy in ['hold_empty', 'advance_empty']
     slots, reads, writes, sequence = [[None] * 4 for _ in range(2)], [0, 0], [0, 0], [0, 0]
     owners, observations = [], []
     previous = -1
@@ -66,12 +67,15 @@ def queue_owners(rows, policy):
                     blocker = 4
                 assert blocker
             before = sum(owner is not None for owner in slots[q])
+            advance_empty = read_policy == 'advance_empty' and before > 0 and head is None
             departed, overwritten = None, None
             if row['output']:
                 assert head is not None
                 departed = head['id']
                 head.update(fate='served', end_cycle=cycle, residence_cycles=cycle - head['input_cycle'])
                 slots[q][reads[q]] = None
+                reads[q] = (reads[q] + 1) & 3
+            elif advance_empty:
                 reads[q] = (reads[q] + 1) & 3
             if row['input']:
                 slot = writes[q]
@@ -91,7 +95,7 @@ def queue_owners(rows, policy):
             assert row['input'] - row['output'] == int(overwritten is not None) + after - before
             observations.append(dict(core_cycle=cycle, queue=q, input=row['input'], output=row['output'], overwritten=overwritten,
                                      served=departed, occupancy_before=before, occupancy_after=after, blocked_reason_mask=blocker,
-                                     occupied_with_invalid_head=bool(before and head is None)))
+                                     occupied_with_invalid_head=bool(before and head is None), empty_head_advance=bool(advance_empty)))
     for q in range(2):
         members = [o for o in owners if o['queue'] == q]
         counts = Counter(o['fate'] for o in members)
@@ -110,7 +114,9 @@ def analyze(folder, receipt):
     expected = [(r['core_cycle'], r['clean'], r['native_dump']) for r in read(folder / 'load-service-probe.csv') if r['lane'] == 3]
     for q in range(2):
         assert [(r['core_cycle'], r['clean'], r['native_dump']) for r in rows if r['kind'] == 0 and r['queue'] == q] == expected, 'PHT boundary differs from native/S2'
-    owners, observations = queue_owners(rows, binding['policy'])
+    # Existing abf captures used the original hold-on-empty read-pointer policy.
+    read_policy = binding.get('queue_read_policy', 'hold_empty')
+    owners, observations = queue_owners(rows, binding['policy'], read_policy)
     native = read_blocks(folder / 'simulator_err.txt')
     for phase in output['phases']:
         begin, end = phase['begin_core_exclusive'], phase['end_core_inclusive']
@@ -138,6 +144,7 @@ def analyze(folder, receipt):
                                 start_owner_ids=start, finish_owner_ids=finish, overwritten_owner_ids=[o['id'] for o in lost],
                                 jointly_partitioned_head_block_cycles={str(k): v for k, v in sorted(masks.items())},
                                 occupied_with_invalid_head_cycles=sum(r['occupied_with_invalid_head'] for r in selected),
+                                empty_head_pointer_advance_cycles=sum(r['empty_head_advance'] for r in selected),
                                 served_request_queue_residence=hist_stats(hist) if hist else dict(count=0, histogram={}),
                                 served_owners_inserted_at_or_before_window=sum(o['input_cycle'] <= begin for o in served), input_cohort_fates=dict(cohorts),
                                 conservation_passed=True)
@@ -179,7 +186,7 @@ def analyze(folder, receipt):
             assert abs(sum(sum(p['DIP_CPI_contribution'].values()) + p['DIP_Unresolved_CPI_contribution'] for p in partitions.values()) - cpi) < 1e-9
         phase['PHT_sampled_joint'] = dict(native_CPI=cpi, sampled_cycles=len(samples), partitions=partitions,
                                          mask_semantics='Lookup blockers bits0..2,update blockers bits3..5,occupied-invalid-head bits6/7; zero includes idle or unblocked service. Same-source-cycle association only; full later DIP finals are replayed independently for every group. TEA and DIP budgets each sum to own CPI and must not be added.')
-    output.update(PHT_policy=binding['policy'], PHT_queue_owners=owners,
+    output.update(PHT_policy=binding['policy'], PHT_queue_read_policy=read_policy, PHT_queue_owners=owners,
                   PHT_scope='Every physical slot write starts a distinct host generation. Same-cycle departures precede writes; overwritten owners and capture-end pending owners remain distinct. Joint blocker bits:1=S2 same-index RAW,2=S3 RAM write busy,4=other queue selected with pipeline ready. Module cycles and request residence are not CPU lost cycles; served events do not prove useful prefetches or unique training/load causality.')
     return output
 

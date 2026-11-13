@@ -34,6 +34,16 @@ def add_capture(root, header, cpp):
     qtext = queue_source.read_text()
     assert 'when(r && io.out.fire)' in qtext and 'when(io.in.valid && w)' in qtext
     assert qtext.index('v := false.B') < qtext.index('v := true.B')
+    compact = re.sub(r'\s+', '', qtext)
+    assert 'io.out.valid:=Mux1H(r_mask,valids)' in compact and 'io.out.bits:=Mux1H(r_mask,entries)' in compact
+    assert 'valr_mask=(0untiln).map(i=>i.U===rd_ptr)' in compact
+    assert compact.count('rd_ptr:=rd_ptr+1.U') == 1
+    if 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
+        assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
+        read_policy = 'advance_empty'
+    else:
+        assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}' in compact
+        read_policy = 'hold_empty'
     generated = subprocess.check_output(['rg', '-l', '-F', *sum((['-e', 'sms_pht_' + k + 'Counter + '] for k in ['lookup_in', 'lookup_out', 'evict_in', 'evict_out']), []), str(root / 'build/gsim-compile/model'), '--glob', '*.cpp'], text=True).splitlines()
     equations = '\n'.join(Path(p).read_text() for p in generated)
     event = {}
@@ -95,12 +105,14 @@ static void pht_observe(SSimTop *model) {
   assert(outputs[1]==unsigned(update&&ready&&select_update));
   for(unsigned q=0;q<2;++q) {
     const unsigned mask=masks[q],r=reads[q],w=writes[q],in=inputs[q],out=outputs[q];
+    const bool advance_empty=ADVANCE_EMPTY;
+    assert(!(out&&advance_empty));
     assert(mask==pq_committing_mask[q]&&r==pq_committing_read[q]&&w==pq_committing_write[q]);
     if(!pq_seen) assert(mask==0);
     for(unsigned slot=0;slot<4;++slot) if(mask>>slot&1) for(unsigned k=0;k<4;++k) assert(data[q][slot][k]==pq_committing[q][slot][k]);
     assert(!out||(mask>>r&1));
     const unsigned expected_mask=(mask&~(out?1u<<r:0))|(in?1u<<w:0);
-    assert(next_masks[q]==expected_mask&&next_reads[q]==((r+out)&3)&&next_writes[q]==((w+in)&3));
+    assert(next_masks[q]==expected_mask&&next_reads[q]==((r+out+unsigned(advance_empty))&3)&&next_writes[q]==((w+in)&3));
     for(unsigned slot=0;slot<4;++slot) if(expected_mask>>slot&1) if(!(in&&slot==w)) for(unsigned k=0;k<4;++k) assert(next[q][slot][k]==data[q][slot][k]);
     const uint64_t zero[4]{};
     const uint64_t *head=(mask>>r&1)?data[q][r]:zero,*incoming=in?next[q][w]:zero;
@@ -115,12 +127,13 @@ static void pht_observe(SSimTop *model) {
 }
 '''
     replacements = dict(NEXT_DATA=tensor(nxt), CURRENT_DATA=tensor(current), MASKS=array(masks), NEXT_MASKS=array(next_masks), READS=array(reads), WRITES=array(writes), NEXT_READS=array(next_reads), NEXT_WRITES=array(next_writes), INPUTS=array([event['lookup_in'], event['evict_in']]), OUTPUTS=array([event['lookup_out'], event['evict_out']]), PIPE=array(values), SELECT_UPDATE='update' if policy == 'update_priority' else 'update&&(!lookup||!pipe[0]||!pipe[1])')
+    replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1))' if read_policy == 'advance_empty' else 'false'
     for name in sorted(replacements, key=len, reverse=True):
         helper = helper.replace(name, replacements[name])
     for old, new in [('static void sms_snapshot(SSimTop *model)', helper + '\nstatic void sms_snapshot(SSimTop *model)'), ('  sms_snapshot(model);', '  pht_snapshot(model);\n  sms_snapshot(model);'), ('  sms_observe(model);', '  sms_observe(model);\n  pht_observe(model);')]:
         assert cpp.count(old) == 1, old
         cpp = cpp.replace(old, new)
-    return cpp, dict(queue_slots=4, policy=policy, actual_counter_events=event, current_NEXT_and_queue_equations_asserted=True, service_selection_and_hazards_asserted=True, new_RTL_state_bits=0, bindings=bindings, source_sha256={str(p): digest(p) for p in [source, queue_source, *map(Path, generated)]}, scope='Physical four-slot owners, input generations, pre-write departures and overwrite fates. Wait masks are module cycles, not CPU loss; PHT index/tag are not full PC or unique load causality.')
+    return cpp, dict(queue_slots=4, policy=policy, queue_read_policy=read_policy, actual_counter_events=event, current_NEXT_and_queue_equations_asserted=True, service_selection_and_hazards_asserted=True, new_RTL_state_bits=0, bindings=bindings, source_sha256={str(p): digest(p) for p in [source, queue_source, *map(Path, generated)]}, scope='Physical four-slot owners, input generations, pre-write departures and overwrite fates. Wait masks are module cycles, not CPU loss; PHT index/tag are not full PC or unique load causality.')
 
 
 def build(proof_path, output):
@@ -142,7 +155,7 @@ def build(proof_path, output):
             subprocess.run(command, stdout=out, stderr=err, check=True)
     for name, value in previous['original_sha256'].items():
         assert digest(Path(name)) == value, name
-    proof = dict(previous, binary=str(output / 'emu'), binary_sha256=digest(output / 'emu'), commands=commands, probe_cpp_sha256=digest(output / 'probe.cpp'), generator_sha256=digest(Path(__file__)), base_targeted_build_proof_sha256=digest(proof_path), SMS_PHT_binding=binding)
+    proof = dict(previous, binary=str(output / 'emu'), binary_sha256=digest(output / 'emu'), commands=commands, probe_cpp_sha256=digest(output / 'probe.cpp'), generator_sha256=digest(Path(__file__)), base_targeted_build_proof_sha256=digest(proof_path), SMS_PHT_binding=binding, scope='Eight source-qualified S2/WB/SMS/PHT CSVs, with actual source-bound read-pointer policy and NEXT equations. Host-only observer; own-source execution neutrality, semantics and cost require closed calibration.')
     (output / 'build-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
     return proof
 
