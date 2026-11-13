@@ -281,7 +281,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   val l3_ratio_const = Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
   val l3_ratio = l3_ratio_const(3, 0)
 
-  val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
+  val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 16)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
   val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) 
 
