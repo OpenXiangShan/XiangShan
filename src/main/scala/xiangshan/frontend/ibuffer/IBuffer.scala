@@ -30,6 +30,7 @@ import utility.XSDebug
 import utility.XSError
 import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
+import xiangshan.PerfFrontend
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
@@ -175,7 +176,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   allowEnq := io.in.bits.prevInstrCount < nextNumInvalid
 
   private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
-  private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
+  private val packetPerfPsvVec = if (backendParams.perfPsvEn) {
+    val carrierMask = io.in.bits.valid.asBools.zip(io.in.bits.enqEnable.asBools).map {
+      case (valid, enqEnable) => valid && enqEnable
+    }
+    PerfFrontend.bindPacketPsv(carrierMask, io.in.bits.perfPsv)
+  } else VecInit.fill(EnqueueWidth)(0.U(0.W))
+  private val enqData = VecInit.tabulate(EnqueueWidth) { i =>
+    val entry = Wire(new IBufEntry).fromFetch(io.in.bits, i)
+    entry.perfPsv := packetPerfPsvVec(i)
+    entry
+  }
   private val enqBankOffset =
     WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
   private val enqBankEntrys =

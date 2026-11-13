@@ -45,6 +45,11 @@ case class BackendParams(
     debugOpts.EnableDifftest || debugOpts.FullBasicDiff
   }
 
+  def teaTrackerEn(implicit p: Parameters): Boolean = debugEn && p(DebugOptionsKey).EnableTeaTracker
+  def dipEn(implicit p: Parameters): Boolean = debugEn && p(DebugOptionsKey).EnableDipSampler
+  def teaCycleStatsEn(implicit p: Parameters): Boolean = debugEn && p(DebugOptionsKey).EnableTeaCycleStats
+  def perfPsvEn(implicit p: Parameters): Boolean = teaTrackerEn || dipEn
+
   def regCacheEn: Boolean = true
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
