@@ -41,8 +41,13 @@ def add_capture(root, header, cpp):
     if 'valadvance_empty_head=!io.out.valid&&io.out.ready&&valids.reduce(_||_)' in compact:
         assert policy == 'update_priority'
         assert 'evict.ready := !s1_valid || !s1_wait' in text
-        assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
-        read_policy = 'advance_empty_ready'
+        if 'valnext_valid_ptr=Mux1H(' in compact:
+            assert 'valnext_valid_ptr=Mux1H((0untiln).map(i=>i.U===rd_ptr),(0untiln).map(i=>PriorityMux((1untiln).map(j=>valids((i+j)%n)->((i+j)%n).U(log2Up(n).W)))))' in compact
+            assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}.elsewhen(advance_empty_head){rd_ptr:=next_valid_ptr}' in compact
+            read_policy = 'advance_nearest_ready'
+        else:
+            assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
+            read_policy = 'advance_empty_ready'
     elif 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
         assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
         read_policy = 'advance_empty'
@@ -117,7 +122,7 @@ static void pht_observe(SSimTop *model) {
     for(unsigned slot=0;slot<4;++slot) if(mask>>slot&1) for(unsigned k=0;k<4;++k) assert(data[q][slot][k]==pq_committing[q][slot][k]);
     assert(!out||(mask>>r&1));
     const unsigned expected_mask=(mask&~(out?1u<<r:0))|(in?1u<<w:0);
-    assert(next_masks[q]==expected_mask&&next_reads[q]==((r+out+unsigned(advance_empty))&3)&&next_writes[q]==((w+in)&3));
+    assert(next_masks[q]==expected_mask&&next_reads[q]==EXPECTED_READ_SLOT&&next_writes[q]==((w+in)&3));
     for(unsigned slot=0;slot<4;++slot) if(expected_mask>>slot&1) if(!(in&&slot==w)) for(unsigned k=0;k<4;++k) assert(next[q][slot][k]==data[q][slot][k]);
     const uint64_t zero[4]{};
     const uint64_t *head=(mask>>r&1)?data[q][r]:zero,*incoming=in?next[q][w]:zero;
@@ -133,8 +138,11 @@ static void pht_observe(SSimTop *model) {
 '''
     replacements = dict(NEXT_DATA=tensor(nxt), CURRENT_DATA=tensor(current), MASKS=array(masks), NEXT_MASKS=array(next_masks), READS=array(reads), WRITES=array(writes), NEXT_READS=array(next_reads), NEXT_WRITES=array(next_writes), INPUTS=array([event['lookup_in'], event['evict_in']]), OUTPUTS=array([event['lookup_out'], event['evict_out']]), PIPE=array(values), SELECT_UPDATE='update' if policy == 'update_priority' else 'update&&(!lookup||!pipe[0]||!pipe[1])')
     replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1))' if read_policy == 'advance_empty' else 'false'
-    if read_policy == 'advance_empty_ready':
+    if read_policy in ['advance_empty_ready', 'advance_nearest_ready']:
         replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1)&&(q==0?ready&&!update:ready))'
+    replacements['EXPECTED_READ_SLOT'] = '((r+out+unsigned(advance_empty))&3)'
+    if read_policy == 'advance_nearest_ready':
+        replacements['EXPECTED_READ_SLOT'] = '([&](){unsigned target=r;if(out)target=(r+1)&3;else if(advance_empty)for(unsigned step=1;step<4;++step)if(mask>>((r+step)&3)&1){target=(r+step)&3;break;}return target;}())'
     for name in sorted(replacements, key=len, reverse=True):
         helper = helper.replace(name, replacements[name])
     for old, new in [('static void sms_snapshot(SSimTop *model)', helper + '\nstatic void sms_snapshot(SSimTop *model)'), ('  sms_snapshot(model);', '  pht_snapshot(model);\n  sms_snapshot(model);'), ('  sms_observe(model);', '  sms_observe(model);\n  pht_observe(model);')]:
