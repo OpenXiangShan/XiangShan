@@ -44,6 +44,7 @@ object ArgParser {
       |--with-iommu
       |--fpga-platform
       |--reset-gen
+      |--enable-dip
       |--enable-difftest
       |--full-basicdiff
       |--enable-log
@@ -129,6 +130,10 @@ object ArgParser {
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableConstantin = true)
+          }), tail)
+        case "--enable-dip" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDipSampler = true)
           }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -289,6 +294,9 @@ object ArgParser {
         perfDBHartID = 0
       )
     })
+    val debug = config(DebugOptionsKey)
+    require(!debug.EnableDipSampler || debug.EnableDifftest || debug.FullBasicDiff,
+      "DIP profiling requires --enable-difftest or --full-basicdiff")
     (config, firrtlOpts, firtoolOpts ++ firtoolOptions.map(_.option))
   }
 }
