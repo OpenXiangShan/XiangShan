@@ -35,7 +35,8 @@ def add_capture(root, header, cpp):
     assert 'train_filter.io.enable := true.B' in sms_source and 'train_filter.io.flush := false.B' in sms_source
     assert 'train_filter.io.trainReq.ready := true.B' in sms_source
     line, = [line for line in sms_source.splitlines() if 'val train_filter = Module(new TrainFilter(' in line]
-    qualified = 'matchPc = true' in line
+    qualified = 'matchPcBits = PHT_INDEX_BITS + 2 + PHT_TAG_BITS' in line
+    assert 'matchPc' not in line or qualified, line
     helper = r'''
 static FILE *sa_file=nullptr;
 static unsigned sa_hash(uint64_t va) {

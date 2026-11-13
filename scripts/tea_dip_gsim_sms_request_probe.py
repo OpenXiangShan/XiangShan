@@ -27,6 +27,7 @@ def add_capture(root,header,cpp):
         current.append([field(base+name,width)for name,width in regs])
         next_values.append([field(base+name+'$NEXT',width)for name,width in regs])
     helper=r'''
+#include <cstring>
 static uint64_t sms_next[2][3]{},sms_prior_stage0[3]{},sms_prior_input[3]{};
 static bool sms_seen=false,sms_input_seen=false;
 static uint64_t sms_last_core=0;
@@ -72,9 +73,9 @@ static void sms_observe(SSimTop *model) {
     for label,values in [('SMS_CURRENT_VALUES',current),('SMS_NEXT_VALUES',next_values)]:
         helper=helper.replace(label,','.join('{'+','.join('uint64_t('+v+')'for v in stage)+'}'for stage in values))
     helper=helper.replace('FIRE',' && '.join(fire))
-    for old,new in [('static void lineage_snapshot(SSimTop *model)',helper+'\nstatic void lineage_snapshot(SSimTop *model)'),
-                    ('  lineage_snapshot(model);','  sms_snapshot(model);\n  lineage_snapshot(model);'),
-                    ('  lineage_observe(model);','  lineage_observe(model);\n  sms_observe(model);')]:
+    for old,new in [('static Context context{};','static Context context{};\n'+helper),
+                    ('  in_step = true; __real_','  sms_snapshot(model);\n  in_step = true; __real_'),
+                    ('  assert(context.clean == ','  sms_observe(model);\n  assert(context.clean == ')]:
         assert cpp.count(old)==1,old
         cpp=cpp.replace(old,new)
     # The actual generated native equation defines SMS fire. Preserve this source proof.

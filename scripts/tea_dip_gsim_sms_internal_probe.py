@@ -135,8 +135,8 @@ static void sms_internal_observe(SSimTop *model) {
     sources = [root / 'src/main/scala/xiangshan/mem/prefetch' / name
                for name in ['SMSPrefetcher.scala', 'L1PrefetchComponent.scala', 'PrefetcherWrapper.scala']]
     sources.append(root / 'utility/src/main/scala/utility/FastArbiter.scala')
-    generated = root / 'build/gsim-compile/model/SimTop129.cpp'
-    text = generated.read_text()
+    generated = [Path(p) for p in subprocess.check_output(['rg', '-l', '-F', '-e', 'SMS_train_filter_deqCounter + ', '-e', 'sms_pf_filter_recv_reqCounter + ', '-e', expressions['GEN_ACCEPTED'].removeprefix('model->'), str(root / 'build/gsim-compile/model'), '--glob', '*.cpp'], text=True).splitlines()]
+    text = '\n'.join(p.read_text() for p in generated)
     assert 'SMS_train_filter_deqCounter + ((uint64_t)' + expressions['TRAIN_VALID'].removeprefix('model->') + ')' in text
     assert 'sms_pf_filter_recv_reqCounter + ((uint64_t)' + expressions['GEN_RAW'].removeprefix('model->') + ')' in text
     assert expressions['GEN_ACCEPTED'].removeprefix('model->') in text
@@ -144,7 +144,7 @@ static void sms_internal_observe(SSimTop *model) {
                      filter_region_bytes=1024, filter_blocks=16, block_bytes=64,
                      current_NEXT_commits_asserted=True, actual_filter_allocation_edges=True,
                      actual_arbiter_departure_owner_asserted=True, bindings=bindings,
-                     source_sha256={str(p): digest(p) for p in [*sources, generated]}, new_RTL_state_bits=0,
+                     source_sha256={str(p): digest(p) for p in [*sources, *generated]}, new_RTL_state_bits=0,
                      scope='Actual training dequeue, raw/accepted filter generation, physical filter owner states and actual arbiter departures. Consecutive-tag-suppressed generation retains an explicit unknown payload. PC is a20-bit training tag, not full retired PC; generation causality from a particular training event is not inferred.')
 
 
