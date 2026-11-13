@@ -10,6 +10,7 @@ import sqlite3
 import sys
 
 from native_perf import read_blocks
+from tea_dip_clock_alignment import core_native_alignment
 from tea_dip_query_endpoint_evidence import digest, verify
 from tea_dip_wb_protocol_micro import write
 
@@ -33,6 +34,9 @@ def analyze(folder, receipt_path, gap_bounds):
     assert cycles == end - begin and retired > 0
     with sqlite3.connect((folder / 'simulator.db').resolve().as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
+        clock = core_native_alignment(db, folder / 'simulator_err.txt')
+        begin -= clock['core_to_native_offset']
+        end -= clock['core_to_native_offset']
         rows = list(db.execute('SELECT * FROM TeaNoCommit_0 ORDER BY START,ID'))
         first = db.execute('SELECT * FROM TeaCycleSummary_0 WHERE CYCLE>=? AND CYCLE<=? ORDER BY CYCLE,ID LIMIT 1', (begin, end)).fetchone()
         last = db.execute('SELECT * FROM TeaCycleSummary_0 WHERE CYCLE>=? AND CYCLE<=? ORDER BY CYCLE DESC,ID DESC LIMIT 1', (begin, end)).fetchone()
@@ -63,9 +67,10 @@ def analyze(folder, receipt_path, gap_bounds):
                           complete_cycles=observed, contribution_lower=low / retired,
                           contribution_upper=high / retired))
     return dict(point=folder.name, source=receipt['source'], native_cycles=cycles, native_retired=retired,
-                roi_begin=begin, roi_end=end, bands=bands, threshold_bounds=thresholds,
+                roi_begin=begin, roi_end=end, clock_alignment=clock, bands=bands, threshold_bounds=thresholds,
                 receipt_sha256=digest(receipt_path), tool_sha256=digest(Path(__file__)),
-                scope='Complete interval counts exclude censored and ROI-crossing gaps. Contribution bounds '
+                scope='ROI and interval coordinates use the measured core clock. Complete interval counts exclude '
+                      'censored and ROI-crossing gaps. Contribution bounds '
                       'retain ROI edges and unreported tails. Band extrema are marginal, not simultaneous or '
                       'confidence intervals. Gaps shorter than128 cycles are not individually logged. No PC '
                       'latency, additive TEA/DIP budget, causal counterfactual or hardware expansion is inferred.')
