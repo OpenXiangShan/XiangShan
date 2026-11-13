@@ -17,7 +17,7 @@ class OverrideableQueue[T <: Data](gen: T, n: Int) extends Module {
     wr_ptr := wr_ptr + 1.U
   }
   // Overwrites can leave the read head empty while other slots remain valid.
-  val advance_empty_head = !io.out.valid && valids.reduce(_ || _)
+  val advance_empty_head = !io.out.valid && io.out.ready && valids.reduce(_ || _)
   when(io.out.fire || advance_empty_head){
     rd_ptr := rd_ptr + 1.U
   }
