@@ -10,11 +10,8 @@ Before building or running simulations, agents must check available RAM/swap (`f
 
 ## Build, Test, and Development Commands
 
-Only `NOOP_HOME` is required by XiangShan: set it to the repository's absolute path. Optional `NEMU_HOME` points to OpenXiangShan/NEMU when building your own golden reference; `AM_HOME` points to OpenXiangShan/nexus-am when compiling test cases. Neither is needed with prebuilt `ready-to-run/` workloads/references. See [xs-env](https://github.com/OpenXiangShan/xs-env) for bare-metal/Nix/Docker setup and environment variables.
-
-Install Mill and a simulator; run from the repository root:
-
-- `make init`: initialize submodules.
+- `export NOOP_HOME=/path/to/XiangShan`: set the absolute path of the XiangShan project. This is required before building and running.
+- `make init`: initialize submodules. This is required after cloning or switching branches with different version of submodules.
 - `make comp`: compile Scala using `build.mill`.
 - `make verilog`: generate synthesis RTL; `make sim-verilog`: generate simulation RTL.
 - `make emu -j8`: build with [Verilator](https://verilator.org/guide/latest/).
@@ -25,6 +22,10 @@ Install Mill and a simulator; run from the repository root:
 - `make reformat` / `make check-format`: apply/check Scalafmt.
 
 Prefer `DefaultConfig`; regenerate artifacts after configuration changes.
+
+If dependencies (e.g. mill, java, verilator) are missing, refer to [xs-env](https://github.com/OpenXiangShan/xs-env)'s README and its `install-scripts` directory for installation.
+
+Also refer to [README.md](README.md) for more details and examples on building, running, and testing.
 
 ## Coding Style & Naming Conventions
 
