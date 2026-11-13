@@ -399,7 +399,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       alt.hitWayMaskOH := Mux(meta.hasAlt, UIntToOH(meta.altWayIdx, MaxNumWays), 0.U)
       alt.tag          := t2_rawTag(meta.altTableIdx) ^ position
       alt.takenCtr     := meta.altTakenCtr
-      // Alternate training never writes useful SRAM. Its useful counter is unavailable on the meta path.
+      // Alternate training never writes useful. Its trace value is unavailable when useMeta is true.
       alt.usefulCtr := UsefulCounter.Zero
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
@@ -445,7 +445,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // When the weak provider and alternate/base disagree, exactly one of them is correct.
     val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
     val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
-    val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
+    val decUseAltOnNa   = trainUseAltOnNa && altOrBasePred =/= actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
@@ -459,6 +459,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.providerEntry.takenCtr := providerNewTakenCtr
     trainInfo.providerOldUsefulCtr   := provider.usefulCtr
     trainInfo.providerNewUsefulCtr   := providerNewUsefulCtr
+    trainInfo.incProviderUsefulCtr   := incProviderUsefulCtr
 
     trainInfo.hasAlt            := hasAlt
     trainInfo.useAlt            := useAlt
@@ -581,61 +582,63 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
-    val writeWayMask    = Wire(Vec(NumWays, Bool()))
-    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
-    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
-    val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
-    val actualTakenMask = Wire(Vec(NumWays, Bool()))
+    table.io.writeReq.zipWithIndex.foreach { case (writeReq, wayIdx) =>
+      // These masks select training branches and may be all zero when no update is needed.
+      val providerUpdateCtrBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+      }.asUInt
+      val providerUpdateUsefulBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+      }.asUInt
+      val altUpdateCtrBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
+      }.asUInt
 
-    (0 until NumWays).foreach { wayIdx =>
-      val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t3_trainInfoVec.map { info =>
-        val providerNeedUpdateCtr =
-          info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val providerNeedUpdateUseful =
-          info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val altNeedUpdateCtr = info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
-        (providerNeedUpdateCtr, providerNeedUpdateUseful, altNeedUpdateCtr)
-      }.unzip3
+      val providerUpdateBranchOH = providerUpdateCtrBranchOH | providerUpdateUsefulBranchOH
+      val altUpdateBranchOH      = altUpdateCtrBranchOH
+      val updateBranchOH         = providerUpdateBranchOH | altUpdateBranchOH
 
-      val hitProvider = providerWriteCtr.reduce(_ || _) || providerWriteUseful.reduce(_ || _)
-      val hitProviderMask = (providerWriteCtr zip providerWriteUseful).map {
-        case (writeCtr, writeUseful) =>
-          writeCtr || writeUseful
-      }
-      val hitAlt = altWriteCtr.reduce(_ || _)
+      val updateCtrEn    = providerUpdateCtrBranchOH.orR || altUpdateCtrBranchOH.orR
+      val updateUsefulEn = providerUpdateUsefulBranchOH.orR
+
+      val updateProviderEn = providerUpdateBranchOH.orR
+      val updateAltEn      = altUpdateBranchOH.orR
+
       when(t3_fire) {
-        assert(PopCount(hitProviderMask) <= 1.U)
-        assert(PopCount(altWriteCtr) <= 1.U)
-        assert(!(hitProvider && hitAlt))
+        assert(PopCount(updateBranchOH) <= 1.U, "Each way must select at most one training branch!")
+        assert(!(updateProviderEn && updateAltEn), "A way can never be both the provider and the alt!")
       }
 
-      val providerInfo = Mux1H(hitProviderMask, t3_trainInfoVec)
-      val altInfo      = Mux1H(altWriteCtr, t3_trainInfoVec)
+      val updateInfo       = Mux1H(updateBranchOH, t3_trainInfoVec)
+      val updatedEntry     = Mux(updateProviderEn, updateInfo.providerEntry, updateInfo.altEntry)
+      val updatedUsefulCtr = updateInfo.providerNewUsefulCtr
 
-      val updateEn                = hitProvider || hitAlt
-      val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
-      val updateBranchActualTaken = Mux(hitProvider, providerInfo.actualTaken, altInfo.actualTaken)
+      val allocate = t3_fire && t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
+      val update   = t3_fire && (updateProviderEn || updateAltEn)
 
-      val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
-
-      writeWayMask(wayIdx)    := updateEn || allocateEn
-      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
-      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
-      writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, providerInfo.providerNewUsefulCtr)
-      actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      // Allocation takes priority over counter updates. Other write operations can be arbitrated here.
+      writeReq.valid := allocate || update
+      writeReq.bits  := 0.U.asTypeOf(writeReq.bits)
+      when(allocate) {
+        writeReq.bits.op            := TageWriteOp.Allocate
+        writeReq.bits.setIdx        := t3_setIdx(tableIdx)
+        writeReq.bits.bankMask      := t3_bankMask(tableIdx)
+        writeReq.bits.entry         := t3_allocateEntry
+        writeReq.bits.usefulCtr     := UsefulCounter.Init
+        writeReq.bits.writeEntryEn  := true.B
+        writeReq.bits.writeUsefulEn := true.B
+      }.elsewhen(update) {
+        writeReq.bits.op            := TageWriteOp.Update
+        writeReq.bits.setIdx        := t3_setIdx(tableIdx)
+        writeReq.bits.bankMask      := t3_bankMask(tableIdx)
+        writeReq.bits.entry         := updatedEntry
+        writeReq.bits.usefulCtr     := updatedUsefulCtr
+        writeReq.bits.writeEntryEn  := updateCtrEn
+        writeReq.bits.writeUsefulEn := updateUsefulEn
+        writeReq.bits.actualTaken   := updateInfo.actualTaken
+        writeReq.bits.incUseful     := updateProviderEn && updateInfo.incProviderUsefulCtr
+      }
     }
-
-    table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
-    table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
-    table.io.writeReq.bits.bankMask        := t3_bankMask(tableIdx)
-    table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
-    table.io.writeReq.bits.writeEntryEn    := writeEntryEn
-    table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
-    table.io.writeReq.bits.entries         := writeEntries
-    table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
-    table.io.writeReq.bits.actualTakenMask := actualTakenMask
 
     table.io.usefulResetStart := t3_usefulResetStart
   }
