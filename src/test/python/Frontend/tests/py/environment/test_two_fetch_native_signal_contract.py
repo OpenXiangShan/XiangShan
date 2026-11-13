@@ -57,3 +57,20 @@ def test_ftq_ingress_native_aliases_match_live_sources(env):
             live_source = recorder._read_first_dut_signal(env.dut, (source,))
             assert native is not None and live_source is not None, key
             assert native == live_source, key
+
+
+@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")
+def test_prefetch_and_real_two_native_aliases_match_live_sources(env):
+    recorder = env.functional_coverage
+    sources = {
+        "prefetch_valid": "Frontend_top.Frontend.inner_ftq.prefetchQueue.io_deq_valid_0",
+        "prefetch_ready": "Frontend_top.Frontend.inner_icache.prefetcher.io_fromFtq_ready",
+        "way_real_two": "Frontend_top.Frontend.inner_icache.dataArray.io_read_req_bits_1_valid",
+    }
+    for _ in range(16):
+        env.step(1)
+        for key, source in sources.items():
+            native = recorder._read_first_dut_signal(env.dut, _TWO_FETCH_SIGNALS[key])
+            live_source = recorder._read_first_dut_signal(env.dut, (source,))
+            assert native is not None and live_source is not None, key
+            assert native == live_source, key

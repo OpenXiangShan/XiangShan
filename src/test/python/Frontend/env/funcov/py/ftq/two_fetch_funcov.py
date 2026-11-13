@@ -101,11 +101,10 @@ _TWO_FETCH_SIGNALS = {
         "inner_icache.io_fromFtq_flushFromBpu_s3_valid",
     ),
     "prefetch_valid": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_valid",
+        "inner_icache.io_fromFtq_toPrefetch_valid",
     ),
     "prefetch_ready": (
-        "Frontend_top.Frontend._inner_icache_io_fromFtq_toPrefetch_ready",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_ready",
+        "inner_icache.io_fromFtq_toPrefetch_ready",
     ),
     "prefetch_case": (
         "inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value",
@@ -120,7 +119,7 @@ _TWO_FETCH_SIGNALS = {
         'inner_icache.io_fromFtq_toMainPipe_ready',
     ),
     "way_real_two": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+        "inner_icache.io_toFtq_fromMainPipe_realTwoFetchValid",
     ),
     "main_s0_fire": (
         f"{_MAINPIPE_PREFIX}s0_fire",

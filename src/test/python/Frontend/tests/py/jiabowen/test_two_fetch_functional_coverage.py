@@ -121,6 +121,20 @@ def test_ftq_ingress_reads_live_signal_not_toggle(tmp_path, key, native, shadow)
         dut.set(name, native)
     assert _tf_read(recorder, key) == native
 
+
+@pytest.mark.parametrize("key,shadow", [
+    ("prefetch_valid", "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toPrefetch_valid"),
+    ("prefetch_ready", "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toPrefetch_ready"),
+    ("way_real_two", "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid"),
+])
+@pytest.mark.parametrize("native,old", [(0, 1), (1, 0), (None, 1)])
+def test_prefetch_and_real_two_read_current_signal(tmp_path, key, shadow, native, old):
+    recorder, _env, dut = _make_recorder(tmp_path)
+    dut.set(shadow, old)
+    if native is not None:
+        dut.set_key(key, native)
+    assert _tf_read(recorder, key) == native
+
 def _set_raw_two_fetch_window(dut, first_size: int) -> None:
     base = "Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_"
     for index in range(32):
