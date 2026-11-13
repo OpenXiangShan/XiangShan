@@ -378,7 +378,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
   toPmp.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
   toPmp.bits.addr := getPAddrFromPTag(s1_req(0).startVAddr, s1_pTag).toUInt
-  toPmp.bits.size := 3.U
+  toPmp.bits.size := 1.U
   toPmp.bits.cmd  := TlbCmd.exec
   private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
   private val s1_pmpMmio      = fromPmp.mmio
