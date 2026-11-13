@@ -108,7 +108,9 @@ abstract class EnumUInt(
     (this.names zip this.litValues).sortBy { case (_, i) => i }.mkString("[", ", ", "]")
 
   private def validate(): Unit = {
-    val methodsAll = this.getClass.getDeclaredMethods
+    // getDeclaredMethods returns the methods in no particular order (it varies between JVM runs), so sort them:
+    // names/values feed generated hardware (e.g. perf-counter selects), which must not change from build to build
+    val methodsAll = this.getClass.getDeclaredMethods.sortBy(_.getName)
       .filter { method =>
         method.getReturnType == classOf[UInt] && // return UInt
         method.getParameterTypes.isEmpty         // no parameters

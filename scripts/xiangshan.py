@@ -30,6 +30,50 @@ import psutil
 import pathlib
 from typing import List, Tuple, Set
 
+TIMEOUT_EXIT_CODE = 124
+INTERRUPT_EXIT_CODE = 128 + signal.SIGINT
+PROCESS_GROUP_GRACE_SECONDS = 5
+
+
+def terminate_process_group(proc, process_group, grace_seconds=None):
+    """Stop *process_group* and reap *proc*, even after repeated interrupts.
+
+    SIGINT gives the emulator a chance to run its existing signal cleanup.
+    SIGKILL is still sent after the grace period (or after the group leader
+    exits) because a shell's background descendants may ignore SIGINT and
+    outlive their leader.
+    """
+    if grace_seconds is None:
+        grace_seconds = PROCESS_GROUP_GRACE_SECONDS
+    try:
+        try:
+            os.killpg(process_group, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+
+        try:
+            proc.wait(timeout=grace_seconds)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            pass
+    finally:
+        # Keep both operations in one retry loop so another Ctrl-C cannot land
+        # in an unprotected gap between escalation and reaping.
+        kill_sent = False
+        reaped = False
+        while not reaped:
+            try:
+                if not kill_sent:
+                    try:
+                        os.killpg(process_group, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    kill_sent = True
+                proc.wait()
+                reaped = True
+            except KeyboardInterrupt:
+                continue
+
+
 def find_files_with_suffix(root_dir, suffixes):
     matching_files = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -44,6 +88,18 @@ def load_all_gcpt(gcpt_paths):
     for gcpt_path in gcpt_paths:
         all_gcpt.extend(find_files_with_suffix(gcpt_path, ['.zstd', '.gz']))
     return all_gcpt
+
+def pgo_thread_shortfall(emulator, pgo, threads, available=None):
+    '''return the number of CPUs this process can use if a Verilator PGO build with `threads` emu threads
+    cannot train on them, otherwise None'''
+    if emulator != "verilator" or not pgo or not threads or threads <= 1:
+        return None
+    if available is None:
+        if hasattr(os, "sched_getaffinity"):
+            available = len(os.sched_getaffinity(0))
+        else:
+            available = os.cpu_count() or threads
+    return available if available < threads else None
 
 class XSArgs(object):
     script_path = os.path.realpath(__file__)
@@ -254,6 +310,13 @@ class XiangShan(object):
     def build_emu(self):
         print("Building XiangShan emu with the following configurations:")
         self.show()
+        shortfall = pgo_thread_shortfall(self.args.emulator, self.args.pgo, self.args.threads)
+        if shortfall is not None:
+            print(f"Error: PGO training would abort: only {shortfall} CPUs are available but the emu is built with "
+                  f"--threads {self.args.threads} (Verilator refuses to run a model built with more threads "
+                  f"than CPUs, and the build would continue with an almost empty profile).", file=sys.stderr)
+            print(f"Run on at least {self.args.threads} CPUs, lower --threads, or drop --pgo.", file=sys.stderr)
+            return 1
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         threads = self.args.make_threads
@@ -307,6 +370,8 @@ class XiangShan(object):
         diff_args = "$NOOP_HOME/"+ args.diff
         assert_args = "-assert finish_maxfail=30 -assert global_finish_maxfail=10000"
         return_code = self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args} | tee simv.log')
+        if return_code != 0:
+            return return_code
         with open(f"{self.args.noop_home}/build/simv.log") as f:
             content = f.read()
             if "Offending" in content or "HIT GOOD TRAP" not in content:
@@ -339,16 +404,21 @@ class XiangShan(object):
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
         start = time.time()
-        proc = subprocess.Popen(cmd, shell=True, env=env, preexec_fn=os.setsid)
+        proc = subprocess.Popen(cmd, shell=True, env=env, start_new_session=True)
+        process_group = proc.pid
         try:
             return_code = proc.wait(self.timeout)
             end = time.time()
             print(f"Elapsed time: {end - start} seconds")
             return return_code
-        except (KeyboardInterrupt, subprocess.TimeoutExpired):
-            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-            print(f"KeyboardInterrupt or TimeoutExpired.")
-            return 0
+        except subprocess.TimeoutExpired:
+            print(f"Command timed out after {self.timeout} seconds.")
+            terminate_process_group(proc, process_group)
+            return TIMEOUT_EXIT_CODE
+        except KeyboardInterrupt:
+            print("Command interrupted by user.")
+            terminate_process_group(proc, process_group)
+            return INTERRUPT_EXIT_CODE
 
     def __get_ci_isa_smoke(self, name=None):
         runlist_path = os.path.realpath(self.isa_smoke_runlist)
