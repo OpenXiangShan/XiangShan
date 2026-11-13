@@ -51,7 +51,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val missReq:       DecoupledIO[MissReqBundle]       = DecoupledIO(new MissReqBundle)
     val missResp:      Valid[MissRespBundle]            = Flipped(ValidIO(new MissRespBundle))
 
-    val wayLookupWrite: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, DecoupledIO(new WayLookupWriteBundle))
+    val wayLookupWrite: DecoupledIO[WayLookupWriteBundle] = DecoupledIO(new WayLookupWriteBundle)
 
     val perf: PrefetchPipePerfInfo = Output(new PrefetchPipePerfInfo)
   }
@@ -166,7 +166,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: in kunminghu-v3, Bpu/Ftq ensure that a single fetch request will not cross page,
   //       so we need only one Itlb port to get pAddr / itlbException,
   //       and we can simply use vAddr of first cacheline to send Itlb request.
-  private val itlbVAddr  = Mux(s1_needItlb, s1_readMetaVAddr(0), s0_readMetaVAddr(0))
+  private val itlbVAddr  = Mux(s1_needItlb, s1_req(0).startVAddr, s0_req(0).startVAddr)
   private val itlbFullVa = itlbVAddr.signExt(XLEN).toUInt
 
   toItlb.valid             := s1_needItlb || s0_valid
@@ -196,10 +196,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // Guest page fault related: save tlb raw response, select later
   // NOTE: we don't use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  private val s1_gpAddr = VecInit(
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(0).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse),
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(1).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse)
-  )
+  private val s1_gpAddr = DataHoldBypass(fromItlb.bits.gpaddr.head, 0.U(PAddrBitsMax.W), tlbValidPulse)
   private val s1_isForVSnonLeafPTE =
     DataHoldBypass(
       fromItlb.bits.isForVSnonLeafPTE,
@@ -303,36 +300,39 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_isMmio = Wire(Bool())
 
   // Disallow enqueuing wayLookup when SRAM write occurs.
-  toWayLookup.zipWithIndex.foreach { case (port, i) =>
-    port.valid :=
-      // tlb/meta ready
-      ((s1_state === S1FsmState.EnqWay) || ((s1_state === S1FsmState.Idle) && tlbFinish)) &&
-        // meta is not being updated
-        !fromMiss.valid &&
-        // pipeline is not being flushed
-        !s1_flush &&
-        // enqueue only inStream requests (otherwise is softPrefetch or TODO, which should not affect control flow)
-        s1_req(i).source.inStream &&
-        // first port is always valid, the second port is valid only if we can do 2-prefetch
-        (if (i == 0) true.B else s1_twoPrefetchCase.valid)
+  toWayLookup.valid :=
+    // tlb/meta ready
+    ((s1_state === S1FsmState.EnqWay) || ((s1_state === S1FsmState.Idle) && tlbFinish)) &&
+      // meta is not being updated
+      !fromMiss.valid &&
+      // pipeline is not being flushed
+      !s1_flush &&
+      // enqueue only inStream requests (otherwise is softPrefetch or TODO, which should not affect control flow)
+      s1_req.head.source.inStream
 
-    port.bits.ftqIdx            := s1_req(i).ftqIdx
-    port.bits.entry.vSetIdx     := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
-    port.bits.entry.waymask     := VecInit(s1_reqMetaInfo(i).map(_.waymask))
-    port.bits.entry.pTag        := s1_pTag
-    port.bits.entry.maybeRvcMap := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))
-    port.bits.entry.metaCodes   := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
-    port.bits.entry.isMmio      := s1_isMmio
-    port.bits.entry.itlbPbmt    := s1_itlbPbmt
+  // the exception is the same for both fetch blocks and only the first one is stored, so there is only one copy
+  toWayLookup.bits.exceptionEntry.itlbException     := s1_itlbException
+  toWayLookup.bits.exceptionEntry.gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
+  toWayLookup.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-    port.bits.exceptionEntry.itlbException     := s1_itlbException
-    port.bits.exceptionEntry.gpAddr            := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
-    port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
+  toWayLookup.bits.blocks.zipWithIndex.foreach { case (block, i) =>
+    // first block is always valid, the second block is valid only if we can do 2-prefetch
+    block.valid :=
+      (if (i == 0) true.B else s1_req(i).source.inStream && s1_twoPrefetchCase.valid)
 
-    port.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
-    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
+    block.bits.ftqIdx            := s1_req(i).ftqIdx
+    block.bits.entry.vSetIdx     := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
+    block.bits.entry.waymask     := VecInit(s1_reqMetaInfo(i).map(_.waymask))
+    block.bits.entry.pTag        := s1_pTag
+    block.bits.entry.maybeRvcMap := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))
+    block.bits.entry.metaCodes   := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
+    block.bits.entry.isMmio      := s1_isMmio
+    block.bits.entry.itlbPbmt    := s1_itlbPbmt
 
-    when(port.fire) {
+    block.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
+    block.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
+
+    when(toWayLookup.fire && block.valid) {
       val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))
       assert(
         PopCount(waymasksVec(0)) <= 1.U && (PopCount(waymasksVec(1)) <= 1.U || !s1_req(i).isCrossLine),
@@ -379,9 +379,9 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       when(s1_valid) {
         when(!tlbFinish) {
           s1_nextState := S1FsmState.ItlbResend
-        }.elsewhen(!toWayLookup.head.fire) { // tlbFinish
+        }.elsewhen(!toWayLookup.fire) { // tlbFinish
           s1_nextState := S1FsmState.EnqWay
-        }.elsewhen(!s2_ready) { // tlbFinish && toWayLookup.head.fire
+        }.elsewhen(!s2_ready) { // tlbFinish && toWayLookup.fire
           s1_nextState := S1FsmState.EnterS2
         } // .otherwise { s1_nextState := S1FsmState.Idle }
       }   // .otherwise { s1_nextState := S1FsmState.Idle }  // !s1_valid
@@ -401,7 +401,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       } // .otherwise { s1_nextState := S1FsmState.metaResend }  // !toMeta.ready
     }
     is(S1FsmState.EnqWay) {
-      when(toWayLookup.head.fire || !s1_req.head.source.inStream) {
+      when(toWayLookup.fire || !s1_req.head.source.inStream) {
         when(!s2_ready) {
           s1_nextState := S1FsmState.EnterS2
         }.otherwise { // s2_ready
