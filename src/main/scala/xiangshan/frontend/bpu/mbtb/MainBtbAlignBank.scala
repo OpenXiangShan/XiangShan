@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfRolling
@@ -138,7 +139,7 @@ class MainBtbAlignBank(
    * check entries hit
    * filter-out unneeded entries
    */
-  private val s1_fire              = io.stageCtrl.s1_fire && io.enable
+  private val s1_fire              = Wire(Bool())
   private val s1_startPc           = RegEnable(s0_startPc, s0_fire)
   private val s1_posHigherBits     = RegEnable(s0_posHigherBits, s0_fire)
   private val s1_crossPage         = RegEnable(s0_crossPage, s0_fire)
@@ -168,7 +169,7 @@ class MainBtbAlignBank(
       // filter out branches before alignedInstOffset
       // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
       val hit = rawHit && e.position >= s1_alignedInstOffset && !s1_crossPage
-      pred.valid            := hit && io.enable
+      pred.valid            := hit
       pred.bits.cfiPosition := Cat(s1_posHigherBits, e.position)
       pred.bits.target      := getFullTarget(s1_startPc, e.targetLowerBits, e.targetCarry)
       pred.bits.attribute   := e.attribute
@@ -186,7 +187,15 @@ class MainBtbAlignBank(
    * send resp to top
    * generate metadata for training
    */
-  private val s2_fire             = io.stageCtrl.s2_fire
+  private val s2_fire = Wire(Bool())
+
+  // redirect/override flushing is handled by Bpu top-level valid; only the
+  // io.enable 0 -> 1 freeze needs local tracking (stale s2 prediction).
+  private val s1_valid = ValidHold(s0_fire, s1_fire, !io.enable)
+  private val s2_valid = ValidHold(s1_fire, s2_fire, !io.enable)
+  s1_fire := io.stageCtrl.s1_fire && s1_valid
+  s2_fire := io.stageCtrl.s2_fire && s2_valid
+
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   // Only the positions are needed in s2 for MainBtb/VBTB duplicate detection.
@@ -201,7 +210,13 @@ class MainBtbAlignBank(
   private val s2_setIdx = getSetIndex(s2_startPc)
 
   // send resp
-  r.resp.predictions := VecInit(s2_predictions :+ s2_vbtbPrediction)
+  private val s2_gatedPredictions = VecInit((s2_predictions :+ s2_vbtbPrediction).map { prediction =>
+    val gated = Wire(Valid(new Prediction))
+    gated.valid := prediction.valid && s2_valid
+    gated.bits  := prediction.bits
+    gated
+  })
+  r.resp.predictions := s2_gatedPredictions
 
   r.resp.metas.take(NumWay).zipWithIndex.foreach { case (meta, i) =>
     meta.rawHit    := s2_rawHitMask(i) && io.enable
@@ -213,7 +228,7 @@ class MainBtbAlignBank(
   r.resp.metas.last := s2_vbtbMeta
 
   // Keep the hit mask aligned directly with the MainBtb predictions.
-  private val s2_hitMask = VecInit(s2_predictions.map(_.valid))
+  private val s2_hitMask = VecInit(s2_predictions.map(_.valid && s2_valid))
   victimBtb.io.s2_mainBtbHitMask   := s2_hitMask
   victimBtb.io.s2_mainBtbPositions := s2_rawPositions
 
