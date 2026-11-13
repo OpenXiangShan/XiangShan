@@ -612,6 +612,9 @@ case class DebugOptions
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
+  EnableTeaTracker: Boolean = false,
+  EnableDipSampler: Boolean = false,
+  EnableTeaCycleStats: Boolean = false,
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false,
   EnableSimFrontend: Boolean = false

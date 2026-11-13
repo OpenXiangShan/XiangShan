@@ -457,6 +457,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
 
+    if (backendParams.perfPsvEn && i < RenameWidth - 1) {
+      // Merge events for the surviving uop; keep each architectural member's input PSV intact.
+      uops(i).perfPsv := io.in(i).bits.perfPsv |
+        Mux(io.isFusionVec(i), io.in(i + 1).bits.perfPsv, PerfPsvOps.empty)
+    }
+
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
     uops(i).loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid

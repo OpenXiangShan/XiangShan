@@ -1337,8 +1337,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // debug_inst update
   for (i <- 0 until (LduCnt + StaCnt)) {
-    debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(in.debug_ls.debugLsInfo(i))
-    debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(in.debug_ls.debugLsInfo(i))
+    debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx.value).s1SignalEnable(in.debug_ls.debugLsInfo(i))
+    debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx.value).s2SignalEnable(in.debug_ls.debugLsInfo(i))
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(in.debug_ls.debugLsInfo(i))
   }
   for (i <- 0 until LduCnt) {
@@ -2034,6 +2034,35 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val l1Miss = in.debugTopDown.fromCore.fromMem.robHeadMissInDCache
   val l2Miss = in.debugTopDown.fromCore.l2MissMatch
   val l3Miss = in.debugTopDown.fromCore.l3MissMatch
+  out.perfInfo.foreach { info =>
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    info.cycle := cycle
+    info.retired := out.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, count) =>
+      Mux(out.commits.isCommit && valid, count, 0.U)
+    }.reduce(_ +& _)
+    for (slot <- 0 until 2 * CommitWidth) {
+      info.commits(slot).valid := out.commits.isCommit && commitSlotValid(slot)
+      info.commits(slot).bits := out.commits.robIdx(slot / 2)
+      info.commits(slot).bits.isFormer := (slot % 2 == 0).B
+    }
+    // Control redirects carry a fetch-block PC; memory redirects carry an instruction PC.
+    val redirectInstrPc = in.redirect.bits.pc +
+      Mux(in.redirect.bits.debugIsCtrl, SignExt(in.redirect.bits.getPcOffset(), GuardedVAddrBits), 0.U)
+    info.redirect.valid := in.redirect.valid
+    info.redirect.bits.robIdx := in.redirect.bits.robIdx
+    info.redirect.bits.self := in.redirect.bits.flushItself()
+    info.redirect.bits.pc := in.debugInstrAddrTransType.extend(redirectInstrPc(VAddrBits - 1, 0), XLEN)
+    info.redirect.bits.isCtrlMispred := in.redirect.bits.debugIsCtrl && in.redirect.bits.isMisPred
+    info.redirect.bits.isMemVio := in.redirect.bits.debugIsMemVio
+    info.flush.valid := out.flushOut.valid
+    info.flush.bits.robIdx := out.flushOut.bits.robIdx
+    info.flush.bits.self := out.flushOut.bits.flushItself()
+    info.flush.bits.pc := in.debugInstrAddrTransType.extend(exceptionDebug.pc, XLEN)
+    info.flush.bits.isException := deqHasException && !intrEnable
+    info.flush.bits.isInterrupt := intrEnable
+    info.flushEcho := RegNext(out.flushOut.valid, false.B)
+  }
   val ldReason = Mux(l3Miss, LoadMemStall.id.U,
     Mux(l2Miss, LoadL3Stall.id.U,
       Mux(l1Miss, LoadL2Stall.id.U,
@@ -2520,6 +2549,8 @@ object Rob {
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
     // ROB occupancy.
     val robFull = Output(Bool())
+    val perfInfo = Option.when(backendParams.teaTrackerEn || backendParams.dipEn || backendParams.teaCycleStatsEn)(
+      Output(new PerfRobInfo))
 
     // ROB commit notifications.
     val commits = Output(new RobCommitIO)

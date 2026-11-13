@@ -261,6 +261,7 @@ class FetchBlockInfo(implicit p: Parameters) extends ICacheBundle {
 }
 
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
+  val perfPsv:    UInt = UInt((if (backendParams.perfPsvEn) xiangshan.PerfEvent.width else 0).W)
   val firstRange: UInt = UInt(FetchBlockInstNum.W)
   val totalRange: UInt = UInt(FetchBlockInstNum.W)
   // aligned to the fetch coordinate (bit 0 = the first fetched instruction slot)
@@ -328,13 +329,14 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  *      To save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:     Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:     Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val maybeRvcMap: Vec[UInt] = Vec(PortNumber, UInt(MaxInstNumPerBlock.W))
-  val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
-  val pTag:        UInt      = UInt(tagBits.W)
-  val isMmio:      Bool      = Bool()
-  val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+  val vSetIdx:      Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:      Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val maybeRvcMap:  Vec[UInt] = Vec(PortNumber, UInt(MaxInstNumPerBlock.W))
+  val metaCodes:    Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
+  val pTag:         UInt      = UInt(tagBits.W)
+  val isMmio:       Bool      = Bool()
+  val itlbPbmt:     UInt      = UInt(Pbmt.width.W)
+  val perfItlbMiss: UInt      = UInt((if (backendParams.perfPsvEn) 1 else 0).W)
 
   val debug_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
   val debug_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())
