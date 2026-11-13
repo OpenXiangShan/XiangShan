@@ -59,6 +59,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     val s2OverrideData: Valid[MicroRasSpecIn] = Input(Valid(new MicroRasSpecIn))
     val s3OverrideData: Valid[MicroRasSpecIn] = Input(Valid(new MicroRasSpecIn))
     val fullRetAddr:    GuardedPc             = Input(GuardedPc()) // Current top of the main RAS
+    val fullRetValid:   Bool                  = Input(Bool())
   }
   val io = IO(new MicroRasIO)
   io.sramResetDone := true.B
@@ -160,7 +161,8 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     // - If S3 pops, the main RAS top changes → prediction invalid.
     // - If S3 pushes, the new top is s3_retAddr.
     // - If S3 does nothing, the top remains io.fullRetAddr (main RAS).
-    isCanUse := !s3_realPop // Without popping, stack top data can be fetched from s3 or Main RAS.
+    // Without popping, stack top data can be fetched from s3 or Main RAS.
+    isCanUse := !s3_realPop && (s3_realPush || io.fullRetValid)
     topRetAddr :=
       Mux(
         s3_realPop,
@@ -174,7 +176,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       isCanUse   := true.B
       topRetAddr := s2_realPushAddr
     }.elsewhen(s2_realPop) {
-      isCanUse   := s3_hasPush
+      isCanUse   := s3_hasPush && io.fullRetValid
       topRetAddr := Mux(s3_hasPush, io.fullRetAddr, 0.U.asTypeOf(GuardedPc()))
     }.elsewhen(s3_hasPush) {
       isCanUse   := true.B
@@ -182,7 +184,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }.elsewhen(s3_hasPop) {
       isCanUse := false.B
     }.otherwise {
-      isCanUse   := Mux(redirectDelay1, false.B, true.B)
+      isCanUse   := Mux(redirectDelay1, false.B, io.fullRetValid)
       topRetAddr := Mux(redirectDelay1, 0.U.asTypeOf(GuardedPc()), io.fullRetAddr)
     }
   }.elsewhen(io.stageCtrl.s1_fire && !s2_override && specPush) {
@@ -198,7 +200,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       // - If S3 pushes → new top is s3_retAddr.
       // - If S3 pops → stack depth decreases unpredictably → invalid.
       // - Otherwise → top reverts to main RAS (io.fullRetAddr).
-      isCanUse := Mux(s3_hasPush, true.B, Mux(s3_hasPop, false.B, true.B))
+      isCanUse := Mux(s3_hasPush, true.B, Mux(s3_hasPop, false.B, io.fullRetValid))
       topRetAddr := Mux(
         s3_hasPush,
         s3_retAddr,
@@ -210,7 +212,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }.elsewhen(s3_hasPush) {
       // S2 neutral, but S3 pushes → S1 pop pairs with S3 push.
       // Thus, the effective top remains the current main RAS top.
-      isCanUse   := true.B
+      isCanUse   := io.fullRetValid
       topRetAddr := io.fullRetAddr
     }.otherwise {
       // No pairing possible; main RAS will be popped → unknown new top.
@@ -226,7 +228,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }.elsewhen(s2_hasPop) {
       // S2 pop → main RAS will be popped.
       // Only safe if S3 pushes (which cancels the pop effect).
-      isCanUse   := Mux(s3_hasPush, true.B, false.B)
+      isCanUse   := Mux(s3_hasPush, io.fullRetValid, false.B)
       topRetAddr := Mux(s3_hasPush, io.fullRetAddr, 0.U.asTypeOf(GuardedPc()))
     }.elsewhen(s3_hasPop) {
       // S2 neutral, but S3 pops → main RAS changes unpredictably.
@@ -237,12 +239,12 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       topRetAddr := s3_retAddr
     }.otherwise {
       // No pending ops → top is main RAS, unless RAS is recovering from redirect.
-      isCanUse   := Mux(redirectDelay1, false.B, true.B)
+      isCanUse   := Mux(redirectDelay1, false.B, io.fullRetValid)
       topRetAddr := Mux(redirectDelay1, 0.U.asTypeOf(GuardedPc()), io.fullRetAddr)
     }
   }
 
-  io.specOut.isCanUse  := false.B
+  io.specOut.isCanUse  := isCanUse
   io.specOut.retTarget := topRetAddr
 
   private val s3_overrideHasRasAction     = s3_override && (s3_realPush || s3_realPop)
