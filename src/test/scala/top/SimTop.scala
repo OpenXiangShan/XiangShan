@@ -27,7 +27,7 @@ import difftest.fpga.DifftestMemCtrl
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
+import utility.{ChiselDB, ClockGate, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
 import system._
 import device._
@@ -155,7 +155,10 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   when (rtcCounter === 0.U) {
     rtcClock := ~rtcClock
   }
-  soc.io.rtc_clock := rtcClock.asClock
+  // rtc_clock has one rising edge per rtcClockDiv cycles, on the cycle where rtcClock above would rise. It is generated
+  // through a clock gate instead of a register-divided clock, so that GSIM, which has no derived-clock support,
+  // evaluates the rtc domain once per rtcClockDiv cycles.
+  soc.io.rtc_clock := ClockGate(false.B, rtcCounter === 0.U && !rtcClock, clock)
 
   val success = Wire(Bool())
   val jtag = Module(new SimJTAG(tickDelay = 3)(p))
