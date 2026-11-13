@@ -38,7 +38,12 @@ def add_capture(root, header, cpp):
     assert 'io.out.valid:=Mux1H(r_mask,valids)' in compact and 'io.out.bits:=Mux1H(r_mask,entries)' in compact
     assert 'valr_mask=(0untiln).map(i=>i.U===rd_ptr)' in compact
     assert compact.count('rd_ptr:=rd_ptr+1.U') == 1
-    if 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
+    if 'valadvance_empty_head=!io.out.valid&&io.out.ready&&valids.reduce(_||_)' in compact:
+        assert policy == 'update_priority'
+        assert 'evict.ready := !s1_valid || !s1_wait' in text
+        assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
+        read_policy = 'advance_empty_ready'
+    elif 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
         assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
         read_policy = 'advance_empty'
     else:
@@ -128,6 +133,8 @@ static void pht_observe(SSimTop *model) {
 '''
     replacements = dict(NEXT_DATA=tensor(nxt), CURRENT_DATA=tensor(current), MASKS=array(masks), NEXT_MASKS=array(next_masks), READS=array(reads), WRITES=array(writes), NEXT_READS=array(next_reads), NEXT_WRITES=array(next_writes), INPUTS=array([event['lookup_in'], event['evict_in']]), OUTPUTS=array([event['lookup_out'], event['evict_out']]), PIPE=array(values), SELECT_UPDATE='update' if policy == 'update_priority' else 'update&&(!lookup||!pipe[0]||!pipe[1])')
     replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1))' if read_policy == 'advance_empty' else 'false'
+    if read_policy == 'advance_empty_ready':
+        replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1)&&(q==0?ready&&!update:ready))'
     for name in sorted(replacements, key=len, reverse=True):
         helper = helper.replace(name, replacements[name])
     for old, new in [('static void sms_snapshot(SSimTop *model)', helper + '\nstatic void sms_snapshot(SSimTop *model)'), ('  sms_snapshot(model);', '  pht_snapshot(model);\n  sms_snapshot(model);'), ('  sms_observe(model);', '  sms_observe(model);\n  pht_observe(model);')]:

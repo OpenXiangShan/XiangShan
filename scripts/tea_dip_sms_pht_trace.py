@@ -19,7 +19,9 @@ PIPE = ['s1_valid', 's1_update', 's1_index', 's2_valid', 's2_update', 's2_index'
 
 def queue_owners(rows, policy, read_policy='hold_empty'):
     assert policy in ['update_priority', 'existing_S1_type_alternation']
-    assert read_policy in ['hold_empty', 'advance_empty']
+    assert read_policy in ['hold_empty', 'advance_empty', 'advance_empty_ready']
+    if read_policy == 'advance_empty_ready':
+        assert policy == 'update_priority'
     slots, reads, writes, sequence = [[None] * 4 for _ in range(2)], [0, 0], [0, 0], [0, 0]
     owners, observations = [], []
     previous = -1
@@ -67,7 +69,9 @@ def queue_owners(rows, policy, read_policy='hold_empty'):
                     blocker = 4
                 assert blocker
             before = sum(owner is not None for owner in slots[q])
-            advance_empty = read_policy == 'advance_empty' and before > 0 and head is None
+            advance_empty = read_policy in ['advance_empty', 'advance_empty_ready'] and before > 0 and head is None
+            if read_policy == 'advance_empty_ready':
+                advance_empty = advance_empty and ready and (q == 1 or not valid[1])
             departed, overwritten = None, None
             if row['output']:
                 assert head is not None
