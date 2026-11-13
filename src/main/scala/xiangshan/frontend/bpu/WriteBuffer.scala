@@ -135,7 +135,7 @@ class WriteBuffer[T <: WriteReqBundle](
       // even if a stalled prediction's shadow entry is updated or replaced in the meantime.
       val hit = hitVec.asUInt.orR
       resp.valid := HoldUnless(hit, readValid, Some(false.B))
-      resp.bits  := HoldUnless(Mux1H(hitVec, entries(portIdx)), readValid && hit)
+      resp.bits  := HoldUnless(Mux1H(hitVec, entries(portIdx)), readValid)
     }
   }
 
