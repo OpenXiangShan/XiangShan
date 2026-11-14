@@ -12,6 +12,7 @@ from native_perf import read_blocks
 from tea_dip_l2_return_trace import read
 from tea_dip_load_writeback_trace import hist_stats
 from tea_dip_sms_observer import analyze as targeted
+from tea_dip_sms_internal_trace import analyze as internal_source
 
 PAYLOAD = ['index', 'tag', 'offset', 'region']
 PIPE = ['s1_valid', 's1_update', 's1_index', 's2_valid', 's2_update', 's2_index', 's3_valid', 's3_update', 'raw_hazard', 'write_busy']
@@ -110,9 +111,9 @@ def queue_owners(rows, policy, read_policy='hold_empty'):
     return owners, observations
 
 
-def analyze(folder, receipt):
+def analyze(folder, receipt, internal=False):
     folder = Path(folder)
-    output = targeted(folder, receipt)
+    output = internal_source(folder, receipt) if internal else targeted(folder, receipt)
     proof = json.loads((folder / 'probe-build-proof.json').read_text())
     binding = proof['SMS_PHT_binding']
     assert binding['queue_slots'] == 4 and binding['current_NEXT_and_queue_equations_asserted'] and binding['service_selection_and_hazards_asserted'] and binding['new_RTL_state_bits'] == 0
@@ -202,8 +203,9 @@ def main():
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--internal', action='store_true', help='Use a calibrated SMS internal capture as the base')
     args = parser.parse_args()
-    args.output.write_text(json.dumps(analyze(args.folder, args.receipt), indent=2) + '\n')
+    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, internal=args.internal), indent=2) + '\n')
 
 
 if __name__ == '__main__':

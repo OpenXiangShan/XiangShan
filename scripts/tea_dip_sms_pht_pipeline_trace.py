@@ -126,9 +126,9 @@ def replay(rows, owners, observations, generated):
                 pending_before_S2=sorted(pending_before_s2), pending_S3_owner=s3['id'] if s3 else None)
 
 
-def analyze(folder, receipt):
+def analyze(folder, receipt, internal=False):
     folder = Path(folder)
-    output = parent(folder, receipt)
+    output = parent(folder, receipt, internal=internal)
     proof = json.loads((folder / 'probe-build-proof.json').read_text())
     binding = proof['SMS_PHT_pipeline_binding']
     assert binding['PHT_only_filter_source'] and binding['all_inflight_tail_stages_captured'] and binding['new_RTL_state_bits'] == 0
@@ -153,7 +153,7 @@ def analyze(folder, receipt):
             assert native == [count], 'PHT pipeline/native marginal mismatch'
         fates = Counter(p['filter_fate'] for p in packets)
         arrivals = [r for r in generated if r['kind'] in [1, 2] and begin < r['core_cycle'] <= end]
-        assert len(arrivals) == phase['SMS']['raw_generated']
+        assert len(arrivals) == phase['SMS_internal' if internal else 'SMS']['raw_generated']
         assert fates['accepted'] == sum(r['kind'] == 1 for r in arrivals)
         assert fates['consecutive_tag_suppressed'] == sum(r['kind'] == 2 for r in arrivals)
         phase['PHT_pipeline'] = dict(S2_operations=len(operations), S2_lookup_hit=counts['lookup_hit'], S2_update_hit=counts['update_hit'],
@@ -169,8 +169,9 @@ def main():
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--internal', action='store_true', help='Use a calibrated SMS internal capture as the base')
     args = parser.parse_args()
-    args.output.write_text(json.dumps(analyze(args.folder, args.receipt), indent=2) + '\n')
+    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, internal=args.internal), indent=2) + '\n')
 
 
 if __name__ == '__main__':
