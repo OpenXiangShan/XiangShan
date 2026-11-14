@@ -908,6 +908,14 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
+  // The RNMI entry taken with dbltrpToMN clear records the NMI as its cause.
+  val nmiCause = Mux(intrMod.io.out.interruptVec.valid, intrMod.io.out.interruptVec.bits, intrVec)
+  val rnmiForNmi = trapEntryMNEvent.valid && !dbltrpToMN
+  when (rnmiForNmi) {
+    trapEntryMNEvent.in.causeNO.Interrupt := true.B
+    trapEntryMNEvent.in.causeNO.ExceptionCode := nmiCause
+  }
+
   mnretEvent.valid := legalMNret
   mnretEvent.in match {
     case in =>
@@ -1696,9 +1704,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     io.diffArchEvent.get.bits := pendingLatter
 
     val hartId = io.fromTop.hartId
-    val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
-    val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
-    val hasNMI = nmi && hasTrap
+    // DiffTest is told about the trap the core takes: an RNMI taken for an NMI is reported as the NMI.
+    val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool || rnmiForNmi
+    val trapNO = Mux(rnmiForNmi, nmiCause,
+      Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt))
+    val hasNMI = (nmi || rnmiForNmi) && hasTrap
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
     val isSv39: Bool =
