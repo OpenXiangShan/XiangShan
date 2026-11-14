@@ -23,6 +23,7 @@ import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -53,6 +54,9 @@ trait Helpers extends HasScParameters with PhrHelper {
     }
     ParallelXOR(hashChunks)
   }
+
+  def getBiasIdxLowBits(ctr: SaturateCounter, valid: Bool): UInt =
+    Cat(valid && ctr.isWeak, valid && ctr.isPositive)
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
