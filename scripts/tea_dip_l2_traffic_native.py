@@ -82,6 +82,27 @@ def analyze(folder, receipt_path):
     for total, parts in [('l2prefetchHit', ['l2prefetchHitInCache', 'l2prefetchHitInMSHR']),
                          ('l2prefetchLate', ['l2prefetchLateInCache', 'l2prefetchLateInMSHR'])]:
         assert traffic[total]['events'] == sum(traffic[key]['events'] for key in parts)
+    prefetch_sources = {}
+    source_names = ['VBOP', 'PBOP', 'SMS', 'Stride', 'Stream', 'NextLine', 'TP', 'Berti', 'CDP']
+    for source in source_names:
+        row = {}
+        for metric in names[3:]:
+            name, value = scalar('.l2cache.topDown.' + metric + source)
+            row[metric] = dict(native_name=name, events=value, per_kinst=1000 * value / retired)
+        for total, parts in [('l2prefetchHit', ['l2prefetchHitInCache', 'l2prefetchHitInMSHR']),
+                             ('l2prefetchLate', ['l2prefetchLateInCache', 'l2prefetchLateInMSHR'])]:
+            assert row[total]['events'] == sum(row[key]['events'] for key in parts), source
+        for stage in ['Cache', 'MSHR']:
+            origins = {}
+            for origin in ['Demand', 'L1Prefetch'] + source_names:
+                name, value = scalar('.l2cache.topDown.l2prefetchLateIn' + stage + source + '_Hit' + origin)
+                origins[origin] = dict(native_name=name, events=value)
+            row['late_origins_in_' + stage] = origins
+        cache_origins = row['late_origins_in_Cache']
+        assert cache_origins['Demand']['events'] == cache_origins['L1Prefetch']['events'], source
+        prefetch_sources[source] = row
+    for metric in names[3:]:
+        assert traffic[metric]['events'] == sum(row[metric]['events'] for row in prefetch_sources.values()), metric
     sources = {}
     for name, values in counters.items():
         match = re.search(r'\.l2cache\.topDown\.E2_L2AReqSource_(.+)_(Total|Miss)$', name)
@@ -112,7 +133,7 @@ def analyze(folder, receipt_path):
             generators[role] = row
         learning[phase] = dict(native_print_stamp=stamp, generators=generators)
     return dict(point=receipt['point'], source=receipt['source'], native_cycles=cycles,
-                native_retired=retired, traffic=traffic, directory_request_sources=sources,
+                native_retired=retired, traffic=traffic, prefetch_sources=prefetch_sources, directory_request_sources=sources,
                 prefetch_learning=learning,
                 completed_MSHR_residence=residence(counters),
                 receipt_sha256=digest(receipt_path), native_log_sha256=digest(folder/'simulator_err.txt'),
@@ -130,7 +151,11 @@ def analyze(folder, receipt_path):
                       'Feedback-control-drop counts enable && s1_req_valid && fdbkDegree == 0 condition cycles; '
                       'it is not unique dropped requests and has a different population from accepted training. '
                       'Student/local-disable overlap bounds use their common atomic training population, not CPU-loss cycles. '
-                      'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets.')
+                      'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets. '
+                      'LateInCache_HitDemand and _HitL1Prefetch both classify PfSource.NoWhere, so they alias '
+                      'and must not be summed. Cache origin metadata does not uniquely identify the original requester. '
+                      'LateInMSHR origin selects a matching MSHR or request-buffer entry, not its service result. '
+                      'Per-source event rates are not lifetime accuracy or CPU timeliness.')
 
 
 def main():
