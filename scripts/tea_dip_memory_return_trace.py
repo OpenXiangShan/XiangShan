@@ -75,8 +75,9 @@ def analyze(folder, receipt, load_observer=False):
         result=llptw_analyze(folder,receipt)
     else:
         result=l2_analyze(folder,receipt)
-    proof=json.loads((folder/'probe-build-proof.json').read_text())['memory_return_binding']
-    assert proof['command_call_is_external'] and proof['model_objects']==577 and proof['new_RTL_state_bits']==0
+    build_proof=json.loads((folder/'probe-build-proof.json').read_text())
+    proof=build_proof['memory_return_binding']
+    assert proof['command_call_is_external'] and proof['model_objects']==build_proof['original_objects'] and proof['new_RTL_state_bits']==0
     timing=json.loads((folder/'memory-timing.json').read_text())
     stdout=(folder/'simulator_out.txt').read_text()
     assert 'DRAMSIM3 config: '+timing['config_path'] in stdout

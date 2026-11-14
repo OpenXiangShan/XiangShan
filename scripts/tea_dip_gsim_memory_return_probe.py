@@ -91,6 +91,30 @@ extern "C" void __wrap_COMMAND(void *self,const dramsim3::Command &cmd,uint64_t 
     return cpp
 
 
+def binding_for_model(root, library, symbols, model_objects):
+    for symbol in WRAPPED:
+        assert any(line.split()[-1:] == [symbol] for line in symbols.splitlines()), symbol
+    dram = library.parent.parent
+    source = dram/'src'
+    common, controller, ram = source/'common.h', source/'controller.cc', root/'difftest/src/test/csrc/common/ram.cpp'
+    assert 'channel_state_.UpdateTimingAndStates(cmd, clk_);' in controller.read_text()
+    assert 'auto meta = new dramsim3_meta;' in ram.read_text()
+    obj = dram/'build/CMakeFiles/dramsim3.dir/src/controller.cc.o'
+    assert COMMAND_SYMBOL in subprocess.check_output(['nm','-u',str(obj)],text=True)
+    model = root/'build/gsim-compile/model'
+    target = 'cpu__DOT__memory__DOT__ram__DOT___read_resp_addr_T_5 ='
+    paths = subprocess.check_output(['rg','-l','-F',target,str(model),'--glob','*.cpp'],text=True).splitlines()
+    generated = '\n'.join(Path(name).read_text() for name in paths)
+    assert target + ' (cpu__DOT__memory__DOT__ram__DOT__read_resp_id & 0x3f);' in generated
+    return dict(
+        wrapped_symbols=WRAPPED,original_DRAM_library=str(library),
+        source_sha256={str(p):digest(p)for p in [common,controller,ram,obj]},
+        command_call_is_external=True,model_objects=model_objects,new_RTL_state_bits=0,
+        read_tracker_full_id_and_address_asserted=True,read_tracker_index_mask=63,
+        generated_index_source_sha256={name:digest(Path(name)) for name in paths},
+        scope='Original memory API returns and DRAM clock/order preserved. Model-step API events use the actual same-step core callback; outside-step DRAM commands use the latest confirmed core. Command controller IDs are observation identities, not guessed physical channels. Closure, clock alignment and execution neutrality still need real calibration.'), source
+
+
 def build(l2_build_proof, output, load_observer=False):
     proof_path, output = Path(l2_build_proof).resolve(), Path(output).resolve()
     previous = json.loads(proof_path.read_text())
@@ -105,21 +129,8 @@ def build(l2_build_proof, output, load_observer=False):
     for name, value in previous['original_sha256'].items():
         assert digest(Path(name)) == value, name
     symbols = subprocess.check_output(['nm','--defined-only',str(root/'build/gsim-compile/emu')],text=True)
-    for symbol in WRAPPED:
-        assert any(line.split()[-1:] == [symbol] for line in symbols.splitlines()), symbol
     library, = [Path(name) for name in previous['original_sha256'] if Path(name).name == 'libdramsim3.a']
-    dram = library.parent.parent
-    source = dram/'src'
-    common, controller, ram = source/'common.h', source/'controller.cc', root/'difftest/src/test/csrc/common/ram.cpp'
-    assert 'channel_state_.UpdateTimingAndStates(cmd, clk_);' in controller.read_text()
-    assert 'auto meta = new dramsim3_meta;' in ram.read_text()
-    obj = dram/'build/CMakeFiles/dramsim3.dir/src/controller.cc.o'
-    assert COMMAND_SYMBOL in subprocess.check_output(['nm','-u',str(obj)],text=True)
-    model = root/'build/gsim-compile/model'
-    target = 'cpu__DOT__memory__DOT__ram__DOT___read_resp_addr_T_5 ='
-    paths = subprocess.check_output(['rg','-l','-F',target,str(model),'--glob','*.cpp'],text=True).splitlines()
-    generated = '\n'.join(Path(name).read_text() for name in paths)
-    assert target + ' (cpu__DOT__memory__DOT__ram__DOT__read_resp_id & 0x3f);' in generated
+    binding, source = binding_for_model(root, library, symbols, previous['original_objects'])
     output.mkdir(parents=True)
     (output/'probe.cpp').write_text(add_capture((parent/'probe.cpp').read_text(), (root/'build/gsim-compile/model/SimTop.h').read_text()))
     (output/'objects.rsp').write_bytes((parent/'objects.rsp').read_bytes())
@@ -134,13 +145,7 @@ def build(l2_build_proof, output, load_observer=False):
     base = {'base_load_build_proof_sha256' if load_observer else 'base_L2_build_proof_sha256': digest(proof_path)}
     result = dict(previous,binary=str(output/'emu'),binary_sha256=digest(output/'emu'),commands=commands,
                   probe_cpp_sha256=digest(output/'probe.cpp'),generator_sha256=digest(Path(__file__)),
-                  **base,memory_return_binding=dict(
-                      wrapped_symbols=WRAPPED,original_DRAM_library=str(library),
-                      source_sha256={str(p):digest(p)for p in [common,controller,ram,obj]},
-                      command_call_is_external=True,model_objects=577,new_RTL_state_bits=0,
-                      read_tracker_full_id_and_address_asserted=True,read_tracker_index_mask=63,
-                      generated_index_source_sha256={name:digest(Path(name)) for name in paths},
-                      scope='Original memory API returns and DRAM clock/order preserved. Model-step API events use the actual same-step core callback; outside-step DRAM commands use the latest confirmed core. Command controller IDs are observation identities, not guessed physical channels. Closure, clock alignment and execution neutrality still need real calibration.'))
+                  **base,memory_return_binding=binding)
     (output/'build-proof.json').write_text(json.dumps(result,indent=2)+'\n')
     return result
 

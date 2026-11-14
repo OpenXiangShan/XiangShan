@@ -195,7 +195,7 @@ def read_rows(path):
         return [{k: int(v) for k, v in row.items()} for row in csv.DictReader(stream)]
 
 
-def analyze(folder, receipt):
+def analyze(folder, receipt, identities=()):
     folder = Path(folder)
     output = replay(folder, receipt)
     proof = json.loads((folder / 'probe-build-proof.json').read_text())['MSHR_return_binding']
@@ -231,6 +231,9 @@ def analyze(folder, receipt):
         assert matched == finish - begin, 'Missing LRQ DM tag coverage'
     assert sum(coverage.values()) == sum(b - a for a, b, _ in tag_spans), 'Extra LRQ DM tags'
     attempts, completed = match_attempts(joint)
+    if identities:
+        wanted = {tuple(row) for row in identities}
+        requested = []
     waits = defaultdict(list)
     for begin, finish, row in lrq_spans:
         if not row['is_vector'] and row['cause'] == 64 and not row['scheduled'] and not row['eligible']:
@@ -280,10 +283,16 @@ def analyze(folder, receipt):
         phase['MSHR_native_D_wait'] = native_marginals
         phase['completed_scalar_PC_MSHR_wait'] = profiles
         phase['longest_completed_scalar_MSHR_services'] = sorted(services, key=lambda r: r['service_cycles'], reverse=True)[:20]
+        if identities:
+            requested.extend(s for s in services if tuple(s['identity'][k] for k in KEY) in wanted)
     output.update(MSHR_generation_count=sum(map(len, owners.values())), MSHR_grant_events=len(grants),
                   MSHR_state_change_rows=sum(r['kind'] == 1 for r in rows),
                   LRQ_MSHR_tag_change_rows=sum(r['kind'] == 1 for r in tags),
                   scope=output['scope'] + ' L1 MSHR generations follow valid edges; qualified LRQ tags retain actual enqueue handledByMSHR provenance. Each uninterrupted scalar DM waiting episode binds once to its current slot generation and matching WB physical block. Missing/incomplete returns and released-owner tails remain unknown, without rebinding reused slots. Complete-return waits are partitioned at recorded acquire, first-data and last-data cycles; at/after-last includes the response cycle and is not proven wakeup overhead. Cohorts use successful WB, may start before clean, overlap, and are not retirement or exclusive CPU loss. Per-slot native D-wait is independently preserved.')
+    if identities:
+        output['requested_completed_scalar_MSHR_services'] = requested
+        found = {tuple(s['identity'][k] for k in KEY) for s in requested}
+        output['requested_identities_without_completed_service'] = [dict(zip(KEY, row)) for row in sorted(wanted - found)]
     return output
 
 
@@ -292,8 +301,10 @@ def main():
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--identity', type=int, nargs=len(KEY), action='append', metavar=tuple(k.upper() for k in KEY),
+                        help='Query a complete scalar issue identity in addition to the top20 summary; may be repeated')
     args = parser.parse_args()
-    args.output.write_text(json.dumps(analyze(args.folder, args.receipt), indent=2) + '\n')
+    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, identities=args.identity or ()), indent=2) + '\n')
 
 
 if __name__ == '__main__':
