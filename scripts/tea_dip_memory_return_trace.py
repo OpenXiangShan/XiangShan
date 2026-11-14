@@ -68,9 +68,13 @@ def transactions(rows):
     return complete, list(active.values()), commands, sum(map(len,pending.values()))
 
 
-def analyze(folder, receipt):
+def analyze(folder, receipt, load_observer=False):
     folder=Path(folder)
-    result=l2_analyze(folder,receipt)
+    if load_observer:
+        from tea_dip_llptw_trace import analyze as llptw_analyze
+        result=llptw_analyze(folder,receipt)
+    else:
+        result=l2_analyze(folder,receipt)
     proof=json.loads((folder/'probe-build-proof.json').read_text())['memory_return_binding']
     assert proof['command_call_is_external'] and proof['model_objects']==577 and proof['new_RTL_state_bits']==0
     timing=json.loads((folder/'memory-timing.json').read_text())
@@ -82,7 +86,8 @@ def analyze(folder, receipt):
     refresh_core_cycles=timing['tRFC']*timing['CPU_FREQ']//timing['DRAM_FREQ']
     rows=read(folder/'load-memory-events.csv')
     boundary=lambda records:[(r['core_cycle'],r['clean'],r['native_dump'])for r in records if r['kind']==0]
-    assert boundary(rows)==boundary(read(folder/'load-l2-mshr.csv')), 'Memory trace boundary mismatch'
+    boundary_trace='llptw-probe.csv' if load_observer else 'load-l2-mshr.csv'
+    assert boundary(rows)==boundary(read(folder/boundary_trace)), 'Memory trace boundary mismatch'
     complete, pending, commands, failed_pending=transactions(rows)
     accepted=sum(r['kind']==1 and r['accepted']for r in rows)
     assert accepted==len(complete)+len(pending), 'Memory accepted/response conservation'
@@ -103,7 +108,10 @@ def analyze(folder, receipt):
         blocked=sum(max(0,min(command_core,r['core_cycle']+1+refresh_core_cycles)-max(owner['accepted_core'],r['core_cycle']+1))for r in overlapping)
         owner.update(read_command_core=command_core,accepted_to_READ=command_core-owner['accepted_core'],READ_to_API_response=owner['response_core']-command_core,same_rank_refresh_overlap_core_cycles=blocked,overlapping_refresh_commands=overlapping,read_stage_unknown_reason=None)
     for phase in result['phases']:
-        lo,hi=phase['begin_core_exclusive']+1,phase['end_core_inclusive']+1
+        if load_observer:
+            lo,hi=phase['begin_core_inclusive'],phase['end_core_exclusive']
+        else:
+            lo,hi=phase['begin_core_exclusive']+1,phase['end_core_inclusive']+1
         members=[r for r in complete if lo<=r['response_core']<hi]
         reads=[r for r in members if not r['is_write']]
         measured=[r for r in reads if r['read_command']is not None]
@@ -116,9 +124,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--folder',type=Path,required=True)
     parser.add_argument('--receipt',type=Path,required=True)
+    parser.add_argument('--load-observer',action='store_true',help='Validate the S2/WB/LLPTW observer instead of an L2 observer')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
-    args.output.write_text(json.dumps(analyze(args.folder,args.receipt),indent=2)+'\n')
+    args.output.write_text(json.dumps(analyze(args.folder,args.receipt,load_observer=args.load_observer),indent=2)+'\n')
 
 
 if __name__=='__main__':

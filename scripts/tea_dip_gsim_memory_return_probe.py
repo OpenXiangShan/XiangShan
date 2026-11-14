@@ -91,11 +91,15 @@ extern "C" void __wrap_COMMAND(void *self,const dramsim3::Command &cmd,uint64_t 
     return cpp
 
 
-def build(l2_build_proof, output):
+def build(l2_build_proof, output, load_observer=False):
     proof_path, output = Path(l2_build_proof).resolve(), Path(output).resolve()
     previous = json.loads(proof_path.read_text())
     assert previous['passed'] and previous['original_files_unchanged'] and previous['original_objects'] == 577
-    assert previous['generator_sha256'] == digest(Path(__file__).with_name('tea_dip_gsim_l2_return_probe.py'))
+    if load_observer:
+        assert previous['generator_sha256'] == digest(Path(__file__).with_name('tea_dip_gsim_load_service_probe.py'))
+        assert previous['binding']['writeback_capture'] and previous['binding']['LLPTW_binding']['new_RTL_state_bits'] == 0
+    else:
+        assert previous['generator_sha256'] == digest(Path(__file__).with_name('tea_dip_gsim_l2_return_probe.py'))
     parent, root = proof_path.parent, Path(previous['root'])
     assert not output.exists() and digest(parent/'probe.cpp') == previous['probe_cpp_sha256']
     for name, value in previous['original_sha256'].items():
@@ -127,9 +131,10 @@ def build(l2_build_proof, output):
             subprocess.run(command,stdout=out,stderr=err,check=True)
     for name, value in previous['original_sha256'].items():
         assert digest(Path(name)) == value, name
+    base = {'base_load_build_proof_sha256' if load_observer else 'base_L2_build_proof_sha256': digest(proof_path)}
     result = dict(previous,binary=str(output/'emu'),binary_sha256=digest(output/'emu'),commands=commands,
                   probe_cpp_sha256=digest(output/'probe.cpp'),generator_sha256=digest(Path(__file__)),
-                  base_L2_build_proof_sha256=digest(proof_path),memory_return_binding=dict(
+                  **base,memory_return_binding=dict(
                       wrapped_symbols=WRAPPED,original_DRAM_library=str(library),
                       source_sha256={str(p):digest(p)for p in [common,controller,ram,obj]},
                       command_call_is_external=True,model_objects=577,new_RTL_state_bits=0,
@@ -142,10 +147,12 @@ def build(l2_build_proof, output):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--l2-build-proof',type=Path,required=True)
+    group=parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--l2-build-proof',type=Path)
+    group.add_argument('--load-build-proof',type=Path,help='Use the qualified S2/WB/LLPTW host observer instead of an L2 observer')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
-    result=build(args.l2_build_proof,args.output)
+    result=build(args.l2_build_proof or args.load_build_proof,args.output,load_observer=args.load_build_proof is not None)
     print(json.dumps({k:result[k]for k in ['passed','binary','binary_sha256','original_objects']}))
 
 
