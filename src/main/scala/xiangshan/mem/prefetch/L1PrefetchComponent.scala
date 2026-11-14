@@ -358,7 +358,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     req.bits.no_translate := false.B
     req.bits.fullva := 0.U
     req.bits.checkfullva := false.B
-    req.bits.memidx := DontCare
     req.bits.debug := DontCare
     req.bits.hlvx := DontCare
     req.bits.hyperinst := DontCare
