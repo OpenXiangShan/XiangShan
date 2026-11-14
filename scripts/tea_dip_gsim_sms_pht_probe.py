@@ -37,23 +37,33 @@ def add_capture(root, header, cpp):
     compact = re.sub(r'\s+', '', qtext)
     assert 'io.out.valid:=Mux1H(r_mask,valids)' in compact and 'io.out.bits:=Mux1H(r_mask,entries)' in compact
     assert 'valr_mask=(0untiln).map(i=>i.U===rd_ptr)' in compact
-    assert compact.count('rd_ptr:=rd_ptr+1.U') == 1
-    if 'valadvance_empty_head=!io.out.valid&&io.out.ready&&valids.reduce(_||_)' in compact:
-        assert policy == 'update_priority'
+    if 'skipEmptyHead:Boolean=false' in compact:
+        assert policy == 'update_priority' and compact.count('rd_ptr:=rd_ptr+1.U') == 2
+        assert 'classOverrideableQueue[T<:Data](gen:T,n:Int,skipEmptyHead:Boolean=false)' in compact
+        assert 'if(skipEmptyHead){valadvanceEmptyHead=!io.out.valid&&io.out.ready&&valids.reduce(_||_)valnextValidPtr=Mux1H((0untiln).map(i=>i.U===rd_ptr),(0untiln).map(i=>PriorityMux((1untiln).map(j=>valids((i+j)%n)->((i+j)%n).U(log2Up(n).W)))))when(io.out.fire){rd_ptr:=rd_ptr+1.U}.elsewhen(advanceEmptyHead){rd_ptr:=nextValidPtr}}else{when(io.out.fire){rd_ptr:=rd_ptr+1.U}}' in compact
+        instances = re.sub(r'\s+', '', text)
+        assert 'vallookup_queue=Module(newOverrideableQueue(newPhtLookup,smsParams.pht_lookup_queue_size,skipEmptyHead=true))' in instances
+        assert 'valevict_queue=Module(newOverrideableQueue(newAGTEntry,smsParams.pht_lookup_queue_size))' in instances
         assert 'evict.ready := !s1_valid || !s1_wait' in text
-        if 'valnext_valid_ptr=Mux1H(' in compact:
-            assert 'valnext_valid_ptr=Mux1H((0untiln).map(i=>i.U===rd_ptr),(0untiln).map(i=>PriorityMux((1untiln).map(j=>valids((i+j)%n)->((i+j)%n).U(log2Up(n).W)))))' in compact
-            assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}.elsewhen(advance_empty_head){rd_ptr:=next_valid_ptr}' in compact
-            read_policy = 'advance_nearest_ready'
-        else:
-            assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
-            read_policy = 'advance_empty_ready'
-    elif 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
-        assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
-        read_policy = 'advance_empty'
+        read_policy = 'lookup_nearest_ready'
     else:
-        assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}' in compact
-        read_policy = 'hold_empty'
+        assert compact.count('rd_ptr:=rd_ptr+1.U') == 1
+        if 'valadvance_empty_head=!io.out.valid&&io.out.ready&&valids.reduce(_||_)' in compact:
+            assert policy == 'update_priority'
+            assert 'evict.ready := !s1_valid || !s1_wait' in text
+            if 'valnext_valid_ptr=Mux1H(' in compact:
+                assert 'valnext_valid_ptr=Mux1H((0untiln).map(i=>i.U===rd_ptr),(0untiln).map(i=>PriorityMux((1untiln).map(j=>valids((i+j)%n)->((i+j)%n).U(log2Up(n).W)))))' in compact
+                assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}.elsewhen(advance_empty_head){rd_ptr:=next_valid_ptr}' in compact
+                read_policy = 'advance_nearest_ready'
+            else:
+                assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
+                read_policy = 'advance_empty_ready'
+        elif 'valadvance_empty_head=!io.out.valid&&valids.reduce(_||_)' in compact:
+            assert 'when(io.out.fire||advance_empty_head){rd_ptr:=rd_ptr+1.U}' in compact
+            read_policy = 'advance_empty'
+        else:
+            assert 'when(io.out.fire){rd_ptr:=rd_ptr+1.U}' in compact
+            read_policy = 'hold_empty'
     generated = subprocess.check_output(['rg', '-l', '-F', *sum((['-e', 'sms_pht_' + k + 'Counter + '] for k in ['lookup_in', 'lookup_out', 'evict_in', 'evict_out']), []), str(root / 'build/gsim-compile/model'), '--glob', '*.cpp'], text=True).splitlines()
     equations = '\n'.join(Path(p).read_text() for p in generated)
     event = {}
@@ -140,8 +150,10 @@ static void pht_observe(SSimTop *model) {
     replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1))' if read_policy == 'advance_empty' else 'false'
     if read_policy in ['advance_empty_ready', 'advance_nearest_ready']:
         replacements['ADVANCE_EMPTY'] = 'bool(mask&&!(mask>>r&1)&&(q==0?ready&&!update:ready))'
+    if read_policy == 'lookup_nearest_ready':
+        replacements['ADVANCE_EMPTY'] = 'bool(q==0&&mask&&!(mask>>r&1)&&ready&&!update)'
     replacements['EXPECTED_READ_SLOT'] = '((r+out+unsigned(advance_empty))&3)'
-    if read_policy == 'advance_nearest_ready':
+    if read_policy in ['advance_nearest_ready', 'lookup_nearest_ready']:
         replacements['EXPECTED_READ_SLOT'] = '([&](){unsigned target=r;if(out)target=(r+1)&3;else if(advance_empty)for(unsigned step=1;step<4;++step)if(mask>>((r+step)&3)&1){target=(r+step)&3;break;}return target;}())'
     for name in sorted(replacements, key=len, reverse=True):
         helper = helper.replace(name, replacements[name])

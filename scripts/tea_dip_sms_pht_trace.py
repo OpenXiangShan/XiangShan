@@ -19,8 +19,8 @@ PIPE = ['s1_valid', 's1_update', 's1_index', 's2_valid', 's2_update', 's2_index'
 
 def queue_owners(rows, policy, read_policy='hold_empty'):
     assert policy in ['update_priority', 'existing_S1_type_alternation']
-    assert read_policy in ['hold_empty', 'advance_empty', 'advance_empty_ready', 'advance_nearest_ready']
-    if read_policy in ['advance_empty_ready', 'advance_nearest_ready']:
+    assert read_policy in ['hold_empty', 'advance_empty', 'advance_empty_ready', 'advance_nearest_ready', 'lookup_nearest_ready']
+    if read_policy in ['advance_empty_ready', 'advance_nearest_ready', 'lookup_nearest_ready']:
         assert policy == 'update_priority'
     slots, reads, writes, sequence = [[None] * 4 for _ in range(2)], [0, 0], [0, 0], [0, 0]
     owners, observations = [], []
@@ -69,8 +69,9 @@ def queue_owners(rows, policy, read_policy='hold_empty'):
                     blocker = 4
                 assert blocker
             before = sum(owner is not None for owner in slots[q])
-            advance_empty = read_policy in ['advance_empty', 'advance_empty_ready', 'advance_nearest_ready'] and before > 0 and head is None
-            if read_policy in ['advance_empty_ready', 'advance_nearest_ready']:
+            queue_policy = ('advance_nearest_ready' if q == 0 else 'hold_empty') if read_policy == 'lookup_nearest_ready' else read_policy
+            advance_empty = queue_policy in ['advance_empty', 'advance_empty_ready', 'advance_nearest_ready'] and before > 0 and head is None
+            if queue_policy in ['advance_empty_ready', 'advance_nearest_ready']:
                 advance_empty = advance_empty and ready and (q == 1 or not valid[1])
             departed, overwritten = None, None
             if row['output']:
@@ -80,7 +81,7 @@ def queue_owners(rows, policy, read_policy='hold_empty'):
                 slots[q][reads[q]] = None
                 reads[q] = (reads[q] + 1) & 3
             elif advance_empty:
-                step = next(step for step in range(1, 4) if slots[q][(reads[q] + step) & 3] is not None) if read_policy == 'advance_nearest_ready' else 1
+                step = next(step for step in range(1, 4) if slots[q][(reads[q] + step) & 3] is not None) if queue_policy == 'advance_nearest_ready' else 1
                 reads[q] = (reads[q] + step) & 3
             if row['input']:
                 slot = writes[q]
