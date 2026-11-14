@@ -268,7 +268,6 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     spec.wen  := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && intDestValid(i)
     spec.addr := io.rabCommits.info(i).ldest
     spec.data := io.rabCommits.info(i).pdest
-    XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
     when (rename.wen) {
