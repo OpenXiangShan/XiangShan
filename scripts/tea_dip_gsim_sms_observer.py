@@ -12,7 +12,7 @@ from tea_dip_gsim_sms_internal_probe import add_capture as internal
 from tea_dip_gsim_sms_admission_probe import add_capture as admission
 
 
-def build(root, output, compiler, library):
+def build(root, output, compiler, library, *, capture_tlb=False):
     root, output, library = Path(root).resolve(), Path(output).resolve(), Path(library).resolve()
     assert not output.exists()
     git = lambda *args: subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
@@ -26,6 +26,9 @@ def build(root, output, compiler, library):
     bindings = dict(binding=binding)
     for name, add in [('SMS_request_binding', pipeline), ('SMS_internal_binding', internal), ('SMS_admission_binding', admission)]:
         cpp, bindings[name] = add(root, header.read_text(), cpp)
+    if capture_tlb:
+        from tea_dip_gsim_sms_tlb_probe import add_capture
+        cpp, bindings['SMS_TLB_binding'] = add_capture(root, header.read_text(), cpp)
     output.mkdir(parents=True)
     (output / 'probe.cpp').write_text(cpp)
     (output / 'objects.rsp').write_text('\n'.join(shlex.quote(str(p)) for p in objects) + '\n')
@@ -44,6 +47,8 @@ def build(root, output, compiler, library):
                  original_objects=len(objects), original_sha256=originals, commands=commands, wrapped_symbols=wrapped,
                  probe_cpp_sha256=digest(output / 'probe.cpp'), generator_sha256=digest(Path(__file__)), **bindings,
                  scope='One source-qualified host object and one link, using only this source model. Seven S2/WB/SMS CSVs; no LRQ/L2/LLC/NCB/DRAM observers or new RTL state. Closed own-source native/SQL/CSV neutrality, field semantics and host costs must still be calibrated.')
+    if capture_tlb:
+        proof['scope'] += ' Additional sms-tlb.csv captures qualified translation ownership and pipeline, pending closed-source calibration.'
     (output / 'build-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
     return proof
 
@@ -54,8 +59,9 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compiler', default='clang++')
     parser.add_argument('--dramsim3-library', type=Path, required=True)
+    parser.add_argument('--capture-tlb', action='store_true')
     args = parser.parse_args()
-    proof = build(args.root, args.output, args.compiler, args.dramsim3_library)
+    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_tlb=args.capture_tlb)
     print(json.dumps({name: proof[name] for name in ['passed', 'source', 'binary', 'binary_sha256', 'original_objects']}))
 
 
