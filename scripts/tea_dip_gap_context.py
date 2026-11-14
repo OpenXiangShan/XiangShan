@@ -80,6 +80,8 @@ def analyze(folder, receipt_path, top=5):
                       'and censoring retained. A boundary gap includes cycles outside ROI; its state budget is not '
                       'clipped. TEA targets and DIP slot fates refer only to identical source samples inside gap '
                       'and ROI, with all later final records retained. Empty sampling populations remain null. '
+                      'ROB head context describes the dequeue entry and its Topdown classification; it need not '
+                      'identify the selected compressed TEA member or prove that member has not issued. '
                       'A sampled target or event does not explain the whole gap, and DIP observes dispatch slots, '
                       'not that same retirement target. Recorded gap thresholds can omit shorter intervals. '
                       'Gap lengths are not load-service latency or recoverable CPU cycles; no address, prefetch '
