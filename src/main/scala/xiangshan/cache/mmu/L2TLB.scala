@@ -46,7 +46,7 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   lazy val module = new L2TLBImp(this)
 }
 
-class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
+class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEventInfos {
 
   val (mem, edge) = outer.node.out.head
 
@@ -867,7 +867,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // print configs
   println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l2:${l2tlbParams.l2Size} fa l1: nSets ${l2tlbParams.l1nSets} nWays ${l2tlbParams.l1nWays} l0: ${l2tlbParams.l0nSets} nWays ${l2tlbParams.l0nWays} blockBytes:${l2tlbParams.blockBytes}")
 
-  val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
+  val perfEvents = Seq(llptw, cache, ptw).flatMap(_.getPerfEventInfos)
   generatePerfEvent()
 
   val isWriteL1TlbTable = Constantin.createRecord(s"isWriteL1TlbTable$hartId")
@@ -1050,7 +1050,7 @@ class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParame
     node := ptw.node
   }
 
-  class L2TLBWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
+  class L2TLBWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEventInfos {
     val io = IO(new L2TLBIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
@@ -1059,7 +1059,7 @@ class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParame
     }
     else {
         io <> ptw.module.io
-        ptw.module.getPerfEvents
+        ptw.module.getPerfEventInfos
     }
     generatePerfEvent()
   }

@@ -20,7 +20,7 @@ import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 
-class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
+class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEventInfos {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out := resp
   // shorter path for s1 pred
@@ -89,6 +89,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_ ++ _))
 
-  override val perfEvents = components.map(_.getPerfEvents).reduce(_ ++ _)
+  override val perfEvents = components.map(_.getPerfEventInfos).reduce(_ ++ _)
   generatePerfEvent()
 }

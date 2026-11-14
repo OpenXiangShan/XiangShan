@@ -972,7 +972,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents with HasL1PrefetchSourceParameter {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEventInfos with HasL1PrefetchSourceParameter {
 
   val io = IO(new DCacheIO)
 
@@ -1765,7 +1765,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // }
   // XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
 
-  val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
+  val perfFromLoadPipes = ldu.zipWithIndex.flatMap { case (pipe, pipeIndex) =>
+    pipe.getPerfEventInfos.map(event =>
+      event.copy(description = s"DCache LoadPipe $pipeIndex: ${event.description}")
+    )
+  }
+  val perfEvents = Seq(wb, mainPipe, missQueue, probeQueue).flatMap(_.getPerfEventInfos) ++ perfFromLoadPipes
   generatePerfEvent()
 }
 
@@ -1799,7 +1804,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule
     dcache.cacheCtrlOpt.get.node := uncacheNode.get
   }
 
-  class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
+  class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEventInfos {
     val io = IO(new DCacheIO)
     val perfEvents = if (!useDcache) {
       // a fake dcache which uses dpi-c to access memory, only for debug usage!
@@ -1809,7 +1814,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule
     }
     else {
       io <> dcache.module.io
-      dcache.module.getPerfEvents
+      dcache.module.getPerfEventInfos
     }
     generatePerfEvent()
   }
