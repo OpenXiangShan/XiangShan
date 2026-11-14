@@ -680,4 +680,6 @@ object TopMain extends App {
   }
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
+
+  DiplomacyGlobalView.dump()
 }
