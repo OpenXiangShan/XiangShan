@@ -955,6 +955,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
         loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
+      dtlb_reqs.take(LduCnt)(i).req_kill := Mux(vSegmentFlag,
+        vSegmentUnit.io.dtlb.req_kill, loadUnits(i).io.tlb.req_kill)
     }
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
