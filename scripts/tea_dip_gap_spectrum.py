@@ -76,6 +76,27 @@ def analyze(folder, receipt_path, gap_bounds):
                       'latency, additive TEA/DIP budget, causal counterfactual or hardware expansion is inferred.')
 
 
+def snapshot_counts(first, last):
+    """Difference two same-epoch prefix snapshots; counts are classified at gap completion.
+
+    Pending edge intervals remain separate. Counts do not recover individual short
+    gap lengths, PCs, request identities or saved cycles.
+    """
+    cycles = last['CYCLE'] - first['CYCLE']
+    states = {name: last['STATES_' + str(i)] - first['STATES_' + str(i)]
+              for i, name in enumerate(['Computing', 'Stalled', 'Flushed', 'Drained'])}
+    gaps = {name: last['GAPS_' + str(i)] - first['GAPS_' + str(i)]
+            for i, name in enumerate(['1-7', '8-31', '32-127', '128-511', '512+'])}
+    retired = last['RETIRED'] - first['RETIRED']
+    censored = last['CENSOREDGAPS'] - first['CENSOREDGAPS']
+    assert cycles > 0 and sum(states.values()) == cycles
+    assert min([retired, censored, *states.values(), *gaps.values()]) >= 0
+    return dict(core_begin=first['CYCLE'], core_exclusive_end=last['CYCLE'],
+                cycles=cycles, retired=retired, states=states, completed_gap_counts=gaps,
+                censored_gap_completions=censored,
+                pending_at_begin=first['PENDING'], pending_at_end=last['PENDING'])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
