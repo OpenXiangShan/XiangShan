@@ -790,6 +790,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   /** prefetcher site in L1 */
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
+  prefetcher.io.historyContext := Cat(tlbcsr.satp.mode, tlbcsr.satp.asid, tlbcsr.satp.ppn,
+    tlbcsr.vsatp.mode, tlbcsr.vsatp.asid, tlbcsr.vsatp.ppn,
+    tlbcsr.hgatp.mode, tlbcsr.hgatp.vmid, tlbcsr.hgatp.ppn, tlbcsr.priv.virt, tlbcsr.priv.dmode)
+  prefetcher.io.historyFence := sfence.valid || tlbcsr.satp.changed || tlbcsr.vsatp.changed ||
+    tlbcsr.hgatp.changed || tlbcsr.priv.virt_changed
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
   prefetcher.io.l2_fdbk_pf_ctrl := io.l2_fdbk_pf_ctrl
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl

@@ -84,6 +84,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     println(f"  Prefetcher #$idx%-2d => ${pf.name}")
   }
   val io = IO(new Bundle() {
+    // ASID/VMID, roots and data privilege; history never crosses contexts.
+    val historyContext = Input(UInt(195.W))
+    val historyFence = Input(Bool())
     // prefetch control
     val pfCtrlFromTile = Input(new PrefetchCtrlFromTile)
     val pfCtrlFromCSR = Flipped(new PrefetchCtrl)
@@ -224,6 +227,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.enable := l1D_pf_enable
     pf.io.fdbkDegree := 1.U
 
+    val previousContext = RegNext(io.historyContext, 0.U(195.W))
+    pf.historyFlush := io.historyFence || previousContext =/= io.historyContext
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
     pf.streamEnable := l1D_pf_enable && enableL1StreamPrefetcher &&
@@ -250,6 +255,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
       // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
+      pf.io.ld_in(i).bits.pc := Mux(io.trainSource.s3_ptrChasing(i), s2_loadPcVec(i), s3_loadPcVec(i))
     }
 
     for (i <- 0 until ST_TRAIN_WIDTH) {

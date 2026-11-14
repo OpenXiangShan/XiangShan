@@ -1143,6 +1143,34 @@ for(i <- 0 until reqNum) {
   io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
   io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
 
+  // These diagnostic registers disappear with performance printing disabled.
+  // Preserve the primary Stream origin even when a demand clears req.pf_source.
+  if (p(PerfCounterOptionsKey).enablePerfPrint) {
+    val streamOrigin = RegInit(false.B)
+    val demandSeen = RegInit(false.B)
+    when(primary_fire) {
+      streamOrigin := (0 until reqNum).map(i => primary_fire_vec(i) &&
+        io.queryME(i).req.bits.isFromPrefetch && isFromStream(io.queryME(i).req.bits.pf_source)).reduce(_ || _)
+      demandSeen := false.B
+    }
+    val streamPending = req_valid && streamOrigin
+    val demandMerge = streamPending && (0 until reqNum).map(i => secondary_fire_vec(i) &&
+      io.queryME(i).req.bits.isFromLoad).reduce(_ || _)
+    when(demandMerge) { demandSeen := true.B }
+    val lastData = streamPending && !w_grantlast && io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && refill_done
+    val failed = error || io.mem_grant.bits.denied || io.mem_grant.bits.corrupt
+    XSPerfAccumulate("history_stream_primary", primary_fire && (0 until reqNum).map(i => primary_fire_vec(i) &&
+      io.queryME(i).req.bits.isFromPrefetch && isFromStream(io.queryME(i).req.bits.pf_source)).reduce(_ || _))
+    XSPerfAccumulate("history_stream_refill_success", lastData && !failed)
+    XSPerfAccumulate("history_stream_refill_error", lastData && failed)
+    XSPerfAccumulate("history_stream_mshr_cycles", streamPending)
+    XSPerfAccumulate("history_stream_wait_data_cycles", streamPending && !w_grantlast)
+    XSPerfAccumulate("history_stream_demand_wait_cycles", streamPending && demandSeen && !w_grantlast)
+    XSPerfAccumulate("history_stream_first_demand_merge", demandMerge && !demandSeen)
+    XSPerfAccumulate("history_stream_refill_with_demand", lastData && !failed && (demandSeen || demandMerge))
+    XSPerfAccumulate("history_stream_a_stall_cycles", streamPending && io.mem_acquire.valid && !io.mem_acquire.ready)
+  }
+
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
   XSPerfAccumulate("load_miss_penalty_to_use",
