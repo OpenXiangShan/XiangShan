@@ -1,4 +1,4 @@
-"""Bound phase changes at common cumulative retirement milestones in closed CI windows."""
+"""Bound phase changes at common cumulative retirement milestones in closed windows."""
 from pathlib import Path
 from bisect import bisect_left
 import argparse
@@ -15,7 +15,7 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def brackets(rows):
+def brackets(rows, targets=TARGETS):
     assert rows
     for before, after in zip(rows, rows[1:]):
         assert before['CYCLE'] <= after['CYCLE'] and before['RETIRED'] <= after['RETIRED'], 'Nonmonotonic cycle or retirement counter'
@@ -23,7 +23,7 @@ def brackets(rows):
         assert sum(after['STATES_' + str(i)] - before['STATES_' + str(i)] for i in range(4)) == after['CYCLE'] - before['CYCLE'], 'TEA state increments do not cover elapsed cycles'
     retired = [row['RETIRED'] for row in rows]
     result = []
-    for target in TARGETS:
+    for target in targets:
         index = bisect_left(retired, target)
         assert 0 < index < len(rows), 'Common retirement milestone lacks two snapshots'
         lower, upper = rows[index - 1:index + 1]
