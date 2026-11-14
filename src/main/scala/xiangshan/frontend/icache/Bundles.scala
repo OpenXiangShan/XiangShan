@@ -28,6 +28,7 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.TopdownBundle
 import xiangshan.frontend.ftq.FtqPtr
 
 /* ***
@@ -269,7 +270,8 @@ class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
 }
 
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
-  val req: DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
+  val req:     DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
+  val topdown: TopdownBundle                 = new TopdownBundle
   // for timing fix, sent 1 cycle after req is fired
   val corrupt: Vec[Vec[Bool]] = Vec(FetchPorts, Vec(PortNumber, Bool()))
 }
@@ -453,12 +455,6 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   def hit: Bool = hits(0) && (!isDoubleLine || hits(1))
 }
 
-// to Ifu -> IBuffer -> Backend
-class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
-  val iCacheMissBubble: Bool = Output(Bool())
-  val itlbMissBubble:   Bool = Output(Bool())
-}
-
 // inner MainPipe -> top
 class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val rawHits:     Vec[Bool] = Vec(PortNumber, Bool())
@@ -467,12 +463,15 @@ class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
 
 // inner PrefetchPipe -> top
 class PrefetchPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
+  val bpuFlush:        Bool = Bool()
   val pendingItlbMiss: Bool = Bool()
+  val pendingUpdate:   Bool = Bool()
 }
 
 // inner WayLookup -> top
 class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val empty: Bool = Bool()
+  val empty:         Bool = Bool()
+  val pendingUpdate: Bool = Bool()
 }
 
 class ICacheToFtqIO(implicit p: Parameters) extends ICacheBundle {

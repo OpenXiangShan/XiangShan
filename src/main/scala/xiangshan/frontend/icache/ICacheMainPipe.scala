@@ -26,10 +26,13 @@ import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
+import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.Pc
+import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqToMainPipeBundle
@@ -67,7 +70,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // backend/Beu
     val error: Valid[L1CacheErrorInfo] = Output(ValidIO(new L1CacheErrorInfo))
 
-    val perf: MainPipePerfInfo = Output(new MainPipePerfInfo)
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
+
+    val perf:           MainPipePerfInfo     = Output(new MainPipePerfInfo)
+    val perf_prefetch:  PrefetchPipePerfInfo = Input(new PrefetchPipePerfInfo)
+    val perf_waylookup: WayLookupPerfInfo    = Input(new WayLookupPerfInfo)
   }
 
   val io: ICacheMainPipeIO = IO(new ICacheMainPipeIO)
@@ -158,8 +165,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   s0_req(1).valid := s0_realTwoFetchValid
 
-  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx, s0_valid) ||
+  private val s0_bpuFlush = io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx, s0_valid) ||
     io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
+  s0_flush := io.flush || s0_bpuFlush
 
   private val s0_canAccept = toData.ready && s1_ready
   io.fromFtq.ready       := s0_canAccept && io.fromWayLookup.valid && !s0_flush
@@ -455,7 +463,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.icacheMeta.pAddr              := getPAddrFromPTag(s1_vAddr(2 * i), s1_pTag)
     req.icacheMeta.gpAddr             := s1_exceptionInfo(i).gpAddr
   }
-  s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
+  private val s1_bpuFlush = io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
+  s1_flush := io.flush || s1_bpuFlush
   s1_ready := (s1_fetchFinish && io.toIfu.req.ready) || !s1_valid
   s1_fire  := s1_valid && s1_fetchFinish && io.toIfu.req.ready && !s1_flush
 
@@ -572,16 +581,52 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s2_flush := io.flush
 
   /* *** perf *** */
+  private val perf_s1PendingMiss = s1_valid && !s1_fetchFinish
+  private val perf_waitingMeta   = io.fromFtq.valid && !io.fromWayLookup.valid
+
+  private val perf_waylookupEmptyReason = RegInit(TopDownCounters.FrontendOtherCoreStall.id.U)
+  when(io.topdownOverride.valid) {
+    perf_waylookupEmptyReason := io.topdownOverride.bits.reason
+  }.elsewhen(io.perf_prefetch.bpuFlush) {
+    perf_waylookupEmptyReason := TopDownCounters.OverrideBubble.id.U
+  }.elsewhen(io.perf_prefetch.pendingItlbMiss) {
+    perf_waylookupEmptyReason := TopDownCounters.ITLBMissBubble.id.U
+  }.elsewhen(io.perf_prefetch.pendingUpdate) {
+    perf_waylookupEmptyReason := TopDownCounters.ICacheStructualConflict.id.U
+  }
+
+  // topdown: fromFtq -> toIfu has 1 stage
+  private val topdownPipe = Module(new TopDownPipeline(1))
+  topdownPipe.io.in := io.fromFtq.bits.topdown
+  topdownPipe.setReason(
+    0,
+    Seq(
+      s0_bpuFlush                                           -> TopDownCounters.OverrideBubble,
+      (s0_valid && !toData.ready)                           -> TopDownCounters.ICacheStructualConflict,
+      (perf_waitingMeta && io.perf_waylookup.pendingUpdate) -> TopDownCounters.ICacheStructualConflict,
+      (perf_waitingMeta && io.perf_waylookup.empty)         -> perf_waylookupEmptyReason
+    )
+  )
+  topdownPipe.setReason(
+    1,
+    Seq(
+      s1_bpuFlush        -> TopDownCounters.OverrideBubble,
+      perf_s1PendingMiss -> TopDownCounters.ICacheMissBubble
+    )
+  )
+  topdownPipe.setReason(Seq(io.topdownOverride.valid -> io.topdownOverride.bits.reason))
+  io.toIfu.topdown := topdownPipe.io.out
+
   // when fired, tell ifu raw hit state of each cache line
   // NOTE: we cannot use s2_hits, it will be reset when refilled from L2
   io.perf.rawHits := s1_sramHits(0) // FIXME
   // tell ICache top when handling miss
-  io.perf.pendingMiss := s1_valid && !s1_fetchFinish
+  io.perf.pendingMiss := perf_s1PendingMiss
 
   XSPerfAccumulate("stallCycles_fetch_icacheMain", !s1_fire)
-  XSPerfAccumulate("stallCycles_fetch_icacheMain_prefetch", s0_valid && !io.fromWayLookup.valid)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain_prefetch", perf_waitingMeta)
   XSPerfAccumulate("stallCycles_fetch_icacheMain_dataArray", s0_valid && !toData.ready)
-  XSPerfAccumulate("stallCycles_fetch_icacheMain_missUnit", s1_valid && !s1_fetchFinish)
+  XSPerfAccumulate("stallCycles_fetch_icacheMain_missUnit", perf_s1PendingMiss)
 
   private class AccessTrace extends Bundle {
     val vAddr:      UInt      = UInt(VAddrBits.W)

@@ -26,11 +26,13 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
+import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
@@ -52,6 +54,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
+
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
   }
 
   val io: BpuIO = IO(new BpuIO)
@@ -722,8 +726,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.scUsed              := s3_scUsed.asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
-  // TODO: override reason and redirect reason
-  io.toFtq.topdownReasons := 0.U.asTypeOf(new FrontendTopDownBundle())
+
+  /* *** top-down *** */
+  private val topdownPipe = Module(new TopDownPipeline(3))
+  // BPU is the starting point of the top-down pipeline, starts with FrontendOtherCoreStall.
+  // The later part of the pipeline might override to other reason (i.e. ICacheMiss).
+  // At last, IBuffer will expand reason from per-fetch-block to per-instruction,
+  // all valid instructions will be marked as NoStall, the reason from topdown pipeline is used only on empty slots.
+  topdownPipe.io.in.reason := TopDownCounters.FrontendOtherCoreStall.id.U
+
+  topdownPipe.setReason(1, Seq((s2_override || s3_override) -> TopDownCounters.OverrideBubble))
+  topdownPipe.setReason(2, Seq(s3_override -> TopDownCounters.OverrideBubble))
+  topdownPipe.setReason(Seq(io.topdownOverride.valid -> io.topdownOverride.bits.reason))
+  io.toFtq.topdown := topdownPipe.io.out
 
   /* *** BpTrace *** */
   when(io.toFtq.meta.fire) {

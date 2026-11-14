@@ -35,6 +35,7 @@ import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.ICacheToIfuIO
+import xiangshan.frontend.TopdownOverrideBundle
 
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
@@ -58,6 +59,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val flush:  Bool = Input(Bool())
     // wfi
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
+    // topdown
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -168,6 +171,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.fromWayLookup <> wayLookup.io.toMainPipe
   io.toFtq.fromMainPipe := mainPipe.io.toFtq
 
+  mainPipe.io.perf_prefetch   := prefetcher.io.perf
+  mainPipe.io.perf_waylookup  := wayLookup.io.perf
+  mainPipe.io.topdownOverride := io.topdownOverride
+
   wayLookup.io.flush        := io.fromFtq.redirectFlush
   wayLookup.io.flushFromBpu := io.fromFtq.flushFromBpu
   wayLookup.io.fromMainPipe := mainPipe.io.toWayLookup
@@ -188,18 +195,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   // send final accepted fetch bundle
   io.toIfu.req <> mainPipe.io.toIfu.req
+  io.toIfu.topdown := mainPipe.io.toIfu.topdown
   io.toIfu.corrupt := mainPipe.io.toIfu.corrupt
 
   // perf
   io.toIfu.perf.hits         := mainPipe.io.perf.rawHits
   io.toIfu.perf.isDoubleLine := mainPipe.io.toIfu.req.bits.info(0).perf_isCrossLine
   io.toIfu.perf.exception    := mainPipe.io.toIfu.req.bits.info(0).icacheMeta.exception
-
-  // topdown perf
-  // when mainPipe is handling a miss, it will create a bubble in Ifu pipe
-  io.toIfu.topdown.iCacheMissBubble := mainPipe.io.perf.pendingMiss
-  // when prefetcher is handling an Itlb miss, and wayLookup is empty, it will create a bubble in MainPipe
-  io.toIfu.topdown.itlbMissBubble := prefetcher.io.perf.pendingItlbMiss && wayLookup.io.perf.empty
 
   bus.b.ready := false.B
   bus.c.valid := false.B

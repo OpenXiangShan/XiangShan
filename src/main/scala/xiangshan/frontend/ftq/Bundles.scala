@@ -23,6 +23,7 @@ import utils.EnumUInt
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
+import xiangshan.frontend.TopdownBundle
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
@@ -122,7 +123,8 @@ class FtqToPrefetchBundle(implicit p: Parameters) extends FtqBundle {
 }
 
 class FtqToMainPipeBundle(implicit p: Parameters) extends FtqBundle {
-  val req: Vec[FtqFetchRequest] = Vec(MaxFetchReqNum, new FtqFetchRequest)
+  val req:     Vec[FtqFetchRequest] = Vec(MaxFetchReqNum, new FtqFetchRequest)
+  val topdown: TopdownBundle        = new TopdownBundle
 }
 
 class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {

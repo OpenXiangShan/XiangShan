@@ -34,9 +34,9 @@ import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
 import xiangshan.backend.decode.VTypeGen
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
-import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -51,8 +51,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val fromBackend: BackendToIBufBundle = Input(new BackendToIBufBundle)
 
     // top-down
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
-    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
+    val stallReason:     StallReasonIO                = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -519,37 +519,26 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private def numStages     = 2
-  private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
-
-  topdownStages(0) := io.in.bits.topdownInfo
-  for (i <- 1 until numStages) {
-    topdownStages(i) := topdownStages(i - 1)
-  }
-
-  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
-
-  private val deqValidCount = PopCount(io.out.map(_.valid))
-  private val deqWasteCount = DecodeWidth.U - deqValidCount
-  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
-    topdownStages.last.reasons.reverse
+  private val topdownPipe = Module(new TopDownPipeline(1))
+  topdownPipe.io.in := io.in.bits.topdown
+  topdownPipe.setReason(
+    0,
+    Seq(
+      // waiting for vtype update
+      resumingVType -> TopDownCounters.VTypeResumeStall,
+      // using bypass entry (buf empty), but incoming is not full
+      (useBypass && io.in.fire) -> TopDownCounters.FetchFragBubble,
+      // using dequeue entry, and has available incoming, but Ibuf can use either deq or bypass (structural conflict)
+      (!useBypass && io.in.valid && numFromFetch =/= 0.U) -> TopDownCounters.IBufStructualConflict
+    )
   )
+  topdownPipe.setReason(Seq(
+    (io.topdownOverride.valid && !io.topdownOverride.bits.isIfuRedirect) -> io.topdownOverride.bits.reason
+  ))
 
-  io.stallReason.reason.foreach(_ := 0.U)
+  // Expand the registered cause to absent lanes; valid instructions contribute NoStall.
   for (i <- 0 until DecodeWidth) {
-    when(i.U < deqWasteCount) {
-      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
-  }
-
-  when(!(deqWasteCount === DecodeWidth.U || topdownStages.last.reasons.asUInt.orR)) {
-    // should set reason for FetchFragmentationStall
-    // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
-    for (i <- 0 until DecodeWidth) {
-      when(i.U < deqWasteCount) {
-        io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
-      }
-    }
+    io.stallReason.reason(i) := Mux(io.out(i).valid, TopDownCounters.NoStall.id.U, topdownPipe.io.out.reason)
   }
 
   // Debug info

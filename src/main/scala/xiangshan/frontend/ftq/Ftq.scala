@@ -37,17 +37,17 @@ import xiangshan.RedirectLevel
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.BlameBpuSource
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PcInit
+import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
@@ -87,8 +87,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
       Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
 
-    // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Output(new BackendRedirectTopdown)
+    // when a redirect happened, broadcast override to every stage
+    val topdownOverride: Valid[TopdownOverrideBundle] = Valid(new TopdownOverrideBundle)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -339,14 +339,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   // bpu override fetch/pf ptr
+  private val flushFromBpu = Wire(new BpuFlushInfo)
   for (stage <- 2 to 3) {
     val redirect = if (stage == 2) prediction.bits.s2Override else prediction.bits.s3Override
     val ftqIdx   = if (stage == 2) io.fromBpu.s2FtqPtr else io.fromBpu.s3FtqPtr
 
-    io.toICache.flushFromBpu.stage(stage).valid := redirect
-    io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
-    io.toIfu.flushFromBpu.stage(stage).valid    := redirect
-    io.toIfu.flushFromBpu.stage(stage).bits     := ftqIdx
+    flushFromBpu.stage(stage).valid := redirect
+    flushFromBpu.stage(stage).bits  := ftqIdx
 
     when(redirect) {
       when(pfPtr >= ftqIdx) {
@@ -357,6 +356,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       }
     }
   }
+  io.toICache.flushFromBpu := flushFromBpu
+  io.toIfu.flushFromBpu    := flushFromBpu
 
   // --------------------------------------------------------------------------------
   // Interaction with backend
@@ -522,44 +523,84 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
+  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
+  private val redirectCfiOffset = getAlignedPosition(
+    GuardedPcInit(redirect.bits.pc),
+    redirect.bits.ftqOffset
+  )._1
+  private val perf_backendRedirectBranchInfo = Wire(new BranchInfo)
+  perf_backendRedirectBranchInfo.target      := GuardedPcInit(backendRedirect.bits.target).unGuard
+  perf_backendRedirectBranchInfo.taken       := backendRedirect.bits.taken
+  perf_backendRedirectBranchInfo.cfiPosition := redirectCfiOffset
+  perf_backendRedirectBranchInfo.attribute   := backendRedirect.bits.attribute
+  perf_backendRedirectBranchInfo.mispredict  := backendRedirect.bits.isMisPred
+  perf_backendRedirectBranchInfo.debug_realCfiPc.foreach(_ := DontCare)
+  private val perf_backendRedirectBlame = BlameBpuSource(
+    backendRedirect.valid,
+    redirectPerfMeta,
+    perf_backendRedirectBranchInfo
+  )
+
+  private val commitPerfMeta = perfQueue(commitPtr(0).value)
 
   // Topdown analysis
-  io.backendRedirectTopdown.backendRedirect         := backendRedirect.valid
-  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
-  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
+  io.topdownOverride.valid := backendRedirect.valid || ifuRedirect.valid
+  io.topdownOverride.bits.reason := Mux(
+    backendRedirect.valid,
+    MuxCase( // backend redirect
+      TopDownCounters.OtherRedirectBubble.id.U,
+      Seq(
+        backendRedirect.bits.debugIsCtrl -> Mux1H(
+          Seq(
+            (BlameBpuSource.BlameType.BTB, TopDownCounters.BTBMissBubble.id.U),
+            (BlameBpuSource.BlameType.RAS, TopDownCounters.RASMissBubble.id.U),
+            (BlameBpuSource.BlameType.TAGE, TopDownCounters.TAGEMissBubble.id.U),
+            (BlameBpuSource.BlameType.ITTAGE, TopDownCounters.ITTAGEMissBubble.id.U),
+            (BlameBpuSource.BlameType.SC, TopDownCounters.SCMissBubble.id.U)
+          ).map { case (blameType, counterType) =>
+            (perf_backendRedirectBlame === blameType) -> counterType
+          }
+        ),
+        backendRedirect.bits.debugIsMemVio -> TopDownCounters.MemVioRedirectBubble.id.U
+      )
+    ),
+    Mux( // ifu redirect
+      ifuRedirect.bits.isMisPred,
+      // precheck redirect
+      Mux(
+        ifuRedirect.bits.attribute.isReturn,
+        TopDownCounters.RASMissBubble.id.U, // return mispred, FIXME: can be a BTBMiss?
+        TopDownCounters.BTBMissBubble.id.U  // notCfiTaken, invalidTaken, direct mispred
+      ),
+      // uncache redirect, attribute to OtherRedirect
+      TopDownCounters.OtherRedirectBubble.id.U
+    )
+  )
+  io.topdownOverride.bits.isIfuRedirect := ifuRedirect.valid && !backendRedirect.valid // prevent overriding ibuf
 
-  io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
-  io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional
-  io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
-  io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
-  io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
-
-  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  // only driven by clock, not valid-ready
-  topdownStage := io.fromBpu.topdownReasons
-  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
-  io.toIfu.topdownInfo := topdownStage
-
-  when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
-    topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
-  }.elsewhen(
-    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U && bpTrainStallCnt < BpTrainStallLimit.U)
-  ) {
-    topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
-  }
+  private val topdownPipe = Module(new TopDownPipeline(1))
+  topdownPipe.io.in := io.fromBpu.topdown
+  topdownPipe.setReason(
+    0,
+    Seq(
+      (
+        flushFromBpu.shouldFlushByStage2(fetchPtr(0), true.B) ||
+          flushFromBpu.shouldFlushByStage3(fetchPtr(0), true.B)
+      )                                                                    -> TopDownCounters.OverrideBubble,
+      (!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U))            -> TopDownCounters.FtqFullStall,
+      (pfPtr(0) === fetchPtr(0) && bpTrainStallCnt >= BpTrainStallLimit.U) -> TopDownCounters.FtqUpdateBubble
+    )
+  )
+  topdownPipe.setReason(Seq(
+    io.topdownOverride.valid -> io.topdownOverride.bits.reason
+  ))
+  io.toICache.toMainPipe.bits.topdown := topdownPipe.io.out
 
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 
   // XSPerfCounters
-  private val redirectCfiOffset = getAlignedPosition(
-    GuardedPcInit(redirect.bits.pc),
-    redirect.bits.ftqOffset
-  )._1
-  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
-  private val commitPerfMeta   = perfQueue(commitPtr(0).value)
-
   XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred,
