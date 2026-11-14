@@ -999,6 +999,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val strideEnable = IO(Input(Bool()))
   val strideFdbkDegree = IO(Input(UInt(DEGREE_WIDTH.W)))
   val streamEnable = IO(Input(Bool()))
+  val historyFlush = IO(Input(Bool()))
   val streamFdbkDegree = IO(Input(UInt(DEGREE_WIDTH.W)))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
@@ -1019,7 +1020,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
     }
   }
   stream_train_filter.io.enable := streamEnable
-  stream_train_filter.io.flush := stream_pf_ctrl.flush
+  stream_train_filter.io.flush := stream_pf_ctrl.flush || historyFlush
 
   stride_train_filter.io.ldTrainOpt.get.zipWithIndex.foreach {
     case (ld_in, i) => {
@@ -1033,6 +1034,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   stream_bit_vec_array.io.enable := streamEnable
   stream_bit_vec_array.io.fdbkDegree := streamFdbkDegree
   stream_bit_vec_array.io.flush := stream_pf_ctrl.flush
+  stream_bit_vec_array.io.historyFlush := historyFlush
   stream_bit_vec_array.io.dynamic_depth := stream_pf_ctrl.dynamic_depth
   stream_bit_vec_array.io.confidence := stream_pf_ctrl.confidence
   stream_bit_vec_array.io.train_req <> stream_train_filter.io.trainReq

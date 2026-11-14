@@ -182,6 +182,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     val fdbkDegree = Input(UInt(DEGREE_WIDTH.W))
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
+    val historyFlush = Input(Bool())
     val dynamic_depth = Input(UInt(DEPTH_BITS.W))
     val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new TrainReqBundle))
@@ -420,16 +421,33 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     t_va = s2_vaddr
     )
 
+  val historyAllow = WireDefault(VecInit(Seq.fill(3)(true.B)))
+  p(StreamHistoryKey).foreach { config =>
+    val history = Module(new StreamHistory(config, VAddrBits))
+    history.io.flush := io.flush || io.historyFlush
+    history.io.train.valid := s0_fire
+    history.io.train.bits.pc := s0_pc
+    history.io.train.bits.vaddr := s0_vaddr
+    history.io.train.bits.eligible := s0_miss || s0_pfHit
+    Seq(s2_pf_l1_req_bits, s2_pf_l2_req_bits, s2_pf_l3_req_bits).zipWithIndex.foreach { case (req, i) =>
+      history.io.candidates(i).valid := s2_pf_req_valid
+      history.io.candidates(i).region := req.region
+      history.io.candidates(i).bitmap := req.bit_vec
+    }
+    historyAllow := history.io.allow
+  }
+
   XSPerfAccumulate("s2_valid", s2_valid)
   XSPerfAccumulate("s2_will_not_send_pf", s2_valid && !s2_will_send_pf)
   XSPerfAccumulate("s2_will_send_decr_pf", s2_valid && s2_will_send_pf && s2_decr_mode)
   XSPerfAccumulate("s2_will_send_incr_pf", s2_valid && s2_will_send_pf && !s2_decr_mode)
 
   // s3: send the l1 prefetch req out
-  val s3_pf_l1_valid = GatedValidRegNext(s2_pf_req_valid)
+  val s3_pf_l1_valid = GatedValidRegNext(s2_pf_req_valid && historyAllow(0))
   val s3_pf_l1_bits = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
-  val s3_pf_l2_valid = GatedValidRegNext(s2_pf_req_valid)
+  val s3_pf_l2_valid = GatedValidRegNext(s2_pf_req_valid && historyAllow(1))
   val s3_pf_l2_bits = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
+  val s3_pf_l3_valid = GatedValidRegNext(s2_pf_req_valid && historyAllow(2))
   val s3_pf_l3_bits = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
 
   XSPerfAccumulate("s3_pf_sent", s3_pf_l1_valid)
@@ -437,12 +455,13 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   // s4: send the l2 prefetch req out
   val s4_pf_l2_valid = GatedValidRegNext(s3_pf_l2_valid)
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
-  val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
+  val s4_pf_l3_valid = GatedValidRegNext(s3_pf_l3_valid)
+  val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l3_valid)
 
   val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = true)
   // s5: send the l3 prefetch req out
-  val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
-  val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
+  val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l3_valid) && enable_l3_pf
+  val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l3_valid)
 
   io.l1_prefetch_req.valid := s3_pf_l1_valid
   io.l1_prefetch_req.bits := s3_pf_l1_bits
