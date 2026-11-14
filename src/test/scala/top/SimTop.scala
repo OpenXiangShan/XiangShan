@@ -17,7 +17,7 @@
 
 package top
 
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
@@ -29,6 +29,7 @@ import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
+import xiangshan.backend.fu.PMAConfigEntry
 import system.SoCParamsKey
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
@@ -123,8 +124,30 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
 }
 
 object XiangShanSim extends App {
-  // Keep this the same as TopMain except that XiangShanSim is used here instead of XSTop
-  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
+  val (baseConfig, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
+  // Fixed SimTop PMA map. Unlisted addresses retain the hardware's default deny.
+  val config = new Config((_, _, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = Seq(
+      // pma_init reverses the table: the OFF lower bound precedes the DDR TOR.
+      PMAConfigEntry(0x880000000L, a = 1, r = true, w = true, x = true, c = true, atomic = true), // DDR
+      PMAConfigEntry(0x80000000L), // DDR lower bound
+      PMAConfigEntry(0x10000000L, range = 0x10000000L, a = 3, r = true, x = true), // Flash
+      PMAConfigEntry(0x310b0000L, range = 0x1000L, a = 3, r = true, w = true), // UART16550
+      PMAConfigEntry(0x31100000L, range = 0x8000L, a = 3, r = true, w = true), // APLIC M
+      PMAConfigEntry(0x31120000L, range = 0x8000L, a = 3, r = true, w = true), // APLIC S
+      PMAConfigEntry(0x38000000L, range = 0x10000L, a = 3, r = true, w = true), // CLINT
+      PMAConfigEntry(0x38010000L, range = 0x1000L, a = 3, r = true, w = true), // BEU
+      PMAConfigEntry(0x38020000L, range = 0x1000L, a = 3, r = true, w = true, x = true), // Debug
+      PMAConfigEntry(0x38021000L, range = 0x1000L, a = 3, r = true, w = true), // MMPMA
+      PMAConfigEntry(0x38022000L, range = 0x1000L, a = 3, r = true, w = true), // I/D cache controls
+      PMAConfigEntry(0x38040000L, range = 0x10000L, a = 3, r = true, w = true), // SYSCNT
+      PMAConfigEntry(0x3a000000L, range = 0x1000L, a = 3, r = true, w = true), // PLL control
+      PMAConfigEntry(0x3c000000L, range = 0x4000000L, a = 3, r = true, w = true), // PLIC
+      PMAConfigEntry(0x40002000L, range = 0x1000L, a = 3, r = true, w = true), // Dummy SD
+      PMAConfigEntry(0x40070000L, range = 0x10000L, a = 3, r = true, w = true), // Interrupt generator
+      PMAConfigEntry(0x40600000L, range = 0x1000L, a = 3, r = true, w = true) // UARTLite
+    ))
+  }) ++ baseConfig
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
