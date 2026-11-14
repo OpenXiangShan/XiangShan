@@ -101,7 +101,7 @@ class PMPEntryHandleIOBundle(implicit p: Parameters) extends PMPBundle {
 
 trait PMPReadWrite extends PMPConst {
   def matchMask(cfg: PMPCfgBundle, paddr: UInt): UInt = {
-    val matchMaskCAddr = Cat(paddr, cfg.A.asUInt(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    val matchMaskCAddr = Cat(paddr, cfg.A.asUInt(0)) | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
     Cat(matchMaskCAddr & (~(matchMaskCAddr + 1.U)).asUInt, ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
