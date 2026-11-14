@@ -352,10 +352,28 @@ trait MachineLevel { self: NewCSR =>
 
 
   val minstret = Module(new CSRModule("Minstret", new CounterValueBundle("Machine retired-instruction counter value.")) with HasMachineCounterControlBundle with HasRobCommitBundle {
+    // An explicit write (csrrw/csrrs/csrrc[i] on minstret) is performed while the CSR instruction
+    // executes at the ROB head, i.e. before it commits, but its own retirement reaches
+    // robCommit.instNum only 2 cycles after its ROB commit (Rob trueCommitCnt RegEnable + CtrlBlock
+    // RegNext). Zicsr: "the explicit write is done instead of the update from the side effect ...
+    // a value written to instret by one instruction will be the value read by the following
+    // instruction". So drop the writer from the next non-empty commit group. That group is the
+    // writer's own: CSR instructions are waitForward (dispatched only into an empty ROB, long after
+    // every older commit count has been accumulated) and blockBackward (nothing younger can commit
+    // before or with it), and are never ROB-compressed (size 1).
+    val dropWriterRetire = RegInit(false.B)
+    val commitNonEmpty = robCommit.instNum.valid && robCommit.instNum.bits =/= 0.U
+    when(w.wen) {
+      dropWriterRetire := true.B
+    }.elsewhen(commitNonEmpty) {
+      dropWriterRetire := false.B
+    }
+    assert(!(dropWriterRetire && commitNonEmpty && robCommit.instNum.bits =/= 1.U),
+      "minstret: the commit group of a minstret-writing CSR instruction must contain only that instruction")
     when(w.wen) {
       reg := w.wdata
-    }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid) {
-      reg := reg.ALL.asUInt + robCommit.instNum.bits
+    }.elsewhen(!this.mcountinhibit.IR && commitNonEmpty) {
+      reg := reg.ALL.asUInt + (robCommit.instNum.bits - dropWriterRetire.asUInt)
     }.otherwise {
       reg := reg
     }
