@@ -717,6 +717,7 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def FtqSize = coreParams.frontendParameters.ftqParameters.FtqSize
+  def MaxPredictionNum = coreParams.frontendParameters.MaxPredictionNum
   def FetchBlockInstOffsetWidth: Int = log2Ceil(coreParams.frontendParameters.FetchBlockSize / instBytes)
   def backendParams: BackendParams = coreParams.backendParams
   def DecodeWidth = coreParams.DecodeWidth
