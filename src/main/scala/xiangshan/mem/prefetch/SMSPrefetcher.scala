@@ -1004,7 +1004,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
       Mux(ent.decr_mode, last_one_offset, first_one_offset),
       0.U(log2Up(dcacheParameters.blockBytes).W)
     )
-    pf_req_arb.io.in(i).valid := v && Cat(pending_req_vec).orR && ent.paddr_valid && !is_evicted
+    pf_req_arb.io.in(i).valid := v && Cat(pending_req_vec).orR && ent.paddr_valid && (!is_evicted || s1_hit)
     pf_req_arb.io.in(i).bits := pf_addr
   }
 
