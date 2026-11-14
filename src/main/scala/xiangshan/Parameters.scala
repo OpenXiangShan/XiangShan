@@ -595,7 +595,11 @@ trait HasXSParameter {
   def env = p(DebugOptionsKey)
 
   def ISABase = coreParams.ISABase
-  def ISAExtensions = coreParams.ISAExtensions
+  def ISAExtensions = coreParams.ISAExtensions.filter {
+    // Cache management and zero instructions require CMO support; prefetch hints do not.
+    case "zicbom" | "zicboz" => HasCMO
+    case _ => true
+  }
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
   def ELEN = coreParams.ELEN
