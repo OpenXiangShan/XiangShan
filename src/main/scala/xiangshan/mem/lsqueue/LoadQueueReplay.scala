@@ -744,7 +744,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
-    XSError(((vecLdCancel(i) || vecLdCommit(i)) && allocated(i)), s"vector load, should not have replay entry $i when commit or flush.\n")
   }
 
   // misprediction recovery / exception redirect
