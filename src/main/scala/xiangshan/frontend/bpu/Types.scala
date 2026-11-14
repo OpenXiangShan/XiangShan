@@ -34,35 +34,32 @@ abstract class NamedTuple[T <: Product] {
     s"${this.getClass.getSimpleName}${asTuple.toString}"
 }
 
+/** Parameters for one tagged TAGE table.
+  *
+  * NumSetsLog2 is log2 of the number of sets in each bank, the whole table has
+  * (1 << NumSetsLog2) * NumBanks sets and (1 << NumSetsLog2) * NumBanks * NumWays entries.
+  */
 class TageTableInfo(
-    val Size:          Int,
+    val NumSetsLog2:   Int,
     val NumWays:       Int,
     val HistoryLength: Int
 ) extends NamedTuple[(Int, Int, Int)] {
-  require(Size > 0, "Size must be > 0")
+  require(NumSetsLog2 >= 0 && NumSetsLog2 < 31, "NumSetsLog2 must be in [0, 31)")
   require(NumWays > 0, "NumWays must be > 0")
   require(HistoryLength >= 0, "HistoryLength must be >= 0")
 
   def asTuple: (Int, Int, Int) =
-    (Size, NumWays, HistoryLength)
+    (NumSetsLog2, NumWays, HistoryLength)
 
-  def getFoldedHistoryInfoSet(tagWidth: Int): Set[FoldedHistoryInfo] = {
-    require(tagWidth > 0, "tagWidth must be > 0")
-    if (HistoryLength > 0)
-      Set( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size / NumWays))),
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
-      )
-    else
-      Set[FoldedHistoryInfo]()
-  }
+  def getFoldedHistoryInfoSet(tagWidth: Int, numBanks: Int): Set[FoldedHistoryInfo] =
+    getTageFoldedHistoryInfo(tagWidth, numBanks).toSet
 
-  def getTageFoldedHistoryInfo(tagWidth: Int): List[FoldedHistoryInfo] = {
+  def getTageFoldedHistoryInfo(tagWidth: Int, numBanks: Int): List[FoldedHistoryInfo] = {
     require(tagWidth > 0, "tagWidth must be > 0")
+    require(numBanks > 0 && isPow2(numBanks), "numBanks must be a positive power of two")
     if (HistoryLength > 0)
       List( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size / NumWays))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, NumSetsLog2 + log2Ceil(numBanks))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
