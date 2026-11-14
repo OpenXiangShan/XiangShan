@@ -60,7 +60,8 @@ def analyze(folder, receipt_path, top=5):
                 for row in selected:
                     cycle = row['CYCLE']
                     context = contexts[cycle]
-                    selected_tea.append(dict(**samples[cycle], context={name: context[name] for name in context.keys()
+                    selected_tea.append(dict(**samples[cycle], retired_before_sample=row['TOTALRETIRED'],
+                                             retired_on_sample=row['RETIRED'], context={name: context[name] for name in context.keys()
                         if name.startswith(('CONTEXT_', 'TARGET'))}))
             records.append(dict(core_begin=gap['START'], core_exclusive_end=gap['ENDCYCLE'],
                                 cycles=length, exact_states=states,
