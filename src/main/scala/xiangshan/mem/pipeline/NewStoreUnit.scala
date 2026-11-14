@@ -133,7 +133,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHwPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = StoreEntrance.isHWPrefetch(entrance)
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
   sink.bits.illegalIssue := !sink.bits.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
@@ -216,7 +216,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.cmd := Mux(isCboNoZero, TlbCmd.read, TlbCmd.write)
   io.tlbReq.bits.hyperinst := LSUOpType.isHsv(uop.fuOpType)
   io.tlbReq.bits.hlvx := false.B
-  io.tlbReq.bits.isPrefetch := isHwPrefetch
+  io.tlbReq.bits.fromHwPrefetch := isHwPrefetch
   io.tlbReq.bits.size := sink.bits.size
   io.tlbReq.bits.kill := false.B
   io.tlbReq.bits.memidx.is_ld := false.B
@@ -314,7 +314,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHwPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = StoreEntrance.isHWPrefetch(entrance)
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
   val align = in.align.get
@@ -583,7 +583,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHwPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = StoreEntrance.isHWPrefetch(entrance)
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
   val tlbException = in.tlbException.get
@@ -734,7 +734,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHwPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = StoreEntrance.isHWPrefetch(entrance)
   val isCbo = accessType.isCbo
   val isMMIO = in.mmio.get
   val hasException = in.hasException.get

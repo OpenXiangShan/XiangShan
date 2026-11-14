@@ -352,7 +352,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     req.valid := valid
     req.bits.vaddr := entry.get_tlb_va()
     req.bits.cmd := TlbCmd.read
-    req.bits.isPrefetch := true.B
+    req.bits.fromHwPrefetch := true.B
     req.bits.size := 3.U
     req.bits.kill := false.B
     req.bits.no_translate := false.B

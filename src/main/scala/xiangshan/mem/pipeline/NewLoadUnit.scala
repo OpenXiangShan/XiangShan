@@ -413,7 +413,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.memidx.is_ld := true.B
   io.tlbReq.bits.memidx.is_st := false.B
   io.tlbReq.bits.memidx.idx := uop.lqIdx.value
-  io.tlbReq.bits.isPrefetch := isPrefetch
+  io.tlbReq.bits.fromHwPrefetch := isHwPrefetch
   io.tlbReq.bits.no_translate := noQuery
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq
   // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
@@ -605,6 +605,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   val noQuery = in.noQuery.get
   val tlbHit = tlbResp.valid && !tlbResp.bits.miss && !noQuery
   val tlbMiss = tlbResp.valid && tlbResp.bits.miss
+  val tlbFastMiss = pipeIn.valid && tlbResp.valid && tlbResp.bits.fastMiss
+  val swPrefetchGpaKill = accessType.isSwPrefetch() && !tlbFastMiss
   val specialRequest = io.specialMode && robIdx =/= io.robHeadPtr
   val paddrEffective = tlbHit || noQuery // hit or noQuery
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
@@ -741,7 +743,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
   io.tlbResp.ready := true.B
-  io.tlbReqKill := kill || specialRequest
+  io.tlbReqKill := kill || specialRequest || swPrefetchGpaKill
   io.tlbPAddr := noQueryPAddr
 
   io.dcachePAddr := paddrDCache
