@@ -452,7 +452,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
 
   if(EnableTagEcc) {
-    val s2_probe_or_atomic = (s2_req.probe || s2_req.isAMO && !s2_sc) && !s2_req.miss
+    // A store joins the probe/atomic class for tag-error detection: its tag read is the one that
+    // decides whether the line it is about to write is there at all, and a tag error in any way
+    // (not just in the way the replacement policy picked) makes that decision wrong.  Without
+    // this a store whose tag read is corrupt gets no tag match, goes to the MissQueue, and the
+    // refill steers itself to the way the raw tag matches (s2_refill_tag_eq_way) and overwrites
+    // that line from L2 without writing the Dirty line back.
+    val s2_probe_or_atomic = (s2_req.probe || s2_req.isAMO && !s2_sc || s2_req.isStore) && !s2_req.miss
     val s2_probe_atomic_tag_error = s2_probe_or_atomic && !s2_tag_match && s2_tag_errors.orR
     val s2_evict_tag_error = !s2_probe_or_atomic && (s2_tag_errors & s2_way_en).orR
     s2_tag_error := (s2_probe_atomic_tag_error || s2_evict_tag_error) && s2_need_tag
@@ -597,7 +603,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // error signal for amo inst
   // s3_error_beu = s3_flag_error_beu || s3_tag_error_beu || s3_l2_error_beu || s3_data_error_beu
-  val s3_error_beu = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire) || s3_data_error_beu
+  val s3_meta_error_beu = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire) // tag / flag / L2
+  val s3_error_beu = s3_meta_error_beu || s3_data_error_beu
   val s3_error_wb = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error_wb
   val s3_error_paddr_beu = get_block_addr(RegEnable(Cat(s2_tag, get_untag(s2_req.vaddr)), s2_fire))
 
@@ -1057,7 +1064,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   // report error, update error csr
-  io.error.valid := s3_error_beu && GatedValidRegNext(s2_fire && !s2_should_not_report_ecc_error)
+  // s2_should_not_report_ecc_error exempts the data a store/AMO reads for its read-modify-write
+  // (#4480); it must not hide a tag or L2 error, whose damage does not depend on what the store
+  // writes afterwards.
+  io.error.valid := (s3_meta_error_beu ||
+    (s3_error_beu && !GatedValidRegNext(s2_fire && s2_should_not_report_ecc_error))) &&
+    GatedValidRegNext(s2_fire)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
   io.error.bits.report_to_beu := (s3_tag_error_beu || s3_data_error_beu) && RegNext(s2_fire)
