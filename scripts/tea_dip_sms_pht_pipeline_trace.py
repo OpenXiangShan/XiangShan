@@ -126,6 +126,44 @@ def replay(rows, owners, observations, generated):
                 pending_before_S2=sorted(pending_before_s2), pending_S3_owner=s3['id'] if s3 else None)
 
 
+
+def prediction_payloads(audit, rows):
+    """Recover the calibrated16-block/4KiB PHT buffer payloads, including overwritten predictions."""
+    assert audit['passed']
+    stage = {r['core_cycle']: r for r in rows if r['kind'] == 1}
+    owners = {o['id']: o for o in audit['PHT_queue_owners']}
+    flow = audit['PHT_pipeline_flow']
+    packets = {p['prediction_id']: p for p in flow['packets']}
+    result = []
+    for prediction in flow['predictions']:
+        row = stage[prediction['created_cycle'] - 1]
+        owner = owners[prediction['lookup_owner_id']]['payload']
+        assert row['s3_valid'] and not row['s3_update'] and row['s3_hits']
+        assert (row['s3_index'], row['s3_tag'], row['s3_region']) == (owner['index'], owner['tag'], owner['region'])
+        pattern, mask, offset = row['s3_pattern'], row['s3_mask'], owner['offset']
+        hi = ((pattern >> 15) << offset) & ((1 << 30) - 1)
+        lo = ((pattern & 32767) << offset) & ((1 << 30) - 1)
+        bits = {'current': ((hi & 32767) << 1) | (lo >> 15),
+                'increment': hi >> 15, 'decrement': (lo & 32767) << 1}
+        fresh = {'current': pattern & mask,
+                 'increment': (pattern >> 15) & ~(mask >> 15) & 32767,
+                 'decrement': pattern & ~mask & 32767}
+        branch, region = prediction['branch'], owner['region']
+        assert fresh[branch] and bits[branch]
+        physical = (branch == 'current' or (branch == 'increment' and region & 3 != 3)
+                    or (branch == 'decrement' and region & 3 != 0))
+        address = region + {'current': 0, 'increment': 1, 'decrement': -1}[branch] if physical else None
+        if prediction['fate'] == 'served':
+            actual = packets[prediction['id']]['payload']
+            assert actual['region_bits'] == bits[branch] and bool(actual['physical_valid']) == physical
+            assert actual['decreasing'] == int(branch == 'decrement')
+            if physical:
+                assert actual['region_address'] == address
+        result.append(dict(prediction, region_bits=bits[branch], physical_valid=physical,
+                           physical_region_address=address))
+    return result
+
+
 def analyze(folder, receipt, internal=False):
     folder = Path(folder)
     output = parent(folder, receipt, internal=internal)
