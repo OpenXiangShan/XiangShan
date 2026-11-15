@@ -58,7 +58,7 @@ def analyze(folder, receipt_path):
     begin -= clock['core_to_native_offset']
     end -= clock['core_to_native_offset']
     coverage = tea.sampling_coverage(database, (begin, end), periods[0])
-    assert not any(coverage[k] for k in ['duplicate_sample_rows', 'off_grid_sample_rows', 'missing_interior_samples'])
+    assert not any(coverage[k] for k in ['duplicate_sample_rows', 'off_grid_sample_rows', 'missing_interior_samples', 'missing_endpoint_samples'])
     run = tea.load_data(database, folder.name,
                         SimpleNamespace(cycle_range=(begin, end), spec_checkpoint=False, bins=1), sample_callback=sample)
     with sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True) as db:
