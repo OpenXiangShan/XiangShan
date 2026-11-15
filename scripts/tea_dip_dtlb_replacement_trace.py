@@ -62,6 +62,8 @@ def analyze(folder, proof_path):
             records[cycle] = row
     assert set(records) == set(controls), 'Missing replacement cycle'
     counts = Counter()
+    origins = {name: dict(observed_cycles=0, touch_cycles_by_port=[0] * binding['ports'])
+               for name in ['refill_override', 'no_refill_override', 'unknown_previous_cycle']}
     for cycle, row in sorted(records.items()):
         control = controls[cycle]
         assert all(row[k] == control[k] for k in ['clean', 'native_dump']), 'Boundary phase mismatch'
@@ -88,6 +90,11 @@ def analyze(folder, proof_path):
         active = any(row[f'touch_valid_{i}'] for i in range(binding['ports']))
         group = 'unknown_prior_cycle' if row['pending_refill'] is None else 'pending_refill' if row['pending_refill'] else 'hit_touches_only' if active else 'idle'
         counts[group] += 1
+        origin = origins['unknown_previous_cycle' if row['pending_refill'] is None else
+                         'refill_override' if row['pending_refill'] else 'no_refill_override']
+        origin['observed_cycles'] += 1
+        for i in range(binding['ports']):
+            origin['touch_cycles_by_port'][i] += row[f'touch_valid_{i}']
         if row['write_valid']:
             counts['writes'] += 1
             counts['writes_with_selector_change'] += row['victim'] != row['forwarded_victim']
@@ -96,6 +103,9 @@ def analyze(folder, proof_path):
                 counts['back_to_back_same_victim'] += row['victim'] == previous['victim']
     return dict(passed=True, source=dtlb['source'], core_ranges=binding['core_ranges'],
                 observed_cycles=len(records), counts=dict(counts), records=list(records.values()),
+                touch_origin=dict(groups=origins, scope='Actual valid-touch port cycles partitioned by the preceding write. '
+                                  'Refill overrides are not lookup-client requests. Gap history is unknown; '
+                                  'port cycles are not exclusive CPU loss.'),
                 input_sha256=dict(dtlb['input_sha256'], **{str(folder / 'load-dtlb-replacement-probe.csv'): digest(folder / 'load-dtlb-replacement-probe.csv')}),
                 tool_sha256=digest(Path(__file__)), scope='Source-bound actual PLRU recurrence and registered transitions. '
                 'All four delayed-refill touches are checked against the preceding actual write. '
