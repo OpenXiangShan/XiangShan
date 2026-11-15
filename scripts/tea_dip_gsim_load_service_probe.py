@@ -21,7 +21,7 @@ IDENTITY = [('uop__DOT__robIdx__DOT__flag', 1), ('uop__DOT__robIdx__DOT__value',
             ('entrance', 8), ('accessType__DOT__instrType', 3)]
 
 
-def source(root, header, database, symbols, capture_wb=False, capture_llptw=False, dtlb_ranges=()):
+def source(root, header, database, symbols, capture_wb=False, capture_llptw=False, dtlb_ranges=(), capture_dtlb_replacement=False):
     model = root / 'build/gsim-compile/model'
     declared = set(re.findall(r'uint(?:8|16|32|64)_t ([A-Za-z0-9_$]+)(?:;|\[)', header))
     assignments, code_hashes = {}, {}
@@ -228,9 +228,13 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
     if capture_llptw:
         from tea_dip_gsim_llptw_probe import add_capture
         cpp, extra['LLPTW_binding'] = add_capture(root, header, cpp)
+    assert not capture_dtlb_replacement or dtlb_ranges, 'Replacement capture requires DTLB ranges'
     if dtlb_ranges:
         from tea_dip_gsim_dtlb_probe import add_capture
         cpp, extra['DTLB_binding'] = add_capture(root, header, cpp, dtlb_ranges)
+        if capture_dtlb_replacement:
+            from tea_dip_gsim_dtlb_replacement_probe import add_capture
+            cpp, extra['DTLB_replacement_binding'] = add_capture(root, header, cpp, dtlb_ranges)
     return cpp, [step, writer], dict(**extra, lanes=bindings, assignments=assignments,
         detail_bindings=detail_bindings, cause_details_asserted=True,
         writeback_capture=capture_wb, writeback_bindings=wb_bindings,
@@ -239,7 +243,7 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
         cause_next_commit_asserted=True, WB_identity='not_captured', scope='S2 attempts only. Next payload commitments and qualified miss event are asserted; final WB/lifetime association is not established.')
 
 
-def build(root, output, compiler, library, capture_wb=False, capture_llptw=False, dtlb_ranges=()):
+def build(root, output, compiler, library, capture_wb=False, capture_llptw=False, dtlb_ranges=(), capture_dtlb_replacement=False):
     root, output, library = Path(root).resolve(), Path(output).resolve(), Path(library).resolve()
     assert not output.exists()
     model = root / 'build/gsim-compile/model'
@@ -247,7 +251,7 @@ def build(root, output, compiler, library, capture_wb=False, capture_llptw=False
     objects = sorted(model.glob('*.o')) + sorted((root / 'build/gsim-compile/other').glob('*.o'))
     originals = {str(p): digest(p) for p in [original, header, database, library, *objects]}
     symbols = subprocess.check_output(['nm', '--defined-only', str(original)], text=True)
-    cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols, capture_wb=capture_wb, capture_llptw=capture_llptw, dtlb_ranges=dtlb_ranges)
+    cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols, capture_wb=capture_wb, capture_llptw=capture_llptw, dtlb_ranges=dtlb_ranges, capture_dtlb_replacement=capture_dtlb_replacement)
     output.mkdir(parents=True)
     (output / 'probe.cpp').write_text(cpp)
     (output / 'objects.rsp').write_text('\n'.join(shlex.quote(str(p)) for p in objects) + '\n')
@@ -280,9 +284,10 @@ def main():
     parser.add_argument('--capture-llptw', action='store_true', help='Also capture LLPTW states and qualified memory requests')
     parser.add_argument('--dtlb-range', nargs=2, type=int, action='append', default=[], metavar=('BEGIN', 'END'),
                         help='Capture DTLB provenance and resident ways in a half-open core-cycle range')
+    parser.add_argument('--capture-dtlb-replacement', action='store_true', help='Also record PLRU state and pending touches in the DTLB ranges')
     parser.add_argument('--dramsim3-library', type=Path, required=True)
     args = parser.parse_args()
-    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_wb=args.capture_wb, capture_llptw=args.capture_llptw, dtlb_ranges=args.dtlb_range)
+    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_wb=args.capture_wb, capture_llptw=args.capture_llptw, dtlb_ranges=args.dtlb_range, capture_dtlb_replacement=args.capture_dtlb_replacement)
     print(json.dumps({k: proof[k] for k in ['passed', 'binary', 'binary_sha256', 'original_files_unchanged', 'original_objects']}))
 
 
