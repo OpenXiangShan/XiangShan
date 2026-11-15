@@ -12,7 +12,7 @@ from tea_dip_gsim_sms_internal_probe import add_capture as internal
 from tea_dip_gsim_sms_admission_probe import add_capture as admission
 
 
-def build(root, output, compiler, library, *, capture_tlb=False, capture_memory=False):
+def build(root, output, compiler, library, *, capture_tlb=False, capture_memory=False, capture_l2_route=False):
     root, output, library = Path(root).resolve(), Path(output).resolve(), Path(library).resolve()
     assert not output.exists()
     git = lambda *args: subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
@@ -43,6 +43,10 @@ def build(root, output, compiler, library, *, capture_tlb=False, capture_memory=
         cpp, bindings['L2_merge_binding'] = merge(root, header.read_text(), cpp)
         cpp, bindings['memory_lineage_binding'] = lineage(root, header.read_text(), cpp)
         bindings['memory_lineage_binding']['AXI_ID_route'] = route_proof(root)
+    if capture_l2_route:
+        assert capture_memory, 'L2 route capture requires the existing memory observers'
+        from tea_dip_gsim_l2_demand_route_probe import add_capture
+        cpp, bindings['L2_demand_route_binding'] = add_capture(root, header.read_text(), cpp)
     for name, add in [('SMS_request_binding', pipeline), ('SMS_internal_binding', internal), ('SMS_admission_binding', admission)]:
         cpp, bindings[name] = add(root, header.read_text(), cpp)
     if capture_tlb:
@@ -72,6 +76,8 @@ def build(root, output, compiler, library, *, capture_tlb=False, capture_memory=
         proof['scope'] = 'One host observer object and one link compose existing S2/WB/LLPTW/LRQ/L1/L2/LLC/NCB/DRAM/SMS captures against unchanged original objects. No new RTL state. Own-source native, all SQL and old CSV neutrality, existing marginal checks and host costs still require closed-guest calibration.'
     if capture_tlb:
         proof['scope'] += ' Additional sms-tlb.csv captures qualified translation ownership and pipeline, pending closed-source calibration.'
+    if capture_l2_route:
+        proof['scope'] += ' Additional load-l2-demand-route.csv captures ReqBuf owners and handshakes in the same host compilation.'
     (output / 'build-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
     return proof
 
@@ -84,8 +90,9 @@ def main():
     parser.add_argument('--dramsim3-library', type=Path, required=True)
     parser.add_argument('--capture-tlb', action='store_true')
     parser.add_argument('--capture-memory', action='store_true', help='Compose existing memory-owner and DRAM probes in the same host compilation')
+    parser.add_argument('--capture-l2-route', action='store_true', help='Compose ReqBuf route capture; requires --capture-memory')
     args = parser.parse_args()
-    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_tlb=args.capture_tlb, capture_memory=args.capture_memory)
+    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, capture_tlb=args.capture_tlb, capture_memory=args.capture_memory, capture_l2_route=args.capture_l2_route)
     print(json.dumps({name: proof[name] for name in ['passed', 'source', 'binary', 'binary_sha256', 'original_objects']}))
 
 
