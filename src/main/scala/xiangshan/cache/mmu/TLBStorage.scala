@@ -483,7 +483,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
   } else {
     val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
     re.access(page.access.map(_.touch_ways))
-    re.way
+    re.get_replace_way(re.get_next_state(re.state_read, page.access.map(_.touch_ways)))
   }
 
   page.w_apply(
