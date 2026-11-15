@@ -147,8 +147,9 @@ class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUCon
 class BasePredictorOutput(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val reset_vector = Input(UInt(PAddrBits.W))
-  val in           = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
+  val reset_vector        = Input(UInt(PAddrBits.W))
+  val target_use_sign_ext = Input(Bool())
+  val in                  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
   // val flush_out = Valid(UInt(VAddrBits.W))
@@ -245,10 +246,11 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
-  val bpu_to_ftq   = new BpuToFtqIO()
-  val ftq_to_bpu   = Flipped(new FtqToBpuIO)
-  val ctrl         = Input(new BPUCtrl)
-  val reset_vector = Input(UInt(PAddrBits.W))
+  val bpu_to_ftq          = new BpuToFtqIO()
+  val ftq_to_bpu          = Flipped(new FtqToBpuIO)
+  val ctrl                = Input(new BPUCtrl)
+  val reset_vector        = Input(UInt(PAddrBits.W))
+  val target_use_sign_ext = Input(Bool())
 }
 
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
@@ -389,6 +391,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.in.valid               := s0_fire_dup(0)
   predictors.io.in.bits.s0_pc          := VecInit(s0_pc_dup.map(_(VAddrBits - 1, 0)))
   predictors.io.in.bits.s0_pc_guard    := VecInit(s0_pc_dup.map(_(VAddrBits)))
+  predictors.io.target_use_sign_ext    := io.target_use_sign_ext
   predictors.io.in.bits.ghist          := s0_ghist
   predictors.io.in.bits.folded_hist    := s0_folded_gh_dup
   predictors.io.in.bits.s1_folded_hist := s1_folded_gh_dup

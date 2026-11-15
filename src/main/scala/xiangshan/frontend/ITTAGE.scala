@@ -594,8 +594,14 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }.reduce(_ | _)
 
   s2_tageTarget := Mux1H(Seq(
-    (provided && !(providerNull && altProvided), Cat(s2_pc_guard_dup(0), providerCatTarget)),
-    (altProvided && providerNull, Cat(s2_pc_guard_dup(0), altproviderCatTarget)),
+    (
+      provided && !(providerNull && altProvided),
+      Cat(Mux(io.target_use_sign_ext, providerCatTarget(VAddrBits - 1), 0.U(1.W)), providerCatTarget)
+    ),
+    (
+      altProvided && providerNull,
+      Cat(Mux(io.target_use_sign_ext, altproviderCatTarget(VAddrBits - 1), 0.U(1.W)), altproviderCatTarget)
+    ),
     (!provided, baseTarget)
   ))
   s2_provided          := provided
