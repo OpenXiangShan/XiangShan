@@ -111,7 +111,7 @@ print(json.dumps(dict(succeeded=sorted(set(re.findall(r'([A-Za-z0-9_.-]+) succee
                   runner_succeeded_points=succeeded,collected=collected,pending=pending,already_collected=existing,
                   source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                   scope='Closed per-point raw collection only. No dispatch, server selection, live DB reads, partial-suite score or adoption claim.')
-    target = root/args.ci_evidence; target.mkdir(exist_ok=True)
+    target = root/args.ci_evidence; target.mkdir(parents=True, exist_ok=True)
     (target/'collection-status.json').write_text(json.dumps(status,indent=2)+'\n')
     print(json.dumps(status,indent=2))
 

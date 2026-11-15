@@ -23,6 +23,18 @@ def check_guest(guest, identity):
                 sampling_announcements_complete=all(guest[k] is not None for k in expected),
                 difftest_announced=True if guest['difftest_announced'] else None)
 
+
+def observe_hosts(hosts, observe):
+    """Keep successful host observations when another transport fails."""
+    def one(host):
+        try:
+            return observe(host), None
+        except (subprocess.SubprocessError, ValueError) as error:
+            return None, dict(host=host, error=str(error))
+    with ThreadPoolExecutor(max_workers=len(hosts)) as pool:
+        results = list(pool.map(one, hosts))
+    return [data for data, _ in results], [error for _, error in results if error is not None]
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
@@ -130,16 +142,16 @@ print(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(), run_id=run['id
                       host=socket.gethostname(),
                       processes=processes, scope='Live argv and process identity; no unfinished database reads'), indent=2))
     '''.replace('REPORT', repr(identity['report'])).replace('RUN_ID', repr(identity['run_id']))
-    with ThreadPoolExecutor(max_workers=len(workers) + 1) as pool:
-        observations = list(pool.map(lambda host: remote(host, code), [*workers, runner_host]))
+    observations, errors = observe_hosts([*workers, runner_host], lambda host: remote(host, code))
     stamp = datetime.now(timezone.utc).isoformat()
-    result = dict(utc=stamp, run_id=identity['run_id'], source=head, nodes=observations[:-1], controller=observations[-1],
+    result = dict(utc=stamp, run_id=identity['run_id'], source=head, nodes=[data for data in observations[:-1] if data is not None], controller=observations[-1],
+                  worker_hosts=workers, observation_errors=errors,
                   scope='Worker list observed from the original auto-scheduled runner. Original process identities and stdout flags only; no host-load sampling, unfinished DB reads or inferred guest CPI.')
     # Preserve kernel identities even when buffered sampler output is not ready.
     (O / 'runtime-live.json').write_text(json.dumps(result, indent=2) + '\n')
     with (O / 'resource-events.jsonl').open('a') as output:
         output.write(json.dumps(result) + '\n')
-    controllers = result['controller']['processes']
+    controllers = result['controller']['processes'] if result['controller'] is not None else []
     controller_checked = None
     if controllers:
         assert len(controllers) == 1
@@ -153,13 +165,15 @@ print(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(), run_id=run['id
                 checks.append(dict(host=node['host'], point=guest['point'], pid=guest['pid'],
                                    start_ticks=guest['start_ticks'], **check_guest(guest, identity)))
     (O / 'runtime-check.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], checks=checks,
-        controller_single_thread_and_default_node_pool=controller_checked, completed_spec_difftest_validated=None,
+        controller_single_thread_and_default_node_pool=controller_checked, observation_errors=errors,
+        completed_spec_difftest_validated=None,
         scope='Observed argv, affinity and sampler stdout only. Difftest is requested; a missing announcement in buffered live stdout is unknown, not a pass or failure. No SPEC DB read.'), indent=2) + '\n')
     (O / 'runner-last-tail.txt').write_text(runner['tail'])
     (O / 'runner-network-retries.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], lines=runner['retry_lines'],
         scope='Original platform transport failures and automatic retries; preserved as infrastructure evidence, not new user dispatches or measured RTL failures.'), indent=2) + '\n')
     print(json.dumps(dict(utc=stamp, workers=[dict(host=n['host'], guests=len([p for p in n['processes'] if p['role']=='guest'])) for n in result['nodes']],
-                         retry_lines=len(runner['retry_lines']), controller_processes=len(result['controller']['processes'])), indent=2))
+                         retry_lines=len(runner['retry_lines']), observation_errors=errors,
+                         controller_processes=len(controllers) if result['controller'] is not None else None), indent=2))
 
 
 if __name__ == '__main__':

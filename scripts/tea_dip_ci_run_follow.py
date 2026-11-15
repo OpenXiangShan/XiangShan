@@ -58,6 +58,10 @@ print(json.dumps({'run':get('actions/runs/'+str(run_id)), 'jobs':get('actions/ru
                 subprocess.run([sys.executable, str(scripts / 'tea_dip_ci_run_runtime.py'),
                                 '--report-dir', str(root), '--ci-evidence', args.ci_evidence],
                                check=True, timeout=180)
+                runtime = json.loads((evidence / 'runtime-live.json').read_text())
+                state['unobserved_hosts'] = [error['host'] for error in runtime.get('observation_errors', [])]
+                if state['unobserved_hosts']:
+                    state['phase'] = 'observing_partial'
             current = json.loads((evidence / 'archive-identity.json').read_text())
             if current['emu_sha256'] is not None and current['runner_log'] is not None:
                 subprocess.run([sys.executable, str(scripts / 'tea_dip_ci_run_collect.py'),
