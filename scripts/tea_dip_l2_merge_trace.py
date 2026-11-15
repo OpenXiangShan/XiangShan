@@ -32,7 +32,7 @@ def attach_merges(rows, owners):
             assert cycle > current[key]['core_cycle'], 'Duplicate L2 merge state cycle'
         current[key] = row
         entries = indexed.get(key, [])
-        at = bisect_right([owner['begin'] for owner in entries], cycle) - 1
+        at = bisect_right(entries, cycle, key=lambda owner: owner['begin']) - 1
         owner = entries[at] if at >= 0 and cycle < entries[at]['end'] else None
         assert bool(row['valid']) == (owner is not None), 'Merge/owner lifetime mismatch'
         if owner is None:

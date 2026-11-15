@@ -2,6 +2,7 @@
 import argparse
 from bisect import bisect_right
 from collections import Counter, defaultdict
+from itertools import accumulate
 import json
 from pathlib import Path
 
@@ -55,8 +56,9 @@ def attach_lineage(memory, ncb, llc, l2):
         indexed=defaultdict(list)
         for owner in owners:
             indexed[key(owner)].append(owner)
-        for values in indexed.values():
+        for bucket_key, values in indexed.items():
             values.sort(key=lambda owner:owner['begin'])
+            indexed[bucket_key] = (values, list(accumulate((owner['end'] for owner in values), max)))
         return indexed
 
     ncb_by_slot=index(ncb,lambda owner:owner['slot'])
@@ -64,9 +66,11 @@ def attach_lineage(memory, ncb, llc, l2):
     l2_by_slot=index(l2,lambda owner:(owner['bank'],owner['slot']))
 
     def at(indexed, key, cycle):
-        entries=indexed.get(key,[])
-        # IDs may wrap across slots; all live matches must still be unique.
-        matches=[owner for owner in entries if owner['begin']<=cycle<owner['end']]
+        entries, max_ends = indexed.get(key, ([], []))
+        # Keep every live overlap, including IDs reused across slots.
+        upper = bisect_right(entries, cycle, key=lambda owner: owner['begin'])
+        lower = bisect_right(max_ends, cycle, hi=upper)
+        matches = [owner for owner in entries[lower:upper] if cycle < owner['end']]
         assert len(matches)<=1, 'Ambiguous live lineage identity'
         return matches[0] if matches else None
 
@@ -86,7 +90,7 @@ def attach_lineage(memory, ncb, llc, l2):
             owner=at(ncb_by_slot,request['id'] & 63,cycle)
             assert owner is not None, 'Memory read has no live NCB generation'
             assert owner['line']==request['address'] & ~63, 'Memory/NCB block mismatch'
-            state=owner['states'][bisect_right([r['core_cycle'] for r in owner['states']],cycle)-1]
+            state=owner['states'][bisect_right(owner['states'], cycle, key=lambda row: row['core_cycle'])-1]
             assert state['r_pending'], 'Memory read without NCB read-data operation'
             lineage['NCB']=identity(owner)
             # The SN link replaces cacheable SrcID with the actual LLC route ID2.
