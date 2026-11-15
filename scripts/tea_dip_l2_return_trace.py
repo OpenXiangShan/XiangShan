@@ -17,6 +17,7 @@ def read(path):
 
 
 def owners(rows, end):
+    """Keep final-cycle allocations with a marked, unobserved next-cycle valid edge."""
     current, active, epochs, records = {}, {}, Counter(), defaultdict(list)
     allocations, returns = [], []
     allocation_cycles, observed_edges = set(), set()
@@ -67,7 +68,9 @@ def owners(rows, end):
         current[key] = row
     assert len(current) == 64, 'Missing L2 slot snapshots'
     for allocation in allocations:
-        assert (allocation['bank'],allocation['mshr'],allocation['core_cycle']) in observed_edges, 'L2 allocation has no valid edge'
+        if (allocation['bank'],allocation['mshr'],allocation['core_cycle']) not in observed_edges:
+            assert allocation['core_cycle'] + 1 == end, 'L2 allocation has no valid edge'
+            allocation['valid_edge_right_censored'] = True
     for entries in records.values():
         for owner in entries:
             rs = owner['returns']
@@ -152,7 +155,7 @@ def analyze(folder, receipt):
         lo,hi=phase['begin_core_exclusive']+1,phase['end_core_inclusive']+1
         counts=[]
         for bank in range(4):
-            histogram=Counter(r['mshr']for r in allocations if r['bank']==bank and lo<=r['core_cycle']<hi)
+            histogram=Counter(r['mshr']for r in allocations if r['bank']==bank and lo<=r['core_cycle']+1<hi)
             for slot in range(16):
                 suffix=f'.l2cache.slices_{bank}.mshrCtl.mshr_alloc_{slot}_{slot+1}'
                 values,=[value for name,value in blocks[phase['native_dump']].items()if name.endswith(suffix)]
@@ -168,6 +171,11 @@ def analyze(folder, receipt):
                   L2_TXREQ_without_matching_request_owner=unmatched,L2_pending_TXREQ={str(k):v for k,v in pending.items()},
                   L2_owners=[o for entries in records.values()for o in entries],
                   L2_scope='Actual per-bank allocation/RXDAT owners and FIFO TXREQ handshakes. Nonmatching/release/pipeline addresses stay unmatched. Stage records do not identify DRAM alone, retirement, or exclusive CPU loss; cross-L1 source binding is separate.')
+    censored = [row for row in allocations if row.get('valid_edge_right_censored')]
+    if censored:
+        result['L2_valid_edge_right_censored_allocations'] = censored
+        result['L2_allocation_valid_edges_observed'] = len(allocations) - len(censored)
+        result['L2_scope'] += ' Allocation signals are labeled before the register edge; native counts use core_cycle+1. Final-cycle signals are retained with right-censored next valid edges, without inventing request owners.'
     return result
 
 
