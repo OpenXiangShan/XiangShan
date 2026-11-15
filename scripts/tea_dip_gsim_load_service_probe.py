@@ -261,7 +261,8 @@ def build(root, output, compiler, library, capture_wb=False, capture_llptw=False
         (output / f'command-{i}.stderr').write_text(result.stderr)
         assert result.returncode == 0, result.stderr[-5000:]
     assert all(digest(p) == value for p, value in originals.items())
-    proof = dict(passed=True, root=str(root), binary=str(output / 'emu'), binary_sha256=digest(output / 'emu'),
+    source_revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    proof = dict(passed=True, root=str(root), source=source_revision, binary=str(output / 'emu'), binary_sha256=digest(output / 'emu'),
                  original_binary=str(original), original_binary_sha256=originals[str(original)],
                  original_files_unchanged=True, original_objects=len(objects), original_sha256=originals,
                  commands=commands, binding=binding, probe_cpp_sha256=digest(output / 'probe.cpp'),
