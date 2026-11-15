@@ -24,7 +24,9 @@ def add_capture(root, header, cpp, ranges):
     paths = [root / 'src/main/scala/xiangshan/cache/mmu/TLBStorage.scala',
              root / 'rocket-chip/src/main/scala/util/Replacement.scala']
     storage, policy = [re.sub(r'\s+', '', p.read_text()) for p in paths]
-    assert 're.access(page.access.map(_.touch_ways))re.way' in storage
+    pending = ('re.access(page.access.map(_.touch_ways))valstate=re.state_read.asTypeOf(UInt(re.nBits.W))'
+               're.get_replace_way(re.get_next_state(state,page.access.map(_.touch_ways)))') in storage
+    assert pending or 're.access(page.access.map(_.touch_ways))re.way' in storage
     assert 'when(RegNext(io.w.valid)){io.access.map{access=>' in storage
     assert 'defway=get_replace_way(state_reg)' in policy
     assert 'state_reg:=get_next_state(state_reg,touch_ways)' in policy
@@ -52,7 +54,12 @@ static void dtlb_replacement_observe(SSimTop *model) {{
     call = '  dtlb_observe(model);'
     assert cpp.count(marker) == cpp.count(call) == 1
     cpp = cpp.replace(marker, helper + '\n' + marker).replace(call, call + '\n  dtlb_replacement_observe(model);')
-    return cpp, dict(columns=COLUMNS, ways=48, ports=4, core_ranges=list(ranges), bindings=bindings,
+    binding = dict(columns=COLUMNS, ways=48, ports=4, core_ranges=list(ranges), bindings=bindings,
                      source_sha256={str(p): digest(p) for p in paths}, generator_sha256=digest(Path(__file__)),
                      new_RTL_state_bits=0, scope='Actual registered PLRU state, computed NEXT and four touches. '
                      'Local next-state victim is a counterfactual selector, not a simulated speedup.')
+    if pending:
+        binding.update(victim_state='next_state',
+                       scope='Actual victim decodes pending NEXT; registered state and four touches are also recorded. '
+                             'State selection does not establish a speedup or exclusive CPU loss.')
+    return cpp, binding

@@ -46,6 +46,8 @@ def analyze(folder, proof_path):
     proof = json.loads(proof_path.read_text())
     binding = proof['binding']['DTLB_replacement_binding']
     assert binding['columns'] == COLUMNS and binding['core_ranges'] == proof['binding']['DTLB_binding']['core_ranges']
+    selector_state = binding.get('victim_state', 'state')
+    assert selector_state in ['state', 'next_state'], 'Unknown victim-state selection'
     controls = {}
     with (folder / 'load-dtlb-probe.csv').open() as stream:
         for raw in csv.DictReader(stream):
@@ -67,7 +69,7 @@ def analyze(folder, proof_path):
     for cycle, row in sorted(records.items()):
         control = controls[cycle]
         assert all(row[k] == control[k] for k in ['clean', 'native_dump']), 'Boundary phase mismatch'
-        assert row['victim'] == victim(row['state'], binding['ways']) == control['refill_way'], 'Current victim mismatch'
+        assert row['victim'] == victim(row[selector_state], binding['ways']) == control['refill_way'], 'Actual selector victim mismatch'
         expected = row['state']
         for i in range(binding['ports']):
             assert row[f'touch_valid_{i}'] in (0, 1)
@@ -77,6 +79,8 @@ def analyze(folder, proof_path):
                 expected = next_state(expected, way, binding['ways'])
         assert row['next_state'] == expected, 'Pending touches do not reproduce NEXT'
         row['forwarded_victim'] = victim(expected, binding['ways'])
+        if selector_state == 'next_state':
+            row['registered_state_victim'] = victim(row['state'], binding['ways'])
         row['write_valid'] = bool(control['refill_mask'])
         row['pending_refill'] = None
         previous = records.get(cycle - 1)
@@ -98,10 +102,12 @@ def analyze(folder, proof_path):
         if row['write_valid']:
             counts['writes'] += 1
             counts['writes_with_selector_change'] += row['victim'] != row['forwarded_victim']
+            if selector_state == 'next_state':
+                counts['writes_with_register_decode_difference'] += row['victim'] != row['registered_state_victim']
             if row['pending_refill']:
                 counts['back_to_back_writes'] += 1
                 counts['back_to_back_same_victim'] += row['victim'] == previous['victim']
-    return dict(passed=True, source=dtlb['source'], core_ranges=binding['core_ranges'],
+    result = dict(passed=True, source=dtlb['source'], core_ranges=binding['core_ranges'],
                 observed_cycles=len(records), counts=dict(counts), records=list(records.values()),
                 touch_origin=dict(groups=origins, scope='Actual valid-touch port cycles partitioned by the preceding write. '
                                   'Refill overrides are not lookup-client requests. Gap history is unknown; '
@@ -112,6 +118,13 @@ def analyze(folder, proof_path):
                 'Forwarded victim is a local counterfactual on the observed state; subsequent executions, '
                 'other victims and performance can change and require a real candidate experiment. '
                 'First-cycle history remains unknown. Shared prefix does not explain a relative long-window regression.')
+    if selector_state == 'next_state':
+        result.update(victim_state=selector_state,
+                      scope='Source-bound actual victim decodes NEXT from the recorded pending touches. '
+                            'registered_state_victim decodes the old state only on this same observed trajectory; '
+                            'it is not another execution or a performance estimate. All delayed refill touches and '
+                            'registered transitions are checked; first-cycle history is unknown.')
+    return result
 
 
 def main():
