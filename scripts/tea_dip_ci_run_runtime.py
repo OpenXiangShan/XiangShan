@@ -35,7 +35,7 @@ def main():
     jobs = json.loads((O / 'jobs.json').read_text())
     assert identity['run_id'] == run['id'] and identity['source'] == run['head_sha']
     assert len(jobs['jobs']) == 1 and jobs['jobs'][0]['run_id'] == run['id']
-    runner_host = jobs['jobs'][0]['runner_name'].removeprefix('xs-perf-').rsplit('-', 1)[0]
+    runner_host = jobs['jobs'][0]['runner_name'].rsplit('-', 2)[-2]
     head = identity['source']
     code = r"""from pathlib import Path
 import hashlib,json,subprocess,socket
