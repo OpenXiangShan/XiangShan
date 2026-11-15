@@ -142,8 +142,7 @@ class TLBFA(
     val pfRejectVecReg = RegEnable(redirectPfClearVec.asUInt | hwPfRejectVec, req.fire)
     val multiHitMaskReg = RegEnable(multiHitMask, req.fire)
     val rejectedHit = (hitVecReg.asUInt & (pfRejectVecReg | multiHitMaskReg)).orR
-    // Exclude cleared ways from conflict detection while keeping data selection unchanged
-    val multiHitVec = hitVecReg.asUInt & ~multiHitMaskReg
+    val multiHitVec = hitVecReg.asUInt
     // Each node carries (hasOne, hasTwo) for its group of ways
     // A merged node has two hits if either child has two hits or both children have one hit
     val (anyHit, multiHit) = ParallelOperation(
