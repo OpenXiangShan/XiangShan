@@ -101,12 +101,13 @@ def generations(rows, end):
     by_slot = defaultdict(list)
     for begin, finish, row in spans:
         by_slot[row['mshr']].append((begin, row))
+    starts_by_slot = {slot: [begin for begin, _ in records] for slot, records in by_slot.items()}
     for grant in grants:
         cycle = grant['core_cycle'] + 1
         if cycle >= end:
             continue
         records = by_slot[grant['mshr']]
-        index = bisect_right([a for a, _ in records], cycle) - 1
+        index = bisect_right(starts_by_slot[grant['mshr']], cycle) - 1
         assert index >= 0
         following = records[index][1]
         assert following['first'] and following['has_data'] == grant['grant_has_data'], 'Grant data/next-state mismatch'
