@@ -60,7 +60,7 @@ def match_attempts(rows):
     return attempts, completed
 
 
-def analyze(folder, receipt):
+def analyze(folder, receipt, *, pcs=None):
     folder = Path(folder)
     output = details(folder, receipt)
     proof = json.loads((folder / 'probe-build-proof.json').read_text())
@@ -68,25 +68,54 @@ def analyze(folder, receipt):
     assert len(proof['binding']['writeback_bindings']) == 3
     probe = json.loads((folder / 'probe-receipt.json').read_text())
     assert 'load-writeback-probe.csv' in probe['files']
-    with (folder / 'load-writeback-probe.csv').open() as stream:
-        rows = [{name: int(value) for name, value in row.items()} for row in csv.DictReader(stream)]
-    with (folder / 'load-service-probe.csv').open() as stream:
-        service = [{name: int(value) for name, value in row.items()} for row in csv.DictReader(stream)]
-    old = [row for row in service if row['lane'] < 3 and row['fire']]
-    joined_s2 = [row for row in rows if row['kind'] == 1]
-    columns = ['core_cycle', 'lane', 'cause_mask', *PAYLOAD]
-    assert [{name: row[name] for name in columns} for row in joined_s2] == [
-        {name: row[name] for name in columns} for row in old], 'Joint S2 rows differ from the calibrated trace'
-    assert [(r['core_cycle'], r['clean'], r['native_dump']) for r in rows if r['kind'] == 0] == [
-        (r['core_cycle'], r['clean'], r['native_dump']) for r in service if r['lane'] == 3]
-    attempts, completed = match_attempts(rows)
     blocks = read_blocks(folder / 'simulator_err.txt')
-    for phase in output['phases']:
+    selected_pcs = None if pcs is None else set(pcs)
+    rows, boundaries, service_boundaries, prior = [], [], [], {}
+    wb_counts = [Counter() for _ in output['phases']]
+    s2_count, wb_count, previous_cycle = 0, 0, -1
+    columns = ['core_cycle', 'lane', 'cause_mask', *PAYLOAD]
+    with (folder / 'load-service-probe.csv').open() as service, (folder / 'load-writeback-probe.csv').open() as joint:
+        def service_events():
+            for raw in csv.DictReader(service):
+                row = {name: int(value) for name, value in raw.items()}
+                if row['lane'] == 3:
+                    service_boundaries.append((row['core_cycle'], row['clean'], row['native_dump']))
+                elif row['fire']:
+                    yield row
+        events = service_events()
+        for raw in csv.DictReader(joint):
+            row = {name: int(value) for name, value in raw.items()}
+            assert row['core_cycle'] >= previous_cycle, 'Joint event clock moved backwards'
+            if row['core_cycle'] > previous_cycle:
+                prior = {key: value for key, value in prior.items() if key[0] >= row['core_cycle'] - 1}
+            previous_cycle = row['core_cycle']
+            if row['kind'] == 0:
+                boundaries.append((row['core_cycle'], row['clean'], row['native_dump']))
+                continue
+            if row['kind'] == 1:
+                original = next(events, None)
+                assert original is not None and all(row[name] == original[name] for name in columns), 'Joint S2 rows differ from the calibrated trace'
+                prior[row['core_cycle'], row['lane']] = row
+                s2_count += 1
+            else:
+                assert row['kind'] == 2
+                previous = prior.get((row['core_cycle'] - 1, row['lane']))
+                assert previous is not None, 'WB has no preceding same-lane S2'
+                assert all(previous[name] == row[name] for name in PAYLOAD), 'WB payload differs from preceding S2'
+                wb_count += 1
+                for phase, counts in zip(output['phases'], wb_counts):
+                    if phase['begin_core_exclusive'] < row['core_cycle'] <= phase['end_core_inclusive']:
+                        counts[row['lane']] += 1
+            if selected_pcs is None or row['pc'] in selected_pcs:
+                rows.append(row)
+        assert next(events, None) is None, 'Joint trace is missing calibrated S2 rows'
+    assert boundaries == service_boundaries
+    attempts, completed = match_attempts(rows)
+    for phase, counts in zip(output['phases'], wb_counts):
         begin, end = phase['begin_core_exclusive'], phase['end_core_inclusive']
-        selected = [row for row in rows if row['kind'] == 2 and begin < row['core_cycle'] <= end]
         marginals = []
         for lane in range(3):
-            measured = sum(row['lane'] == lane for row in selected)
+            measured = counts[lane]
             values, = [values for name, values in blocks[phase['native_dump']].items()
                        if name.endswith(f'.LoadUnit_{lane}.s3.load_successful_writeback')]
             expected, = values
@@ -114,10 +143,13 @@ def analyze(folder, receipt):
         phase['successful_WB_native_marginals'] = marginals
         phase['completed_scalar_PC_cohorts'] = dict(profiles)
     unresolved = Counter(hex(group[0]['pc']) for key, group in attempts.items() if key not in completed)
-    output.update(joint_S2_events=len(joined_s2), joint_successful_WB_events=sum(row['kind'] == 2 for row in rows),
+    output.update(joint_S2_events=s2_count, joint_successful_WB_events=wb_count,
                   completed_scalar_keys=len(completed), scalar_keys_without_successful_WB=sum(unresolved.values()),
                   scalar_unresolved_PC=dict(unresolved), successful_WB_identity='previous_S2_payload_and_carried_issue_member',
                   scope=output['scope'] + ' Joint WB timing/payload reproduces the preceding same-lane S2 and every existing native successful-WB counter. Issue identity is checked for scalar uniqueness. Completed cohorts include pre-clean service and are not retired loads or first-data-arrival times. Unmatched S2 keys have unknown fate; latencies are not additive CPU losses.')
+    if selected_pcs is not None:
+        output['WB_cohort_PCs'] = [hex(pc) for pc in sorted(selected_pcs)]
+        output['scope'] += ' WB identity/cohort and unresolved-key statistics cover only WB_cohort_PCs; S2 profiles, per-event S2/WB payload checks and native marginals still cover the full trace.'
     return output
 
 
@@ -126,8 +158,10 @@ def main():
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--pc', type=lambda value: int(value, 0), action='append',
+                        help='Select WB identity/cohort PCs; full-trace/native checks remain enabled')
     args = parser.parse_args()
-    args.output.write_text(json.dumps(analyze(args.folder, args.receipt), indent=2) + '\n')
+    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, pcs=args.pc), indent=2) + '\n')
 
 
 if __name__ == '__main__':

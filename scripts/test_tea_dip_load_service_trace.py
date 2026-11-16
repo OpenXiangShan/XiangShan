@@ -29,6 +29,15 @@ class LoadServiceTests(unittest.TestCase):
         self.assertEqual((pc['cause_C_DM'], pc['cause_C_BC'], pc['cause_C_FF']), (1, 1, 1))
         self.assertEqual(row['WB_identity'], 'not_captured')
 
+    def test_one_pass_iterator_covers_warmup_and_ROI(self):
+        rows = self.rows + [dict(row, core_cycle=row['core_cycle'] + 4) for row in self.rows]
+        boundaries = [self.boundaries[0], dict(core_cycle=4, clean=1, native_dump=1),
+                      dict(core_cycle=8, clean=0, native_dump=1)]
+        result = measure(iter(rows), boundaries, {7: self.blocks[7], 11: self.blocks[7]})
+        self.assertEqual(result['events'], 8)
+        self.assertEqual([phase['events'] for phase in result['phases']], [4, 4])
+        self.assertEqual(result['phases'][0]['scalar_PC_attempts'], result['phases'][1]['scalar_PC_attempts'])
+
     def test_wrong_dump_phase_rejected_by_native(self):
         boundaries = copy.deepcopy(self.boundaries)
         boundaries[-1]['core_cycle'] -= 1

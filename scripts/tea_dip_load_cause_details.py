@@ -28,24 +28,27 @@ def details(folder, receipt):
     output = analyze(folder, receipt)
     proof = json.loads((folder / 'probe-build-proof.json').read_text())
     assert proof['binding']['cause_details_asserted'] and len(proof['binding']['detail_bindings']) == 3
+    aggregates = [(defaultdict(Counter), Counter()) for _ in output['phases']]
     with (folder / 'load-service-probe.csv').open() as stream:
-        rows = [{key: int(value) for key, value in row.items()} for row in csv.DictReader(stream)]
-    for phase in output['phases']:
-        profiles, partitions = defaultdict(Counter), Counter()
-        for row in rows:
-            if row['lane'] == 3 or not phase['begin_core_exclusive'] < row['core_cycle'] <= phase['end_core_inclusive']:
+        for raw in csv.DictReader(stream):
+            row = {key: int(value) for key, value in raw.items()}
+            if row['lane'] == 3:
                 continue
-            bank, unaligned, translation, special = decompose(row)
-            if not row['fire'] or row['instr_type'] != 1:
-                continue
-            profile = profiles[hex(row['pc'])]
-            values = dict(attempts=1, bank_physical=int(bool(bank)), bank_unaligned=int(unaligned),
-                          translation_miss=int(translation), special_request=int(special))
-            profile.update(values)
-            if bank or unaligned:
-                partitions[f'BC_bank{bank}_unaligned{int(unaligned)}'] += 1
-            if translation or special:
-                partitions[f'TM_translation{int(translation)}_special{int(special)}'] += 1
+            for phase, (profiles, partitions) in zip(output['phases'], aggregates):
+                if not phase['begin_core_exclusive'] < row['core_cycle'] <= phase['end_core_inclusive']:
+                    continue
+                bank, unaligned, translation, special = decompose(row)
+                if not row['fire'] or row['instr_type'] != 1:
+                    continue
+                profile = profiles[hex(row['pc'])]
+                values = dict(attempts=1, bank_physical=int(bool(bank)), bank_unaligned=int(unaligned),
+                              translation_miss=int(translation), special_request=int(special))
+                profile.update(values)
+                if bank or unaligned:
+                    partitions[f'BC_bank{bank}_unaligned{int(unaligned)}'] += 1
+                if translation or special:
+                    partitions[f'TM_translation{int(translation)}_special{int(special)}'] += 1
+    for phase, (profiles, partitions) in zip(output['phases'], aggregates):
         assert sum(v['attempts'] for v in profiles.values()) == sum(v['attempts'] for v in phase['scalar_PC_attempts'].values())
         assert sum(v for k, v in partitions.items() if k.startswith('BC_')) == sum(v['cause_C_BC'] for v in phase['scalar_PC_attempts'].values())
         assert sum(v for k, v in partitions.items() if k.startswith('TM_')) == sum(v['cause_C_TM'] for v in phase['scalar_PC_attempts'].values())
