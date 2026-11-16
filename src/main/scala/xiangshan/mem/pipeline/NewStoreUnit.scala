@@ -219,9 +219,6 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.isPrefetch := isHwPrefetch
   io.tlbReq.bits.size := sink.bits.size
   io.tlbReq.bits.kill := false.B
-  io.tlbReq.bits.memidx.is_ld := false.B
-  io.tlbReq.bits.memidx.is_st := true.B
-  io.tlbReq.bits.memidx.idx := uop.sqIdx.value
   io.tlbReq.bits.no_translate := false.B
   io.tlbReq.bits.pmp_addr := DontCare
   // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
