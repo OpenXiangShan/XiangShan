@@ -86,17 +86,14 @@ def test_mbtb_write_buffer_sampler_selects_hit_entry_and_dirty_probe() -> None:
     values = {
         candidates[-1]: 0
         for key, candidates in groups.items()
-        if key.endswith(("_write_valid", "_hit_written", "_hit_not_written"))
+        if key.endswith(("_write_valid", "_hit_mask", "_dirty_mask"))
     }
 
     def set_value(key: str, value: int) -> None:
         values[groups[key][-1]] = value
 
     set_value("mbtb_a0_i0_p0_write_valid", 1)
-    set_value("mbtb_a0_i0_p0_hit_written", 1)
-    for row in range(4):
-        set_value(f"mbtb_a0_i0_p0_hit_row_{row}", int(row == 2))
-        set_value(f"mbtb_a0_i0_p0_hit_index_{row}", int(row == 2))
+    set_value("mbtb_a0_i0_p0_hit_mask", 1 << (2 * 4 + 1))
     fields = {
         "setIdx": 3, "entry_tag": 0x1234, "entry_attribute_branchType": 2,
         "entry_attribute_rasAction": 0, "entry_position": 7,

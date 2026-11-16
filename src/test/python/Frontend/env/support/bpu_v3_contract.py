@@ -157,7 +157,7 @@ def _mbtb_parent_candidates(
     suffix: str,
 ) -> tuple[str, ...]:
     base = _BPU + f"mbtb.alignBanks_{align_bank}.internalBanks_{internal_bank}."
-    return (base + suffix, base + "__Vtogcov__" + suffix)
+    return (base + suffix,)
 
 
 def _mbtb_buffer_candidates(
@@ -170,7 +170,7 @@ def _mbtb_buffer_candidates(
         + f"mbtb.alignBanks_{align_bank}.internalBanks_{internal_bank}."
         + "entryWriteBuffer."
     )
-    return (base + suffix, base + "__Vtogcov__" + suffix)
+    return (base + suffix,)
 
 
 def _mbtb_key(
@@ -212,43 +212,21 @@ def _build_mbtb_write_buffer_signal_groups() -> dict[str, tuple[str, ...]]:
                         f"entryWriteBuffer_io_write_{port}_valid_REG",
                     )
                 )
-                hit_suffix = "" if port == 0 else f"_{port}"
-                groups[_mbtb_key(align_bank, internal_bank, port_prefix + "hit_written")] = (
-                    _mbtb_buffer_candidates(
-                        align_bank,
-                        internal_bank,
-                        "hitWritten" + hit_suffix,
+                suffix = "" if port == 0 else f"_{port}"
+                for name, rtl_name in (
+                    ("hit_mask", "hitMaskUInt" + suffix),
+                    ("dirty_mask", "dirtyUInt"),
+                ):
+                    # Toggle coverage records transitions, not the current signal.
+                    groups[_mbtb_key(align_bank, internal_bank, port_prefix + name)] = (
+                        _mbtb_buffer_candidates(align_bank, internal_bank, rtl_name)[0],
                     )
-                )
-                groups[_mbtb_key(align_bank, internal_bank, port_prefix + "hit_not_written")] = (
-                    _mbtb_buffer_candidates(
-                        align_bank,
-                        internal_bank,
-                        "hitNotWritten" + hit_suffix,
-                    )
-                )
                 for field, rtl_field in input_fields.items():
                     groups[_mbtb_key(align_bank, internal_bank, port_prefix + "input_" + field)] = (
                         _mbtb_parent_candidates(
                             align_bank,
                             internal_bank,
                             f"entryWriteBuffer_io_write_{port}_bits_{rtl_field}",
-                        )
-                    )
-                for row in range(MBTB_WRITE_BUFFER_ROWS):
-                    row_suffix = f"_{row}" if port == 0 else f"_{port}_{row}"
-                    groups[_mbtb_key(align_bank, internal_bank, port_prefix + f"hit_row_{row}")] = (
-                        _mbtb_buffer_candidates(
-                            align_bank,
-                            internal_bank,
-                            "hitRowsVec" + row_suffix,
-                        )
-                    )
-                    groups[_mbtb_key(align_bank, internal_bank, port_prefix + f"hit_index_{row}")] = (
-                        _mbtb_buffer_candidates(
-                            align_bank,
-                            internal_bank,
-                            "hitRowIdxVec" + row_suffix,
                         )
                     )
             for row in range(MBTB_WRITE_BUFFER_ROWS):
@@ -570,62 +548,25 @@ def sample_mbtb_write_buffer_events(
                 prefix = f"p{port}_"
                 paths: dict[str, str] = {}
                 values: dict[str, int] = {}
-                for field in ("write_valid", "hit_written", "hit_not_written"):
-                    key = _mbtb_key(
-                        align_bank,
-                        internal_bank,
-                        prefix + field,
-                    )
+                for field in ("write_valid", "hit_mask", "dirty_mask"):
+                    key = _mbtb_key(align_bank, internal_bank, prefix + field)
                     values[field], paths[key] = _read_required(
-                        reader,
-                        key,
-                        MBTB_WRITE_BUFFER_SIGNAL_GROUPS[key],
+                        reader, key, MBTB_WRITE_BUFFER_SIGNAL_GROUPS[key]
                     )
-                if values["hit_written"] != 1:
+                valid = values["write_valid"]
+                hit = values["hit_mask"]
+                dirty_mask = values["dirty_mask"]
+                width = MBTB_WRITE_BUFFER_ROWS * MBTB_WRITE_BUFFER_ENTRIES
+                location = f"a={align_bank} i={internal_bank} p={port}"
+                if (valid not in (0, 1) or not 0 <= hit < (1 << width)
+                        or not 0 <= dirty_mask < (1 << width)):
+                    raise AssertionError(f"invalid MBTB native mask/valid: {location} {values!r}")
+                if hit.bit_count() > 1 or (hit and not valid):
+                    raise AssertionError(f"invalid MBTB hit mask: {location} {values!r}")
+                if not hit or (hit & dirty_mask):
                     continue
-                if values["write_valid"] != 1 or values["hit_not_written"] != 0:
-                    raise AssertionError(
-                        "inconsistent MBTB WriteBuffer hitWritten observation: "
-                        f"a={align_bank} i={internal_bank} p={port} values={values!r}"
-                    )
-
-                hit_rows: list[int] = []
-                hit_indices: dict[int, int] = {}
-                for row in range(MBTB_WRITE_BUFFER_ROWS):
-                    row_key = _mbtb_key(
-                        align_bank,
-                        internal_bank,
-                        prefix + f"hit_row_{row}",
-                    )
-                    row_value, paths[row_key] = _read_required(
-                        reader,
-                        row_key,
-                        MBTB_WRITE_BUFFER_SIGNAL_GROUPS[row_key],
-                    )
-                    index_key = _mbtb_key(
-                        align_bank,
-                        internal_bank,
-                        prefix + f"hit_index_{row}",
-                    )
-                    hit_indices[row], paths[index_key] = _read_required(
-                        reader,
-                        index_key,
-                        MBTB_WRITE_BUFFER_SIGNAL_GROUPS[index_key],
-                    )
-                    if row_value == 1:
-                        hit_rows.append(row)
-                if len(hit_rows) != 1:
-                    raise AssertionError(
-                        "MBTB WriteBuffer hitWritten did not identify exactly one row: "
-                        f"a={align_bank} i={internal_bank} p={port} rows={hit_rows!r}"
-                    )
-                row = hit_rows[0]
-                entry = int(hit_indices[row])
-                if not 0 <= entry < MBTB_WRITE_BUFFER_ENTRIES:
-                    raise AssertionError(
-                        "MBTB WriteBuffer hit index is out of range: "
-                        f"a={align_bank} i={internal_bank} p={port} entry={entry}"
-                    )
+                bit = hit.bit_length() - 1
+                row, entry = divmod(bit, MBTB_WRITE_BUFFER_ENTRIES)
 
                 incoming = _read_mbtb_entry(
                     reader,
@@ -651,6 +592,10 @@ def sample_mbtb_write_buffer_events(
                     dirty_key,
                     MBTB_WRITE_BUFFER_SIGNAL_GROUPS[dirty_key],
                 )
+                if dirty != 0:
+                    raise AssertionError(
+                        f"MBTB dirty bit disagrees with native mask: {dirty_key}={dirty}"
+                    )
                 events.append(
                     MbtbWriteBufferEvent(
                         align_bank=align_bank,
