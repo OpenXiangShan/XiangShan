@@ -19,6 +19,17 @@ def verify(folder,files):
         assert path.stat().st_size==entry['bytes'] and digest(path)==entry['sha256']
 
 
+def verify_archived_copy(folder, original_folder, hashes):
+    """Bind a copied closed archive to explicit original paths and file hashes."""
+    files = {Path(name).relative_to(original_folder): expected for name, expected in hashes.items()
+             if Path(name).is_relative_to(original_folder)}
+    required = {Path(name) for name in ['simulator_out.txt', 'simulator_err.txt', 'simulator.db']}
+    assert required <= files.keys(), 'Original archive is missing core evidence'
+    for name, expected in files.items():
+        assert digest(folder / name) == expected, str(folder / name)
+    return {str(folder / name): expected for name, expected in files.items()}
+
+
 def old_execution(before,after,extra_names):
     from native_perf import read_blocks,counter_multisets
     native=[read_blocks(folder/'simulator_err.txt') for folder in [before,after]]
