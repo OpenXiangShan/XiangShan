@@ -344,8 +344,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     uras.io.specOut.retTarget,
     s1_abtbFirstTakenBr.target
   )
-  // pTAGE's own view of the first block, with a return's target from the return stack as for any s1 source. It decides
-  // nothing about the first block; it only says whether pTAGE's second block can follow the one chosen below.
+  // pTAGE's view of the first block, with a return's target from the return stack as for any s1 source
   private val s1_ptageBlock  = ptage.io.prediction.head
   private val s1_ptageResult = WireInit(s1_ptageBlock.bits)
   s1_ptageResult.target := Mux(
@@ -354,16 +353,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     s1_ptageBlock.bits.target
   )
 
-  // The first block comes from the ahead btb and the micro tage behind it, exactly as without pTAGE. pTAGE is keyed a
-  // group ahead and answers with a whole pair, which is what buys a second block, but for the first block alone it is
-  // the weaker predictor and would leave s2 correcting s1 more often.
+  // A pTAGE hit predicts the first block, taken or not. On a miss s1 falls back to the ahead btb and the micro tage
+  // behind it, then to the micro btb, exactly as without pTAGE.
   private val s1_ubtbPathPrediction = Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
+  private val s1_abtbPathPrediction =
+    Mux(s1_abtbValid, Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction), s1_ubtbPathPrediction)
   s1_prediction := Mux(
-    s1_abtbValid,
-    Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    s1_ubtbPathPrediction
+    s1_ptageBlock.valid,
+    Mux(s1_ptageResult.taken, s1_ptageResult, fallThrough.io.prediction),
+    s1_abtbPathPrediction
   )
-  // what s1 would say if pTAGE chose the first block instead, for the performance counters below
+  // pTAGE's answer with only the micro btb behind it, for the performance counters below
   private val s1_ptagePathPrediction =
     Mux(
       s1_ptageBlock.valid,
