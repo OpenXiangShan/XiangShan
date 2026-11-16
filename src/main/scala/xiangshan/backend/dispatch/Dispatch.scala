@@ -106,6 +106,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new RenameOutUop)))
     val toRenameAllFire = Output(Bool())
+    val dip = Option.when(backendParams.dipEn)(Output(new DipDispatch))
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // IssueQueues
@@ -702,6 +703,23 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
+  val drSqPsv = WireDefault(VecInit.fill(RenameWidth)(0.U(TeaEvent.width.W)))
+  if (backendParams.teaTrackerEn) {
+    // The oldest valid lane has no older instruction in this dispatch group to block it.
+    val headIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
+    val head = fromRename(headIdx)
+    val sqHasRoom = head.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+    val sqBlock = io.enqRob.isEmpty && head.valid && FuType.isStore(head.bits.fuType) && !sqHasRoom
+    val pending = RegInit(false.B)
+    when(io.redirect.valid || head.fire) {
+      pending := false.B
+    }.elsewhen(sqBlock) {
+      pending := true.B
+    }
+    for (i <- 0 until RenameWidth) {
+      drSqPsv(i) := Mux(pending && headIdx === i.U && isStoreVec(i), TeaEvent.bit(TeaEvent.DR_SQ), 0.U)
+    }
+  }
 
   /*
   * how to allow dispatch lsu uop:
@@ -789,6 +807,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
+    if (backendParams.teaPsvEn) {
+      updatedUop(i).teaPsv := fromRename(i).bits.teaPsv | drSqPsv(i)
+    } else {
+      updatedUop(i).teaPsv := 0.U
+    }
     XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
@@ -919,6 +942,38 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val fusedVec = (0 until RenameWidth).map{ case i =>
     if (i == 0 || !backendParams.debugEn) false.B
     else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
+  }
+
+  io.dip.foreach { dip =>
+    dip := 0.U.asTypeOf(new DipDispatch)
+    dip.validMask := VecInit(fromRename.map(_.valid)).asUInt
+    dip.fireMask := VecInit(fromRename.map(_.fire)).asUInt
+    for (lane <- 0 until RenameWidth) {
+      dip.uops(lane).robIdx := fromRename(lane).bits.robIdx
+      // CtrlBlock extends the virtual PC using the current translation mode.
+      dip.uops(lane).pc := fromRename(lane).bits.debug.get.pc
+      dip.uops(lane).psv := fromRename(lane).bits.teaPsv
+    }
+    val blocked = VecInit(fromRename.map(x => x.valid && !x.ready))
+    val idx = PriorityEncoder(blocked)
+    val fu = fromRename(idx).bits.fuType
+    val iqCause = Mux(FuType.isInt(fu), DipCause.bit(DipCause.intIq),
+      Mux(FuType.isFArith(fu), DipCause.bit(DipCause.fpIq),
+        Mux(FuType.isVArith(fu), DipCause.bit(DipCause.vecIq), DipCause.bit(DipCause.memIq))))
+    val iqPortOffsets = allIssueParams.map(_.numEnq).scanLeft(0)(_ + _)
+    val iqFull = VecInit(allIssueParams.indices.map(iq =>
+      uopBlockMatrix(idx)(iq) && !io.toIssueQueues(iqPortOffsets(iq)).ready)).asUInt.orR
+    val iqPolicy = VecInit(allIssueParams.indices.map(iq =>
+      uopBlockMatrix(idx)(iq) && io.toIssueQueues(iqPortOffsets(iq)).ready)).asUInt.orR
+    val causes = Mux(blocked.asUInt.orR,
+      Mux(!io.enqRob.canAcceptForDispatch, DipCause.bit(DipCause.rob), 0.U) |
+      Mux(iqFull, iqCause, 0.U) |
+      Mux(iqPolicy, DipCause.bit(DipCause.policy), 0.U) |
+      Mux(!allowDispatch(idx) && FuType.isLoad(fu), DipCause.bit(DipCause.lq), 0.U) |
+      Mux(!allowDispatch(idx) && FuType.isStore(fu), DipCause.bit(DipCause.sq), 0.U) |
+      Mux(blockedByWaitForward(idx) || !notBlockedByPrevious(idx) || hasSpecialInst, DipCause.bit(DipCause.serial), 0.U) |
+      Mux(lsqRecoverStall, DipCause.bit(DipCause.lsqRecovery), 0.U), 0.U)
+    dip.stallCause := Mux(blocked.asUInt.orR && !causes.orR, DipCause.bit(DipCause.policy), causes)
   }
 
   // Topdown collect start
