@@ -75,6 +75,35 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // training only ever writes, and a write buffer absorbs whatever the sram cannot take, so it never back-pressures
   io.trainReady := true.B
 
+  /* *** useful marks ***
+   * A mark says an entry earned its place, and allocation passes marked entries over. They live here rather than in
+   * the entry itself for one reason: the only way to stop the tables filling with permanently-protected entries is to
+   * let every mark go at once, and a write port that spends its cycles on training cannot sweep an sram to do it.
+   * In flops the whole array clears in a cycle, and the entry loses a bit in the bargain.
+   */
+  private val usefulMarks = RegInit(VecInit(Seq.fill(NumTables)(
+    VecInit(Seq.fill(NumBanks * NumSets)(false.B))
+  )))
+  private def usefulAddr(bank: UInt, set: UInt): UInt = Cat(bank, set)
+
+  /* *** pair confidence ***
+   * How many times in a row an entry's second block has turned out right. Without a second lookup at s3 nothing on
+   * the prediction side can tell a right second block from a wrong one, so for a block that was put out the count is
+   * set from where the block resolves. For a pair held back, s3's prediction of the next group says whether the pair
+   * would have been right. Kept beside the useful marks for the same reason they are: it is written from somewhere the
+   * entry's own write port does not reach.
+   */
+  private val pairConf = RegInit(VecInit(Seq.fill(NumTables)(
+    VecInit(Seq.fill(NumBanks * NumSets)(0.U(PairConfWidth.W)))
+  )))
+  private def confInc(c: UInt): UInt = Mux(c === PairConfMax.U, c, c + 1.U)
+
+  // Pipeline registers an earlier stage reads: s0 replays s1's or s3's read after an override, and checks a read
+  // against the pc it was keyed on, which is s1's group. Each is written by its own stage below.
+  private val s1_startPc    = Reg(GuardedPc())
+  private val s1_read       = RegInit(0.U.asTypeOf(new PipelineState))
+  private val s3_replayRead = RegInit(0.U.asTypeOf(new PipelineState))
+
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
@@ -125,8 +154,6 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
    * elsewhere then misses, instead of hitting and rebuilding its targets from the wrong base.
    */
   private val s0_startPc = io.startPc
-  // the group that was in s0 at the last fire, which is the one in s1 now
-  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
   // The read issued at a0, keyed on the group that was in s0 then. That group is this one's predecessor unless a
   // redirect has just put a different group in s0; on an override this read is not used.
@@ -142,15 +169,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   /* After an override, the group in s0 follows the group the override corrected. The read keyed on that group was
    * made while it sat in s0, and it is still held, as the lookup of the successor the override has just discarded: in
-   * s1 for a group corrected at s2. A group corrected at s3 takes a copy of that read with it when it leaves s2, the
-   * moment its successor's lookup is still in s1. Matching the read again against the new group's pc is the lookup a
-   * read issued now would give a cycle too late. A redirect follows the mispredicted block, whose read is long gone,
-   * so its group sits the lookup out.
+   * s1 for a group corrected at s2, and in s3's copy for one corrected at s3. Matching the read again against the new
+   * group's pc is the lookup a read issued now would give a cycle too late. A redirect follows the mispredicted block,
+   * whose read is long gone, so its group sits the lookup out.
    */
-  private val s1_read       = RegInit(0.U.asTypeOf(new PipelineState))
-  private val s3_replayRead = RegEnable(s1_read, 0.U.asTypeOf(new PipelineState), s2_fire)
-  private val s0_read       = Mux(s0_override, Mux(io.bpuS3Override, s3_replayRead, s1_read), s0_sramRead)
-  when(s0_fire)(s1_read := s0_read)
+  private val s0_read = Mux(s0_override, Mux(io.bpuS3Override, s3_replayRead, s1_read), s0_sramRead)
 
   // the corrected group's own start pc, which every replayed read must have been keyed on
   private val debug_overrideOwnStartPc = io.debug_bpuS2StartPc.zip(io.debug_bpuS3StartPc).map { case (s2Pc, s3Pc) =>
@@ -170,45 +193,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     VecInit(Seq.tabulate(NumTables)(t => (s0_read.tagFold(t) ^ getTagPc(s0_startPc))(TagWidth - 1, 0)))
   private val s0_hitVec = VecInit(Seq.tabulate(NumTables)(t => s0_entry(t).valid && s0_entry(t).tag === s0_tag(t)))
 
-  /* *** useful marks ***
-   * A mark says an entry earned its place, and allocation passes marked entries over. They live here rather than in
-   * the entry itself for one reason: the only way to stop the tables filling with permanently-protected entries is to
-   * let every mark go at once, and a write port that spends its cycles on training cannot sweep an sram to do it.
-   * In flops the whole array clears in a cycle, and the entry loses a bit in the bargain.
-   */
-  private val usefulMarks = RegInit(VecInit(Seq.fill(NumTables)(
-    VecInit(Seq.fill(NumBanks * NumSets)(false.B))
-  )))
-  private def usefulAddr(bank: UInt, set: UInt): UInt = Cat(bank, set)
-
   private val s0_useful =
     VecInit(Seq.tabulate(NumTables)(t => usefulMarks(t)(usefulAddr(s0_bankIdx, s0_setIdx(t)))))
-  private val s1_useful = RegEnable(s0_useful, s0_fire)
-
-  /* *** pair confidence ***
-   * How many times in a row an entry's second block has turned out right. Without a second lookup at s3 nothing on
-   * the prediction side can tell a right second block from a wrong one, so for a block that was put out the count is
-   * set from where the block resolves. For a pair held back, s3's prediction of the next group says whether the pair
-   * would have been right. Kept beside the useful marks for the same reason they are: it is written from somewhere the
-   * entry's own write port does not reach.
-   */
-  private val pairConf = RegInit(VecInit(Seq.fill(NumTables)(
-    VecInit(Seq.fill(NumBanks * NumSets)(0.U(PairConfWidth.W)))
-  )))
-  private def confInc(c: UInt): UInt = Mux(c === PairConfMax.U, c, c + 1.U)
-
   private val s0_pairConf =
     VecInit(Seq.tabulate(NumTables)(t => pairConf(t)(usefulAddr(s0_bankIdx, s0_setIdx(t)))))
-  private val s1_pairConf = RegEnable(s0_pairConf, s0_fire)
 
-  /* *** s1: select a provider and decode the group *** */
-  private val s1_valid  = s1_read.valid
-  private val s1_entry  = s1_read.entry
-  private val s1_hitVec = RegEnable(s0_hitVec, s0_fire)
-
-  /* *** perf: where a lookup sits relative to a correction ***
-   * Judged in the cycle the group leaves s0, when the correction that brought it there is still visible.
-   */
+  // perf: where the lookup sits relative to the last correction, judged while the correction that brought the group
+  // here is still visible
   private val perf_kindNow = MuxCase(
     PtageLookupClass.Steady.U,
     Seq(
@@ -228,6 +219,17 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
       PtageLookupClass.Steady.U
     )
   )
+
+  /* *** s1: select a provider and decode the group *** */
+  when(s0_fire) {
+    s1_startPc := s0_startPc
+    s1_read    := s0_read
+  }
+  private val s1_valid     = s1_read.valid
+  private val s1_entry     = s1_read.entry
+  private val s1_hitVec    = RegEnable(s0_hitVec, s0_fire)
+  private val s1_useful    = RegEnable(s0_useful, s0_fire)
+  private val s1_pairConf  = RegEnable(s0_pairConf, s0_fire)
   private val s1_perfClass = RegEnable(perf_s0Class, PtageLookupClass.Steady.U, s0_fire)
 
   // The longest history that hit provides the prediction, as in any TAGE: a longer history is a more specific
@@ -311,6 +313,12 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.meta.p2Conf                 := s1_providerConf
   io.meta.perf_lookupClass       := s1_perfClass
 
+  /* *** s3: keep the read the corrected group's successor would need ***
+   * A group corrected at s3 has left s2 behind, and with it the lookup that was keyed on it. That lookup is still in
+   * s1 at the moment the group leaves s2, so the group takes a copy with it.
+   */
+  when(s2_fire)(s3_replayRead := s1_read)
+
   /* *** t0: receive a verified group ***
    * Driven by s3's verified result, so pTAGE learns what the high-level predictor concluded rather than waiting for
    * the backend. The point is to track s3 closely and stop overriding it; final accuracy is s3's job, and the odd
@@ -365,11 +373,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // Leaving the target out of this counts an entry that rebuilds the wrong address as right, so it is strengthened
   // rather than corrected, and once strengthened it can earn a mark and hold its place -- a confidently wrong entry
   // that goes on being found and goes on being refused by the predictors that check it. Only the direction is left
-  // out, because that is what the counter beside the entry is for.
+  // out, because that is what the counter beside the entry is for. A return is the exception: its prediction takes
+  // the target from the return stack, so the one stored here says nothing about whether the entry was right, and
+  // checking it would keep rewriting a return reached from more than one call site.
   private val t0_heldCorrect = t0_heldHit &&
     heldMeta.p1CfiPosition === heldCfiPosition &&
     heldMeta.p1Attribute.asUInt === heldAttribute.asUInt &&
-    heldMeta.p1NextPcLow === t0_heldNextPcLow
+    (heldMeta.p1NextPcLow === t0_heldNextPcLow || heldAttribute.isReturn)
 
   // A wrong entry is handed to a longer history to tell the two contexts apart, so allocation looks above the
   // provider; a miss may go anywhere. A marked entry is passed over, and when every candidate is marked the
@@ -431,7 +441,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   t0_writeEntry.p1.cfiPosition := heldCfiPosition
   t0_writeEntry.p1.attribute   := heldAttribute
-  t0_writeEntry.p1.nextPcLow   := t0_heldNextPcLow
+  // a strengthened entry keeps its own target, which only a return's can differ from the held group's
+  t0_writeEntry.p1.nextPcLow := Mux(t0_needStrengthen, heldMeta.p1NextPcLow, t0_heldNextPcLow)
   t0_writeEntry.p1.counter := Mux(
     t0_writeFresh,
     Mux(heldTaken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
@@ -458,7 +469,23 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     )
   )
 
-  private val t0_needWrite = t0_fire && (t0_needStrengthen || t0_needCorrect || t0_needAllocate)
+  // the held group's outcome is decided on this event: its mark and its pair confidence are updated whatever it is
+  private val t0_heldUpdate = t0_fire && (t0_needStrengthen || t0_needCorrect || t0_needAllocate)
+
+  /* A strengthened entry only needs writing back if it changes. Every write competes with prediction reads for the
+   * bank, and a write that waits there holds back the corrections behind it, so rewriting an entry that is already
+   * saturated costs real learning. Its exit, type and target stay as they are by definition; what can change is the
+   * first block's counter and the second block, which is learned, re-learned, cleared or counted.
+   */
+  private val t0_p1Changes = t0_writeEntry.p1.counter.asUInt =/= heldMeta.p1Counter.asUInt
+  private val t0_p2Changes = t0_writeEntry.p2Valid =/= heldMeta.p2Valid || t0_writeEntry.p2Valid && (
+    t0_writeEntry.p2.cfiPosition =/= heldMeta.p2CfiPosition ||
+      t0_writeEntry.p2.attribute.asUInt =/= heldMeta.p2Attribute.asUInt ||
+      t0_writeEntry.p2.nextPcLow =/= heldMeta.p2NextPcLow ||
+      t0_writeEntry.p2.counter.asUInt =/= heldMeta.p2Counter.asUInt
+  )
+  private val t0_needWrite =
+    t0_fire && (t0_needCorrect || t0_needAllocate || t0_needStrengthen && (t0_p1Changes || t0_p2Changes))
   // the held group was decided on this event, so what t1 writes is captured now
   private val t0_heldFire = t0_fire && heldValid
 
@@ -474,12 +501,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   /* *** t1: write the entry, its mark and its pair confidence ***
    * The write buffer inside a bank is the drain stage: it takes the request now and lands it on a cycle whose bank is
-   * not busy serving a prediction.
+   * not busy serving a prediction. The mark and the pair confidence live in flops, so they are updated whether or not
+   * the entry itself needed writing.
    */
   private val t1_needWrite      = RegNext(t0_needWrite, false.B)
-  private val t1_needAllocate   = RegNext(t0_needAllocate, false.B)
-  private val t1_markEarned     = RegNext(t0_markEarned, false.B)
-  private val t1_needPairConf   = RegNext(t0_needWrite && !t0_heldPairConfirmed, false.B)
+  private val t1_needAllocate   = RegNext(t0_heldUpdate && t0_needAllocate, false.B)
+  private val t1_markEarned     = RegNext(t0_heldUpdate && t0_markEarned, false.B)
+  private val t1_needPairConf   = RegNext(t0_heldUpdate && !t0_heldPairConfirmed, false.B)
   private val t1_pairConf       = RegEnable(t0_pairConf, t0_heldFire)
   private val t1_writeTable     = RegEnable(t0_writeTable, t0_heldFire)
   private val t1_writeBank      = RegEnable(heldMeta.bankIdx, t0_heldFire)
@@ -495,15 +523,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     }
   }
 
-  when(t1_needWrite) {
-    when(t1_needAllocate) {
-      usefulMarks(t1_writeTable)(t1_writeEntryAddr) := false.B
-    }.elsewhen(t1_markEarned) {
-      usefulMarks(t1_writeTable)(t1_writeEntryAddr) := true.B
-    }
+  when(t1_needAllocate) {
+    usefulMarks(t1_writeTable)(t1_writeEntryAddr) := false.B
+  }.elsewhen(t1_markEarned) {
+    usefulMarks(t1_writeTable)(t1_writeEntryAddr) := true.B
   }
 
-  when(t1_needWrite && t1_needPairConf) {
+  when(t1_needPairConf) {
     pairConf(t1_writeTable)(t1_writeEntryAddr) := t1_pairConf
   }
   // the backend's verdict on a second block that was put out wins over a pairing update to the same entry
@@ -525,8 +551,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("pairOffered", perf_offered)
   XSPerfAccumulate("pairEmitted", s1_fire && s1_p2Usable)
   XSPerfHistogram("pairConfAtOffer", s1_providerConf, perf_offered, 0, PairConfMax + 1)
-  XSPerfAccumulate("pairConfRaisedByPairing", t1_needWrite && t1_needPairConf && t1_pairConf =/= 0.U)
-  XSPerfAccumulate("pairConfClearedByPairing", t1_needWrite && t1_needPairConf && t1_pairConf === 0.U)
+  XSPerfAccumulate("pairConfRaisedByPairing", t1_needPairConf && t1_pairConf =/= 0.U)
+  XSPerfAccumulate("pairConfClearedByPairing", t1_needPairConf && t1_pairConf === 0.U)
   XSPerfAccumulate("pairConfRaisedByBackend", io.pairOutcome.valid && io.pairOutcomeCorrect)
   XSPerfAccumulate("pairConfClearedByBackend", io.pairOutcome.valid && !io.pairOutcomeCorrect)
 
@@ -538,6 +564,19 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainAllocate", t0_fire && t0_needAllocate)
   XSPerfAccumulate("trainNoTableFree", t0_fire && t0_allocRefused)
   XSPerfAccumulate("usefulReset", t0_needUsefulReset)
+  // how much of the training traffic actually reaches the banks, and what each kind of exit does to the entries
+  XSPerfAccumulate("trainWrite", t0_needWrite)
+  XSPerfAccumulate("trainWriteSkipped", t0_heldUpdate && !t0_needWrite)
+  private val perf_heldExit = Seq(
+    ("none", heldAttribute.isNone),
+    ("conditional", heldAttribute.isConditional),
+    ("direct", heldAttribute.isDirect),
+    ("otherIndirect", heldAttribute.isOtherIndirect),
+    ("return", heldAttribute.isReturn)
+  )
+  XSPerfSeqAccumulate("trainStrengthenExit", t0_heldUpdate && t0_needStrengthen, perf_heldExit)
+  XSPerfSeqAccumulate("trainCorrectExit", t0_heldUpdate && t0_needCorrect, perf_heldExit)
+  XSPerfSeqAccumulate("trainAllocateExit", t0_heldUpdate && t0_needAllocate, perf_heldExit)
 
   // Per lookup class: how often a lookup hits, then what training did with it. A class whose lookups go wrong but
   // still train shows up as allocation churn here.
