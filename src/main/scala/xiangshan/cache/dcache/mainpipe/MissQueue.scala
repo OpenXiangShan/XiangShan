@@ -1553,7 +1553,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // Compress: only the first in group is master, others are slaves
     val is_first_in_group = target_group === i.U
-    val compress_ready = has_compress && Mux(is_first_in_group, has_merge || has_alloc, (analysis.strategy(target_group) & 3.U) =/= 0.U)
+    // A follower must satisfy its own merge window; a store leader can still
+    // merge after GrantData, when a load follower can no longer be woken by D.
+    val group_allocates = (analysis.strategy(target_group) & 1.U) =/= 0.U
+    val group_merges = (analysis.strategy(target_group) & 2.U) =/= 0.U
+    val follower_can_merge = has_merge && target_mshr === analysis.target_mshr(target_group)
+    val compress_ready = has_compress && Mux(is_first_in_group, has_merge || has_alloc,
+      group_allocates || (group_merges && follower_can_merge))
 
     val merge_ready = has_merge && !has_compress && is_valid
 
