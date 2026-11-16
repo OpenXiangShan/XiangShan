@@ -36,7 +36,17 @@ trait Helpers extends HasPtageParameters with TargetFixHelper with PhrPathHelper
     )
   )
 
-  def getBankIndex(pc: PrunedAddr): UInt = addrFields.extract("bankIdx", pc)
+  /** The bank, from the lowest pc bits mixed with two bits from inside the set field.
+    *
+    * The lowest bits alone are badly skewed: a group that starts on a fetch block boundary, or at a 4-byte
+    * instruction, has them mostly zero, so most reads land in one bank, and a bank that serves most reads cannot drain
+    * the training writes queued behind them. The mixed-in bits are also part of the set index, so a bank and a set
+    * still name exactly one value of the pc bits they cover, and no capacity is lost.
+    */
+  private def bankMixLo: Int = instOffsetBits + BankIdxWidth + SetIdxWidth / 2
+  require(SetIdxWidth / 2 + BankIdxWidth <= SetIdxWidth, "the bank's mixed-in bits must lie inside the set field")
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc) ^ pc(bankMixLo + BankIdxWidth - 1, bankMixLo)
 
   // The pc half of a set index. The folded history supplies the other half, and the two are XORed rather than
   // concatenated so that a table's whole index depends on its own history span.
