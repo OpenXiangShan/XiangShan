@@ -241,6 +241,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val debug_vaddr = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(VAddrBits.W))))
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
   val blocking = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val tlbWaitRob = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val strict = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
 
   // freeliset: store valid entries index.
@@ -335,6 +336,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     stDataDeqVec(i) := allocated(i) && storeDataValidVec(i)
   })
 
+  val robNotBlockVec = VecInit(uop.map(u => !isAfter(u.robIdx, io.robDeqPtr)))
+
   // update blocking condition
   (0 until LoadQueueReplaySize).map(i => {
     // case C_MA
@@ -343,9 +346,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_TM
     when (cause(i)(LoadReplayCauses.C_TM)) {
-      blocking(i) := Mux(io.tlb_hint.resp.valid &&
+      blocking(i) := Mux(Mux(tlbWaitRob(i), robNotBlockVec(i),
+                     io.tlb_hint.resp.valid &&
                      (io.tlb_hint.resp.bits.replay_all ||
-                     io.tlb_hint.resp.bits.id === tlbHintId(i)), false.B, blocking(i))
+                     io.tlb_hint.resp.bits.id === tlbHintId(i))), false.B, blocking(i))
     }
     // case C_FF
     when (cause(i)(LoadReplayCauses.C_FF)) {
@@ -365,7 +369,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_MF
     when (cause(i)(LoadReplayCauses.C_MF)) {
-      blocking(i) := Mux(!isAfter(uop(i).robIdx, io.robDeqPtr), false.B, blocking(i))
+      blocking(i) := Mux(robNotBlockVec(i), false.B, blocking(i))
     }
   })
 
@@ -664,6 +668,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
        */
       // set flags
       val replayInfo = enq.bits.rep_info
+      tlbWaitRob(enqIndex) := replayInfo.tlb_wait_rob
       val dataInLastBeat = replayInfo.last_beat
       cause(enqIndex) := replayInfo.cause.asUInt
 
@@ -684,7 +689,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // special case: tlb miss
       when (replayInfo.cause(LoadReplayCauses.C_TM)) {
-        blocking(enqIndex) := !replayInfo.tlb_full &&
+        blocking(enqIndex) := replayInfo.tlb_wait_rob || !replayInfo.tlb_full &&
           !(io.tlb_hint.resp.valid && (io.tlb_hint.resp.bits.id === replayInfo.tlb_id || io.tlb_hint.resp.bits.replay_all))
         tlbHintId(enqIndex) := replayInfo.tlb_id
       }

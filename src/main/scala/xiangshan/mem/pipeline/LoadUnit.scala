@@ -61,6 +61,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   // tlb hint
   val tlb_id          = UInt(log2Up(loadfiltersize).W)
   val tlb_full        = Bool()
+  val tlb_wait_rob    = Bool()
 
   // alias
   def mem_amb       = cause(LoadReplayCauses.C_MA)
@@ -1460,6 +1461,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
   s2_out.rep_info.tlb_id          := io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.tlb_hint.full
+  s2_out.rep_info.tlb_wait_rob    := io.tlb_hint.tlbWaitRob
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss

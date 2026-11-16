@@ -298,6 +298,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     for (i <- 0 until LdExuCnt) {
       hintIO.req(i).id := enqidx(i)
       hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
+      hintIO.req(i).tlbWaitRob := false.B
     }
     hintIO.resp.valid := io.refill
     hintIO.resp.bits.id := ptwResp_EntryMatchFirst
