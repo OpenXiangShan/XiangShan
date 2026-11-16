@@ -624,10 +624,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // vsetvl instruction need another one cycle to write to vtype gen
   val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushed && exceptionDataRead.bits.isVset
   val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
+  // The vector-state CSR writes induced by the vsetvl commit (in particular the
+  // vstart reset) travel through the CSR robCommit register and are visible to
+  // Decode two cycles after this flush, one cycle later than vtype.  If the
+  // frontend resumes after only one stalled cycle it can capture the old vstart
+  // and report a spurious illegal-instruction exception for a younger vector
+  // instruction.  Keep the resume stall one more cycle so the committed
+  // vector-state CSRs are visible before decode restarts.
+  val isVsetFlushPipeReg2 = RegNext(isVsetFlushPipeReg)
   //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
   io.isVsetFlushPipe := isVsetFlushPipe
-  io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType || isVsetFlushPipeReg
+  io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType || isVsetFlushPipeReg || isVsetFlushPipeReg2
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
