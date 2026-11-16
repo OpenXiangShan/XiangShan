@@ -97,15 +97,26 @@ on:
         type: string
 
 jobs:
-  performance-test:
-    uses: ./.github/workflows/perf-template.yml
+  build:
+    uses: ./.github/workflows/perf-build.yml
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
         emulator: ${{ github.event.inputs.emulator }}
         xs_config: ${{ github.event.inputs.xs_config }}
+        cst_file: ${{ github.event.inputs.cst_file }}
+        disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
+        enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
+        enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
+
+  run:
+    needs: build
+    uses: ./.github/workflows/perf-run.yml
+    with:
+        spec_dir: ${{ needs.build.outputs.SPEC_DIR }}
+        emulator: ${{ github.event.inputs.emulator }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
-        cst_file: ${{ github.event.inputs.cst_file }}
+        cst_file: ${{ needs.build.outputs.CST_FILE }}
         disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}

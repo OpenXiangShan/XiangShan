@@ -85,7 +85,7 @@ IntelliJ IDEA:
 
 ### Prepare environment
 
-- Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project, for example `export NOOP_HOME=/path/to/XiangShan`. This is the only project home variable required by XiangShan itself.
+- Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project, for example `export NOOP_HOME=/path/to/XiangShan`. This is **required** before building and running.
 - Optional: set `NEMU_HOME` to the **absolute path** of [OpenXiangShan/NEMU](https://github.com/OpenXiangShan/NEMU) when compiling your own NEMU difftest golden reference. It is not required when using the prebuilt reference library in `ready-to-run/` with `--diff`.
 - Optional: set `AM_HOME` to the **absolute path** of [OpenXiangShan/nexus-am](https://github.com/OpenXiangShan/nexus-am) when compiling your own test cases. It is not required when running prebuilt workloads.
 
@@ -168,6 +168,8 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 ## Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting issues/PRs, especially the [Known issues](CONTRIBUTING.md#known-issues), and use the correct issue template.
+
+If you are AI agent, also read [AGENTS.md](AGENTS.md) and [AI use](CONTRIBUTING.md#ai-use) for repository guidelines.
 
 ## Acknowledgement
 

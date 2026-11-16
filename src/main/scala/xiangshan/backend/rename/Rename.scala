@@ -30,7 +30,8 @@ import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
 import xiangshan.backend.rename.freelist._
-import xiangshan.backend.rob.{RobEnqIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobEnqIO
 import xiangshan.mem.mdp._
 import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenRealFlowNum, GenUSWholeEmul, LsqPtrPreCalculateIO}

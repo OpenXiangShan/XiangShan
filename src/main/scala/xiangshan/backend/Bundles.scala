@@ -338,11 +338,11 @@ object Bundles {
     val isXSTrap          = Bool()
     val replayInst        = Bool()
 
-    def isWFI: Bool       = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
     def needEnqRab: Bool  = rfWen || fpWen || vecWen || v0Wen
-    def isHls: Bool = {
-      fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
-    }
+    def isWFI: Bool       = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
+    def isVectorMemory: Bool = FuType.isLoadStore(fuType) && LSUOpType.isVecMemOp(fuOpType)
+    def isHls: Bool = (fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType)) ||
+      (fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType))
 
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
@@ -365,7 +365,7 @@ object Bundles {
     val st   = 4.U(3.W)
 
     val all = Seq(og0, og1, ld, st)
-    val num = all.length
+    val num = all.length + 1
 
     def isnone(cancelSource: UInt): Bool = cancelSource === none
     def isog0(cancelSource: UInt): Bool = cancelSource === og0

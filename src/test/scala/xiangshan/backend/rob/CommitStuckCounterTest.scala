@@ -15,12 +15,12 @@ private class CommitStuckCounterHarness(width: Int, forceEnable: Bool) extends M
   })
 
   private val dut = Module(new CommitStuckCounter(width = width, forceEnable = forceEnable))
-  dut.io.stuck := io.stuck
-  dut.io.runtimeEnable := io.runtimeEnable
-  dut.io.overflowEnabled := io.overflowEnabled
+  dut.in.stuck := io.stuck
+  dut.in.runtimeEnable := io.runtimeEnable
+  dut.in.overflowEnabled := io.overflowEnabled
 
-  io.count := dut.io.count
-  io.overflow := dut.io.overflow
+  io.count := dut.out.count
+  io.overflow := dut.out.overflow
 }
 
 class CommitStuckCounterTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {

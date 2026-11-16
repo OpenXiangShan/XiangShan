@@ -83,7 +83,7 @@ IntelliJ IDEA:
 
 ### 环境准备
 
-- 设定环境变量 `NOOP_HOME` 为香山工程文件夹的绝对路径，例如 `export NOOP_HOME=/path/to/XiangShan`。这是香山本身唯一必需的项目路径环境变量。
+- 设定环境变量 `NOOP_HOME` 为香山工程文件夹的绝对路径，例如 `export NOOP_HOME=/path/to/XiangShan`。在构建/运行前**必须**设置此项。
 - 可选：自行编译 NEMU 作为 difftest 参考模型时，将 `NEMU_HOME` 设为 [OpenXiangShan/NEMU](https://github.com/OpenXiangShan/NEMU) 的绝对路径。通过 `--diff` 使用 `ready-to-run/` 提供的预编译参考模型库时，无需设置此变量。
 - 可选：编译自己的测试用例时，将 `AM_HOME` 设为 [OpenXiangShan/nexus-am](https://github.com/OpenXiangShan/nexus-am) 的绝对路径。运行预编译测试程序时，无需设置此变量。
 
@@ -166,6 +166,8 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 ## 贡献
 
 请务必在提交 issue 或 PR 之前阅读 [贡献指南](CONTRIBUTING.zh-cn.md)，尤其是[部分已知问题说明](CONTRIBUTING.zh-cn.md#部分已知问题说明)部分，并使用正确的 issue 模板。
+
+如果你是 AI agent，也请阅读 [AGENTS.md](AGENTS.md) 和 [AI 使用](CONTRIBUTING.zh-cn.md#ai-使用) 部分，了解仓库贡献指南。
 
 ## 致谢
 

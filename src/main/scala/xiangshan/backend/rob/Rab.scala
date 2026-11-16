@@ -11,58 +11,14 @@ import xiangshan.backend.Bundles.EnqRobUop
 import xiangshan.backend.{RabToVecExcpMod, RegWriteFromRab}
 import xiangshan.backend.rename.SnapshotGenerator
 import chisel3.experimental.BundleLiterals._
-
-class RenameBufferPtr(size: Int) extends CircularQueuePtr[RenameBufferPtr](size) {
-  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RabSize)
-}
-
-object RenameBufferPtr {
-  def apply(flag: Boolean = false, v: Int = 0)(implicit p: Parameters): RenameBufferPtr = {
-    val ptr = Wire(new RenameBufferPtr(p(XSCoreParamsKey).RabSize))
-    ptr.flag := flag.B
-    ptr.value := v.U
-    ptr
-  }
-}
-
-class RenameBufferEntry(implicit p: Parameters) extends XSBundle {
-  val info = new RabCommitInfo
-  val robIdx = OptionWrapper(!env.FPGAPlatform, new RobPtr)
-}
+import xiangshan.backend.rob.RenameBuffer._
 
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
-  val io = IO(new Bundle {
-    val redirect = Input(ValidIO(new Bundle {
-    }))
-
-    val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
-    val fromRob = new Bundle {
-      val walkSize = Input(UInt(log2Up(size).W))
-      val walkEnd = Input(Bool())
-      val commitSize = Input(UInt(log2Up(size).W))
-      val vecLoadExcp = Input(ValidIO(new Bundle{
-        val isStrided = Bool()
-        val isVlm = Bool()
-      }))
-    }
-
-    val snpt = Input(new SnapshotPort)
-
-    val canEnq = Output(Bool())
-    val canEnqForDispatch = Output(Bool())
-    val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
-
-    val commits = Output(new RabCommitIO)
-
-    val status = Output(new Bundle {
-      val walkEnd = Bool()
-      val commitEnd = Bool()
-    })
-    val toVecExcpMod = Output(new RabToVecExcpMod)
-  })
+  val in = IO(new In(size))
+  val out = IO(new Out(size))
 
   // alias
-  private val snptSelect = io.snpt.snptSelect
+  private val snptSelect = in.snpt.snptSelect
 
   // pointer
   private val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(idx => RenameBufferPtr(flag = false, idx)))
@@ -86,7 +42,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   private val walkPtrOHSeq = Seq.tabulate(RabCommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
-  private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
+  private val walkPtrSnapshots = SnapshotGenerator(enqPtr, in.snpt.snptEnq, in.snpt.snptDeq, in.redirect, in.snpt.flushVec)
 
   val vcfgPtrOH = RegInit(1.U(size.W))
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
@@ -96,7 +52,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val renameBuffer = Reg(Vec(size, new RenameBufferEntry))
   val renameBufferEntries = VecInit((0 until size) map (i => renameBuffer(i)))
 
-  val vecLoadExcp = Reg(io.fromRob.vecLoadExcp.cloneType)
+  val vecLoadExcp = Reg(in.fromRob.vecLoadExcp.cloneType)
 
   private val maxLMUL = 8
   private val vdIdxWidth = log2Up(maxLMUL + 1)
@@ -107,52 +63,52 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val stateNext = WireInit(state) // otherwise keep state value
 
   private val robWalkEndReg = RegInit(false.B)
-  private val robWalkEnd = io.fromRob.walkEnd || robWalkEndReg
+  private val robWalkEnd = in.fromRob.walkEnd || robWalkEndReg
 
-  when(io.redirect.valid) {
+  when(in.redirect) {
     robWalkEndReg := false.B
-  }.elsewhen(io.fromRob.walkEnd) {
+  }.elsewhen(in.fromRob.walkEnd) {
     robWalkEndReg := true.B
   }
 
   // only handle int, fp, vec and v0 wen, while vl is handled in VTypeBuffer
-  val mayNeedAlloc = WireInit(VecInit(io.req.map(x => x.bits.needEnqRab)))
-  val realNeedAlloc = io.req.zip(mayNeedAlloc).map { case (req, alloc) => req.valid && alloc }
+  val mayNeedAlloc = WireInit(VecInit(in.req.map(x => x.bits.needEnqRab)))
+  val realNeedAlloc = in.req.zip(mayNeedAlloc).map { case (req, alloc) => req.valid && alloc }
   val enqCount    = PopCount(realNeedAlloc)
   val commitNum = Wire(UInt(RabCommitWidth.U.getWidth.W))
   val walkNum = Wire(UInt(RabCommitWidth.U.getWidth.W))
-  commitNum := Mux(io.commits.commitValid(0), PriorityMux((0 until RabCommitWidth).map(
-    i => io.commits.commitValid(RabCommitWidth - 1 - i) -> (RabCommitWidth - i).U
+  commitNum := Mux(out.commits.commitValid(0), PriorityMux((0 until RabCommitWidth).map(
+    i => out.commits.commitValid(RabCommitWidth - 1 - i) -> (RabCommitWidth - i).U
   )), 0.U)
-  walkNum := Mux(io.commits.walkValid(0), PriorityMux((0 until RabCommitWidth).map(
-    i => io.commits.walkValid(RabCommitWidth - 1 - i) -> (RabCommitWidth-i).U
+  walkNum := Mux(out.commits.walkValid(0), PriorityMux((0 until RabCommitWidth).map(
+    i => out.commits.walkValid(RabCommitWidth - 1 - i) -> (RabCommitWidth-i).U
   )), 0.U)
-  val commitCount = Mux(io.commits.isCommit && !io.commits.isWalk, commitNum, 0.U)
-  val walkCount   = Mux(io.commits.isWalk && !io.commits.isCommit, walkNum, 0.U)
-  val specialWalkCount = Mux(io.commits.isCommit && io.commits.isWalk, walkNum, 0.U)
+  val commitCount = Mux(out.commits.isCommit && !out.commits.isWalk, commitNum, 0.U)
+  val walkCount   = Mux(out.commits.isWalk && !out.commits.isCommit, walkNum, 0.U)
+  val specialWalkCount = Mux(out.commits.isCommit && out.commits.isWalk, walkNum, 0.U)
 
   // number of pair(ldest, pdest) ready to commit to arch_rat
   val commitSize = RegInit(0.U(log2Up(size).W))
   val walkSize = RegInit(0.U(log2Up(size).W))
   val specialWalkSize = RegInit(0.U(log2Up(size).W))
 
-  val newCommitSize = io.fromRob.commitSize
-  val newWalkSize = io.fromRob.walkSize
+  val newCommitSize = in.fromRob.commitSize
+  val newWalkSize = in.fromRob.walkSize
 
   val commitSizeNxt = commitSize + newCommitSize - commitCount
   val walkSizeNxt = walkSize + newWalkSize - walkCount
 
-  val newSpecialWalkSize = Mux(io.redirect.valid && !io.snpt.useSnpt, commitSizeNxt, 0.U)
+  val newSpecialWalkSize = Mux(in.redirect && !in.snpt.useSnpt, commitSizeNxt, 0.U)
   val specialWalkSizeNext = specialWalkSize + newSpecialWalkSize - specialWalkCount
 
-  commitSize := Mux(io.redirect.valid && !io.snpt.useSnpt, 0.U, commitSizeNxt)
+  commitSize := Mux(in.redirect && !in.snpt.useSnpt, 0.U, commitSizeNxt)
   specialWalkSize := specialWalkSizeNext
-  walkSize := Mux(io.redirect.valid, 0.U, walkSizeNxt)
+  walkSize := Mux(in.redirect, 0.U, walkSizeNxt)
 
   walkPtrNext := MuxCase(walkPtr, Seq(
     (state === s_idle && stateNext === s_walk) -> walkPtrSnapshots(snptSelect),
     (state === s_special_walk && stateNext === s_walk) -> deqPtrVecNext.head,
-    (state === s_walk && io.snpt.useSnpt && io.redirect.valid) -> walkPtrSnapshots(snptSelect),
+    (state === s_walk && in.snpt.useSnpt && in.redirect) -> walkPtrSnapshots(snptSelect),
     (state === s_walk) -> (walkPtr + walkCount),
   ))
 
@@ -195,38 +151,38 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   deqPtrVec := deqPtrVecNext
 
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(realNeedAlloc.take(i))).value))
-  allocatePtrVec.zip(io.req).zip(realNeedAlloc).map{ case((allocatePtr, req), realNeedAlloc) =>
+  allocatePtrVec.zip(in.req).zip(realNeedAlloc).map{ case((allocatePtr, req), realNeedAlloc) =>
     when(realNeedAlloc){
       renameBuffer(allocatePtr).info := req.bits
       renameBuffer(allocatePtr).robIdx.foreach(_ := req.bits.robIdx)
     }
   }
 
-  io.commits.isCommit := state === s_idle || state === s_special_walk
-  io.commits.isWalk := state === s_walk || state === s_special_walk
+  out.commits.isCommit := state === s_idle || state === s_special_walk
+  out.commits.isWalk := state === s_walk || state === s_special_walk
 
   for(i <- 0 until RabCommitWidth) {
-    io.commits.commitValid(i) := state === s_idle && i.U < commitSize || state === s_special_walk && i.U < specialWalkSize
-    io.commits.walkValid(i) := state === s_walk && i.U < walkSize || state === s_special_walk && i.U < specialWalkSize
+    out.commits.commitValid(i) := state === s_idle && i.U < commitSize || state === s_special_walk && i.U < specialWalkSize
+    out.commits.walkValid(i) := state === s_walk && i.U < walkSize || state === s_special_walk && i.U < specialWalkSize
     // special walk use commitPtr
-    io.commits.info(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).info, walkCandidates(i).info)
-    io.commits.robIdx.foreach(_(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).robIdx.get, walkCandidates(i).robIdx.get))
+    out.commits.info(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).info, walkCandidates(i).info)
+    out.commits.robIdx.foreach(_(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).robIdx.get, walkCandidates(i).robIdx.get))
   }
 
   private val walkEndNext = walkSizeNxt === 0.U
   private val commitEndNext = commitSizeNxt === 0.U
   private val specialWalkEndNext = specialWalkSize <= RabCommitWidth.U
   // when robWalkEndReg is 1, walkSize donot increase and decrease RabCommitWidth per Cycle
-  private val walkEndNextCycle = (robWalkEndReg || io.fromRob.walkEnd && io.fromRob.walkSize === 0.U) && (walkSize <= RabCommitWidth.U)
+  private val walkEndNextCycle = (robWalkEndReg || in.fromRob.walkEnd && in.fromRob.walkSize === 0.U) && (walkSize <= RabCommitWidth.U)
   // change state
   state := stateNext
-  when(io.redirect.valid) {
-    when(io.snpt.useSnpt) {
+  when(in.redirect) {
+    when(in.snpt.useSnpt) {
       stateNext := s_walk
     }.otherwise {
       stateNext := s_special_walk
-      vecLoadExcp := io.fromRob.vecLoadExcp
-      when(io.fromRob.vecLoadExcp.valid) {
+      vecLoadExcp := in.fromRob.vecLoadExcp
+      when(in.fromRob.vecLoadExcp.valid) {
         currentVdIdx := 0.U
       }
     }
@@ -256,20 +212,20 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val allowEnqueue = GatedValidRegNext(numValidEntries + enqCount <= (size - RenameWidth).U, true.B)
   val allowEnqueueForDispatch = GatedValidRegNext(numValidEntries + enqCount <= (size - 2*RenameWidth).U, true.B)
 
-  io.canEnq := allowEnqueue && state === s_idle
-  io.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
-  io.enqPtrVec := enqPtrVec
+  in.canEnq := allowEnqueue && state === s_idle
+  in.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
+  in.enqPtrVec := enqPtrVec
 
-  io.status.walkEnd := walkEndNext
-  io.status.commitEnd := commitEndNext
+  in.status.walkEnd := walkEndNext
+  in.status.commitEnd := commitEndNext
 
   for (i <- 0 until RabCommitWidth) {
-    val valid = (state === s_special_walk) && vecLoadExcp.valid && io.commits.commitValid(i)
-    io.toVecExcpMod.logicPhyRegMap(i).valid := RegNext(valid)
-    io.toVecExcpMod.logicPhyRegMap(i).bits match {
+    val valid = (state === s_special_walk) && vecLoadExcp.valid && out.commits.commitValid(i)
+    out.toVecExcpMod.logicPhyRegMap(i).valid := RegNext(valid)
+    out.toVecExcpMod.logicPhyRegMap(i).bits match {
       case x =>
-        x.lreg := RegEnable(io.commits.info(i).ldest, valid)
-        x.preg := RegEnable(io.commits.info(i).pdest, valid)
+        x.lreg := RegEnable(out.commits.info(i).ldest, valid)
+        x.preg := RegEnable(out.commits.info(i).pdest, valid)
     }
   }
 
@@ -298,4 +254,77 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   XSPerfAccumulate("disallow_enq_cycle", !allowEnqueue)
   XSPerfAccumulate("disallow_enq_full_cycle", numValidEntries + enqCount > (size - RenameWidth).U)
   XSPerfAccumulate("disallow_enq_not_idle_cycle", state =/= s_idle)
+}
+
+object RenameBuffer {
+  class In(size: Int)(implicit p: Parameters) extends XSBundle {
+    // Enqueue requests and admission responses.
+    val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
+    val canEnq = Output(Bool())
+    val canEnqForDispatch = Output(Bool())
+    val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
+
+    // ROB quotas and completion responses.
+    val fromRob = new RobToRabIO(size)
+    val status = Output(new RabStatus)
+
+    // Recovery redirect.
+    val redirect = Input(Bool())
+
+    // Recovery snapshots.
+    val snpt = Input(new SnapshotPort)
+  }
+
+  class Out(size: Int)(implicit p: Parameters) extends XSBundle {
+    // Register mapping notifications.
+    val commits = Output(new RabCommitIO)
+
+    // Vector exception mappings.
+    val toVecExcpMod = Output(new RabToVecExcpMod)
+  }
+
+  class RabVecLoadExcp extends Bundle {
+    // Vector load format.
+    val isStrided = Bool()
+    val isVlm = Bool()
+  }
+
+  class RobToRabIO(size: Int)(implicit p: Parameters) extends XSBundle {
+    // ROB commit quota.
+    val commitSize = Input(UInt(log2Up(size).W))
+
+    // ROB walk quota.
+    val walkSize = Input(UInt(log2Up(size).W))
+    // ROB walk completion.
+    val walkEnd = Input(Bool())
+
+    // Vector load exception mode.
+    val vecLoadExcp = Input(ValidIO(new RabVecLoadExcp))
+  }
+
+  class RabStatus extends Bundle {
+    // Walk completion.
+    val walkEnd = Bool()
+
+    // Commit completion.
+    val commitEnd = Bool()
+  }
+
+  class RenameBufferEntry(implicit p: Parameters) extends XSBundle {
+    val info = new RabCommitInfo
+    val robIdx = OptionWrapper(!env.FPGAPlatform, new RobPtr)
+  }
+
+  class RenameBufferPtr(size: Int) extends CircularQueuePtr[RenameBufferPtr](size) {
+    def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RabSize)
+  }
+
+  object RenameBufferPtr {
+    def apply(flag: Boolean = false, v: Int = 0)(implicit p: Parameters): RenameBufferPtr = {
+      val ptr = Wire(new RenameBufferPtr(p(XSCoreParamsKey).RabSize))
+      ptr.flag := flag.B
+      ptr.value := v.U
+      ptr
+    }
+  }
 }

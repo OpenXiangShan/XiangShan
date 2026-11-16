@@ -133,7 +133,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val release1Cycle = io.release
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
-  val release2Cycle = RegEnable(io.release, io.release.valid)
+  val release2Cycle = Wire(io.release.cloneType)
+  release2Cycle.bits := RegEnable(io.release.bits, io.release.valid)
   release2Cycle.valid := RegNext(io.release.valid)
   //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 

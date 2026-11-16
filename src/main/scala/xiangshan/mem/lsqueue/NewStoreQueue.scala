@@ -1292,8 +1292,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
-      port.bits.prefetch := dataEntry.prefetch
+      port.bits.wline    := !headCross16B && ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+      port.bits.prefetch := !headCross16B && dataEntry.prefetch
       port.bits.vecValid := true.B
       if (i == 0) {
         // if cross16B, only port 1 deqPtr move, else both port 0 and port 1 deqPtr move.
@@ -1314,7 +1314,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     io.writeToSbuffer    <> dataQueue.io.toSbuffer
-    io.fromUnalignQueue.ready := headrdataPtr === io.fromUnalignQueue.bits.sqIdx && writeSbufferWire.head.fire
+    // Keep the second-page forwarding guard until the matching Store actually leaves the SQ.
+    io.fromUnalignQueue.ready := headDeqPtr === io.fromUnalignQueue.bits.sqIdx && io.sqDeqCnt.orR
 
     /*============================================ deqPtr generate ===================================================*/
     /*
@@ -1421,7 +1422,11 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
       cmoInvalEvent.coreid := io.hartId
       cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqDataEntries.head.cboType)
-      cmoInvalEvent.addr   := deqDataEntries.head.paddr
+      // Use the cache-block base address as the refill checker lookup key.
+      cmoInvalEvent.addr   := Cat(
+        deqDataEntries.head.paddr(PAddrBits - 1, DCacheLineOffset),
+        0.U(DCacheLineOffset.W)
+      )
 
       // DiffStoreEvent happens when rdataPtr moves.
       // That is, pmsStore enter dataBuffer or ncStore enter Ubuffer

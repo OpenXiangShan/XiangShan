@@ -11,6 +11,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
+import xiangshan.backend.rob.DiffRatStateBuffer._
 
 case class DiffRatStateParams()(implicit p: Parameters) {
   private val coreParams = p(XSCoreParamsKey)
@@ -39,47 +40,12 @@ case class DiffRatStateParams()(implicit p: Parameters) {
   val slotBits: Int = log2Ceil(storageEntries)
 }
 
-class DiffRatState(val params: DiffRatStateParams)(implicit p: Parameters) extends XSBundle {
-  val intRat = Vec(params.intEntries, UInt(PhyRegIdxWidth.W))
-  val fpRat = Vec(params.fpEntries, UInt(PhyRegIdxWidth.W))
-  val vecRat = Vec(params.vecEntries, UInt(PhyRegIdxWidth.W))
-  val vlRat = Vec(params.vlEntries, UInt(PhyRegIdxWidth.W))
-}
-
-class DiffRatRenameUpdate(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(LogicRegsWidth.W)
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val pdestVl = UInt(VlPhyRegIdxWidth.W)
-  val rfWen = Bool()
-  val fpWen = Bool()
-  val vecWen = Bool()
-  val vlWen = Bool()
-}
-
-object DiffRatState {
-  def init(params: DiffRatStateParams)(implicit p: Parameters): DiffRatState = {
-    val state = Wire(new DiffRatState(params))
-    val pregWidth = state.intRat.head.getWidth
-    state.intRat := VecInit.fill(params.intEntries)(0.U(pregWidth.W))
-    state.fpRat := VecInit.tabulate(params.fpEntries)(_.U(pregWidth.W))
-    state.vecRat := VecInit.tabulate(params.vecEntries)(_.U(pregWidth.W))
-    state.vlRat := VecInit.tabulate(params.vlEntries)(_.U(pregWidth.W))
-    state
-  }
-}
-
 class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   private val params = DiffRatStateParams()
   private val stateWidth = params.totalEntries * PhyRegIdxWidth
 
-  val io = IO(new Bundle {
-    val diffRatBase = Input(new DiffRatState(params))
-    val renameUpdates = Input(Vec(params.renameWidth, Valid(new DiffRatRenameUpdate)))
-    val snapshotEnds = Input(Vec(params.renameWidth, Valid(new RobPtr)))
-    val commitRobIdx = Input(Valid(new RobPtr))
-    val commitRobIdxVec = Input(Vec(params.commitWidth, Valid(new RobPtr)))
-    val diffRat = Output(new DiffRatState(params))
-  })
+  val in = IO(new In(params))
+  val out = IO(new Out(params))
 
   private def slotOf(ptr: RobPtr): UInt = {
     val entryBits = params.slotBits - 1
@@ -89,10 +55,10 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   }
 
   val laneRat = Wire(Vec(params.renameWidth + 1, new DiffRatState(params)))
-  laneRat.head := io.diffRatBase
+  laneRat.head := in.diffRatBase
 
   for (lane <- 0 until params.renameWidth) {
-    val req = io.renameUpdates(lane)
+    val req = in.renameUpdates(lane)
     val prev = laneRat(lane)
     val next = laneRat(lane + 1)
 
@@ -119,8 +85,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     Mem(params.storageEntries, UInt(stateWidth.W))
       .suggestName(s"diff_rat_state_bank_$bank")
   }
-  val stateWriteValid = VecInit(io.snapshotEnds.map(_.valid))
-  val stateWriteSlots = io.snapshotEnds.map(req => slotOf(req.bits))
+  val stateWriteValid = VecInit(in.snapshotEnds.map(_.valid))
+  val stateWriteSlots = in.snapshotEnds.map(req => slotOf(req.bits))
   val stateWriteData = laneRat.tail.map(_.asUInt)
   val stateBankTags = Mem(params.storageEntries, UInt(params.bankBits.W))
   val stateSlotValid = RegInit(VecInit.fill(params.storageEntries)(false.B))
@@ -145,15 +111,15 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     }
   }
 
-  val readSlot = slotOf(io.commitRobIdx.bits)
-  val readRequestValid = io.commitRobIdx.valid && stateSlotValid(readSlot)
+  val readSlot = slotOf(in.commitRobIdx.bits)
+  val readRequestValid = in.commitRobIdx.valid && stateSlotValid(readSlot)
   val readWriteConflict = VecInit.tabulate(params.renameWidth) { lane =>
     stateWriteValid(lane) && stateWriteSlots(lane) === readSlot
   }.asUInt.orR
-  assert(!io.commitRobIdx.valid || stateSlotValid(readSlot), "diff RAT commit reads an invalid state")
-  assert(!io.commitRobIdx.valid || !readWriteConflict, "diff RAT state is read and written in the same cycle")
+  assert(!in.commitRobIdx.valid || stateSlotValid(readSlot), "diff RAT commit reads an invalid state")
+  assert(!in.commitRobIdx.valid || !readWriteConflict, "diff RAT state is read and written in the same cycle")
 
-  for (commit <- io.commitRobIdxVec) {
+  for (commit <- in.commitRobIdxVec) {
     val commitSlot = slotOf(commit.bits)
     val formerSlot = slotOf(commit.bits.asFormer)
     val latterSlot = formerSlot | 1.U
@@ -175,8 +141,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     younger <- older + 1 until params.commitWidth
   } {
     assert(
-      !(io.commitRobIdxVec(older).valid && io.commitRobIdxVec(younger).valid &&
-        io.commitRobIdxVec(older).bits.isSameEntry(io.commitRobIdxVec(younger).bits)),
+      !(in.commitRobIdxVec(older).valid && in.commitRobIdxVec(younger).valid &&
+        in.commitRobIdxVec(older).bits.isSameEntry(in.commitRobIdxVec(younger).bits)),
       "two commit lanes clear the same diff RAT entry"
     )
   }
@@ -190,5 +156,56 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   when(readValid) {
     committedRat := readState
   }
-  io.diffRat := Mux(readValid, readState, committedRat)
+  out.diffRat := Mux(readValid, readState, committedRat)
+}
+
+object DiffRatStateBuffer {
+  class In(params: DiffRatStateParams)(implicit p: Parameters) extends XSBundle {
+    // Rename RAT base state.
+    val diffRatBase = Input(new DiffRatState(params))
+
+    // Rename mapping updates.
+    val renameUpdates = Input(Vec(params.renameWidth, Valid(new DiffRatRenameUpdate)))
+
+    // ROB slot snapshot boundaries.
+    val snapshotEnds = Input(Vec(params.renameWidth, Valid(new RobPtr)))
+
+    // Retired slot snapshot selection.
+    val commitRobIdx = Input(Valid(new RobPtr))
+    val commitRobIdxVec = Input(Vec(params.commitWidth, Valid(new RobPtr)))
+  }
+
+  class Out(params: DiffRatStateParams)(implicit p: Parameters) extends XSBundle {
+    // Architectural RAT state for difftest.
+    val diffRat = Output(new DiffRatState(params))
+  }
+
+  class DiffRatRenameUpdate(implicit p: Parameters) extends XSBundle {
+    val ldest = UInt(LogicRegsWidth.W)
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val pdestVl = UInt(VlPhyRegIdxWidth.W)
+    val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val vlWen = Bool()
+  }
+
+  class DiffRatState(val params: DiffRatStateParams)(implicit p: Parameters) extends XSBundle {
+    val intRat = Vec(params.intEntries, UInt(PhyRegIdxWidth.W))
+    val fpRat = Vec(params.fpEntries, UInt(PhyRegIdxWidth.W))
+    val vecRat = Vec(params.vecEntries, UInt(PhyRegIdxWidth.W))
+    val vlRat = Vec(params.vlEntries, UInt(PhyRegIdxWidth.W))
+  }
+
+  object DiffRatState {
+    def init(params: DiffRatStateParams)(implicit p: Parameters): DiffRatState = {
+      val state = Wire(new DiffRatState(params))
+      val pregWidth = state.intRat.head.getWidth
+      state.intRat := VecInit.fill(params.intEntries)(0.U(pregWidth.W))
+      state.fpRat := VecInit.tabulate(params.fpEntries)(_.U(pregWidth.W))
+      state.vecRat := VecInit.tabulate(params.vecEntries)(_.U(pregWidth.W))
+      state.vlRat := VecInit.tabulate(params.vlEntries)(_.U(pregWidth.W))
+      state
+    }
+  }
 }
