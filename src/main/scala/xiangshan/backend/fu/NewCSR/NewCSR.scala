@@ -1513,7 +1513,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg
-  io.status.criticalErrorState := criticalErrorState && !dcsr.regOut.CETRIG.asBool
+  io.status.criticalErrorState := criticalErrorState && !(dcsr.regOut.CETRIG.asBool | debugMode)
 
   val criticalErrors = Seq(
     ("csr_dbltrp_inMN", !mnstatus.regOut.NMIE && hasTrap && !(entryDebugMode || debugMode)),
