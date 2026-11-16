@@ -26,8 +26,17 @@ def add_capture(root, header, cpp, ranges):
     storage, policy = [re.sub(r'\s+', '', p.read_text()) for p in paths]
     pending = ('re.access(page.access.map(_.touch_ways))valstate=re.state_read.asTypeOf(UInt(re.nBits.W))'
                're.get_replace_way(re.get_next_state(state,page.access.map(_.touch_ways)))') in storage
-    assert pending or 're.access(page.access.map(_.touch_ways))re.way' in storage
-    assert 'when(RegNext(io.w.valid)){io.access.map{access=>' in storage
+    refill_only = ('Mux(page.pendingRefill,re.get_replace_way(re.get_next_state(state,'
+                   'page.access.map(_.touch_ways))),re.way)') in storage
+    assert pending or refill_only or 're.access(page.access.map(_.touch_ways))re.way' in storage
+    if refill_only:
+        bundle = root / 'src/main/scala/xiangshan/cache/mmu/MMUBundle.scala'
+        assert 'valpendingRefill=Output(Bool())' in re.sub(r'\s+', '', bundle.read_text())
+        assert 'io.pendingRefill:=false.B' in storage
+        assert 'when(RegNext(io.w.valid)){io.pendingRefill:=true.Bio.access.map{access=>' in storage
+        paths.append(bundle)
+    else:
+        assert 'when(RegNext(io.w.valid)){io.access.map{access=>' in storage
     assert 'defway=get_replace_way(state_reg)' in policy
     assert 'state_reg:=get_next_state(state_reg,touch_ways)' in policy
     values = [field(tlb + 'refill_idx_state_reg', 47),
@@ -62,4 +71,8 @@ static void dtlb_replacement_observe(SSimTop *model) {{
         binding.update(victim_state='next_state',
                        scope='Actual victim decodes pending NEXT; registered state and four touches are also recorded. '
                              'State selection does not establish a speedup or exclusive CPU loss.')
+    if refill_only:
+        binding.update(victim_state='refill_next_state',
+                       scope='Actual victim decodes NEXT only for the existing previous-write refill override; '
+                             'ordinary hit touches use registered state. Prior-write history at capture gaps is unknown.')
     return cpp, binding

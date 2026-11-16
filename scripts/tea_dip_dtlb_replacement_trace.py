@@ -47,7 +47,7 @@ def analyze(folder, proof_path):
     binding = proof['binding']['DTLB_replacement_binding']
     assert binding['columns'] == COLUMNS and binding['core_ranges'] == proof['binding']['DTLB_binding']['core_ranges']
     selector_state = binding.get('victim_state', 'state')
-    assert selector_state in ['state', 'next_state'], 'Unknown victim-state selection'
+    assert selector_state in ['state', 'next_state', 'refill_next_state'], 'Unknown victim-state selection'
     controls = {}
     with (folder / 'load-dtlb-probe.csv').open() as stream:
         for raw in csv.DictReader(stream):
@@ -69,7 +69,9 @@ def analyze(folder, proof_path):
     for cycle, row in sorted(records.items()):
         control = controls[cycle]
         assert all(row[k] == control[k] for k in ['clean', 'native_dump']), 'Boundary phase mismatch'
-        assert row['victim'] == victim(row[selector_state], binding['ways']) == control['refill_way'], 'Actual selector victim mismatch'
+        assert row['victim'] == control['refill_way'], 'Recorded actual victim disagrees with DTLB write selection'
+        if selector_state != 'refill_next_state':
+            assert row['victim'] == victim(row[selector_state], binding['ways']), 'Actual selector victim mismatch'
         expected = row['state']
         for i in range(binding['ports']):
             assert row[f'touch_valid_{i}'] in (0, 1)
@@ -79,7 +81,7 @@ def analyze(folder, proof_path):
                 expected = next_state(expected, way, binding['ways'])
         assert row['next_state'] == expected, 'Pending touches do not reproduce NEXT'
         row['forwarded_victim'] = victim(expected, binding['ways'])
-        if selector_state == 'next_state':
+        if selector_state in ['next_state', 'refill_next_state']:
             row['registered_state_victim'] = victim(row['state'], binding['ways'])
         row['write_valid'] = bool(control['refill_mask'])
         row['pending_refill'] = None
@@ -91,6 +93,13 @@ def analyze(folder, proof_path):
                 assert all(row[f'touch_valid_{i}'] and row[f'touch_way_{i}'] == previous['victim']
                            for i in range(binding['ports'])), 'Delayed refill touch mismatch'
                 assert row['forwarded_victim'] != previous['victim'], 'PLRU touch should protect the preceding refill'
+        if selector_state == 'refill_next_state':
+            if row['pending_refill'] is None:
+                assert row['victim'] in {row['registered_state_victim'], row['forwarded_victim']}, 'Gap-boundary victim matches neither possible state'
+                counts['unknown_selector_prior_cycle'] += 1
+            else:
+                chosen = row['forwarded_victim'] if row['pending_refill'] else row['registered_state_victim']
+                assert row['victim'] == chosen, 'Refill-only conditional selector mismatch'
         active = any(row[f'touch_valid_{i}'] for i in range(binding['ports']))
         group = 'unknown_prior_cycle' if row['pending_refill'] is None else 'pending_refill' if row['pending_refill'] else 'hit_touches_only' if active else 'idle'
         counts[group] += 1
@@ -102,7 +111,7 @@ def analyze(folder, proof_path):
         if row['write_valid']:
             counts['writes'] += 1
             counts['writes_with_selector_change'] += row['victim'] != row['forwarded_victim']
-            if selector_state == 'next_state':
+            if selector_state in ['next_state', 'refill_next_state']:
                 counts['writes_with_register_decode_difference'] += row['victim'] != row['registered_state_victim']
             if row['pending_refill']:
                 counts['back_to_back_writes'] += 1
@@ -124,6 +133,12 @@ def analyze(folder, proof_path):
                             'registered_state_victim decodes the old state only on this same observed trajectory; '
                             'it is not another execution or a performance estimate. All delayed refill touches and '
                             'registered transitions are checked; first-cycle history is unknown.')
+    if selector_state == 'refill_next_state':
+        result.update(victim_state=selector_state,
+                      scope='Source-bound refill-only selection: NEXT after a recorded prior refill, registered state otherwise. '
+                            'The first cycle of each captured range lacks prior-write history and checks only both possible victims; '
+                            'it remains unknown rather than assumed idle. Actual delayed refill touches and state transitions are checked. '
+                            'Local alternate victims are not another execution or a performance prediction.')
     return result
 
 
