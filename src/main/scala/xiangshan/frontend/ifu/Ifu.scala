@@ -753,7 +753,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b
   }
 
-  toFtq.wbRedirect := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.wbRedirect             := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.wbPredictionCorrection := wbValid && checkFlushWb.valid
 
   private val wbSelectedEndHalfRvi = Mux(
     !checkerRedirect.bits.blockSel,

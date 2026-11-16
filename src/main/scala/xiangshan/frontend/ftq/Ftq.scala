@@ -156,6 +156,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
 
+  perfQueue.io.ifuRedirect       := io.fromIfu.wbRedirect
+  perfQueue.io.ifuRedirect.valid := io.fromIfu.wbRedirect.valid && !backendRedirect.valid
+  perfQueue.io.ifuCorrection     := io.fromIfu.wbPredictionCorrection
+  perfQueue.io.commitPtr         := commitPtr(0)
+
   // Instruction page fault, guest page fault, and access fault are checked by backend and sent with redirect requests.
   private val backendException = RegInit(ExceptionType.None)
   private val hasSatpFlush     = RegInit(false.B)
@@ -577,6 +582,61 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("mispredicts", true.B, commitPerfMeta.mispredict)
     )
   )
+
+  // Original stage results, evaluated on surviving committed blocks. These counters use blocks,
+  // unlike commit_branch_num, which counts individual control-flow instructions.
+  private val perf_commitPrediction = commit && perfQueue.io.commitValid
+  XSPerfAccumulate("commit_pred_excluded_no_meta", commit && !perfQueue.io.commitValid)
+  XSPerfAccumulate("commit_pred_blocks", perf_commitPrediction)
+  XSPerfAccumulate("commit_pred_ifu_redirect", perf_commitPrediction && commitPerfMeta.ifuRedirect.valid)
+  XSPerfAccumulate("commit_pred_ifu_correction", perf_commitPrediction && commitPerfMeta.ifuCorrection.valid)
+  XSPerfAccumulate("commit_pred_backend_truncated", perf_commitPrediction && commitPerfMeta.backendTruncated)
+  XSPerfAccumulate("ifu_prediction_corrections", perfQueue.io.ifuRedirect.valid && perfQueue.io.ifuCorrection)
+  XSPerfAccumulate("ifu_other_redirects", perfQueue.io.ifuRedirect.valid && !perfQueue.io.ifuCorrection)
+
+  private val perf_stagePredictions = Seq(
+    commitPerfMeta.bpuPerf.s1Prediction,
+    commitPerfMeta.bpuPerf.s2Prediction,
+    commitPerfMeta.bpuPerf.s3Prediction
+  )
+  private val perf_stageSources = Seq(
+    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source),
+    BpuPredictionSource.Stage2.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s2Source),
+    BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
+  )
+  private val perf_stageResults = perf_stagePredictions.map(prediction => PredictionResult(commitPerfMeta, prediction))
+  private val perf_allStagesKnown = perf_stageResults.map(_.known).reduce(_ && _)
+  XSPerfAccumulate("commit_pred_common_total", perf_commitPrediction && perf_allStagesKnown)
+  perf_stageResults.zip(perf_stageSources).zipWithIndex.foreach { case ((result, sources), i) =>
+    val prefix = s"commit_pred_s${i + 1}"
+    XSPerfSeqAccumulate(
+      prefix,
+      perf_commitPrediction,
+      Seq(
+        ("total", result.known),
+        ("correct", result.correct),
+        ("wrong", result.known && !result.correct),
+        ("unknown", !result.known),
+        ("common_correct", perf_allStagesKnown && result.correct)
+      )
+    )
+    XSPerfSeqAccumulate(s"${prefix}_source_total", perf_commitPrediction && result.known, sources)
+    XSPerfSeqAccumulate(s"${prefix}_source_correct", perf_commitPrediction && result.correct, sources)
+    XSPerfSeqAccumulate(s"${prefix}_source_wrong", perf_commitPrediction && result.known && !result.correct, sources)
+    XSPerfSeqAccumulate(s"${prefix}_source_unknown", perf_commitPrediction && !result.known, sources)
+  }
+  perf_stageResults.sliding(2).zipWithIndex.foreach { case (pair, i) =>
+    XSPerfSeqAccumulate(
+      s"commit_pred_s${i + 2}_vs_s${i + 1}",
+      perf_commitPrediction && pair(0).known && pair(1).known,
+      Seq(
+        ("corrected", !pair(0).correct && pair(1).correct),
+        ("harmed", pair(0).correct && !pair(1).correct),
+        ("both_correct", pair(0).correct && pair(1).correct),
+        ("both_wrong", !pair(0).correct && !pair(1).correct)
+      )
+    )
+  }
 
   private def PerfNumCfiWithAttr(
       perfMeta: PerfMeta,

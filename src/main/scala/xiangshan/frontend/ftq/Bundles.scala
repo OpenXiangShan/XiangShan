@@ -106,6 +106,12 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
 class PerfMeta(implicit p: Parameters) extends FtqBundle {
   val bpuPerf: BpuPerfMeta = new BpuPerfMeta
 
+  // Positions let backend recovery discard IFU events in a squashed suffix.
+  val ifuRedirect:   Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val ifuCorrection: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  // An exception/replay may commit only a prefix, without validating the predicted block exit.
+  val backendTruncated: Bool = Bool()
+
   // Whether a position is a Control-Flow Instruction
   val isCfi:   Vec[Bool]            = Vec(FetchBlockInstNum, Bool())
   val cfiAttr: Vec[BranchAttribute] = Vec(FetchBlockInstNum, new BranchAttribute)

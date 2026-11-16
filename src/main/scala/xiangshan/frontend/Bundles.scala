@@ -147,6 +147,8 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val wbRedirect: Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+  // Qualifies wbRedirect: predecode correction rather than uncache sequencing.
+  val wbPredictionCorrection: Bool = Bool()
 }
 
 class ExceptionType extends Bundle {
