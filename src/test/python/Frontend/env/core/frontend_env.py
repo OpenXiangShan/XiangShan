@@ -1201,7 +1201,19 @@ class FrontendEnv:
         return True
 
     def get_errors(self) -> list:
-        return self.flow_checker.get_errors()
+        errors = self.flow_checker.get_errors()
+        errors.extend(
+            {"checker": "translation_scenario", **error}
+            for error in self.translation_checker.errors
+        )
+        for name in ("ptw_full_ppn_checker", "ptw_resp_input_checker"):
+            error = getattr(getattr(self, name), "last_error", None)
+            if error is not None:
+                errors.append({"checker": name, **error})
+        vtype_checker = self.backend_model.vtype_checker
+        if vtype_checker is not None:
+            errors.extend({"checker": "vtype", **error} for error in vtype_checker.errors)
+        return errors
 
     def arm_translation_scenario(self, state, *, page_indexes=None, expect_ptw: bool = True) -> dict:
         state_epoch = int(state.translation_epoch)

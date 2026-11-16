@@ -5,6 +5,7 @@ import pytest
 from env.support.env_config import DEFAULT_ENV_CONFIG, SV39_ENV_CONFIG
 from env.runtime.dut_factory import FakeDUTFrontend, StrictFakeDUTFrontend
 from env.core.frontend_env import FrontendEnv
+from env.checkers.vtype_checker import VTypeChecker
 
 
 def test_strict_fake_dut_rejects_unknown_signals() -> None:
@@ -13,6 +14,32 @@ def test_strict_fake_dut_rejects_unknown_signals() -> None:
     assert dut.known_signal.value == 7
     with pytest.raises(AttributeError, match="unknown DUT signal"):
         _ = dut.unknown_signal
+
+
+def test_get_errors_includes_recorded_checker_errors_without_scenario_assertion() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    flow_error = {"kind": "PC_MISMATCH"}
+    translation_error = {"cycle": 7, "reason": "gpaddr_write_mismatch"}
+    ptw_error = {"cycle": 8, "reason": "ptw_resp_input_mismatch"}
+    vtype_error = {"cycle": 9, "field": "vtype"}
+    env.flow_checker.errors.append(flow_error)
+    env.translation_checker.errors.append(translation_error)
+    env.ptw_resp_input_checker.last_error = ptw_error
+    env.backend_model.vtype_checker = VTypeChecker([])
+    env.backend_model.vtype_checker.errors.append(vtype_error)
+
+    assert env.get_errors() == [
+        flow_error,
+        {"checker": "translation_scenario", **translation_error},
+        {"checker": "ptw_resp_input_checker", **ptw_error},
+        {"checker": "vtype", **vtype_error},
+    ]
+    env.translation_checker.clear()
+    assert env.get_errors() == [
+        flow_error,
+        {"checker": "ptw_resp_input_checker", **ptw_error},
+        {"checker": "vtype", **vtype_error},
+    ]
 
 
 def test_bare_mode_initialize_keeps_fetch_in_machine_mode() -> None:
