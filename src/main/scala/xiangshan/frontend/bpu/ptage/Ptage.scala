@@ -246,10 +246,12 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   // The alternate answer: the longest history that hit below the provider. A mark is only worth giving where the
   // provider said something the alternate did not -- an entry that merely agrees with a shorter history is not
-  // holding any context of its own, and protecting it costs a place that a new group could have used.
+  // holding any context of its own, and protecting it costs a place that a new group could have used. A provider with
+  // no alternate holds its context alone, so it counts as differing: without that, the shortest table could never
+  // earn a mark, and every new context would land on top of whatever lives there.
   private val s1_altHitVec = VecInit((s1_hitVec zip s1_providerOH).map { case (hit, isProvider) => hit && !isProvider })
   private val s1_altEntry  = Mux1H(selectLongestOH(s1_altHitVec), s1_entry)
-  private val s1_providerDiffersFromAlt = s1_altHitVec.reduce(_ || _) && (
+  private val s1_providerDiffersFromAlt = !s1_altHitVec.reduce(_ || _) || (
     s1_providerEntry.p1.taken =/= s1_altEntry.p1.taken ||
       s1_providerEntry.p1.cfiPosition =/= s1_altEntry.p1.cfiPosition
   )
