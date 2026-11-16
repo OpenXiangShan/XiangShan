@@ -129,6 +129,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_s1_isFakePte = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
   val need_replay = WireInit(VecInit.fill(Width) {false.B})
+  io.tlbreplayWaitRob := need_replay
 
   when (need_gpa_wire || need_gpa_state_clear || need_gpa_count_full) {
     need_gpa_count := 0.U

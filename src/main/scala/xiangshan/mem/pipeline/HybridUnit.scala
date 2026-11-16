@@ -1034,6 +1034,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
   s2_out.rep_info.tlb_id          := io.ldu_io.tlb_hint.id
   s2_out.rep_info.tlb_full        := io.ldu_io.tlb_hint.full
+  s2_out.rep_info.tlb_wait_rob    := io.ldu_io.tlb_hint.tlbWaitRob
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss

@@ -660,6 +660,7 @@ class TlbPtwIOwithMemIdx(Width: Int = 1)(implicit p: Parameters) extends TlbBund
 class TlbHintReq(implicit p: Parameters) extends TlbBundle {
   val id = Output(UInt(log2Up(loadfiltersize).W))
   val full = Output(Bool())
+  val tlbWaitRob = Output(Bool())
 }
 
 class TLBHintResp(implicit p: Parameters) extends TlbBundle {
@@ -713,6 +714,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
   val pmpMode = Vec(Width, Output(UInt(2.W)))
   val tlbreplay = Vec(Width, Output(Bool()))
+  val tlbreplayWaitRob = Vec(Width, Output(Bool()))
   val robPendingPtr = Input(new RobPtr)
 }
 
