@@ -1,6 +1,6 @@
 # V2 冷 CMO 错误响应后的 SQ 重入与排空阻塞分析
 
-日期：2026-11-11。版本：`mem_ut_uvm_v2`，当前 worktree 的 Scala 与 `build/rtl/StoreQueue.sv`。本文记录专项真实 DUT 用例的实际波形与责任边界，不是 RTL 知识库更新或正式 Buglist 定责；未修改 RTL。
+首次发现日期：2026-11-11；后端时序补核与责任分类日期：2026-11-12。版本：`mem_ut_uvm_v2`。本文保留专项真实 DUT 用例的原始波形链，并补充独立责任分类结论；不是 RTL 知识库更新，未修改 RTL。正式缺陷记录见 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W46_20261109.md`。
 
 ## 1. 术语与分析范围
 
@@ -16,7 +16,7 @@
 
 结论：已证实当前 DUT 在 CMO 故障完成后重新进入 SQ 的请求状态，随后发生保留 CMO 身份与年轻 Store 地址混用、重复完成及读取指针越过恢复后 Store，最终 flushSb 不空。CMO 请求、错误异常及年轻指令的 RM 指令级比较已经通过，原含 Store/CHECK_STORE 场景整体验收仍受阻。
 
-波形能确认 DUT 内部现象及因果链；尚未完成真实后端 `pendingst` 撤销契约与框架采样/驱动延迟的独立对照，不能据此宣称上游测试框架时序已经完全免责。正式责任分类仍需独立 review，本文不登记“已确认 RTL 缺陷”。
+2026-11-11 初版将责任保留为“后端 pendingst 契约待核对”。2026-11-12 已完成真实后端寄存流水与框架实测输入的两轮独立对照，结论收敛为 StoreQueue 的 CMO 请求资格未消费导致重入，满足 RTL 缺陷正式登记门禁。该结论只覆盖本例；完整后端时序来自源码推导，不能宣称已完成整核复现或全部框架时序验证。独立 review 记录见第7节。
 
 ## 2. 复现入口及证据
 
@@ -92,13 +92,26 @@ ssh eda01 'source /nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.envrc; pyt
 
 内部控制流：每次 `mmioStout.fire` 均允许推进 rdataPtr，并把当前 deqPtr 标记 completed；因此第二次保留旧身份的完成仍推进到 rdataPtr=2。redirect 分支清除年轻 entry 的 allocated/completed，当前这段恢复逻辑没有将已越过的读取位置退回。恢复 Store 再入 SQ1 后 completed=0，后续提交也不能让它自动完成，最终实际出队与排空受阻。本文未修改任何上述源码。
 
-### 4.3 上游 pendingst 时序仍需独立核对
+### 4.3 后端 pendingst 与异常 redirect 时序补核（2026-11-12）
 
-抽象功能描述：框架 `lsq_commit_handler` 将软件观察到的 ROB 头状态转换为下一次实际驱动的后端控制输入，fault head 不应继续以正常 pending Store 表示。
+抽象功能描述：真实后端接收顶层写回，更新 ROB 完成/异常状态后阻止正常提交，并将异常 redirect 送回 MemBlock。框架模拟上述控制接口；判断框架是否违规应以 DUT 输入波形和后端流水为依据，不能要求其在 SQ 内部完成同拍反馈。
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv:695` 附近。现有代码明确仅在 `has_head && !has_fault_head && !fault_head_waiting` 等条件成立时置 pendingst。日志表明 fault head 已被识别后停止软件驱动，但 monitor 观察与 driver 到达 DUT 输入存在延迟，本次 DUT pendingst 实际到430.3ns才撤销。
+本例实测：SQ 内部 `mmioStout.valid` 在410.3～415.3ns有效，于415.3ns握手；顶层 `io_mem_to_ooo_writebackSta_0_valid` 在415.3～420.3ns有效，异常位7为1、ROB0。框架于422.8ns处理该异常，430.3ns实际撤销顶层 pendingst 并提交异常 redirect 意图；顶层 redirect 在440.3ns有效，SQ在445.3ns收到 ROB0、level1 的异常 redirect。没有漏发 redirect，也没有 pendingst 永久未更新。
 
-已确认的结论是“当前输入时序下，DUT 出现重复启动并形成错误请求/完成”。尚缺真实后端对该输入的撤销时间要求、fault WB 对 pendingst 的组合/寄存反馈关系以及框架相应延迟是否符合接口约束的独立比对。责任分类应保留为 DUT 状态机与上游时序契约待复核，不能为了令用例通过而让 RM 忽略请求、提前结束排空或直接修改 pendingst 采样。
+真实后端源码依据：
+
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/mem/MemBlock.scala:1385`：`otherStoutConnect` 将 SQ 内部写回寄存一拍后交给顶层 STA0。
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/datapath/WbArbiter.scala:355`、`:375`：内存写回以实际 fire 交给 CtrlBlock，没有在此额外寄存。
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/CtrlBlock.scala:125`、`:765`：写回延迟一拍后交给 ROB；`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/rob/Rob.scala:254`、`:1107`、`:781`、`:848` 分别对应寄存的队首组、写回状态更新、阻止提交和再次 RegNext 的 pendingst 输出。
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/rob/ExceptionGen.scala:102`、`:108`、`:154`：异常 s0/s1/current 流水；`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/rob/Rob.scala:635` 产生 flushOut，`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/CtrlBlock.scala:104` 寄存 ROB redirect，`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/mem/MemBlock.scala:405` 再寄存到 SQ。
+
+内部控制流推导：在本例时钟边沿、无额外背压且队首其它条件就绪时，顶层写回在420.3ns交付，CtrlBlock 延迟结果自该边沿后有效，ROB 队首状态在425.3ns更新，pendingst 最早约430.3ns撤销。ExceptionGen 三阶段约在425.3/430.3/435.3ns推进，顶层redirect约440.3ns、SQ redirect约445.3ns。该推导与本例实测相符，但属于源码时序推导，不是整核仿真实测。
+
+更直接的因果判断：415.3ns时旧启动条件已经被REG_4锁存为真；即使外部pendingst在该边沿之后立即拉低，420.3ns仍可消费旧REG_4。因此不能依赖加快测试框架反馈消除本次重入。
+
+框架依据：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv:695` 排除fault head/fault waiting后才发布pendingst；`:169` 的 `request_fault_head_redirect()` 构造完整 ROB、level1、flush-itself1；`:1095` 调用该函数时没有把 terminal_ready 作为必要条件，不存在已证实的“先排空才允许redirect”循环等待。fault软件终态标记也不等于正常scommit。`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/agent/lsqcommit_agent_agent/src/lsqcommit_agent_agent_driver.sv:104`、`:124` 分别为驱动与间隙保持电平逻辑。框架不是完整逐拍ROB模型，但本例未发现造成首个重入的时序违规。
+
+新增顶层边界提取原文件为 `/tmp/cmo_backend_boundary_20261112.txt`；该文件、原有三个SQ提取文件、两份控制台日志和两个原FSDB均已另存到 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/cmo_plans_20261111_results/cmo_fault_sq_reentry_20261112`，完整来源及SHA-256见 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/cmo_plans_20261111_results/cmo_fault_sq_reentry_20261112/evidence_manifest.json`。原路径仍保留，固定副本用于避免后续复跑覆盖。
 
 ## 5. 隔离用例与验收范围
 
@@ -112,4 +125,38 @@ CMO RM、统一 denied/corrupt 与首次物理行加权历史的功能代码可�
 
 若主 agent 确认三项方案的编码、文档和必要验证均已完成，并明确把“故障后年轻 Store + flushSb 完整恢复”登记为保留的集成阻塞，可以依规则将 plan 作为“编码完成，存在已复现集成阻塞”收口；归档本身不代表全部真实 DUT 验收通过。若原 plan 将这两个四指令场景或完整故障排空列为必须通过的验收条件，则该条件仍未满足，必须保留未满足项，不能仅凭 isolated 通过宣称计划完全验收。
 
-正式 Buglist 需先完成独立责任分类；本文仅提供波形证据、源代码链和待确认接口边界。后续修复需按实际责任取得授权，并回到原 denied/corrupt 四指令 seed 完整复测。
+2026-11-12 已完成两轮独立责任分类，按 RTL 类别正式登记。本轮没有新的仿真或修复，原 denied/corrupt 四指令场景仍未通过。后续 RTL 修改仍需用户明确授权，并回到原 cfg/seed 完整复测，不能用 isolated 通过或 RM 吞事件代替排空验收。
+
+## 7. 独立责任分类 review 与最小修复建议（2026-11-12）
+
+核验提交为 `4f1cbd818969587616ce565a1380e35d8b0b6cb2`，仅为当前源码核验基线，不将其等同于此前仿真的编译提交。两轮review均为只读独立核查，没有新编译或新仿真。
+
+### 7.1 第一轮独立 review
+
+Reviewer：`/root/cmo_bug_classify_r1`；日期：2026-11-12；责任分类门禁：PASS，归类RTL。
+
+核验范围：StoreQueue Scala与生成RTL的REG_4、实际SQ/顶层输入提取、真实CtrlBlock/ROB/ExceptionGen/MemBlock流水以及框架fault提交/redirect路径。独立结论：420.3ns重入早于真实后端最早可反馈的时刻；旧pending资格未消费、fault只保存在uncacheUop、fault WB直接回idle共同形成重复请求。实测430.3ns撤销pendingst、440.3ns顶层redirect、445.3nsSQ redirect，不能作为框架漏反馈证据。
+
+初次建议还包含idle入口当前资格与completed门控；经最短握手流水及地址补写优先级补核，reviewer明确修正：全live门控不是本例最小修复的必需项。主方案在现有请求消费分支补入cmoOpReq.fire，足以使资格在返回idle前传过RegNext。此修正保留为方案收敛过程，不伪称初次即无分歧。
+
+### 7.2 第二轮独立 review
+
+Reviewer：`/root/cmo_bug_classify_r2`；日期：2026-11-12；责任分类门禁：PASS，归类RTL；正式记录草稿复核亦为PASS。该轮在第一轮结束后开展，独立重读源码并尝试反证，不依赖上一轮责任结论。
+
+独立推导：CtrlBlock写回寄存、ROB队首寄存和pendingst的RegNext，使真实后端最早约430.3ns撤销pendingst；异常选择、ROB flush和两级redirect寄存使SQ最早约445.3ns收到redirect。即使不依赖这些精确时刻，真实后端必须先接收415.3～420.3ns顶层异常，已经不能阻止420.3ns重入。
+
+排除项：框架确有异常redirect；fault软件rob_commit不等于物理scommit；422.8ns之后的fault token等待不能造成更早的420.3ns重入；driver保持pending level不等于违规；responder已应答额外请求。另核对 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:479` 和第103/104行默认值，clean未设置noSpec/blockBack，不能用该译码禁止年轻Store来否定场景。
+
+最小方案独立意见为在nonzero CMO的io.cmoOpReq.fire分支清pending，或等价地合并进现有mmioDoReq清理条件；不扩展到zero的每段资格门控。该意见为静态建议，尚无修复后验证。
+
+### 7.3 建议修改与验证边界
+
+功能职责：实际接受一次特殊请求时消费一次启动资格，等待响应和写回期间继续持有请求身份及异常，不允许同一动态项重新从idle启动。
+
+建议源码位置：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1054`，将现有 `when(mmioDoReq)` 清pending条件扩为 `when(mmioDoReq || io.cmoOpReq.fire)`，其他状态与payload逻辑保持。内部时序：E0请求握手并清pending、进入resp；最早E1响应握手进入wb且REG_4已变0；最早E2写回握手回idle；E3不再有旧启动资格。只在fault WB清pending则不足以排空上一拍寄存条件。
+
+保持边界：deqCanDoCbo不依赖pending，不会因消费资格而关闭response.ready；仅fire清理，背压时保持；普通MMIO保留原机制；zero多分段由resp直接回req，不在每段检查pending；正常CMO仍等scommit；异常、redirect与真实写路径不被吞掉或伪造。地址补写先于正常CMO启动，同拍消费清零优先，不增加未经证明必要的idle组合路径。
+
+当前状态为待修复。后续须取得RTL修改授权，再在原denied/corrupt四项主表、seed666666上证明单次请求/完成、无年轻Store额外Uncache请求、恢复后Store正常排空和CHECK_STORE实际通过，并覆盖正常CMO、MMIO、zero分段、最短响应、背压和redirect边界。本轮不改变原CSV的未通过结果。
+
+正式周记录：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W46_20261109.md`。日志、FSDB与提取的防覆盖副本清单为 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/cmo_plans_20261111_results/cmo_fault_sq_reentry_20261112/evidence_manifest.json`，保留原始发现时间、原始路径与源码核验hash；详细逐拍证据和修复建议以该周记录为正式入口。
