@@ -354,6 +354,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val heldTaken       = RegEnable(t0_branch.taken, t0_fire)
   // whether the held group already carried its own second block, which decides if a successor can still be expected
   private val heldHasSecondBlock = RegEnable(t0_train.hasSecondBlock, t0_fire)
+  private val debug_heldStartPc  = RegEnable(t0_startPc, t0_fire)
   when(io.redirect) {
     heldValid := false.B
   }.elsewhen(t0_fire) {
@@ -437,7 +438,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   private val t0_writeEntry = Wire(new PtageEntry)
   t0_writeEntry.valid := true.B
-  t0_writeEntry.tag   := heldMeta.tag(t0_writeTable)
+  t0_writeEntry.debug_startPc.foreach(_ := debug_heldStartPc(DebugStartPcWidth, 1))
+  t0_writeEntry.tag := heldMeta.tag(t0_writeTable)
 
   t0_writeEntry.p1.cfiPosition := heldCfiPosition
   t0_writeEntry.p1.attribute   := heldAttribute
@@ -540,6 +542,10 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   }
 
   XSPerfAccumulate("predHit", s1_fire && s1_p1Usable)
+  // a hit on an entry installed for a different group: aliasing between groups that share an index and a tag
+  s1_providerEntry.debug_startPc.foreach { trainedPc =>
+    XSPerfAccumulate("debugHitForeignGroup", s1_fire && s1_p1Usable && trainedPc =/= s1_startPc(DebugStartPcWidth, 1))
+  }
   XSPerfAccumulate("predMiss", s1_fire && !s1_p1Usable)
   XSPerfAccumulate("lookupInvalid", s1_fire && !s1_valid)
   Seq.tabulate(NumTables)(t =>

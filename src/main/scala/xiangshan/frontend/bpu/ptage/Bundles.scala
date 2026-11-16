@@ -75,6 +75,9 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
   val p1:      PtageBlock = new PtageBlock
   val p2:      PtageBlock = new PtageBlock
   val p2Valid: Bool       = Bool()
+
+  // the low bits of the start pc of the group this entry was last installed for, to count hits by another group
+  val debug_startPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(DebugStartPcWidth.W))
 }
 
 /** What training needs to know about the lookup that produced a prediction.

@@ -60,6 +60,9 @@ trait HasPtageParameters extends HasFastPhrParameters {
 
   // One table per FastPhr history span: a table is indexed by the folded history of its own span, which is what makes
   // the geometric-history structure of TAGE. The two therefore have to be configured together.
+  // start pc bits recorded in an entry for debugging, wide enough to tell nearby groups apart
+  def DebugStartPcWidth: Int = 20
+
   def NumTables:  Int = fastPhrParameters.Spans.length
   def NumEntries: Int = NumTables * NumBanks * NumSets
 
