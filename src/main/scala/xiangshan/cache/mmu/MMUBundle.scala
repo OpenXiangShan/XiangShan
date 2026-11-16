@@ -519,6 +519,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val data = Output(new PtwRespS2)
   }))
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
+  val pendingRefill = Output(Bool())
 
   def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate:UInt): Unit = {
     this.r.req(i).valid := valid

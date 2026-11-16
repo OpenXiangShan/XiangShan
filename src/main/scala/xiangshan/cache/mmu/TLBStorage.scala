@@ -96,6 +96,7 @@ class TLBFA(
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
   io.r.req.map(_.ready := true.B)
+  io.pendingRefill := false.B
 
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
@@ -193,6 +194,7 @@ class TLBFA(
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
   val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
   when (RegNext(io.w.valid)) {
+    io.pendingRefill := true.B
     io.access.map { access =>
       access.sets := get_set_idx(refill_vpn_reg, nSets)
       access.touch_ways.valid := true.B
@@ -333,6 +335,7 @@ class TLBFakeFA(
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
   io.r.req.map(_.ready := true.B)
+  io.pendingRefill := false.B
 
   val mode = if (useDmode) io.csr.priv.dmode else io.csr.priv.imode
   val sv39Enable = io.csr.satp.mode === Sv39
@@ -483,7 +486,10 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
   } else {
     val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
     re.access(page.access.map(_.touch_ways))
-    re.way
+    val state = re.state_read.asTypeOf(UInt(re.nBits.W))
+    Mux(page.pendingRefill,
+      re.get_replace_way(re.get_next_state(state, page.access.map(_.touch_ways))),
+      re.way)
   }
 
   page.w_apply(
