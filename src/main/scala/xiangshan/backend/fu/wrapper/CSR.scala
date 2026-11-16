@@ -422,6 +422,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
       custom.distribute_csr.w.bits.addr := waddrReg
       custom.distribute_csr.w.bits.data := wdataReg
+      when(csrMod.io.mhpmeventWrite.w.valid) {
+        custom.distribute_csr := csrMod.io.mhpmeventWrite
+      }
       // trigger
       custom.frontend_trigger := csrMod.io.status.frontendTrigger
       custom.mem_trigger      := csrMod.io.status.memTrigger
