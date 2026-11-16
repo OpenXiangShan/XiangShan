@@ -414,6 +414,10 @@ emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
 gsim: sim-chirrtl
+	@if [ "$(SIM_TOP_OUT)" -nt "$(BUILD_DIR)/gsim-compile/model/$(SIM_TOP)0.cpp" ]; then \
+		rm -f "$(BUILD_DIR)/gsim-compile/model/$(SIM_TOP)"*.cpp \
+			"$(BUILD_DIR)/gsim-compile/model/"*.o "$(BUILD_DIR)/gsim-compile/other/"*.o; \
+	fi
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
