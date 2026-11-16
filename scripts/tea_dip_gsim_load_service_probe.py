@@ -243,7 +243,7 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
         cause_next_commit_asserted=True, WB_identity='not_captured', scope='S2 attempts only. Next payload commitments and qualified miss event are asserted; final WB/lifetime association is not established.')
 
 
-def build(root, output, compiler, library, capture_wb=False, capture_llptw=False, dtlb_ranges=(), capture_dtlb_replacement=False):
+def build(root, output, compiler, library, capture_wb=False, capture_llptw=False, dtlb_ranges=(), capture_dtlb_replacement=False, *, source_factory=None):
     root, output, library = Path(root).resolve(), Path(output).resolve(), Path(library).resolve()
     assert not output.exists()
     model = root / 'build/gsim-compile/model'
@@ -251,7 +251,10 @@ def build(root, output, compiler, library, capture_wb=False, capture_llptw=False
     objects = sorted(model.glob('*.o')) + sorted((root / 'build/gsim-compile/other').glob('*.o'))
     originals = {str(p): digest(p) for p in [original, header, database, library, *objects]}
     symbols = subprocess.check_output(['nm', '--defined-only', str(original)], text=True)
-    cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols, capture_wb=capture_wb, capture_llptw=capture_llptw, dtlb_ranges=dtlb_ranges, capture_dtlb_replacement=capture_dtlb_replacement)
+    if source_factory is None:
+        cpp, wrapped, binding = source(root, header.read_text(), database.read_text(), symbols, capture_wb=capture_wb, capture_llptw=capture_llptw, dtlb_ranges=dtlb_ranges, capture_dtlb_replacement=capture_dtlb_replacement)
+    else:
+        cpp, wrapped, binding = source_factory(root, header.read_text(), database.read_text(), symbols)
     output.mkdir(parents=True)
     (output / 'probe.cpp').write_text(cpp)
     (output / 'objects.rsp').write_text('\n'.join(shlex.quote(str(p)) for p in objects) + '\n')
