@@ -5,6 +5,7 @@ its architectural start. Preserve both. This does not infer a missing ROB
 flag/former bit, retirement ownership for ambiguous WBs, or CPU cycle savings.
 """
 import argparse
+import csv
 from collections import Counter, defaultdict
 import json
 from pathlib import Path
@@ -12,10 +13,12 @@ import re
 import sqlite3
 import subprocess
 
-from tea_dip_l2_return_trace import read
 from tea_dip_load_writeback_trace import KEY, analyze as writeback, match_attempts
 from tea_dip_query_endpoint_evidence import digest, endpoint
-from tea_visualize import normalize_pc
+
+
+def normalize_pc(pc):
+    return None if pc is None else pc & ((1 << 64) - 1)
 
 
 def instructions(elf, objdump):
@@ -34,10 +37,14 @@ def instructions(elf, objdump):
     return decoded
 
 
-def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-gnu-objdump'):
+def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-gnu-objdump', *, pcs=None):
     folder, receipt_path, elf, pc_proof = map(lambda p: Path(p).resolve(),
                                              [folder, receipt_path, elf, pc_proof])
-    validated = writeback(folder, receipt_path)
+    decoded = instructions(elf, objdump)
+    selected_pcs = None if pcs is None else set(pcs)
+    carried_pcs = None if selected_pcs is None else {ins['last_halfword_pc']
+        for pc, ins in decoded.items() if pc in selected_pcs}
+    validated = writeback(folder, receipt_path, pcs=carried_pcs)
     build = json.loads((folder / 'probe-build-proof.json').read_text())
     source = json.loads(pc_proof.read_text())
     assert source['head'] == build['source'] == validated['source']
@@ -55,8 +62,11 @@ def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-
         assert expression in '\n'.join(row['text'] for row in source['source_files'][name]['lines'])
     for binding in build['binding']['writeback_bindings']:
         assert binding['fields'][6].endswith('s2__DOT__pipeOutBits__DOT__uop__DOT__pc')
-    decoded = instructions(elf, objdump)
-    attempts, completed = match_attempts(read(folder / 'load-writeback-probe.csv'))
+    with (folder / 'load-writeback-probe.csv').open() as stream:
+        rows = ({name: int(value) for name, value in raw.items()}
+                for raw in csv.DictReader(stream))
+        attempts, completed = match_attempts(row for row in rows
+            if carried_pcs is None or row['pc'] in carried_pcs)
     by_member = defaultdict(list)
     for key, wb in completed.items():
         by_member[wb['rob_index'], wb['rank']].append((key, wb))
@@ -87,7 +97,9 @@ def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-
             pc = normalize_pc(final['MEMBER_PC'])
             record.update(architectural_PC=pc, final_cycle=final['CYCLE'])
             instruction = decoded.get(pc)
-            if instruction is None:
+            if selected_pcs is not None and pc not in selected_pcs:
+                reason = 'target_PC_not_selected'
+            elif instruction is None:
                 reason = 'target_PC_not_in_ELF'
             else:
                 record['instruction'] = instruction
@@ -116,7 +128,7 @@ def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-
             counts[reason] += 1
             unknown.append(dict(record, reason=reason))
     assert len(matches) + len(unknown) == len(samples)
-    return dict(passed=True, source=validated['source'], roi_begin=lo, roi_end=hi,
+    output = dict(passed=True, source=validated['source'], roi_begin=lo, roi_end=hi,
                 Stalled_samples=len(samples), counts=dict(counts), matches=matches, unknown=unknown,
                 validated_completed_scalar_keys=validated['completed_scalar_keys'],
                 completed_WB_PC_profiles=[dict(observed_PC=raw, architectural_PC=pc, instruction_bytes=size, WBs=n)
@@ -132,6 +144,12 @@ def analyze(folder, receipt_path, elf, pc_proof, objdump='riscv64-unknown-linux-
                       'TEA target lacks flag/former, so PC/time qualification is not an independent full allocation identity. '
                       'Successful WB need not be unfinished at sample; initial issue may also follow the sample. '
                       'No load criticality, memory owner, exclusive CPU budget or recoverable performance is inferred.')
+    if selected_pcs is not None:
+        output['architectural_PCs'] = [hex(pc) for pc in sorted(selected_pcs)]
+        output['scope'] += (' WB profiles/keys and identity-time candidate counts cover only selected architectural PCs; all TEA Stalled sources remain '
+                            'and unselected uncancelled targets are explicit target_PC_not_selected. '
+                            'Native marginals and per-event S2/WB validation still cover the full trace.')
+    return output
 
 
 def main():
@@ -142,9 +160,11 @@ def main():
     parser.add_argument('--pc-proof', type=Path, required=True)
     parser.add_argument('--objdump', default='riscv64-unknown-linux-gnu-objdump')
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--pc', type=lambda value: int(value, 0), action='append',
+                        help='Select architectural start PCs; ELF maps carried WB PCs and full native checks remain')
     args = parser.parse_args()
     assert not args.output.exists()
-    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, args.elf, args.pc_proof, args.objdump), indent=2) + '\n')
+    args.output.write_text(json.dumps(analyze(args.folder, args.receipt, args.elf, args.pc_proof, args.objdump, pcs=args.pc), indent=2) + '\n')
 
 
 if __name__ == '__main__':
