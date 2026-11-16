@@ -866,8 +866,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(s_resp) {
       when(io.uncache.resp.fire && !io.uncache.resp.bits.nc) {
+        noPending := true.B
         when (!mmioIsCboZero) {
-          noPending := true.B
           mmioState := s_wb
         }.otherwise {
           cboZeroOffset := cboZeroOffset + 1.U
