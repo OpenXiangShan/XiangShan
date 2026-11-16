@@ -30,7 +30,7 @@ trait Helpers extends HasPtageParameters with TargetFixHelper with PhrPathHelper
     ),
     maxWidth = Option(VAddrBits),
     extraFields = Seq(
-      // the tag takes pc bits above the set index, so that it adds information the index does not already carry
+      // the top of the own-pc bits the tag folds, see getTagPc
       ("tag", instOffsetBits + BankIdxWidth + SetIdxWidth, TagWidth),
       ("nextPcLow", instOffsetBits, NextPcLowWidth)
     )
@@ -42,7 +42,16 @@ trait Helpers extends HasPtageParameters with TargetFixHelper with PhrPathHelper
   // concatenated so that a table's whole index depends on its own history span.
   def getSetIndexPc(pc: PrunedAddr): UInt = addrFields.extract("setIdx", pc)
 
-  def getTagPc(pc: PrunedAddr): UInt = addrFields.extract("tag", pc)
+  /** The pc half of a tag, from the group's own start pc folded to the tag width.
+    *
+    * The index is keyed on the group before this one, so no bit of this group's own pc reaches it. Every bit below
+    * the tag field therefore has to reach the tag instead: otherwise two groups that follow the same key a few
+    * instructions apart -- a branch's target and its fall-through -- share one entry, and each reads the other's exit.
+    */
+  def getTagPc(pc: PrunedAddr): UInt = {
+    val bits = pc(addrFields.getEnd("tag"), instOffsetBits)
+    (0 until bits.getWidth by TagWidth).map(i => bits(scala.math.min(i + TagWidth, bits.getWidth) - 1, i)).reduce(_ ^ _)
+  }
 
   def getEntryNextPc(nextPc: PrunedAddr): UInt = addrFields.extract("nextPcLow", nextPc)
 
