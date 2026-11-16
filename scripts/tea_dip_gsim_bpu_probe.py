@@ -16,7 +16,7 @@ COLUMNS = ['kind', 'ftq_index', 'fetch_pc_halfword', 'cfi_mask', 'conditional', 
            's1_position', 's1_taken', 's2_position', 's2_taken', 's3_position', 's3_taken', 'reason_mask']
 
 
-def source(root, header, database, symbols):
+def source(root, header, database, symbols, capture_redirect=False):
     fields, predicates = {}, {}
 
     def field(name, width, shape=''):
@@ -142,7 +142,11 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
   record(row);
 }}
 '''
-    binding = dict(kind='FTQ_commit_metadata', columns=COLUMNS, entries=64, positions=32,
+    extra = {}
+    if capture_redirect:
+        from tea_dip_gsim_bpu_redirect_probe import add_capture
+        cpp, extra['redirect_binding'] = add_capture(root, cpp, value)
+    binding = dict(**extra, kind='FTQ_commit_metadata', columns=COLUMNS, entries=64, positions=32,
                    fields=fields, reason_predicates=predicates, generated_expressions=expressions, generated_source_sha256=generated_hashes,
                    RTL_source_sha256={str(p): digest(p) for p in paths},
                    generator_sha256=digest(Path(__file__)), new_RTL_state_bits=0,
@@ -159,9 +163,11 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compiler', default='clang++')
+    parser.add_argument('--capture-redirect', action='store_true', help='Also record same-event backend redirects, separately from committed entries')
     parser.add_argument('--dramsim3-library', type=Path, required=True)
     args = parser.parse_args()
-    proof = build(args.root, args.output, args.compiler, args.dramsim3_library, source_factory=source)
+    proof = build(args.root, args.output, args.compiler, args.dramsim3_library,
+                  source_factory=lambda *values: source(*values, capture_redirect=args.capture_redirect))
     print(json.dumps({k: proof[k] for k in ['passed', 'binary', 'binary_sha256', 'original_files_unchanged']}))
 
 

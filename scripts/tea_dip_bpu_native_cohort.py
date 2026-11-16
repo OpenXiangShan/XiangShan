@@ -37,6 +37,52 @@ def cohorts(counters):
                 no_later_override_by_s1_source=no_override, with_s2_or_s3_override_by_s1_source=with_override)
 
 
+
+def redirect_feedback(counters):
+    """Read resolve-time valid cycles, separately from committed FTQ entry metadata."""
+    def value(name):
+        return counters[FTQ + name]
+
+    def group(name):
+        prefix = FTQ + name + '_'
+        result = {key[len(prefix):]: count for key, count in counters.items() if key.startswith(prefix)}
+        assert result
+        return result
+
+    total = value('resolve_redirects')
+    mispredict = value('resolve_branch_mispredicts')
+    other = value('resolve_other_redirects')
+    assert mispredict + other == total
+    causes = {name: value('squash_cycles_bp_wrong_redirect_' + name)
+              for name in ['wrong_taken', 'wrong_position', 'wrong_attribute', 'wrong_target']}
+    causes['unclassified'] = mispredict - sum(causes.values())
+    s1 = group('resolve_branch_mispredicts_s1_source')
+    s3 = group('resolve_branch_mispredicts_s3_source')
+    assert s1.keys() == {'Fallthrough', 'Ubtb', 'Abtb', 'AbtbUtage', 'UbtbUtage'}
+    assert s3.keys() == {'Sc', 'Fallthrough', 'Ras', 'ITTage', 'Tage', 'Mbtb'}
+    stages = dict(S1=sum(s1.values()), S2=mispredict - sum(s1.values()) - sum(s3.values()), S3=sum(s3.values()))
+    targets = {name: value('squash_cycles_bp_wrong_redirect_wrong_target_' + name)
+               for name in ['conditional', 'direct', 'indirect']}
+    targets['unclassified'] = causes['wrong_target'] - sum(targets.values())
+    assert all(number >= 0 for values in [causes, stages, targets, s1, s3] for number in values.values())
+    slots = {}
+    for name in ['ControlRedirectStall', 'MemVioRedirectStall', 'OtherRedirectStall']:
+        slots[name], = [number for key, number in counters.items() if key.endswith('.dispatch.' + name)]
+    return dict(redirect_valid_cycles=total, mispredict_redirect_valid_cycles=mispredict,
+                other_redirect_valid_cycles=other, priority_causes=causes, selected_stages=stages,
+                selected_S1_sources=s1, selected_S3_sources=s3, wrong_target_types=targets,
+                committed_mispredict_FTQ_entries=value('commit_branch_mispredicts'),
+                dispatch_redirect_reason_slot_cycles=slots,
+                scope='Resolve-time backendRedirect.valid counts, not unique dynamic branches or recovery cycles. '
+                      'Priority causes test direction, position, attribute, then target; wrong_position therefore '
+                      'excludes direction mismatches. S1 excludes both overrides; S3 requires S3 override; '
+                      'S2 is the disjoint residual and has no provider identity here. Cause and source groups '
+                      'are separate margins, not a joint distribution. Committed FTQ entries are a different '
+                      'population and their difference cannot be labeled wrong-path branches. Dispatch reason '
+                      'values are slot-cycles (PopCount over lanes), not exclusive CPU cycles. Unclassified '
+                      'counts remain explicit; no per-provider accuracy or saved-cycle budget is inferred.')
+
+
 def analyze(root, point):
     partial = root/NAMESPACE/'partial-analysis'/(point + '.json')
     receipt_path = root/NAMESPACE/'raw/closed-receipts'/(point + '.json')
