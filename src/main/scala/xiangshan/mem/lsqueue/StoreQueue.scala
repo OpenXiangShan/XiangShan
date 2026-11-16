@@ -1017,6 +1017,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.uncache.req.valid := false.B
 
     when (io.cmoOpReq.fire) {
+      pending(deqPtr) := false.B
       noPending := false.B
       mmioState := s_resp
     }
