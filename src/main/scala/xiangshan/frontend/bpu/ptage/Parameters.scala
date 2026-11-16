@@ -25,7 +25,7 @@ case class PtageParameters(
     TagWidth: Int = 8,
     // low bits of a block's next pc kept in the entry. Read straight out and concatenated with the current pc's upper
     // bits, so the fast loop never pays for an adder; a target reaching beyond this range cannot be a pTAGE entry.
-    NextPcLowWidth:  Int = 11,
+    NextPcLowWidth:  Int = 14,
     CounterWidth:    Int = 2,
     WriteBufferSize: Int = 4,
     // How many refused allocations it takes to clear every useful mark. A mark protects an entry from being taken,
