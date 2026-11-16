@@ -339,7 +339,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   // An entry can only describe a group whose next pc it is able to rebuild. A taken exit that jumps beyond the stored
   // low bits is not representable, so learning it would install a confidently wrong target; leaving it as a miss lets
-  // the fallback answer instead. A return is the exception: its target comes from the return stack, not from here.
+  // the fallback answer instead, and an entry that hit it anyway is taken out. A return is the exception: its target
+  // comes from the return stack, not from here.
   private val t0_representable =
     !t0_branch.taken || getTargetCarry(t0_startPc, t0_nextPc).isFit || t0_branch.attribute.isReturn
 
@@ -349,6 +350,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
    * without ever having been predicted as one; otherwise second blocks could only be learned where they existed.
    */
   private val heldValid       = RegInit(false.B)
+  private val heldLearnable   = RegEnable(t0_representable, t0_fire)
   private val heldMeta        = RegEnable(t0_meta, t0_fire)
   private val heldCfiPosition = RegEnable(t0_branch.cfiPosition, t0_fire)
   private val heldAttribute   = RegEnable(t0_branch.attribute, t0_fire)
@@ -360,12 +362,12 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   when(io.redirect) {
     heldValid := false.B
   }.elsewhen(t0_fire) {
-    heldValid := t0_representable
+    heldValid := true.B
   }
 
   // the arriving group continues the held one, so the two can be written as a pair
   private val t0_continuesHeld =
-    heldValid && t0_fire && heldTaken && !heldAttribute.isIndirect && t0_startPc === heldNextPc &&
+    heldValid && heldLearnable && t0_fire && heldTaken && !heldAttribute.isIndirect && t0_startPc === heldNextPc &&
       // only a conditional exit may end a group's second block: anything else has no target the entry can rebuild
       t0_branch.attribute.isConditional && t0_representable
 
@@ -399,14 +401,17 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // wrong one is normally given to a longer history, keeping both contexts represented, but an entry that was never
   // confident, or one no table will take over from, is simply corrected where it stands.
   private val t0_correctInPlace = t0_heldHit && (heldMeta.p1Counter.isWeak || !t0_allocValid)
-  private val t0_needStrengthen = heldValid && t0_heldCorrect
-  private val t0_needCorrect    = heldValid && !t0_heldCorrect && t0_correctInPlace
-  private val t0_needAllocate   = heldValid && !t0_heldCorrect && !t0_correctInPlace && t0_allocValid
+  private val t0_heldLearn      = heldValid && heldLearnable
+  private val t0_needStrengthen = t0_heldLearn && t0_heldCorrect
+  private val t0_needCorrect    = t0_heldLearn && !t0_heldCorrect && t0_correctInPlace
+  private val t0_needAllocate   = t0_heldLearn && !t0_heldCorrect && !t0_correctInPlace && t0_allocValid
+  // a group no entry can describe still takes out the entry that claimed it
+  private val t0_needInvalidate = heldValid && !heldLearnable && t0_heldHit
 
   // Count refusals until one eviction is allowed, then start counting again. Clearing the count on an allocation that
   // succeeded normally would be wrong: successes and refusals interleave, so the count would never reach the limit
   // and marked entries would never be reclaimed at all.
-  private val t0_allocRefused = heldValid && !t0_heldCorrect && !t0_allocValid
+  private val t0_allocRefused = t0_heldLearn && !t0_heldCorrect && !t0_allocValid
 
   /* *** letting the marks go ***
    * Count sustained allocation pressure rather than a run of bad luck: up when an allocation found nowhere to go,
@@ -439,7 +444,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val t0_writeFresh = !t0_needStrengthen
 
   private val t0_writeEntry = Wire(new PtageEntry)
-  t0_writeEntry.valid := true.B
+  t0_writeEntry.valid := !t0_needInvalidate
   t0_writeEntry.debug_startPc.foreach(_ := debug_heldStartPc(DebugStartPcWidth, 1))
   t0_writeEntry.tag := heldMeta.tag(t0_writeTable)
 
@@ -474,7 +479,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   )
 
   // the held group's outcome is decided on this event: its mark and its pair confidence are updated whatever it is
-  private val t0_heldUpdate = t0_fire && (t0_needStrengthen || t0_needCorrect || t0_needAllocate)
+  private val t0_heldUpdate =
+    t0_fire && (t0_needStrengthen || t0_needCorrect || t0_needAllocate || t0_needInvalidate)
 
   /* A strengthened entry only needs writing back if it changes. Every write competes with prediction reads for the
    * bank, and a write that waits there holds back the corrections behind it, so rewriting an entry that is already
@@ -489,7 +495,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
       t0_writeEntry.p2.counter.asUInt =/= heldMeta.p2Counter.asUInt
   )
   private val t0_needWrite =
-    t0_fire && (t0_needCorrect || t0_needAllocate || t0_needStrengthen && (t0_p1Changes || t0_p2Changes))
+    t0_fire && (t0_needCorrect || t0_needAllocate || t0_needInvalidate ||
+      t0_needStrengthen && (t0_p1Changes || t0_p2Changes))
   // the held group was decided on this event, so what t1 writes is captured now
   private val t0_heldFire = t0_fire && heldValid
 
@@ -508,8 +515,9 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
    * not busy serving a prediction. The mark and the pair confidence live in flops, so they are updated whether or not
    * the entry itself needed writing.
    */
-  private val t1_needWrite      = RegNext(t0_needWrite, false.B)
-  private val t1_needAllocate   = RegNext(t0_heldUpdate && t0_needAllocate, false.B)
+  private val t1_needWrite = RegNext(t0_needWrite, false.B)
+  // a slot that now holds another group, or nothing, gives up the mark its previous entry earned
+  private val t1_clearMark      = RegNext(t0_heldUpdate && (t0_needAllocate || t0_needInvalidate), false.B)
   private val t1_markEarned     = RegNext(t0_heldUpdate && t0_markEarned, false.B)
   private val t1_needPairConf   = RegNext(t0_heldUpdate && !t0_heldPairConfirmed, false.B)
   private val t1_pairConf       = RegEnable(t0_pairConf, t0_heldFire)
@@ -527,7 +535,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     }
   }
 
-  when(t1_needAllocate) {
+  when(t1_clearMark) {
     usefulMarks(t1_writeTable)(t1_writeEntryAddr) := false.B
   }.elsewhen(t1_markEarned) {
     usefulMarks(t1_writeTable)(t1_writeEntryAddr) := true.B
@@ -571,6 +579,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainCorrect", t0_fire && t0_needCorrect)
   XSPerfAccumulate("trainAllocate", t0_fire && t0_needAllocate)
   XSPerfAccumulate("trainNoTableFree", t0_fire && t0_allocRefused)
+  XSPerfAccumulate("trainInvalidate", t0_fire && t0_needInvalidate)
+  XSPerfAccumulate("trainUnrepresentable", t0_fire && heldValid && !heldLearnable)
   XSPerfAccumulate("usefulReset", t0_needUsefulReset)
   // how much of the training traffic actually reaches the banks, and what each kind of exit does to the entries
   XSPerfAccumulate("trainWrite", t0_needWrite)
