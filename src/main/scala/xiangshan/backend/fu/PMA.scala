@@ -149,7 +149,7 @@ trait PMAMethod extends PMAConst {
       init_addr.U((PMPAddrBits - PMPOffBits).W)
     }
     def genMask(init_addr: BigInt, a: BigInt) = {
-      val match_mask_addr = (init_addr << 1) | (a & 0x1) | (((1 << PlatformGrain) - 1) >> PMPOffBits)
+      val match_mask_addr = (init_addr << 1) | (a & 0x1) | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits)
       val mask = ((match_mask_addr & ~(match_mask_addr + 1)) << PMPOffBits) | ((1 << PMPOffBits) - 1)
       mask.U(PMPAddrBits.W)
     }
@@ -185,7 +185,7 @@ trait PMAMethod extends PMAConst {
   }
 
   def get_napot(base: BigInt, range: BigInt): BigInt = {
-    val PlatformGrainBytes = (1 << PlatformGrain)
+    val PlatformGrainBytes = (BigInt(1) << PlatformGrain)
     if ((base % PlatformGrainBytes) != 0) {
       println("base:%x", base)
     }
@@ -199,7 +199,7 @@ trait PMAMethod extends PMAConst {
   }
 
   def match_mask(paddr: UInt, cfg: PMPConfig) = {
-    val match_mask_addr: UInt = Cat(paddr, cfg.a(0)).asUInt | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    val match_mask_addr: UInt = Cat(paddr, cfg.a(0)).asUInt | (((BigInt(1) << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
     Cat(match_mask_addr & ~(match_mask_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
