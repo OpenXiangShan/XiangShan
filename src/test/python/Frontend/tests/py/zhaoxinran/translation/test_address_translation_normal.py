@@ -14,6 +14,7 @@ from env.sequences import (
     TranslationSectorLane,
 )
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from tests.py.support.cross_page_cases import run_mapped_cross_page_rvi
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -581,6 +582,11 @@ _NORMAL_CASES = (
         id="ptw-periodic-ready-cross-page",
     ),
 )
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_cacheable_cross_page_rvi_with_two_mapped_pages(env) -> None:
+    run_mapped_cross_page_rvi(env)
 
 
 @pytest.mark.parametrize("scenario,expected_paths", _NORMAL_CASES)

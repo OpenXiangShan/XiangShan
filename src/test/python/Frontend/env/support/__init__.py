@@ -13,6 +13,7 @@ from .pmp_pma import (
     reconstruct_pmp_request_addr,
 )
 from .pc_utils import fold_pc, pc_from_ftq_start, require_matching_foldpc
+from .random_pc import PC_MEMORY, PcBoundary, PcMemory, RandomPc, random_pc
 from .random_regression import derive_seed, read_seed, record_scenario, scenario_rng
 from .signal_utils import read_internal_signal, require_sig
 
@@ -23,6 +24,10 @@ __all__ = [
     "PMP_CFG_BASE",
     "PMP_PMA_PLATFORM_GRAIN_BYTES",
     "PmpPmaConfig",
+    "PC_MEMORY",
+    "PcBoundary",
+    "PcMemory",
+    "RandomPc",
     "csr_addresses_for_entry",
     "encode_pmp_pma_addr",
     "encode_pmp_pma_cfg",
@@ -30,6 +35,7 @@ __all__ = [
     "fold_pc",
     "pc_from_ftq_start",
     "read_seed",
+    "random_pc",
     "record_scenario",
     "reconstruct_pmp_request_addr",
     "require_matching_foldpc",

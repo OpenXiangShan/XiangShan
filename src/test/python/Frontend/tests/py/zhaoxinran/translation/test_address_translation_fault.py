@@ -9,6 +9,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
+from tests.py.support.cross_page_cases import run_cross_page_fault_after_wrong_path_second_page_refill
 from tests.py.support.translation_faults import (
     _CROSS_PAGE_FAULT_CASES,
     _assert_fault_ftq_identity,
@@ -208,7 +209,7 @@ _FAULT_CASES = (
 
 @pytest.mark.parametrize("scenario,expected_fault", _FAULT_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_address_translation_fault(env, scenario: TranslationScenario, expected_fault: str) -> None:
+def test_address_translation_fault(env, frontend_init_config, scenario: TranslationScenario, expected_fault: str) -> None:
     scenario = _randomize_ptw_response_timing(
         env,
         scenario,
@@ -281,6 +282,7 @@ def test_address_translation_fault(env, scenario: TranslationScenario, expected_
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_cross_page_second_page_translation_fault(
     env,
+    frontend_init_config,
     s2xlate: int,
     response_field: str,
     expected_result: str,
@@ -289,3 +291,8 @@ def test_cacheable_cross_page_second_page_translation_fault(
     run_cacheable_cross_page_second_page_fault(
         env, s2xlate, response_field, expected_result, expected_fault
     )
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_cross_page_fault_after_wrong_path_second_page_refill(env, frontend_init_config) -> None:
+    run_cross_page_fault_after_wrong_path_second_page_refill(env)
