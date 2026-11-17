@@ -247,6 +247,10 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+ifeq ($(WITH_DIP),1)
+override SIM_ARGS += --enable-dip
+endif
+
 # run with sim frontend(ideal frontend)
 ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend
