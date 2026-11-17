@@ -126,8 +126,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
 
-  private val s2_override = WireDefault(false.B)
-  private val s3_override = WireDefault(false.B)
+  // Experiment: defer S2 corrections to S3. Re-enable here for the baseline.
+  private val enableS2Override = false
+  private val s2_override      = WireDefault(false.B)
+  private val s3_override      = WireDefault(false.B)
 
   private val s1_prediction = Wire(new Prediction)
   private val s2_prediction = Wire(new Prediction)
@@ -396,7 +398,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
     val notTakenOverride = s2_valid && s2_s1Prediction.taken
 
-    Mux1H(
+    enableS2Override.B && Mux1H(
       s2_firstTakenBranchOH.toSeq :+ !s2_taken,
       overrideCandidates :+ notTakenOverride
     )
@@ -473,8 +475,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_override := {
     // Precompute the override assuming each candidate is the first taken branch.
     val (targetDiffCandidates, overrideCandidates) = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-      // Also detects an S2 prediction with no taken branch, whose one-hot mask is zero.
-      val firstTakenBranchDiff = !s3_s2FirstTakenBranchOH(i)
+      // Without S2 override, FTQ still holds S1's prediction, even when S2 and S3 agree.
+      // Compare all branch fields so equal targets cannot hide a direction/type/position change.
+      val firstTakenBranchDiff = if (enableS2Override) {
+        // Also detects an S2 prediction with no taken branch, whose one-hot mask is zero.
+        !s3_s2FirstTakenBranchOH(i)
+      } else {
+        !s3_s1Prediction.taken ||
+        entry.bits.cfiPosition =/= s3_s1Prediction.cfiPosition ||
+        entry.bits.attribute =/= s3_s1Prediction.attribute
+      }
 
       val useRas    = entry.bits.attribute.isReturn && ras.io.enable
       val useIttage = entry.bits.attribute.needIttage && ittage.io.prediction.hit
@@ -497,7 +507,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       targetDiffCandidates :+ false.B
     )
 
-    val notTakenOverride = s3_valid && s3_s2Prediction.taken
+    val notTakenOverride = s3_valid && (if (enableS2Override) s3_s2Prediction.taken else s3_s1Prediction.taken)
 
     Mux1H(
       s3_firstTakenBranchOH.toSeq :+ !s3_taken,
