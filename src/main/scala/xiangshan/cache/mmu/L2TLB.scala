@@ -115,6 +115,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     }
   }
 
+  if (HasEpmp) {
+    pmp_check.foreach { checker =>
+      checker.check_env.epmpCSR.get <> pmp.io.epmpCSR.get
+    }
+  }
+
   // add bitmapcheck
   val bitmap = Option.when(HasBitmapCheck)(Module(new Bitmap))
   val bitmapcache = Option.when(HasBitmapCheck)(Module(new BitmapCache))

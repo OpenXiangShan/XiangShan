@@ -53,6 +53,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasEpmp: Boolean = false,
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
@@ -670,6 +671,7 @@ trait HasXSParameter {
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
   def HasBitmapCheck = coreParams.HasBitmapCheck
+  def HasEpmp = coreParams.HasEpmp
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher

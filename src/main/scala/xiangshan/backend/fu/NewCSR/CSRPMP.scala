@@ -11,11 +11,12 @@ import freechips.rocketchip.tile.XLen
 import CSRConfig._
 
 import scala.collection.immutable.SeqMap
+import xiangshan.HasXSParameter
 
 trait CSRPMP { self: NewCSR =>
   val pmpcfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMP/4-1, 2).map(num =>
     if (num < (p(PMParameKey).NumPMPReal/4-1)) {
-      Module(new CSRModule(s"Pmpcfg$num") with HasPMPCfgRSink {
+      Module(new CSRModule(s"Pmpcfg$num") with HasPMPCfgRSink with HasXSParameter {
         // read condition
         regOut := cfgRData
       })
@@ -31,10 +32,12 @@ trait CSRPMP { self: NewCSR =>
   // every pmpcfg has 8 cfgs
   val pmpcfgs: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMPReal).map(num =>
     Module(new CSRModule(s"Pmp$num"+"cfg", new PMPCfgBundle) {
-      when (w.wen && (!(!w.wdata(0).asBool && w.wdata(1).asBool))) {  // when R=0 W=1, reserved
-        reg.W := w.wdata(1).asBool
-      }.otherwise {
-        reg.W := reg.W
+      if (!HasEpmp) {
+        when (w.wen && !(!w.wdata(0).asBool && w.wdata(1).asBool)) { // when R=0 W=1, reserved
+          reg.W := w.wdata(1).asBool
+        }.otherwise {
+          reg.W := reg.W
+        }
       }
       reg.A := Mux(wen, Mux(w.wdata(4, 3) === 2.U, 3.U, w.wdata(4, 3).asUInt), reg.A.asUInt) // no support Na4
     })

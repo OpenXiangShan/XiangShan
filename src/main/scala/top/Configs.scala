@@ -588,6 +588,14 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+class WithNoEpmp extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(HasEpmp = false))
+})
+
+class NoEpmpConfig(n: Int = 1) extends Config(
+  new WithNoEpmp ++ new DefaultConfig(n)
+)
+
 class NoRobCompressionConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))

@@ -762,6 +762,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     } else {
       p.apply(pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
     }
+
+    if (HasEpmp) {
+      p.check_env.epmpCSR.get <> pmp.io.epmpCSR.get
+    }
+
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
 
