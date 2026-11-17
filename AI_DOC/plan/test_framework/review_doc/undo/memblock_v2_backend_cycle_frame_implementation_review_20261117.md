@@ -1,6 +1,8 @@
-# V2 后端周期帧与异常地址采样实现评审草稿
+# V2 后端周期帧与异常地址采样实现评审
 
-创建日期：2026-11-17。状态：实现评审更新稿；当前源码独立review未发现功能blocker，真实运输、生产helper、正常Store与Store PF专项通过。主代理仍在检查波形及最终验收边界，本稿不自行归档plan。
+> 当前状态（2026-11-17最终集成）：三项实现分别已本地提交，第一项`6f60bb6c34`、第二项`e1767d7e6`、第三项`4240e4247`；三份plan均在`do`，implementation review按规则保留`undo`。最终rm5的95场景184项检查、30组Guest与4组真实PMM专项均通过；空vseq与真实dispatch smoke通过；旧ROB admission fixture的冻结CSR及WAITING索引已补齐，重编原seed6111999通过。93配置组合/50入口的完整basicTest回归因已确认RTL缺陷停止（STOPPED_RTL_CONFIRMED：14通过、1失败、78未执行），尚未完成，不能将专项通过等同整轮验收。下文较早版本的失败与待验证叙述按其历史时点保留，最终状态以本条及末节为准。
+
+创建日期：2026-11-17。状态：实现评审更新稿；当前源码独立review未发现功能blocker，真实运输、生产helper、正常Store与Store PF专项通过。第一项波形及专项证据已补齐，plan已由主代理归入do并提交`6f60bb6c34`，本review保留undo。
 
 对应方案：[正式plan](../../plan/do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md)。本轮只评审第一项源码与同步flow，不包含第二项特殊指令生成、第三项RM/PMM实现，也不修改RTL。
 
@@ -262,7 +264,7 @@ memoryViolation只走原rollback范围和reissue，不建立fault终态token。
 | `run_backend_normal_final.log` | 两条真实正常Store exception=0，各RM compare PASS，UVM_ERROR=0、UVM_FATAL=0 | 有真实入队与正常scommit路径，不代表违例端到端 |
 | `run_backend_final_storepf_wave.log` | 真实Store PF exception=0x008000，RM compare PASS，UVM_ERROR=0、UVM_FATAL=0 | 生成故障波形，具体边沿由主代理继续核对 |
 
-当前证据组合分别覆盖业务函数、双driver实际运输、真实普通访存，不将运输自测等同真实访存违例。真实rollback带非零older scommit、准备/主尾间reset及flushSb等待窗口若未另提供结果，仍属于未实测边界；生产helper的reset取消只证明软件生命周期清理，不能替代物理reset。标量misalign、故障地址同值连续实例亦需按最终验收矩阵审视。全basicTest一轮回归安排在三个方案完成后开展，当前未完成。
+当前证据组合分别覆盖业务函数、双driver实际运输、真实普通访存，不将运输自测等同真实访存违例。真实rollback带非零older scommit、准备/主尾间reset及flushSb等待窗口若未另提供结果，仍属于未实测边界；生产helper的reset取消只证明软件生命周期清理，不能替代物理reset。标量misalign、故障地址同值连续实例亦需按最终验收矩阵审视。三方案均已提交，当前全basicTest一轮回归正在执行，尚未完成。
 
 ## 11. 性能、排空及非本次改动
 
@@ -284,7 +286,7 @@ memoryViolation只走原rollback范围和reissue，不建立fault终态token。
 | flushSb独立持续服务 | 代码已接入，压力与准备窗口专项待证据 |
 | LSQ S+2、标量misalign仍必需、范围外独立来源 | 精确S+2由helper验证，标量misalign保留LSQ规则；AMO独立，segment当前双入口拒绝而不可达 |
 | 记录及恢复解耦、required地址排空 | 已实现 |
-| 第三项终态前RM参考快照 | 本项保留明确接入点，第三项尚未实施，不提前宣称完成 |
+| 第三项终态前RM参考快照 | 第一项提交时仅保留接入点；现已由第三项`4240e4247`实现freeze及独立地址责任，详见第三项review |
 
 ## 13. 实现与 Plan 不一致项
 
@@ -438,7 +440,7 @@ check_sample等待真实monitor历史并核对sample/reset及逐字段投影，�
 
 ## 16. 当前评审结论
 
-共同发布、实际采样记账和普通LSQ地址链已实现；fault与normal冻结实例、apply幂等及segment边界已闭环。当前独立源码review未发现功能blocker，最新真实运输、生产helper、正常Store和Store PF均通过。主代理继续完成波形及最终验收边界确认；本稿不把运输等同真实违例端到端，不自行移动plan或宣称三项全验收。
+共同发布、实际采样记账和普通LSQ地址链已实现；fault与normal冻结实例、apply幂等及segment边界已闭环。当前独立源码review未发现功能blocker，最新真实运输、生产helper、正常Store和Store PF均通过。第一项波形和最终专项边界已由下节确认；本文仍不把运输等同真实违例端到端，也不宣称正在进行的三项完整回归已验收。
 
 
 ## 主代理最终实测补充
@@ -447,4 +449,18 @@ check_sample等待真实monitor历史并核对sample/reset及逐字段投影，�
 
 真实端口 `top_tb.U_MEMBLOCK.io_ooo_to_mem_isStoreException` 和 `io_redirect_valid` 在1030.850ns同边沿E置1；redirect于1035.600ns清零，类别继续保持。输入S是1035.600ns边沿前采样，`io_mem_to_ooo_lsqio_vaddr` 在1040.350ns边沿后变为0x8e711a80，因此1045.100ns边沿前S+2可取到本次地址。force连接后的top_tb同名reg未反映DUT实际值，故只以U_MEMBLOCK端口作时序证据。GPA在此S1 PF中含未知高位，第一项如实保存四态值，不把它作为独立expected或正常GPA检查通过。
 
-本项coding、文档、必要编译/基础与专项验证及独立源码review已完成，无未关闭源码blocker，允许第一项plan归档并独立提交。未实测的交错（真实违例带非零older Store、主尾间reset、逐窗口flushSb、标量misalign端到端）保留为后续统一回归和扩展验证的明确边界，不宣称已覆盖。全basicTest一轮回归仍在三项完成后执行。
+本项coding、文档、必要编译/基础与专项验证及独立源码review已完成，无未关闭源码blocker，允许第一项plan归档并独立提交。未实测的交错（真实违例带非零older Store、主尾间reset、逐窗口flushSb、标量misalign端到端）保留为后续统一回归和扩展验证的明确边界，不宣称已覆盖。三项现均已完成coding并提交，全basicTest一轮回归正在执行，尚未完成。
+
+
+## 最终集成状态一致性补充（2026-11-17）
+
+三份plan均已按实现完成归入do，三项源码分别本地提交，review按规则保留undo；未push、未修改RTL。第三项最终`4240e4247`包含LSQ局部白名单遗漏修复、固定两槽masked架构参考、B1/B2/B3、真实PMM bootstrap和旧ROB fixture完整WAITING索引。
+
+本轮已闭环证据：rm5 seed6111801自测95场景184checks通过；Guest seed6111810..6111839共30组、真实PMM seed6111900..6111903共4组通过；空vseq及dispatch smoke通过。旧ROB fixture失败版本日志保留，其补完整CSR后遗漏WAITING索引的问题也已修复，通过正式add_waiting_uid_to_index登记，重编原seed6111999通过，四个redirect迟到completion场景均完成，UVM_ERROR/FATAL均0。
+
+当前仍未完成的是93配置组合/50入口完整basicTest仿真回归；正在执行的子项与最终缺陷闭环由主代理持续监控，不能因三份plan位于do、专项通过或原seed复测完成而宣称整轮COMPLETE。既有未独立动态覆盖边界（例如IO+GPF、真实违例带非零older Store、主尾间reset）继续保留原证据范围，不自动升级为已测通过。
+
+
+## 全量回归最终处置（2026-11-17）
+
+三项实现与专项结果保持上述证据范围。全量basicTest在seed6112014发现NC回流异常地址被无效TLB响应覆盖，原参数波形复现及两轮独立review确认RTL责任，按规则停止为`STOPPED_RTL_CONFIRMED`：93组合中14通过、1失败、78未执行。未修改RTL、未关闭地址检查，完整回归不能记为完成。详见 `AI_DOC/analysis/testcase_flow/basic_full_regression_20261117.md` 与 `AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W47_20261116.md`；前文的“运行中”表述仅代表此前历史时点。

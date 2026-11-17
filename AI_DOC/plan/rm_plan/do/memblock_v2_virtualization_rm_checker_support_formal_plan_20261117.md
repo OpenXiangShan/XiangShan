@@ -1,9 +1,11 @@
 # MemBlock V2 虚拟化访存、PMM 与 RM 检查正式实现方案
 
+> 当前状态（2026-11-17最终集成）：三项实现分别已本地提交，第一项`6f60bb6c34`、第二项`e1767d7e6`、第三项`4240e4247`；三份plan均在`do`，implementation review按规则保留`undo`。最终rm5的95场景184项检查、30组Guest与4组真实PMM专项均通过；空vseq与真实dispatch smoke通过；旧ROB admission fixture的冻结CSR及WAITING索引已补齐，重编原seed6111999通过。93配置组合/50入口的完整basicTest回归因已确认RTL缺陷停止（STOPPED_RTL_CONFIRMED：14通过、1失败、78未执行），尚未完成，不能将专项通过等同整轮验收。下文较早版本的失败与待验证叙述按其历史时点保留，最终状态以本条及末节为准。
+
 - 创建日期：2026-11-17。
 - 更新说明：补入 PMM 指针掩码的 CSR 快照、选择优先级、地址预检查、异常地址及数据检查方案；保留已有 `rob_commit` 门槛、CMO fault 例外和后台采集，不新增 replay 记账机制。
 - 适用版本：V2，当前分支 `mem_ut_uvm_v2`。
-- 状态：2026-11-17 已进入授权 coding；主体源码及文档已落地，rm5编译及95场景184检查自测通过，真实专项及整轮 basicTest 回归待最终收口。尚未归档。
+- 状态：第三项实现已本地提交`4240e4247`并归入`do`；rm5编译、95场景184检查、34组真实专项及旧ROB原seed复测通过；完整basicTest回归正在执行，尚未完成。
 - 授权边界：用户已授权顺序执行三份 plan 的 coding、配套文档、验证及逐项本地提交；本项不修改 RTL、不自动 push。
 - 目标：HLV/HLVX/HSV 及普通 Guest 访存复用当前翻译服务和内存模型，补齐访问身份、权限、数据、异常和异常地址检查；普通 Host 与 Guest 标量访存共同接入 PMM 地址参考语义，HLVX按RTL禁用掩码。
 - 主要约束：不重复建模两阶段页表遍历或 L2TLB；不建立第二套 HFENCE/HINVAL 失效 owner；翻译失效不清除已提交的物理内存期望。
@@ -934,7 +936,7 @@ fault数据/异常消费后保留地址责任；地址到齐独立比较，不�
 | PMM、权限、数据与地址 | 两纯PMM helper、13op、SPVP、VS/G MXR、HLVX READ_EXEC、首末预异常、Guest GPA推导、独立地址队列，普通Store/HSV共用原提交路径 | `EnbaleTlbDebug`是编译profile，不把runtime priv_debug误当DTLB模式门控。AMO/CMO保留原预检查分支 |
 | only-S2+Sv48x4+PMLEN16独立架构语义 | 同一冻结范围可覆盖时原helper直接证明；否则消费issue时已有canonical masked映射的独立深复制，重新比较PA、G权限/异常、PBMT和PMA路径 | 测试输入必须在issue前预定义所需masked参考；缺失报告框架参考输入错误并禁止整体PASS。参考不同不自动判错，以可观察结果为准；不晚查current、不创建新walker、不改responder key |
 | 首段停止与分段来源 | 实际算法保留原first-split数据错误事实、按首个参考fault段选VA/GPA，不从actual反选 | snapshot的`first_segment_stopped/fault_segment/address_source`目前为预留默认字段，不宣称已有完整生产赋值；应以算法和已有事实为准 |
-| 测试与文档 | 新RM生产构造soft自测与CSV、implementation review、原flow及接口矩阵增量 | 编译/仿真及全部basicTest结果待主代理补入。PMM tagged跨页首D-error已按低50位修复，仍需专项确认 |
+| 测试与文档 | 新RM生产构造soft自测与CSV、implementation review、原flow及接口矩阵增量 | rm5编译/自测/34组真实专项已通过，完整basicTest仍进行中。PMM tagged首段几何及首页D错误前缀已纳入95场景自测 |
 
 ### 差异函数抽象职责与实现说明
 
@@ -1060,10 +1062,10 @@ LSQ局部白名单的抽象职责是让agent按已经确认的LDU/STU身份接�
 
 | 测试入口 | 输入与目标 | 当前证据边界 |
 |---|---|---|
-| `memblock_pmm10_real_vseq` | Bare LD→HSVD→LD→HLVD，高7位不同、低57位同地址，PMM10；HSV数据明确冻结为AABBCCDDEEFF0011 | rm5编译通过，真实运行待复测 |
-| `memblock_pmm11_real_vseq` | 同组输入，PMM11，普通与特殊访问共享HPA数据 | rm5编译通过，真实运行待复测 |
-| `memblock_pmm00_preaf_real_vseq` | 相同tag且PMM00，三条Load类与一条HSV分别按Load/Store AF检查恢复及地址 | rm5编译通过，真实运行待复测；实际四条为LD、HSVD、LD、HLVD |
-| `memblock_pmm_s2_alias_real_vseq` | Host普通LD走Bare，HLV/HSV走only-S2 Sv48x4/PMM11；原VPN与masked VPN独立canonical输入映到同HPA | rm5编译通过，真实运行待复测 |
+| `memblock_pmm10_real_vseq` | Bare LD→HSVD→LD→HLVD，高7位不同、低57位同地址，PMM10；HSV数据明确冻结为AABBCCDDEEFF0011 | rm5编译及真实复测通过 |
+| `memblock_pmm11_real_vseq` | 同组输入，PMM11，普通与特殊访问共享HPA数据 | rm5编译及真实复测通过 |
+| `memblock_pmm00_preaf_real_vseq` | 相同tag且PMM00，三条Load类与一条HSV分别按Load/Store AF检查恢复及地址 | rm5编译及真实复测通过；实际四条为LD、HSVD、LD、HLVD |
+| `memblock_pmm_s2_alias_real_vseq` | Host普通LD走Bare，HLV/HSV走only-S2 Sv48x4/PMM11；原VPN与masked VPN独立canonical输入映到同HPA | rm5编译及真实复测通过 |
 
 以上入口位于`seq/virtual_sequence/memblock_pmm_real_vseq.sv`，由`seq_pkg.sv`include并在`seq.f`说明登记，`basicTest::vseq_starts_l2tlb()`和`vseq_supports_control_worker_topology()`两处白名单均同步四类，确保AUTO dedicated worker与唯一显式L2TLB owner。真实CSV从30扩为34个场景；soft CSV先从81扩为89项（最终B1/B2/B3再增6项，共95），其中8项针对两4K页、后页权限/PBMT/fault/缺失以及首fault/首页D错误停止。全basicTest清单保留原89组合并追加4入口，共93组合/50入口，暂存清单仅作回归调度输入，不能代替结果。
 
@@ -1091,7 +1093,7 @@ body先运行完整父生命周期，再要求main数量为4；逐条核对opcod
 
 旧`virt_rm3_20261117`编译版本的30组真实虚拟化矩阵已全部通过；该证据早于最终固定两槽、四个真实PMM入口及fixture适配，不能作为这些最新改动的通过结论。
 
-同旧版RM selftest在seed6111801报active map/status不一致，原seed debug复现同错；责任已登记[W47测试框架缺陷](../../../buglist/rm/v2/rm_buglist_2026-W47_20261116.md)。`check_tagged_first_split`修复已落源码，rm5原seed95场景184检查自测通过；旧ROB admission定向、34组真实专项以及整轮93组合basicTest等待主代理最终日志和统计；待测不记PASS。Buglist最终状态由主代理根据原seed复测结果更新。
+同旧版RM selftest在seed6111801报active map/status不一致，原seed debug复现同错；责任已登记[W47测试框架缺陷](../../../buglist/rm/v2/rm_buglist_2026-W47_20261116.md)。`check_tagged_first_split`修复已落源码，rm5原seed95场景184检查自测通过；34组真实专项与旧ROB admission原seed6111999均已通过；整轮93组合basicTest仍进行中，待测不记PASS。Buglist最终状态由主代理根据原seed复测结果更新。
 
 
 
@@ -1154,14 +1156,14 @@ if(memblock_sync_pkg::uses_control_barrier_topology())
 - `virt_rm5_20261117`最终编译完成；seed6111801、`basicTest ts=memblock_virtualization_rm_selftest_vseq cfg=default`的95个场景通过，共184个检查，日志末有`TEST CASE PASSED checks=184`及`UVM_ERROR=0/UVM_FATAL=0`。
 - 权威日志：`/nfs/home/lixiangrui/.tmp/memblock_virtualization_impl_20261117/rm5_selftest/status/seed_6111801.final.log`。报告有2条被catch的预期UVM_ERROR，来自故意错误地址sample/GPA的负例，测试分别要求恰好捕获一次；它们不属于被忽略的未知错误。
 - 该同版自测覆盖固定两槽跨4K、首fault/首页D错误停止、后页NC+GPF优先级、独立对齐Load/Store PMP AF与差异，以及mask后跨bit48进位捕获。IO+GPF门控本轮为源码独立核对，未另加独立动态断言，不宣称该子组合已动态通过。
-- 旧rm3的30组真实Guest矩阵通过仅是早期版本证据；最终rm5的30 Guest矩阵和4组真实PMM入口均已通过（seed6111810..6111839、6111900..6111903）。旧ROB admission入口、整轮93配置组合/50入口basicTest最终结果等待集成方统计；不得据soft PASS推定这些结果。
-- 文档/源码格式检查通过；最终plan继续留在undo，不提前归档或提交。全任务完成仍需真实专项、普通回归和已登记缺陷原seed闭环。
+- 旧rm3的30组真实Guest矩阵通过仅是早期版本证据；最终rm5的30 Guest矩阵和4组真实PMM入口均已通过（seed6111810..6111839、6111900..6111903）。旧ROB admission重编原seed6111999已通过；整轮93配置组合/50入口basicTest仍在运行，不能据专项PASS推定整轮完成。
+- 文档/源码格式检查通过；第三项实现已提交`4240e4247`，plan已归入do，review仍保留undo。已登记fixture缺陷的原seed复测已闭环；全任务仍需完成正在执行的整轮普通回归。
 
 ### 验证记录
 
 - 静态格式检查：实施期间 `git diff --check` 通过；最终提交前须重复。
 - 新增Store旁路：已逐字段核对V2生成RTL内部wire及interface/xaction/driver/connect链；monitor通过driver不可变运输结构接收。
-- rm5编译与RM生产自测结果见上节；定向DUT专项和全部basicTest仍待主代理写入实际命令、日志、统计及失败闭环。
+- rm5编译与RM生产自测结果见上节；34组定向DUT专项已通过，全部basicTest仍在执行并等待最终统计及失败闭环。
 - 未闭环项不得因已有通过子测试或回归自然结束而改写为整体完成。
 
 ### [IMPLEMENTATION_DELTA] ROB自测首页等待索引完整性
@@ -1173,7 +1175,7 @@ data.uid_tlb_record_by_uid[uid]=first_record;
 data.add_waiting_uid_to_index(uid,first_record);
 ```
 
-中文伪代码：构造并发布首页WAITING记录后，调用正式索引API校验uid/key/state、清过期成员、拒绝重复并加入唯一成员，再继续原后页observer/token绑定。仅修改软件fixture，生产检查与激励不变。该遗漏由原seed6111999及带波形复现确认，独立责任和最小方案review通过，见W47 Buglist；重新编译后必须原参数复测。
+中文伪代码：构造并发布首页WAITING记录后，调用正式索引API校验uid/key/state、清过期成员、拒绝重复并加入唯一成员，再继续原后页observer/token绑定。仅修改软件fixture，生产检查与激励不变。该遗漏由原seed6111999及带波形复现确认，独立责任和最小方案review通过，见W47 Buglist；已重新编译并以原seed6111999/原参数复测通过，四个redirect迟到completion场景闭环。
 
 ## 最终提交验收记录
 
@@ -1181,4 +1183,18 @@ data.add_waiting_uid_to_index(uid,first_record);
 
 验证：95场景184项RM检查、34个真实虚拟化/PMM组合、空vseq与普通dispatch smoke全部通过。ROB fixture索引修复后已重编译，同原seed6111999复测通过，结果目录 `/nfs/home/lixiangrui/.tmp/memblock_virtualization_impl_20261117/rm5_rob_retest`；原四个redirect迟到completion场景通过。最后重编仅增加旧软件fixture的一次正式索引登记，不改变生产RM、真实专项输入或DUT。所有结果已核验稳定summary/results、UVM_ERROR/FATAL=0和remote_unknown_jobs=0。
 
-plan按实现完成归入do，implementation review保留undo。用户要求的93组合/50入口全部basicTest将用同版simv继续执行，结果单独更新；此处不把尚未运行的回归标成通过。IO+GPF目前仅有静态独立核验，不宣称独立动态场景覆盖。未修改RTL，未push。
+plan按实现完成归入do，implementation review保留undo。用户要求的93组合/50入口全部basicTest正在用同版simv执行，结果单独更新；此处不把尚未完成的回归标成通过。IO+GPF目前仅有静态独立核验，不宣称独立动态场景覆盖。未修改RTL，未push。
+
+
+## 最终集成状态一致性补充（2026-11-17）
+
+三份plan均已按实现完成归入do，三项源码分别本地提交，review按规则保留undo；未push、未修改RTL。第三项最终`4240e4247`包含LSQ局部白名单遗漏修复、固定两槽masked架构参考、B1/B2/B3、真实PMM bootstrap和旧ROB fixture完整WAITING索引。
+
+本轮已闭环证据：rm5 seed6111801自测95场景184checks通过；Guest seed6111810..6111839共30组、真实PMM seed6111900..6111903共4组通过；空vseq及dispatch smoke通过。旧ROB fixture失败版本日志保留，其补完整CSR后遗漏WAITING索引的问题也已修复，通过正式add_waiting_uid_to_index登记，重编原seed6111999通过，四个redirect迟到completion场景均完成，UVM_ERROR/FATAL均0。
+
+当前仍未完成的是93配置组合/50入口完整basicTest仿真回归；正在执行的子项与最终缺陷闭环由主代理持续监控，不能因三份plan位于do、专项通过或原seed复测完成而宣称整轮COMPLETE。既有未独立动态覆盖边界（例如IO+GPF、真实违例带非零older Store、主尾间reset）继续保留原证据范围，不自动升级为已测通过。
+
+
+## 全量回归最终处置（2026-11-17）
+
+三项实现与专项结果保持上述证据范围。全量basicTest在seed6112014发现NC回流异常地址被无效TLB响应覆盖，原参数波形复现及两轮独立review确认RTL责任，按规则停止为`STOPPED_RTL_CONFIRMED`：93组合中14通过、1失败、78未执行。未修改RTL、未关闭地址检查，完整回归不能记为完成。详见 `AI_DOC/analysis/testcase_flow/basic_full_regression_20261117.md` 与 `AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W47_20261116.md`；前文的“运行中”表述仅代表此前历史时点。

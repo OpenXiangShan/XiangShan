@@ -1,5 +1,7 @@
 # V2虚拟化测试框架实现review（2026-11-17）
 
+> 当前状态（2026-11-17最终集成）：三项实现分别已本地提交，第一项`6f60bb6c34`、第二项`e1767d7e6`、第三项`4240e4247`；三份plan均在`do`，implementation review按规则保留`undo`。最终rm5的95场景184项检查、30组Guest与4组真实PMM专项均通过；空vseq与真实dispatch smoke通过；旧ROB admission fixture的冻结CSR及WAITING索引已补齐，重编原seed6111999通过。93配置组合/50入口的完整basicTest回归因已确认RTL缺陷停止（STOPPED_RTL_CONFIRMED：14通过、1失败、78未执行），尚未完成，不能将专项通过等同整轮验收。下文较早版本的失败与待验证叙述按其历史时点保留，最终状态以本条及末节为准。
+
 关联plan：`AI_DOC/plan/test_framework/plan/do/memblock_virtualization_framework_support_formal_plan_20261117.md`。
 范围：第二项框架实现及配套框架自测，基于第一项已提交的后端周期帧与异常地址采样。不修改RTL，不提前实现第三项RM/PMM权限算法。
 
@@ -335,7 +337,7 @@ check_fence_helpers();
 
 框架CSV目前包含35个子场景，另已在自测中加入inactive HS进入Guest及返回Host两条检查，提交前需由主代理把对应独立子场景补入CSV。
 
-原15类运输负例按传播／CSR写／fence等待分别调用拆分helper；保留owner/control reset/L2 reset/noack及watchdog检查。场景8/9改为等待负例driver的真实completed_item_count递增，再改变owner或reset，确保取消发生在运输完成后的C4等待阶段，避免固定5ns尚处运输阶段而命中错误失败出口。新增soft_test include目录及package include，basicTest只给明确自测和原运输负例加入active-control白名单，不扩大任意VSEQ权限。CSV每个可独立说明的子场景单行，结果待主代理实际执行后更新。
+原15类运输负例按传播／CSR写／fence等待分别调用拆分helper；保留owner/control reset/L2 reset/noack及watchdog检查。场景8/9改为等待负例driver的真实completed_item_count递增，再改变owner或reset，确保取消发生在运输完成后的C4等待阶段，避免固定5ns尚处运输阶段而命中错误失败出口。新增soft_test include目录及package include，basicTest只给明确自测和原运输负例加入active-control白名单，不扩大任意VSEQ权限。CSV每个可独立说明的子场景单行；该段写作时结果待执行，最终virt4 helper与负例通过证据见第14章。
 
 ## 11. 实现与Plan不一致项
 
@@ -441,7 +443,7 @@ end
 | soft selftest、mapping transport negative、seq.f、seq_pkg.sv、basicTest.sv、CSV | 第10章：生产helper专项及真实负例构建入口 |
 | 三份flow、正式plan及本文review | 文档同步与IMPLEMENTATION_DELTA；不属于额外运行逻辑 |
 
-当前git status中相关源码均纳入上述章节。第一项后端frame已在独立commit内，不在本次diff重复review；第三项RM源码尚未改动。没有把仿真生成产物或无关RTL改动纳入本文；若主代理随后产生新diff，提交前需重新核对范围并补充本表。
+当前git status中相关源码均纳入上述章节。第一项后端frame已在独立commit内，不在本次diff重复review；该表描述第二项提交时范围；第三项RM现已由独立提交`4240e4247`实现，不纳入第二项原diff。没有把仿真生成产物或无关RTL改动纳入本文；若主代理随后产生新diff，提交前需重新核对范围并补充本表。
 
 ## 14. 主代理最终验证与独立复核
 
@@ -457,4 +459,18 @@ end
 
 负例运行必须附加 `+MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES=20`、`+uvm_set_type_override=fence_agent_agent_driver,memblock_csr_mapping_negative_fence_driver`、`+uvm_set_type_override=csr_ctrl_agent_agent_driver,memblock_csr_mapping_negative_csr_driver`。主代理曾漏两个override，导致scenario8等待隔离driver计数但真实driver不生产该计数；此误跑不作为功能缺陷或通过证据。补齐原隔离拓扑后15场景通过。
 
-主代理重新检查dispatch地址出口、五PMM和SPVP传递、CSR旧上下文排空、返回Host的HS维护、raw flushPipe及matcher，以及负例运输阶段/完成阶段分离；与独立review交叉核对后未发现未关闭blocker。CSV现登记51项soft子场景和6项真实DUT专项。新增Guest指令的端到端数据、两阶段权限及PMM正确性由第三项RM/check实施和联合专项收口，不能由本次helper测试代替。全部basicTest回归在第三项完成后执行。
+主代理重新检查dispatch地址出口、五PMM和SPVP传递、CSR旧上下文排空、返回Host的HS维护、raw flushPipe及matcher，以及负例运输阶段/完成阶段分离；与独立review交叉核对后未发现未关闭blocker。CSV现登记51项soft子场景和6项真实DUT专项。新增Guest指令的端到端数据、两阶段权限及PMM正确性由第三项RM/check实施和联合专项收口，不能由本次helper测试代替。第三项现已提交并通过95场景184检查及34组真实专项；93组合/50入口的全部basicTest回归正在执行，尚未完成。
+
+
+## 最终集成状态一致性补充（2026-11-17）
+
+三份plan均已按实现完成归入do，三项源码分别本地提交，review按规则保留undo；未push、未修改RTL。第三项最终`4240e4247`包含LSQ局部白名单遗漏修复、固定两槽masked架构参考、B1/B2/B3、真实PMM bootstrap和旧ROB fixture完整WAITING索引。
+
+本轮已闭环证据：rm5 seed6111801自测95场景184checks通过；Guest seed6111810..6111839共30组、真实PMM seed6111900..6111903共4组通过；空vseq及dispatch smoke通过。旧ROB fixture失败版本日志保留，其补完整CSR后遗漏WAITING索引的问题也已修复，通过正式add_waiting_uid_to_index登记，重编原seed6111999通过，四个redirect迟到completion场景均完成，UVM_ERROR/FATAL均0。
+
+当前仍未完成的是93配置组合/50入口完整basicTest仿真回归；正在执行的子项与最终缺陷闭环由主代理持续监控，不能因三份plan位于do、专项通过或原seed复测完成而宣称整轮COMPLETE。既有未独立动态覆盖边界（例如IO+GPF、真实违例带非零older Store、主尾间reset）继续保留原证据范围，不自动升级为已测通过。
+
+
+## 全量回归最终处置（2026-11-17）
+
+三项实现与专项结果保持上述证据范围。全量basicTest在seed6112014发现NC回流异常地址被无效TLB响应覆盖，原参数波形复现及两轮独立review确认RTL责任，按规则停止为`STOPPED_RTL_CONFIRMED`：93组合中14通过、1失败、78未执行。未修改RTL、未关闭地址检查，完整回归不能记为完成。详见 `AI_DOC/analysis/testcase_flow/basic_full_regression_20261117.md` 与 `AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W47_20261116.md`；前文的“运行中”表述仅代表此前历史时点。
