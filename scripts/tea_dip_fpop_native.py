@@ -71,7 +71,7 @@ def analyze(folder, receipt_path):
             valid = scalar(top + 'prefetch_req_from' + generator)
             fire = scalar(top + 'prefetch_req_select' + generator)
             assert fire <= valid, ('Prefetch handshakes exceed valid cycles', label, generator)
-            admission[generator] = dict(valid_cycles=valid, queue_enqueues=fire)
+            admission[generator] = dict(valid_cycles=valid, source_handshakes=fire)
         ports = [scalar(f'.l2cache.slices_{bank}.sinkA.sinkA_prefetch_req') for bank in range(4)]
         frames.append(dict(phase=label, native_print_stamp=stamp,
                            native_cycles=scalar('.rob.clock_cycle'), native_retired=scalar('.rob.commitInstr'),
@@ -97,6 +97,8 @@ def analyze(folder, receipt_path):
                       'Feedback-zero s1-valid counts are condition cycles, not unique dropped requests. '
                       'Engine valid cycles may repeatedly present held requests; subtracting handshakes '
                       'does not count unique drops or distinguish queue pressure from arbitration. '
+                      'Source handshakes count consumed engine outputs, not proof of FIFO admission: '
+                      'a best-effort queue policy can consume and drop a new hint when full. '
                       'Multiple engines and banks can fire in one core cycle. Slice-port fires are '
                       'downstream of the engine-output queues, not S3/data completion. '
                       'No request-level causality, full-suite gain or live database read is inferred.')
