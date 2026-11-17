@@ -96,11 +96,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     else
       csrCtrl
 
+  // Experiment: disable the ahead predictors even when CSR/Constantin requests them.
+  private val enableAbtbUtage = false
+  private val abtbEnabled     = enableAbtbUtage.B && ctrl.abtbEnable
+
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := ctrl.abtbEnable
+  utage.io.enable       := abtbEnabled
   uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
   ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := ctrl.abtbEnable
+  abtb.io.enable        := abtbEnabled
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable && ctrl.mbtbEnable
   sc.io.enable          := ctrl.scEnable && ctrl.mbtbEnable
