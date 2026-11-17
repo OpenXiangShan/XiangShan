@@ -380,6 +380,8 @@ def _set_ifu_output(
         valid_mask |= 1 << slot
         dut.set(_PREFIX + f"io_toIBuffer_bits_foldpc_{slot}", fold_pc(int(pc)))
         dut.set(_PREFIX + f"s2_alignedInstrPcVec_{slot}_addr", int(pc) >> 1)
+        dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_data", instr)
+        dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isRvc", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrs_{slot}", instr)
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)

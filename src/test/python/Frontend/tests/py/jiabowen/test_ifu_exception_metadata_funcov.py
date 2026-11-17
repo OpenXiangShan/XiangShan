@@ -345,3 +345,114 @@ def test_all_five_components_can_complete_with_block1_gpf(tmp_path):
     assert recorder.key_hit(_GROUP, _BIN)
     assert len(recorder._ifu_exception_metadata_witnesses) == 5
     assert recorder._ifu_exception_metadata_witnesses["gpaddr"]["gpaddr_source_block"] == 1
+
+
+def _block1_cross_page(dut):
+    _set_ifu_output(
+        dut, [(0, 0x80000FE0, 0x13, 0, 0, 1, 7, 0),
+              (4, 0x80000FFE, 0x13, 0, 0, 0, 8, 1)],
+        exception_type=1, exception_cross_page=1,
+        s2_fetch_block_start_pc=0x80000FE0,
+    )
+    for stem, value in {
+        "s2_icacheMeta_0_exception_value": 0,
+        "s2_icacheMeta_1_exception_value": 1,
+        "s2_fetchBlock_0_valid": 1, "s2_fetchBlock_1_valid": 1,
+        "s2_fetchBlock_0_ftqIdx_flag": 1, "s2_fetchBlock_0_ftqIdx_value": 7,
+        "s2_fetchBlock_1_ftqIdx_flag": 0, "s2_fetchBlock_1_ftqIdx_value": 8,
+        "s2_fetchBlock_1_startVAddr_addr": 0x80001000 >> 1,
+        "s2_firstEndHalfRvi_valid": 1,
+        "s2_firstEndHalfRvi_bits_pc_addr": 0x80000FFE >> 1,
+        "s2_firstEndHalfRvi_bits_data": 0x13,
+        "s2_alignedInstrVec_4_blockSel": 0,
+        "s2_alignedInstrVec_4_isCrossBlockInstr": 1,
+    }.items():
+        dut.set(_PREFIX + stem, value)
+
+
+@pytest.mark.parametrize("source", ["saved_half", "first_block_half"])
+def test_cross_page_both_rtl_sources_require_consumed_exception_identity(tmp_path, source):
+    recorder, _env, dut, _ = _make_recorder(tmp_path)
+    (_block1_cross_page if source == "first_block_half" else lambda d: _component(d, "cross"))(dut)
+    _sample_exception_metadata(recorder, dut, 30)
+    assert recorder._ifu_exception_metadata_checks == {"cross_page"}
+    witness = recorder._ifu_exception_metadata_witnesses["cross_page"]
+    assert witness["half_pc"] == witness["delivered_pc"] == 0x80000FFE
+    assert witness["half_data"] == 0x13
+    assert witness["ftq"] == witness["delivered_ftq"] == ([0, 8] if source == "first_block_half" else [1, 7])
+    assert witness["exception_source_block"] == int(source == "first_block_half")
+    assert witness["exception_lane"] == (4 if source == "first_block_half" else 0)
+    assert witness["effective_exception_mask"] == 1 << witness["exception_lane"]
+    assert not recorder.key_hit(_GROUP, _BIN)
+
+
+@pytest.mark.parametrize("stem,value", [
+    ("s2_icacheMeta_0_exception_value", 3),
+    ("s2_icacheMeta_1_exception_value", 0),
+    ("s2_icacheMeta_1_exception_value", 3),
+    ("io_toIBuffer_bits_exceptionType_value", 3),
+    ("io_toIBuffer_bits_exceptionCrossPage", 0),
+    ("s2_fetchBlock_0_valid", 0), ("s2_fetchBlock_1_valid", 0),
+    ("s2_firstEndHalfRvi_valid", 0),
+    ("s2_firstEndHalfRvi_bits_pc_addr", 0x80000FFC >> 1),
+    ("s2_firstEndHalfRvi_bits_data", 1),
+    ("s2_firstEndHalfRvi_bits_data", 0x10013),
+    ("s2_fetchBlock_0_startVAddr_addr", 0x80000000 >> 1),
+    ("s2_fetchBlock_1_startVAddr_addr", 0x80002000 >> 1),
+    ("s2_fetchBlock_1_ftqIdx_flag", 1),
+    ("s2_fetchBlock_1_ftqIdx_value", 7),
+    ("s2_alignedInstrVec_4_blockSel", 1),
+    ("s2_alignedInstrVec_4_isCrossBlockInstr", 0),
+    ("s2_alignedInstrVec_4_data", 0x23),
+    ("s2_alignedInstrVec_4_isRvc", 1),
+    ("s2_alignedInstrPcVec_4_addr", 0x80001000 >> 1),
+    ("io_toIBuffer_bits_instrs_4", 0x10013),
+    ("io_toIBuffer_bits_foldpc_4", 0),
+    ("io_toIBuffer_bits_ftqPtr_4_flag", 1),
+    ("io_toIBuffer_bits_ftqPtr_4_value", 7),
+    ("io_toIBuffer_bits_valid", 1),
+    ("io_toIBuffer_bits_enqEnable", 1),
+    ("io_toIBuffer_bits_exceptionMask", 1),
+    ("io_toIBuffer_bits_exceptionMask", 17),
+    ("io_toIBuffer_bits_exceptionMask", 1 << 36),
+    ("io_toIBuffer_ready", 0), ("io_toIBuffer_valid", 0),
+])
+def test_cross_page_block1_rejects_wrong_source_or_unconsumed_lane(tmp_path, stem, value):
+    recorder, _env, dut, _ = _make_recorder(tmp_path)
+    _block1_cross_page(dut)
+    dut.set(_PREFIX + stem, value)
+    _sample_exception_metadata(recorder, dut, 30)
+    assert not getattr(recorder, "_ifu_exception_metadata_witnesses", {})
+    assert not recorder.key_hit(_GROUP, _BIN)
+
+
+@pytest.mark.parametrize("stem", [
+    "s2_firstEndHalfRvi_valid", "s2_firstEndHalfRvi_bits_pc_addr",
+    "s2_firstEndHalfRvi_bits_data", "s2_fetchBlock_1_valid",
+    "s2_fetchBlock_1_startVAddr_addr", "s2_fetchBlock_1_ftqIdx_value",
+    "s2_icacheMeta_1_exception_value", "s2_alignedInstrVec_4_isCrossBlockInstr",
+    "s2_alignedInstrPcVec_4_addr", "s2_alignedInstrVec_4_data",
+    "io_toIBuffer_bits_ftqPtr_4_value", "io_toIBuffer_bits_exceptionMask",
+])
+@pytest.mark.parametrize("mode", ["absent", "unreadable"])
+def test_cross_page_block1_missing_native_probe_fails_closed(tmp_path, stem, mode):
+    recorder, _env, dut, _ = _make_recorder(tmp_path)
+    _block1_cross_page(dut)
+    if mode == "absent":
+        delattr(dut, _PREFIX + stem)
+    else:
+        getattr(dut, _PREFIX + stem).value = None
+    _sample_exception_metadata(recorder, dut, 30)
+    assert not getattr(recorder, "_ifu_exception_metadata_witnesses", {})
+    assert ("cross_page", stem) in recorder._ifu_exception_metadata_gaps
+
+
+def test_cross_page_block1_cannot_join_wrong_pc_then_wrong_ftq_across_cycles(tmp_path):
+    recorder, _env, dut, _ = _make_recorder(tmp_path)
+    _block1_cross_page(dut)
+    dut.set(_PREFIX + "s2_alignedInstrPcVec_4_addr", 0x80001000 >> 1)
+    _sample_exception_metadata(recorder, dut, 30)
+    dut.set(_PREFIX + "s2_alignedInstrPcVec_4_addr", 0x80000FFE >> 1)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_4_value", 7)
+    _sample_exception_metadata(recorder, dut, 31)
+    assert not getattr(recorder, "_ifu_exception_metadata_witnesses", {})

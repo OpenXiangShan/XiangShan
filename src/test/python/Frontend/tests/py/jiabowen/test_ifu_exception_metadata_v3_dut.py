@@ -6,7 +6,11 @@ import os
 
 import pytest
 
-from env.funcov.py.ifu.compact_funcov import _gpf_metadata_delivery_scope, _read_ifu_internal_with_path
+from env.funcov.py.ifu.compact_funcov import (
+    _cross_page_metadata_delivery_scope,
+    _gpf_metadata_delivery_scope,
+    _read_ifu_internal_with_path,
+)
 from tests.py.support.ifu_exception_scope import assert_no_effective_ifu_exception
 from tests.py.zhaoxinran.translation import test_address_translation_context_switch as context
 from tests.py.support import gstage_provenance as gstage
@@ -30,6 +34,8 @@ def _capture_metadata(env):
         "s2_icacheMeta_0_hasSatpFlush", "s2_icacheMeta_0_gpAddr_addr",
         "s2_icacheMeta_0_isForVSnonLeafPTE", "s2_prevEndIsHalfRviInfo_valid",
         "s2_prevEndIsHalfRviInfo_bits_pc_addr", "s2_prevEndIsHalfRviInfo_bits_data",
+        "s2_firstEndHalfRvi_valid", "s2_firstEndHalfRvi_bits_pc_addr",
+        "s2_firstEndHalfRvi_bits_data",
         "s2_fetchBlock_0_ftqIdx_flag", "s2_fetchBlock_0_ftqIdx_value",
         "s2_fetchBlock_0_startVAddr_addr", "io_toIBuffer_bits_enqEnable",
     )
@@ -80,10 +86,17 @@ def _capture_metadata(env):
         for lane in range(36):
             if not (effective >> lane) & 1:
                 continue
-            for stem in (f"s2_alignedInstrVec_{lane}_blockSel",
-                         f"s2_alignedInstrVec_{lane}_isCrossBlockInstr",
-                         f"io_toIBuffer_bits_ftqPtr_{lane}_flag",
-                         f"io_toIBuffer_bits_ftqPtr_{lane}_value"):
+            lane_stems = (f"s2_alignedInstrVec_{lane}_blockSel",
+                          f"s2_alignedInstrVec_{lane}_isCrossBlockInstr",
+                          f"io_toIBuffer_bits_ftqPtr_{lane}_flag",
+                          f"io_toIBuffer_bits_ftqPtr_{lane}_value")
+            if state["io_toIBuffer_bits_exceptionCrossPage"]:
+                lane_stems += (f"s2_alignedInstrPcVec_{lane}_addr",
+                               f"s2_alignedInstrVec_{lane}_data",
+                               f"s2_alignedInstrVec_{lane}_isRvc",
+                               f"io_toIBuffer_bits_instrs_{lane}",
+                               f"io_toIBuffer_bits_foldpc_{lane}")
+            for stem in lane_stems:
                 value, path = _read_ifu_internal_with_path(
                     active_env.functional_coverage, active_env.dut, stem)
                 assert value is not None, {"missing_metadata_probe": stem}
@@ -194,20 +207,48 @@ def test_ifu_exception_metadata_backend_fault_diagnostic(env):
     _save_review(env, records, "backend_fault")
 
 
+def _accepted_cross_page_records(records):
+    """Select actual exception consumption, preserving inactive payload records."""
+    accepted = []
+    for record in records:
+        if not (record["io_toIBuffer_valid"] and record["io_toIBuffer_ready"]
+                and record["io_toIBuffer_bits_exceptionCrossPage"]):
+            continue
+        valid = record["io_toIBuffer_bits_valid"]
+        enq = record["io_toIBuffer_bits_enqEnable"]
+        mask = record["io_toIBuffer_bits_exceptionMask"]
+        assert all(type(v) is int and 0 <= v < (1 << 36) for v in (valid, enq, mask)), record
+        assert enq & ~valid == 0, record
+        effective = valid & enq & mask
+        if effective:
+            accepted.append(record)
+    return accepted
+
+
 @pytest.mark.funcov_bins("BIN-954")
 def test_ifu_exception_metadata_cross_page_fault_diagnostic(env):
     records = _capture_metadata(env)
+    cfvec = translation_faults._capture_cfvec_deliveries(env)
     translation_faults.test_cacheable_cross_page_second_page_translation_fault(
         env, 0, "s1_pf", "page_fault", "instruction_page_fault"
     )
-    delivered = [r for r in records if r["io_toIBuffer_ready"] and r["io_toIBuffer_bits_exceptionCrossPage"]]
+    delivered = _accepted_cross_page_records(records)
     assert delivered, {"reason": "no accepted cross-page exception metadata"}
+    fault_ftq = translation_faults._assert_fault_ftq_identity(
+        cfvec, pc=CACHEABLE_CROSS_PAGE_RVI_PC,
+        expected_fault="instruction_page_fault", cross_page=True,
+    )
     for r in delivered:
-        assert r["s2_prevEndIsHalfRviInfo_valid"] == 1
-        assert r["s2_prevEndIsHalfRviInfo_bits_pc_addr"] << 1 == CACHEABLE_CROSS_PAGE_RVI_PC
-        assert r["s2_prevEndIsHalfRviInfo_bits_data"] == 0x13
-        assert r["io_toIBuffer_bits_exceptionType_value"] == r["s2_icacheMeta_0_exception_value"] == 1
-        assert r["s2_fetchBlock_0_startVAddr_addr"] << 1 == CACHEABLE_CROSS_PAGE_RVI_PC + 2
+        scope = _cross_page_metadata_delivery_scope(
+            lambda stem: r[stem], r["io_toIBuffer_bits_exceptionType_value"],
+            r["s2_icacheMeta_0_exception_value"],
+        )
+        assert scope is not None, {"reason": "unproved cross-page source or consumed lane", "record": r}
+        assert scope["half_pc"] == CACHEABLE_CROSS_PAGE_RVI_PC
+        assert scope["half_data"] == 0x13
+        assert scope["accepted_exception_type"] == 1
+        assert tuple(scope["ftq"]) == tuple(scope["delivered_ftq"]) == fault_ftq
+        r["effective_cross_page_scope"] = scope
     _save_review(env, records, "cross_page")
 
 

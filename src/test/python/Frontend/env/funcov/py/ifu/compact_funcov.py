@@ -1728,6 +1728,71 @@ def _gpf_metadata_delivery_scope(read, exception: int, meta_exception: int):
             "selected_block_valid": True, "vs_nonleaf_pte": bool(nonleaf)}
 
 
+def _cross_page_metadata_delivery_scope(read, exception: int, meta_exception: int):
+    """Bind either RTL half-RVI source to its accepted exception entry.
+
+    Ifu.scala permits a saved half before block 0, or a clean block 0 ending
+    in half an RVI followed by a faulting block 1. The latter entry belongs
+    to block 1's FTQ even though its first half/data/PC originate in block 0.
+    All fields are read in one sample; missing probes remain an explicit gap.
+    """
+    if (read("io_toIBuffer_valid") != 1 or read("io_toIBuffer_ready") != 1
+            or read("io_toIBuffer_bits_exceptionCrossPage") != 1
+            or exception not in _FETCH_EXCEPTION_VALUES):
+        return None
+    if meta_exception == exception:
+        source, half = 0, "s2_prevEndIsHalfRviInfo"
+        path = "saved_half_before_block0"
+    elif meta_exception == 0 and read("s2_icacheMeta_1_exception_value") == exception:
+        source, half = 1, "s2_firstEndHalfRvi"
+        path = "block0_half_before_faulting_block1"
+    else:
+        return None
+    if read(f"{half}_valid") != 1 or read(f"s2_fetchBlock_{source}_valid") != 1:
+        return None
+    if source == 1 and read("s2_fetchBlock_0_valid") != 1:
+        return None
+    half_pc = read(f"{half}_bits_pc_addr") << 1
+    half_data = read(f"{half}_bits_data")
+    source_start = read(f"s2_fetchBlock_{source}_startVAddr_addr") << 1
+    if (half_pc & 0xFFF != 0xFFE or source_start != half_pc + 2
+            or not 0 <= half_data < (1 << 16) or half_data & 3 != 3):
+        return None
+    if source == 1:
+        first_start = read("s2_fetchBlock_0_startVAddr_addr") << 1
+        if not 0 <= half_pc - first_start < 64:
+            return None
+    valid = read("io_toIBuffer_bits_valid")
+    enq = read("io_toIBuffer_bits_enqEnable")
+    mask = read("io_toIBuffer_bits_exceptionMask")
+    limit = (1 << _IFU_OUTPUT_SLOT_COUNT) - 1
+    if (any(value < 0 or value > limit for value in (valid, enq, mask))
+            or enq & ~valid or not mask or mask & (mask - 1)
+            or valid & enq & mask != mask):
+        return None
+    lane = mask.bit_length() - 1
+    block_sel = read(f"s2_alignedInstrVec_{lane}_blockSel")
+    cross_block = read(f"s2_alignedInstrVec_{lane}_isCrossBlockInstr")
+    if block_sel != 0 or cross_block != source:
+        return None
+    delivered_pc = read(f"s2_alignedInstrPcVec_{lane}_addr") << 1
+    raw = read(f"s2_alignedInstrVec_{lane}_data")
+    output = read(f"io_toIBuffer_bits_instrs_{lane}")
+    if (delivered_pc != half_pc or raw & 0xFFFF != half_data
+            or output != raw or read(f"s2_alignedInstrVec_{lane}_isRvc") != 0
+            or read(f"io_toIBuffer_bits_foldpc_{lane}") != fold_pc(half_pc)):
+        return None
+    ftq = [read(f"s2_fetchBlock_{source}_ftqIdx_{field}") for field in ("flag", "value")]
+    delivered_ftq = [read(f"io_toIBuffer_bits_ftqPtr_{lane}_{field}") for field in ("flag", "value")]
+    if ftq[0] not in (0, 1) or delivered_ftq != ftq:
+        return None
+    return {"cross_page_source": path, "exception_source_block": source,
+            "ftq": ftq, "delivered_ftq": delivered_ftq, "start_pc": source_start,
+            "half_pc": half_pc, "half_data": half_data, "delivered_pc": delivered_pc,
+            "exception_lane": lane, "effective_exception_mask": mask,
+            "accepted_exception_type": exception, "delivered_instruction": output}
+
+
 def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
     """Accumulate the five separately specified BIN-954 components in one run.
 
@@ -1780,13 +1845,12 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
         except KeyError as exc:
             note_gap(component, exc)
 
-    if exception == meta_exception and meta_exception in _FETCH_EXCEPTION_VALUES:
+    cross_scope = None
+    if exception in _FETCH_EXCEPTION_VALUES:
         try:
-            if read("s2_prevEndIsHalfRviInfo_valid") == read("io_toIBuffer_bits_exceptionCrossPage") == 1:
-                half_pc = read("s2_prevEndIsHalfRviInfo_bits_pc_addr") << 1
-                half_data = read("s2_prevEndIsHalfRviInfo_bits_data")
-                if half_pc & 0xFFF == 0xFFE and start_pc == half_pc + 2 and half_data & 3 == 3:
-                    observed.add("cross_page")
+            cross_scope = _cross_page_metadata_delivery_scope(read, exception, meta_exception)
+            if cross_scope is not None:
+                observed.add("cross_page")
         except KeyError as exc:
             note_gap("cross_page", exc)
 
@@ -1810,6 +1874,8 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
     for component in added:
         if component in {"gpaddr", "vs_nonleaf_pte"}:
             witnesses[component] = dict(witness, **gp_scope)
+        elif component == "cross_page":
+            witnesses[component] = dict(witness, **cross_scope)
         else:
             witnesses[component] = witness
     recorder._ifu_exception_metadata_witnesses = witnesses
