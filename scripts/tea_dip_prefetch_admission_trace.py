@@ -34,7 +34,9 @@ def admission(path, queue_path, policy):
                 assert tuple(row[n] for n in ['line', 'source_id', 'req_source', 'need_t']) == payload(current, 'input')
                 full = current['head'] == current['tail'] and current['maybe_full']
                 assert row['full'] == int(bool(full))
-                ready = policy == 'overwrite' or not full or bool(current['pipe_ready'])
+                replace = (policy == 'l1_protection' and row['req_source'] not in [8, 9, 13, 15, 16]
+                           and current['head_req_source'] in [8, 9, 13, 15, 16])
+                ready = policy == 'overwrite' or not full or bool(current['pipe_ready']) or replace
                 assert row['enqueue'] == int(bool(ready)), 'Actual queue admission contradicts policy'
                 assert row['source_fire'] == int(bool(ready if policy == 'backpressure' else True))
                 assert row['enqueue'] <= row['source_fire']
@@ -62,12 +64,12 @@ def analyze(folder, receipt_path):
     proof = json.loads((folder / 'probe-build-proof.json').read_text()); binding = proof['binding']
     assert proof['passed'] and proof['original_files_unchanged'] and binding['kind'] == 'prefetch_admission'
     assert proof['source'] == receipt['source'] == result['source'] and proof['binary_sha256'] == result['binary_sha256']
-    policy = binding['queue']['policy']; assert policy in ['overwrite', 'backpressure', 'drop_new']
+    policy = binding['queue']['policy']; assert policy in ['overwrite', 'backpressure', 'drop_new', 'l1_protection']
     fifo = replay(folder / 'prefetch-queue.csv')
     selected = admission(folder / 'prefetch-admission.csv', folder / 'prefetch-queue.csv', policy)
     assert [r[2] for r in selected['counts']] == [r[0] for r in fifo['counts']]
-    if policy != 'overwrite': assert not fifo['outcomes'].get('overwritten', 0)
-    if policy != 'drop_new': assert not selected['outcomes'].get('dropped_new', 0)
+    if policy in ['backpressure', 'drop_new']: assert not fifo['outcomes'].get('overwritten', 0)
+    if policy not in ['drop_new', 'l1_protection']: assert not selected['outcomes'].get('dropped_new', 0)
     native = read_blocks(folder / 'simulator_err.txt')
     dumps = sorted({r['core_cycle'] for r in selected['boundaries'] if r['native_dump']})
     assert len(dumps) == len(native)

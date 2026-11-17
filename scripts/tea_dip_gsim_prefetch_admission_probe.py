@@ -94,7 +94,7 @@ extern "C" void __wrap_{step}(SSimTop *model) {{
 '''
     return cpp, [step, writer], dict(kind='prefetch_admission', queue=binding,
         fields=ADMISSION_FIELDS, admission_bindings=calls, new_RTL_state_bits=0,
-        scope='Source-bound overwrite/backpressure/drop-new policies. Actual FIFO ready/valid admission '
+        scope='Source-bound overwrite/backpressure/drop-new/receiver-protection policies. Actual FIFO ready/valid admission '
               'includes flow-through. Source handshakes can consume dropped hints; input-valid without '
               'consumption is a condition, not a unique request. NEXT pointers/data and pipeline owners '
               'are asserted; closed native/SQL neutrality and semantic calibration remain required.')
