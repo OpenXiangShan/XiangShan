@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from env.agents.ptw_agent import PTWAgent
 
 
@@ -36,6 +38,9 @@ def _interface() -> SimpleNamespace:
         "resp_bits_s2_entry_vmid",
         "resp_bits_s2_entry_n",
         "resp_bits_s2_entry_pbmt",
+        "resp_bits_s2_entry_perm_d",
+        "resp_bits_s2_entry_perm_r",
+        "resp_bits_s2_entry_perm_w",
         "resp_bits_s2_entry_perm_a",
         "resp_bits_s2_entry_perm_x",
         "resp_bits_s2_entry_level",
@@ -47,6 +52,7 @@ def _interface() -> SimpleNamespace:
         "resp_bits_s1_entry_vmid",
         "resp_bits_s1_entry_n",
         "resp_bits_s1_entry_pbmt",
+        "resp_bits_s1_entry_perm_d",
         "resp_bits_s1_entry_perm_a",
         "resp_bits_s1_entry_perm_g",
         "resp_bits_s1_entry_perm_u",
@@ -120,3 +126,29 @@ def test_ptw_response_payload_is_written_once_and_valid_drops_once() -> None:
     assert after_valid_drop == second_write_count + 1
     assert _write_count(interface) == after_valid_drop
     assert int(interface.resp_valid.value) == 0
+
+
+def test_ptw_drives_new_stage_permissions_from_response() -> None:
+    interface = _interface()
+    agent = PTWAgent.__new__(PTWAgent)
+    agent.interface = interface
+    agent._resp_valid_driven = 0
+    agent._driven_response_payload = None
+    agent._drive_response({"s1_entry_perm_d": 1, "s2_entry_perm_d": 1,
+                           "s2_entry_perm_r": 1, "s2_entry_perm_w": 0}, 1)
+    assert [getattr(interface, "resp_bits_" + key).value for key in (
+        "s1_entry_perm_d", "s2_entry_perm_d", "s2_entry_perm_r", "s2_entry_perm_w"
+    )] == [1, 1, 1, 0]
+
+
+def test_nemu_adapter_must_supply_new_permissions() -> None:
+    agent = PTWAgent.__new__(PTWAgent)
+    agent._nemu_source = SimpleNamespace(build_response=lambda _snapshot: {})
+    with pytest.raises(ValueError, match="missing required permission fields"):
+        agent._build_nemu_response(None)
+    fields = {key: 0 for key in ("s1_entry_perm_d", "s2_entry_perm_d",
+                                  "s2_entry_perm_r", "s2_entry_perm_w")}
+    fields["s2_entry_perm_r"] = 2
+    agent._nemu_source = SimpleNamespace(build_response=lambda _snapshot: fields)
+    with pytest.raises(ValueError, match="must be bits"):
+        agent._build_nemu_response(None)

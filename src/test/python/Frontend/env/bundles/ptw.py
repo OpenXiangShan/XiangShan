@@ -16,6 +16,9 @@ class PTWBundle(Bundle):
         "resp_bits_s2_entry_vmid": "io_ptw_resp_bits_s2_entry_vmid",
         "resp_bits_s2_entry_n": "io_ptw_resp_bits_s2_entry_n",
         "resp_bits_s2_entry_pbmt": "io_ptw_resp_bits_s2_entry_pbmt",
+        "resp_bits_s2_entry_perm_d": "io_ptw_resp_bits_s2_entry_perm_d",
+        "resp_bits_s2_entry_perm_r": "io_ptw_resp_bits_s2_entry_perm_r",
+        "resp_bits_s2_entry_perm_w": "io_ptw_resp_bits_s2_entry_perm_w",
         "resp_bits_s2_entry_perm_a": "io_ptw_resp_bits_s2_entry_perm_a",
         "resp_bits_s2_entry_perm_x": "io_ptw_resp_bits_s2_entry_perm_x",
         "resp_bits_s2_entry_level": "io_ptw_resp_bits_s2_entry_level",
@@ -27,6 +30,7 @@ class PTWBundle(Bundle):
         "resp_bits_s1_entry_vmid": "io_ptw_resp_bits_s1_entry_vmid",
         "resp_bits_s1_entry_n": "io_ptw_resp_bits_s1_entry_n",
         "resp_bits_s1_entry_pbmt": "io_ptw_resp_bits_s1_entry_pbmt",
+        "resp_bits_s1_entry_perm_d": "io_ptw_resp_bits_s1_entry_perm_d",
         "resp_bits_s1_entry_perm_a": "io_ptw_resp_bits_s1_entry_perm_a",
         "resp_bits_s1_entry_perm_g": "io_ptw_resp_bits_s1_entry_perm_g",
         "resp_bits_s1_entry_perm_u": "io_ptw_resp_bits_s1_entry_perm_u",
@@ -59,6 +63,9 @@ class PTWBundle(Bundle):
     resp_bits_s2_entry_vmid = Signal()
     resp_bits_s2_entry_n = Signal()
     resp_bits_s2_entry_pbmt = Signal()
+    resp_bits_s2_entry_perm_d = Signal()
+    resp_bits_s2_entry_perm_r = Signal()
+    resp_bits_s2_entry_perm_w = Signal()
     resp_bits_s2_entry_perm_a = Signal()
     resp_bits_s2_entry_perm_x = Signal()
     resp_bits_s2_entry_level = Signal()
@@ -70,6 +77,7 @@ class PTWBundle(Bundle):
     resp_bits_s1_entry_vmid = Signal()
     resp_bits_s1_entry_n = Signal()
     resp_bits_s1_entry_pbmt = Signal()
+    resp_bits_s1_entry_perm_d = Signal()
     resp_bits_s1_entry_perm_a = Signal()
     resp_bits_s1_entry_perm_g = Signal()
     resp_bits_s1_entry_perm_u = Signal()
@@ -101,6 +109,9 @@ class PTWBundle(Bundle):
         self.resp_bits_s2_entry_vmid.value = 0
         self.resp_bits_s2_entry_n.value = 0
         self.resp_bits_s2_entry_pbmt.value = 0
+        self.resp_bits_s2_entry_perm_d.value = 0
+        self.resp_bits_s2_entry_perm_r.value = 0
+        self.resp_bits_s2_entry_perm_w.value = 0
         self.resp_bits_s2_entry_perm_a.value = 0
         self.resp_bits_s2_entry_perm_x.value = 0
         self.resp_bits_s2_entry_level.value = 0
@@ -112,6 +123,7 @@ class PTWBundle(Bundle):
         self.resp_bits_s1_entry_vmid.value = 0
         self.resp_bits_s1_entry_n.value = 0
         self.resp_bits_s1_entry_pbmt.value = 0
+        self.resp_bits_s1_entry_perm_d.value = 0
         self.resp_bits_s1_entry_perm_a.value = 0
         self.resp_bits_s1_entry_perm_g.value = 0
         self.resp_bits_s1_entry_perm_u.value = 0

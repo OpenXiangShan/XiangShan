@@ -239,7 +239,17 @@ class PTWAgent:
     def _build_nemu_response(self, snapshot: PTWRequestSnapshot) -> dict:
         if self._nemu_source is None:
             raise RuntimeError("PTW response source requires a NEMU adapter but none is configured")
-        return self._nemu_source.build_response(snapshot)
+        response = self._nemu_source.build_response(snapshot)
+        # These bits are live inputs in the current DUT.  An external
+        # adapter must supply them rather than silently fabricating zeros.
+        required = ("s1_entry_perm_d", "s2_entry_perm_d",
+                    "s2_entry_perm_r", "s2_entry_perm_w")
+        missing = [key for key in required if key not in response]
+        if missing:
+            raise ValueError(f"NEMU PTW adapter missing required permission fields: {missing}")
+        if any(response[key] not in (0, 1) for key in required):
+            raise ValueError("NEMU PTW adapter permission fields must be bits")
+        return response
 
     def _emit_compare_result(
         self,
@@ -438,6 +448,9 @@ class PTWAgent:
         self._write(self.interface.resp_bits_s2_entry_vmid, payload.get("s2_entry_vmid", 0))
         self._write(self.interface.resp_bits_s2_entry_n, payload.get("s2_entry_n", 0))
         self._write(self.interface.resp_bits_s2_entry_pbmt, payload.get("s2_entry_pbmt", 0))
+        self._write(self.interface.resp_bits_s2_entry_perm_d, payload.get("s2_entry_perm_d", 0))
+        self._write(self.interface.resp_bits_s2_entry_perm_r, payload.get("s2_entry_perm_r", 0))
+        self._write(self.interface.resp_bits_s2_entry_perm_w, payload.get("s2_entry_perm_w", 0))
         self._write(self.interface.resp_bits_s2_entry_perm_a, payload.get("s2_entry_perm_a", 0))
         self._write(self.interface.resp_bits_s2_entry_perm_x, payload.get("s2_entry_perm_x", 0))
         self._write(self.interface.resp_bits_s2_entry_level, payload.get("s2_entry_level", 0))
@@ -449,6 +462,7 @@ class PTWAgent:
         self._write(self.interface.resp_bits_s1_entry_vmid, payload.get("s1_entry_vmid", 0))
         self._write(self.interface.resp_bits_s1_entry_n, payload.get("s1_entry_n", 0))
         self._write(self.interface.resp_bits_s1_entry_pbmt, payload.get("s1_entry_pbmt", 0))
+        self._write(self.interface.resp_bits_s1_entry_perm_d, payload.get("s1_entry_perm_d", 0))
         self._write(self.interface.resp_bits_s1_entry_perm_a, payload.get("s1_entry_perm_a", 0))
         self._write(self.interface.resp_bits_s1_entry_perm_g, payload.get("s1_entry_perm_g", 0))
         self._write(self.interface.resp_bits_s1_entry_perm_u, payload.get("s1_entry_perm_u", 0))

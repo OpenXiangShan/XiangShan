@@ -222,3 +222,16 @@ def test_translate_composes_sv39_superpage_and_explicit_stage_modes() -> None:
     assert pa == 0xA0000004
     assert metadata["stage1_ok"] is False
     assert metadata["fetch_path"] == "uncache"
+
+
+def test_ptw_response_preserves_both_stage_dirty_and_stage2_rw() -> None:
+    pt = PageTableModel(mode="sv39")
+    pt.map_page(0x80200, 0x80400, v=1, r=1, w=1, x=1, a=1, d=1)
+    pt.map_stage2_page(0x80400, 0x80600, v=1, r=1, w=1, x=1, a=1, d=1)
+    resp = pt.build_ptw_resp(0x80200, s2xlate=3)
+    assert [resp[k] for k in ("s1_entry_perm_d", "s2_entry_perm_d",
+                              "s2_entry_perm_r", "s2_entry_perm_w")] == [1, 1, 1, 1]
+    pt.set_stage2_response_fault(0x80400, guest_access_fault=1)
+    fault = pt.build_ptw_resp(0x80200, s2xlate=3)
+    assert [fault[k] for k in ("s2_entry_perm_d", "s2_entry_perm_r",
+                               "s2_entry_perm_w")] == [0, 0, 0]
