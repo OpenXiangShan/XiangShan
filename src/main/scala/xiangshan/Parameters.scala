@@ -72,7 +72,7 @@ case class XSCoreParameters
   AsidLength: Int = 16,
   SdidLength: Int = 6,
   VmidLength: Int = 14,
-  EnableTlbSim: Boolean = false,
+  EnableTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableSv48: Boolean = true,
@@ -281,8 +281,8 @@ case class XSCoreParameters
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
-  softTLB: Boolean = false, // dpi-c l1tlb sim only
-  softPTW: Boolean = false, // dpi-c l2tlb sim only
+  softTLB: Boolean = false, // dpi-c l1tlb debug only
+  softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
   hartIDDmodeWidth: Int = -1, // only for Customization
@@ -594,9 +594,9 @@ case class XSCoreParameters
   )
 }
 
-case object SimOptionsKey extends Field[SimOptions]
+case object DebugOptionsKey extends Field[DebugOptions]
 
-case class SimOptions
+case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
   DumpCSR: Boolean = false,
@@ -604,8 +604,8 @@ case class SimOptions
   EnableDifftest: Boolean = false,
   AlwaysBasicDiff: Boolean = true,
   FullBasicDiff: Boolean = false,
-  EnableSimLog: Boolean = false,
-  EnableSimPerf: Boolean = true,
+  EnableDebug: Boolean = false,
+  EnablePerfDebug: Boolean = true,
   PerfLevel: String = "VERBOSE",
   EnableXMR: Boolean = true,
   SimMemSize: Long = 8190L * 1024 * 1024 * 1024, // same as PMA, (0x80000000L, 0x80000000000L)
@@ -636,7 +636,7 @@ trait HasXSParameter {
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
   def coreParams = p(XSCoreParamsKey)
-  def env = p(SimOptionsKey)
+  def env = p(DebugOptionsKey)
 
   def ISABase = coreParams.ISABase
   def ISAExtensions = coreParams.ISAExtensions
@@ -710,7 +710,7 @@ trait HasXSParameter {
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
-  def EnableTlbSim = coreParams.EnableTlbSim
+  def EnableTlbDebug = coreParams.EnableTlbDebug
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
 

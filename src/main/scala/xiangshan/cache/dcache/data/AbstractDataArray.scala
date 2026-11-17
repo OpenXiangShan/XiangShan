@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug => XSSim}
+import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
 
 import scala.math.max
@@ -53,19 +53,19 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
 
   def dumpRead = {
     (0 until 3) map { w =>
-      XSSim(io.read(w).valid,
+      XSDebug(io.read(w).valid,
         s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
         io.read(w).bits.way_en, io.read(w).bits.addr)
     }
   }
 
   def dumpWrite = {
-    XSSim(io.write.valid,
+    XSDebug(io.write.valid,
       s"DataArray Write valid way_en: %x addr: %x\n",
       io.write.bits.way_en, io.write.bits.addr)
 
     (0 until blockRows) map { r =>
-      XSSim(io.write.valid,
+      XSDebug(io.write.valid,
         s"cycle: $r data: %x wmask: %x\n",
         io.write.bits.data(r), io.write.bits.wmask(r))
     }
@@ -73,16 +73,16 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
 
   def dumpResp = {
     (0 until 3) map { w =>
-      XSSim(s"DataArray ReadResp channel: $w\n")
+      XSDebug(s"DataArray ReadResp channel: $w\n")
       (0 until blockRows) map { r =>
-        XSSim(s"cycle: $r data: %x\n", io.resp(w)(r))
+        XSDebug(s"cycle: $r data: %x\n", io.resp(w)(r))
       }
     }
   }
 
   def dumpNack = {
     (0 until 3) map { w =>
-      XSSim(io.nacks(w), s"DataArray NACK channel: $w\n")
+      XSDebug(io.nacks(w), s"DataArray NACK channel: $w\n")
     }
   }
 

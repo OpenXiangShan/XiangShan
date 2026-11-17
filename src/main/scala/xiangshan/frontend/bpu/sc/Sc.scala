@@ -118,29 +118,29 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     )
   }
 
-  private val s1_pathIdx = s0_pathIdx.map(RegEnable(_, s0_fire)) // for sim
-  private val s2_pathIdx = s1_pathIdx.map(RegEnable(_, s1_fire)) // for sim
+  private val s1_pathIdx = s0_pathIdx.map(RegEnable(_, s0_fire)) // for debug
+  private val s2_pathIdx = s1_pathIdx.map(RegEnable(_, s1_fire)) // for debug
 
   private val s0_globalIdx = GlobalTableInfos.zip(globalTable).map { case (info, table) =>
     table.getTableIdx(s0_startPc, s0_commonHR.ghr(info.HistoryLength - 1, 0))
   }
 
-  private val s1_globalIdx = s0_globalIdx.map(RegEnable(_, s0_fire)) // for sim
-  private val s2_globalIdx = s1_globalIdx.map(RegEnable(_, s1_fire)) // for sim
+  private val s1_globalIdx = s0_globalIdx.map(RegEnable(_, s0_fire)) // for debug
+  private val s2_globalIdx = s1_globalIdx.map(RegEnable(_, s1_fire)) // for debug
 
   private val s0_imliIdx = imliTable.getTableIdx(s0_startPc, io.imli)
-  private val s1_imliIdx = RegEnable(s0_imliIdx, s0_fire) // for sim
-  private val s2_imliIdx = RegEnable(s1_imliIdx, s1_fire) // for sim
+  private val s1_imliIdx = RegEnable(s0_imliIdx, s0_fire) // for debug
+  private val s2_imliIdx = RegEnable(s1_imliIdx, s1_fire) // for debug
 
   private val s0_biasIdx = biasTable.getBiasTableIdx(s0_startPc)
-  private val s1_biasIdx = RegEnable(s0_biasIdx, s0_fire) // for sim
-  private val s2_biasIdx = RegEnable(s1_biasIdx, s1_fire) // for sim
+  private val s1_biasIdx = RegEnable(s0_biasIdx, s0_fire) // for debug
+  private val s2_biasIdx = RegEnable(s1_biasIdx, s1_fire) // for debug
 
   private val s0_bwIdx = BackwardTableInfos.zip(bwTable).map { case (info, table) =>
     table.getTableIdx(s0_startPc, s0_commonHR.bw(info.HistoryLength - 1, 0))
   }
-  private val s1_bwIdx = s0_bwIdx.map(RegEnable(_, s0_fire)) // for sim
-  private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for sim
+  private val s1_bwIdx = s0_bwIdx.map(RegEnable(_, s0_fire)) // for debug
+  private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for debug
 
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
     table.io.predictReadReq.valid         := s0_fire && PathEnable.B
@@ -337,17 +337,17 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
 
-  io.meta.sim_scPathTakenVec.get   := VecInit(s2_pathPred.map(RegEnable(_, s2_fire))) // for performance counter
-  io.meta.sim_scGlobalTakenVec.get := VecInit(s2_globalPred.map(RegEnable(_, s2_fire)))
-  io.meta.sim_scBWTakenVec.get     := VecInit(s2_bwPred.map(RegEnable(_, s2_fire)))
-  io.meta.sim_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
-  io.meta.sim_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
+  io.meta.debug_scPathTakenVec.get   := VecInit(s2_pathPred.map(RegEnable(_, s2_fire))) // for performance counter
+  io.meta.debug_scGlobalTakenVec.get := VecInit(s2_globalPred.map(RegEnable(_, s2_fire)))
+  io.meta.debug_scBWTakenVec.get     := VecInit(s2_bwPred.map(RegEnable(_, s2_fire)))
+  io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
+  io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
 
-  io.meta.sim_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for sim
-  io.meta.sim_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
-  io.meta.sim_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
-  io.meta.sim_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
-  io.meta.sim_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
+  io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for debug
+  io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
+  io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
+  io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
+  io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
 
   /*
    *  train pipeline stage 0
@@ -725,21 +725,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       scWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= t1_meta.scPred(branchWayIdx)
       trainUseScVec(branchWayIdx)  := true.B
 
-      scPathCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.sim_scPathTakenVec.get(branchWayIdx)
-      scPathWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.sim_scPathTakenVec.get(branchWayIdx)
+      scPathCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scPathTakenVec.get(branchWayIdx)
+      scPathWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scPathTakenVec.get(branchWayIdx)
       scGlobalCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.sim_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
+        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scGlobalWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.sim_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
+        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scBWCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.sim_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
+        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scBWWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.sim_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
+        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
 
-      scImliCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.sim_scImliTakenVec.get(branchWayIdx)
-      scImliWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.sim_scImliTakenVec.get(branchWayIdx)
-      scBiasCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.sim_scBiasTakenVec.get(branchWayIdx)
-      scBiasWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.sim_scBiasTakenVec.get(branchWayIdx)
+      scImliCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scImliTakenVec.get(branchWayIdx)
+      scImliWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scImliTakenVec.get(branchWayIdx)
+      scBiasCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scBiasTakenVec.get(branchWayIdx)
+      scBiasWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scBiasTakenVec.get(branchWayIdx)
 
       scUsedVec(branchWayIdx) := true.B
     }.otherwise {
@@ -844,14 +844,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(scCorrectVec)
   dontTouch(scWrongVec)
 
-  private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.sim_predPathIdx.get.zip(t1_pathSetIdx).map {
+  private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
     case (predIdx, trainIdx) => predIdx =/= trainIdx
   }.reduce(_ || _))
   private val sc_global_predIdx_diff_trainIdx =
-    t1_writeValid && (t1_meta.sim_predGlobalIdx.get.zip(t1_globalSetIdx).map {
+    t1_writeValid && (t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
       case (predIdx, trainIdx) => predIdx =/= trainIdx
     }.reduce(_ || _))
-  private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.sim_predBiasIdx.get =/= t1_biasSetIdx)
+  private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
 
   dontTouch(sc_path_predIdx_diff_trainIdx)
   dontTouch(sc_global_predIdx_diff_trainIdx)
@@ -870,7 +870,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val tableWayIdx = t1_branchesWayIdxVec(i)
     trace.valid        := t1_writeValidVec(i)
     trace.bits.startPc := t1_startPc
-    trace.bits.cfiPc   := t1_branches(i).bits.sim_realCfiPc.getOrElse(0.U(VAddrBits.W))
+    trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
     trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
     trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)

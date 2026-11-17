@@ -22,15 +22,17 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.rename._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
+
+
 class StdFreeList(
   freeListSize     : Int,
   initFreePhyReg  : Int,
   regType          : RegType,
   commitWidth      : Int,
-  simNumLogicRegs: Int = 32,
+  debugNumLogicRegs: Int = 32,
   checkArchFreeListFull: Boolean = true,
-)(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, simNumLogicRegs) with HasPerfEvents {
+)(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, debugNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + initFreePhyReg).U(PhyRegIdxWidth.W) )))
   val tailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
@@ -53,7 +55,7 @@ class StdFreeList(
     // Why RegNext (from RAT and Rename): for better timing
     // Why we can RegNext: these free registers won't be used in the next cycle,
     // since we set canAllocate only when the current free regs > RenameWidth.
-    XSSim(io.freeReq(i), p"req#$i free physical reg: ${io.freePhyReg(i)}\n")
+    XSDebug(io.freeReq(i), p"req#$i free physical reg: ${io.freePhyReg(i)}\n")
   }
 
   tailPtrNext := tailPtr + PopCount(io.freeReq)
@@ -64,7 +66,7 @@ class StdFreeList(
   //
   val freeRegCnt = Wire(UInt()) // number of free registers in free list
   io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
-  XSSim(p"freeRegCnt: $freeRegCnt\n")
+  XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
   val freeListVec = Wire(Vec(freeListSize, Vec(RenameWidth, UInt(PhyRegIdxWidth.W))))
   for (i <- 0 until freeListSize) {
@@ -81,7 +83,7 @@ class StdFreeList(
 
   for(i <- 0 until RenameWidth) {
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
-    XSSim(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
+    XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
   val doCommit = io.commit.doCommit
   val archAlloc = io.commit.archAlloc
@@ -105,7 +107,7 @@ class StdFreeList(
   headPtr := Mux(realDoAllocate, headPtrAllocate, headPtr)
   headPtrOH := Mux(realDoAllocate, headPtrOHAllocate, headPtrOH)
 
-  XSSim(p"head:$headPtr tail:$tailPtrNext\n")
+  XSDebug(p"head:$headPtr tail:$tailPtrNext\n")
 
   if (checkArchFreeListFull) {
     XSError(!isFull(tailPtrNext, archHeadPtr), s"${regType}ArchFreeList should always be full\n")

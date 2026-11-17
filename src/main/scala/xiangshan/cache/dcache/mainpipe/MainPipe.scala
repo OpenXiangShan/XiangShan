@@ -682,9 +682,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_error_paddr_beu = get_block_addr(RegEnable(Cat(s2_tag, get_untag(s2_req.vaddr)), s2_fire))
 
   // LR, SC and AMO
-  val sim_sc_fail_addr = RegInit(0.U)
-  val sim_sc_fail_cnt  = RegInit(0.U(8.W))
-  val sim_sc_addr_match_fail_cnt  = RegInit(0.U(8.W))
+  val debug_sc_fail_addr = RegInit(0.U)
+  val debug_sc_fail_cnt  = RegInit(0.U(8.W))
+  val debug_sc_addr_match_fail_cnt  = RegInit(0.U(8.W))
 
   val lrsc_count = RegInit(0.U(log2Ceil(LRSCCycles).W))
   val lrsc_valid = lrsc_count > LRSCBackOff.U
@@ -695,7 +695,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_sc = !s3_req.probe && s3_req.isAMO && s3_req.cmd === M_XSC
   val s3_cas = !s3_req.probe && s3_req.isAMO && isAMOCAS(s3_req.cmd)
   val s3_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s3_req.addr)
-  val sim_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid
+  val debug_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid
 
   s3_sc_fail  := s3_sc && (!s3_lrsc_addr_match || !s3_hit)
   val s3_cas_fail = s3_cas && (FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_amo_resp_data)) =/= 0.U
@@ -729,35 +729,35 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.update_resv_set := s3_valid && s3_lr && s3_can_do_amo
 
   when (s3_valid) {
-    when (s3_req.addr === sim_sc_fail_addr) {
+    when (s3_req.addr === debug_sc_fail_addr) {
       when (s3_sc_fail) {
-        sim_sc_fail_cnt := sim_sc_fail_cnt + 1.U
+        debug_sc_fail_cnt := debug_sc_fail_cnt + 1.U
       } .elsewhen (s3_sc) {
-        sim_sc_fail_cnt := 0.U
+        debug_sc_fail_cnt := 0.U
       }
     } .otherwise {
       when (s3_sc_fail) {
-        sim_sc_fail_addr := s3_req.addr
-        sim_sc_fail_cnt  := 1.U
+        debug_sc_fail_addr := s3_req.addr
+        debug_sc_fail_cnt  := 1.U
       }
     }
   }
-  XSWarn(sim_sc_fail_cnt > 100.U, "L1DCache failed too many SCs in a row")
+  XSWarn(debug_sc_fail_cnt > 100.U, "L1DCache failed too many SCs in a row")
 
   when (s3_valid) {
-    when (s3_req.addr === sim_sc_fail_addr) {
-      when (sim_s3_sc_fail_addr_match) {
-        sim_sc_addr_match_fail_cnt := sim_sc_addr_match_fail_cnt + 1.U
+    when (s3_req.addr === debug_sc_fail_addr) {
+      when (debug_s3_sc_fail_addr_match) {
+        debug_sc_addr_match_fail_cnt := debug_sc_addr_match_fail_cnt + 1.U
       } .elsewhen (s3_sc) {
-        sim_sc_addr_match_fail_cnt := 0.U
+        debug_sc_addr_match_fail_cnt := 0.U
       }
     } .otherwise {
       when (s3_sc_fail) {
-        sim_sc_addr_match_fail_cnt  := 1.U
+        debug_sc_addr_match_fail_cnt  := 1.U
       }
     }
   }
-  XSError(sim_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
+  XSError(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
 
 
   val update_data = s3_req.miss || s3_store_hit || s3_can_do_amo_write

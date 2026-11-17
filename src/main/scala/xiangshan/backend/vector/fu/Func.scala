@@ -49,7 +49,7 @@ class Func(val cfg: VecFuConfig)(implicit p: Parameters) extends XSModule {
     outStage.bits.ctrl.replay.foreach(_ := false.B)
     outStage.bits.ctrl.isRVC.foreach(_ := false.B)
     outStage.bits.ctrl.fflagsWen.foreach(_ := inStage.bits.ctrl.fflagsWen.get)
-    outStage.bits.sim.foreach(_ := inStage.bits.sim.get)
+    outStage.bits.debug.foreach(_ := inStage.bits.debug.get)
   }
 
   // Downstream Vec Exu exposes only one aggregated output per cycle.
@@ -82,13 +82,13 @@ object Func {
   class InUop(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
     val ctrl = new InCtrl(cfg)
     val data = new InData(cfg)
-    val sim = Option.when(backendParams.simEn)(new VecRegionModule.SimBundle)
+    val debug = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
   }
 
   class OutUop(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
     val ctrl = new OutCtrl(cfg)
     val data = new OutData(cfg)
-    val sim = Option.when(backendParams.simEn)(new VecRegionModule.SimBundle)
+    val debug = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
   }
 
   class InCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {

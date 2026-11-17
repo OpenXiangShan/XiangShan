@@ -28,7 +28,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import utility.sram.SRAMTemplate
 import chisel3.util._
 import utility.mbist.MbistPipeline
@@ -135,7 +135,7 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
   XSPerfAccumulate("part_data_read_counter", data_sram.io.r.req.valid)
 
   def dump_r() = {
-    XSSim(RegNext(io.r.en),
+    XSDebug(RegNext(io.r.en),
       "bank read set %x bank %x way %x data %x\n",
       RegEnable(io.r.addr, io.r.en),
       bankIdx.U,
@@ -145,7 +145,7 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
   }
 
   def dump_w() = {
-    XSSim(io.w.en,
+    XSDebug(io.w.en,
       "bank write set %x bank %x way %x data %x\n",
       io.w.addr,
       bankIdx.U,
@@ -213,7 +213,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   }))
 
   def dump_r() = {
-    XSSim(RegNext(io.r.en),
+    XSDebug(RegNext(io.r.en),
       "bank read addr %x data %x\n",
       RegEnable(io.r.addr, io.r.en),
       io.r.data.asUInt
@@ -221,7 +221,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   }
 
   def dump_w() = {
-    XSSim(io.w.en,
+    XSDebug(io.w.en,
       "bank write addr %x way_en %x data %x\n",
       io.w.addr,
       io.w.way_en,
@@ -304,33 +304,33 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
 
   def dumpRead = {
     (0 until LoadPipelineWidth) map { w =>
-      XSSim(io.read(w).valid,
+      XSDebug(io.read(w).valid,
         s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
         io.read(w).bits.way_en, io.read(w).bits.addr)
     }
-    XSSim(io.readline.valid,
+    XSDebug(io.readline.valid,
       s"DataArray Read Line, valid way_en: %x addr: %x rmask %x\n",
       io.readline.bits.way_en, io.readline.bits.addr, io.readline.bits.rmask)
   }
 
   def dumpWrite = {
-    XSSim(io.write.valid,
+    XSDebug(io.write.valid,
       s"DataArray Write valid way_en: %x addr: %x\n",
       io.write.bits.way_en, io.write.bits.addr)
 
     (0 until DCacheBanks) map { r =>
-      XSSim(io.write.valid,
+      XSDebug(io.write.valid,
         s"cycle: $r data: %x wmask: %x\n",
         io.write.bits.data(r), io.write.bits.wmask(r))
     }
   }
 
   def dumpResp = {
-    XSSim(s"DataArray ReadeResp channel:\n")
+    XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
       val req128Data = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.read_resp(r)(i).raw_data))
       val data = Cat((0 until DCacheVWordBankCount / 2).reverse.map(i => io.read_resp(r)(i).raw_data))
-      XSSim(s"cycle: $r data: %x\n", Mux(io.is128Req(r), req128Data, data))
+      XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r), req128Data, data))
     }
   }
 
@@ -658,7 +658,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x)===set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
-  if (backendParams.simEn){
+  if (backendParams.debugEn){
     load_req_with_bank_conflict.map(dontTouch(_))
     dontTouch(read_result)
     dontTouch(read_error_delayed_result)
@@ -1036,7 +1036,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x) === set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
-  if (backendParams.simEn){
+  if (backendParams.debugEn){
     load_req_with_bank_conflict.map(dontTouch(_))
     dontTouch(bank_result)
     dontTouch(read_bank_error_delayed)

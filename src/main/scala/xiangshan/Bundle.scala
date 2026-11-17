@@ -110,7 +110,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val isLastInFtqEntry = Bool()
   val vtype = VType()
   val specvtype = VType()
-  val sim_seqNum = InstSeqNum()
+  val debug_seqNum = InstSeqNum()
 }
 
 
@@ -122,7 +122,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  // val sim_globalID = UInt(XLEN.W)
+  // val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
   val lsrc = Vec(4, UInt(LogicRegsWidth.W))
   val ldest = UInt(LogicRegsWidth.W)
@@ -164,7 +164,7 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
   val ctrl = new CtrlSignals
 }
 
-class PerfSimInfo(implicit p: Parameters) extends XSBundle {
+class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
@@ -218,9 +218,9 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
     ftqIdx + 1.U
   )
 
-  val sim_runahead_checkpoint_id = UInt(64.W)
-  val simIsCtrl = Bool()
-  val simIsMemVio = Bool()
+  val debug_runahead_checkpoint_id = UInt(64.W)
+  val debugIsCtrl = Bool()
+  val debugIsMemVio = Bool()
 
   def flushItself() = RedirectLevel.flushItself(level)
 
@@ -279,7 +279,7 @@ class Resolve(implicit p: Parameters) extends XSBundle {
   val taken: Bool = Bool()
   val mispredict: Bool = Bool()
   val attribute: BranchAttribute = new BranchAttribute
-  val sim_isRVC: Option[Bool] = Option.when(!env.FPGAPlatform)(Bool())
+  val debug_isRVC: Option[Bool] = Option.when(!env.FPGAPlatform)(Bool())
 }
 
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
@@ -292,7 +292,7 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   val preg = UInt(PhyRegIdxWidth.W)
 }
 
-class SimBundle(implicit p: Parameters) extends XSBundle {
+class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
   val isNCIO = Bool()
   val isPerfCnt = Bool()

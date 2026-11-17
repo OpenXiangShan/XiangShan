@@ -84,7 +84,7 @@ class RobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XS
 
   XSInfo(in.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
 
-  if(backendParams.simEn){
+  if(backendParams.debugEn){
     dontTouch(commitDeqPtrVec)
     dontTouch(commitDeqPtrAll)
     dontTouch(allowOnlyOneCond)

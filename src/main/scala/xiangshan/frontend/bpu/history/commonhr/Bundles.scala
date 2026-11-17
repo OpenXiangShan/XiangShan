@@ -29,7 +29,7 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val ghr:   UInt = UInt(GhrHistoryLength.W)
   val bw:    UInt = UInt(BWHistoryLength.W)
 
-  val predStartPc: Option[Pc] = Some(Pc()) // for sim
+  val predStartPc: Option[Pc] = Some(Pc()) // for debug
 }
 
 class Update(implicit p: Parameters) extends CommonHRBundle {

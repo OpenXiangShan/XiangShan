@@ -23,7 +23,7 @@ import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.VecMissalignedSimBundle
+import xiangshan.mem.VecMissalignedDebugBundle
 import utility._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
@@ -124,7 +124,7 @@ object Bundles {
     val vtype = new VType()
     val specvtype = new VType()
     val instr = UInt(32.W)
-    val sim = OptionWrapper(backendParams.simEn, new DecodeInUopSim())
+    val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
@@ -132,13 +132,13 @@ object Bundles {
       this.isFetchMalAddr := source.backendException
       this.vtype            := source.vtype
       this.specvtype        := source.specvtype
-      this.sim.foreach(_.pc := source.pc)
-      this.sim.foreach(_.sim_seqNum := source.sim_seqNum)
+      this.debug.foreach(_.pc := source.pc)
+      this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
   }
-  class DecodeInUopSim(implicit p: Parameters) extends XSBundle {
+  class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val sim_seqNum = InstSeqNum()
+    val debug_seqNum = InstSeqNum()
   }
 
   // DecodeInUop --[Decode]--> DecodeOutUop
@@ -198,7 +198,7 @@ object Bundles {
     val numWB = NumWB() // rob need this
     val latency = Latency()
 
-    val sim = OptionWrapper(backendParams.simEn, new DecodeOutUopSim())
+    val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     def isSoftPrefetch: Bool = {
       FuType.isLoad(fuType) && LSUOpType.isPrefetch(fuOpType)
@@ -207,12 +207,12 @@ object Bundles {
     def connectDecodeInUop(source: DecodeInUop): Unit = {
       (this: Data).waiveAll :<= (source: Data).waiveAll
       this.exceptionVec extendFrom source.exceptionVec
-      this.sim.foreach(x => connectSamePort(x, source.sim.get))
+      this.debug.foreach(x => connectSamePort(x, source.debug.get))
     }
   }
-  class DecodeOutUopSim(implicit p: Parameters) extends XSBundle {
+  class DecodeOutUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val sim_seqNum = InstSeqNum()
+    val debug_seqNum = InstSeqNum()
   }
 
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
@@ -319,18 +319,18 @@ object Bundles {
     val lsqIdxEnd = new LSIdx
     val hasException = Bool()
     val lastIsRVC = Bool() // store isrvc before change in rename
-    val sim = OptionWrapper(backendParams.simEn, new RenameOutUopSim())
+    val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
     def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
   }
-  class RenameOutUopSim(implicit p: Parameters) extends XSBundle {
+  class RenameOutUopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val sim_seqNum = InstSeqNum()
+    val debug_seqNum = InstSeqNum()
     val instr = UInt(32.W)
     val fusionNum = UInt(log2Ceil(RenameWidth / 2 + 1).W)
-    val perfSimInfo = new PerfSimInfo
-    val sim_trigger = Bool()
+    val perfDebugInfo = new PerfDebugInfo
+    val debug_sim_trig = Bool()
   }
 
   class EnqRobUop(implicit p: Parameters) extends RenameOutUop {
@@ -439,12 +439,12 @@ object Bundles {
     val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
-    val sim = OptionWrapper(backendParams.simEn, new IssueQueueInSim)
+    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
-  class IssueQueueInSim(implicit p: Parameters) extends XSBundle {
+  class IssueQueueInDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
-    val sim_seqNum = InstSeqNum()
-    val perfSimInfo = new PerfSimInfo
+    val debug_seqNum = InstSeqNum()
+    val perfDebugInfo = new PerfDebugInfo
   }
   class DispatchOutUop(implicit p: Parameters) extends DispatchOutBaseUop {
     // for scheduler drop amocas sta
@@ -508,7 +508,7 @@ object Bundles {
     val sqIdx             = Option.when(params.needSqIdx)(new SqPtr) // load unit need sqIdx
     // cas ctrl
     val isDropAmocasSta = Bool()
-    val sim = OptionWrapper(backendParams.simEn, new IssueQueueInSim)
+    val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
   class EntryOg1Payload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
@@ -593,8 +593,8 @@ object Bundles {
     val pdestV0   = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     // from dispatch
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val sim             = OptionWrapper(backendParams.simEn, new IssueQueueInSim)
-    val simLastIssueCancelSource = OptionWrapper(backendParams.simEn, IQCancelSource())
+    val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+    val debugLastIssueCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
@@ -605,10 +605,10 @@ object Bundles {
     val flushPipe = OptionWrapper(params.flushPipe, Bool())
     val replay = OptionWrapper(params.replayInst, Bool())
     val trigger = OptionWrapper(params.trigger, TriggerAction())
-    // sim bundle
-    val sim = new SimBundle
-    val perfSimInfo = new PerfSimInfo
-    val sim_seqNum = InstSeqNum()
+    // debug bundle
+    val debug = new DebugBundle
+    val perfDebugInfo = new PerfDebugInfo
+    val debug_seqNum = InstSeqNum()
   }
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
@@ -686,8 +686,8 @@ object Bundles {
 
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
-    val perfSimInfo   = new PerfSimInfo
-    val sim_seqNum    = InstSeqNum()
+    val perfDebugInfo   = new PerfDebugInfo
+    val debug_seqNum    = InstSeqNum()
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitSqIdx       = new SqPtr // store set predicted previous store sqIdx
     // Load wait is needed
@@ -707,12 +707,12 @@ object Bundles {
     // schedule
     val replayInst      = Bool()
 
-    val sim_fuType    = Option.when(backendParams.simEn)(FuType())
-    val sim_trigger  = Option.when(backendParams.simEn)(Bool())
+    val debug_fuType    = Option.when(backendParams.debugEn)(FuType())
+    val debug_sim_trig  = Option.when(backendParams.debugEn)(Bool())
 
     val numLsElem       = NumLsElem()
 
-    def getSimFuType: UInt = sim_fuType.getOrElse(fuType)
+    def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def isLUI32: Bool = this.selImm === SelImm.IMM_LUI32
@@ -741,13 +741,13 @@ object Bundles {
     def connectRenameOutUop(source: RenameOutUop): Unit = {
       this := 0.U.asTypeOf(this)
       connectSamePort(this, source)
-      source.sim.foreach(x => {
+      source.debug.foreach(x => {
         this.pc := x.pc
-        this.sim_seqNum := x.sim_seqNum
+        this.debug_seqNum := x.debug_seqNum
         this.instr := x.instr
         this.fusionNum := x.fusionNum
-        this.perfSimInfo := x.perfSimInfo
-        this.sim_trigger.get := x.sim_trigger
+        this.perfDebugInfo := x.perfDebugInfo
+        this.debug_sim_trig.get := x.debug_sim_trig
       })
     }
   }
@@ -935,8 +935,8 @@ object Bundles {
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
-    val perfSimInfo = OptionWrapper(backendParams.simEn, new PerfSimInfo())
-    val sim_seqNum  = OptionWrapper(backendParams.simEn, InstSeqNum())
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
   class Og1InUop(
@@ -993,8 +993,8 @@ object Bundles {
     val pc  = Option.when(exuParams.needPc)(UInt(VAddrData().dataWidth.W))
     val predTarget = Option.when(exuParams.needTarget)(UInt(VAddrData().dataWidth.W))
 
-    val perfSimInfo = OptionWrapper(backendParams.simEn, new PerfSimInfo())
-    val sim_seqNum  = OptionWrapper(backendParams.simEn, InstSeqNum())
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
     def fromIssueBundle(source: Og0InUop): Unit = {
       // common fields from s0.bits
@@ -1027,8 +1027,8 @@ object Bundles {
 
       this.loadDependency.foreach(_ := source.loadDependency.get)
 
-      this.perfSimInfo.foreach(_ := source.perfSimInfo.get)
-      this.sim_seqNum.foreach(_  := source.sim_seqNum.get)
+      this.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
+      this.debug_seqNum.foreach(_  := source.debug_seqNum.get)
 
       // fields not carried in Og0InUop are explicitly cleared here
       this.rfRen.foreach(_.foreach(_ := false.B))
@@ -1209,8 +1209,8 @@ object Bundles {
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
-    val perfSimInfo = OptionWrapper(backendParams.simEn, new PerfSimInfo())
-    val sim_seqNum  = OptionWrapper(backendParams.simEn, InstSeqNum())
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
     def exuIdx = this.params.exuIdx
 
@@ -1276,8 +1276,8 @@ object Bundles {
       uop.sqIdx          := this.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
       uop.ftqPtr         := this.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
       uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
-      uop.perfSimInfo  := this.perfSimInfo.getOrElse(0.U.asTypeOf(new PerfSimInfo))
-      uop.sim_seqNum   := this.sim_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
+      uop.perfDebugInfo  := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
+      uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
       uop.vtype          := this.vtype.getOrElse(0.U.asTypeOf(VType()))
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
@@ -1358,8 +1358,8 @@ object Bundles {
     val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
     val lqIdx          = Option.when(params.hasLoadExu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu)(new SqPtr)
-    val perfSimInfo  = Option.when(backendParams.simEn)(new PerfSimInfo())
-    val sim_seqNum   = Option.when(backendParams.simEn)(InstSeqNum())
+    val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
+    val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
 
 
@@ -1413,9 +1413,9 @@ object Bundles {
     // LoadUnit only
     // isFromLoadUnit indicates whether this ExuOutput is issued from LoadUnit (e.g., not so for atomics)
     val isFromLoadUnit = if (params.hasLoadFu) Some(Bool()) else None
-    val sim = new SimBundle
-    val perfSimInfo = OptionWrapper(backendParams.simEn, new PerfSimInfo())
-    val sim_seqNum = OptionWrapper(backendParams.simEn, InstSeqNum())
+    val debug = new DebugBundle
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
   class ExuOutputToRob(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
@@ -1448,28 +1448,28 @@ object Bundles {
     val toVlRf         = Option.when(params.writeVlRf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val redirect       = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val isFromLoadUnit = Option.when(params.hasLoadFu)(Bool())
-    val sim          = new SimBundle
-    val perfSimInfo  = Option.when(backendParams.simEn)(new PerfSimInfo())
-    val sim_seqNum   = Option.when(backendParams.simEn)(InstSeqNum())
+    val debug          = new DebugBundle
+    val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
+    val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
 
-  class MemSimBundle(implicit p: Parameters) extends XSBundle {
-    val isMMIO = Option.when(backendParams.basicSimEn)(Bool())
-    val isNCIO = Option.when(backendParams.basicSimEn)(Bool())
-    val isPerfCnt = Option.when(backendParams.basicSimEn)(Bool())
+  class MemDebugBundle(implicit p: Parameters) extends XSBundle {
+    val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
+    val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())
+    val isPerfCnt = Option.when(backendParams.basicDebugEn)(Bool())
 
     def isSkipDiff: Bool = isMMIO.get || isNCIO.get || isPerfCnt.get
     /* add L/S inst info in EXU */
     // val L1toL2TlbLatency = UInt(XLEN.W)
     // val levelTlbHit = UInt(2.W)
 
-    val paddr = Option.when(backendParams.simEn)(UInt(PAddrBits.W))
-    val vaddr = Option.when(backendParams.simEn)(UInt(VAddrBits.W))
-    val perfSimInfo = Option.when(backendParams.simEn)(new PerfSimInfo())
-    val sim_seqNum = Option.when(backendParams.simEn)(new InstSeqNum())
+    val paddr = Option.when(backendParams.debugEn)(UInt(PAddrBits.W))
+    val vaddr = Option.when(backendParams.debugEn)(UInt(VAddrBits.W))
+    val perfDebugInfo = Option.when(backendParams.debugEn)(new PerfDebugInfo())
+    val debug_seqNum = Option.when(backendParams.debugEn)(new InstSeqNum())
   }
   class MemToRob(params: ExeUnitParams)(implicit p: Parameters) extends ExuOutputToRob(params) {
-    val simInfo = new MemSimBundle
+    val debugInfo = new MemDebugBundle
   }
   class MemToIntRf(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
     val pdest = UInt(params.wbPregIdxWidth.W)
@@ -1510,15 +1510,15 @@ object Bundles {
       res.isFromLoadUnit.zip(toIntRf.flatMap(_.bits.isFromLoadUnit)).foreach {
         case (dst, src) => dst := src
       }
-      toRob.bits.simInfo.isMMIO.foreach(res.sim.isMMIO := _)
-      toRob.bits.simInfo.isNCIO.foreach(res.sim.isNCIO := _)
-      toRob.bits.simInfo.isPerfCnt.foreach(res.sim.isPerfCnt := _)
-      toRob.bits.simInfo.paddr.foreach(res.sim.paddr := _)
-      toRob.bits.simInfo.vaddr.foreach(res.sim.vaddr := _)
-      res.perfSimInfo.zip(toRob.bits.simInfo.perfSimInfo).foreach {
+      toRob.bits.debugInfo.isMMIO.foreach(res.debug.isMMIO := _)
+      toRob.bits.debugInfo.isNCIO.foreach(res.debug.isNCIO := _)
+      toRob.bits.debugInfo.isPerfCnt.foreach(res.debug.isPerfCnt := _)
+      toRob.bits.debugInfo.paddr.foreach(res.debug.paddr := _)
+      toRob.bits.debugInfo.vaddr.foreach(res.debug.vaddr := _)
+      res.perfDebugInfo.zip(toRob.bits.debugInfo.perfDebugInfo).foreach {
         case (dst, src) => dst := src
       }
-      res.sim_seqNum.zip(toRob.bits.simInfo.sim_seqNum).foreach {
+      res.debug_seqNum.zip(toRob.bits.debugInfo.debug_seqNum).foreach {
         case (dst, src) => dst := src
       }
 
@@ -1542,9 +1542,9 @@ object Bundles {
     val fflags = UInt(5.W)
     val vxsat = Bool()
     val exceptionVec = ExceptSparseVec()
-    val sim = new SimBundle
-    val perfSimInfo = OptionWrapper(backendParams.simEn, new PerfSimInfo())
-    val sim_seqNum = OptionWrapper(backendParams.simEn, InstSeqNum())
+    val debug = new DebugBundle
+    val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+    val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
     this.wakeupSource = s"WB(${params.toString})"
 
@@ -1569,9 +1569,9 @@ object Bundles {
       this.fflags := source.fflags.getOrElse(0.U.asTypeOf(this.fflags))
       this.vxsat := source.vxsat.getOrElse(0.U.asTypeOf(this.vxsat))
       this.exceptionVec extendFrom source.exceptionVec
-      this.sim := source.sim
-      this.perfSimInfo.foreach(_ := source.perfSimInfo.get)
-      this.sim_seqNum.foreach(_ := source.sim_seqNum.get)
+      this.debug := source.debug
+      this.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
+      this.debug_seqNum.foreach(_ := source.debug_seqNum.get)
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortBundle = {
@@ -1718,9 +1718,9 @@ object Bundles {
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val vecWen        = Option.when(params.writeVecRf)(Bool())
     val v0Wen         = Option.when(params.writeV0Rf)(Bool())
-    val sim         = new SimBundle
-    val perfSimInfo = Option.when(backendParams.simEn)(new PerfSimInfo())
-    val sim_seqNum  = Option.when(backendParams.simEn)(InstSeqNum())
+    val debug         = new DebugBundle
+    val perfDebugInfo = Option.when(backendParams.debugEn)(new PerfDebugInfo())
+    val debug_seqNum  = Option.when(backendParams.debugEn)(InstSeqNum())
   }
 
   // ExuOutput --> ExuBypassBundle --[DataPath]-->ExuInput
@@ -1836,8 +1836,8 @@ object Bundles {
     val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
     val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
     val isFromLoadUnit = Bool()
-    val sim = new SimBundle
-    val vecSim = if (isVector) Some(new VecMissalignedSimBundle) else None
+    val debug = new DebugBundle
+    val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     // TODO: delete this after MemExuOutput is thoroughly removed
     def toExuOutput(param: ExeUnitParams): ExuOutput = {
@@ -1854,9 +1854,9 @@ object Bundles {
       output.exceptionVec := this.uop.exceptionVec
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
-      output.sim := this.sim
-      output.perfSimInfo.foreach(_ := this.uop.perfSimInfo)
-      output.sim_seqNum.foreach(_ := this.uop.sim_seqNum)
+      output.debug := this.debug
+      output.perfDebugInfo.foreach(_ := this.uop.perfDebugInfo)
+      output.debug_seqNum.foreach(_ := this.uop.debug_seqNum)
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)
       output.isRVC.foreach(_ := this.uop.isRVC)

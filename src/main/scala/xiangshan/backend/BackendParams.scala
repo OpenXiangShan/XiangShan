@@ -27,7 +27,7 @@ import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
-import xiangshan.{SimOptionsKey, XSCoreParamsKey}
+import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.vector.{Exu, RegionParam}
 
@@ -40,14 +40,14 @@ case class BackendParams(
   iqWakeUpParams : Seq[WakeUpConfig],
 ) extends NewParam {
 
-  def simEn(implicit p: Parameters): Boolean = {
-    val simOpts = p(SimOptionsKey)
-    simOpts.EnableDifftest || simOpts.FullBasicDiff
+  def debugEn(implicit p: Parameters): Boolean = {
+    val debugOpts = p(DebugOptionsKey)
+    debugOpts.EnableDifftest || debugOpts.FullBasicDiff
   }
 
   def regCacheEn: Boolean = true
 
-  def basicSimEn(implicit p: Parameters): Boolean = p(SimOptionsKey).AlwaysBasicDiff || simEn
+  def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
 

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.rob.RobPtr
@@ -83,7 +83,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     // only fo
     val pc = UInt(VAddrBits.W)
-    val simInfo = new PerfSimInfo
+    val debugInfo = new PerfDebugInfo
   }
   private def isOlder(left: UopEntry, right: UopEntry): Bool = left.robIdx.isBeforeSlot(right.robIdx)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
@@ -178,11 +178,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       uop(enqIndex).ftqPtr := enq.bits.ftqPtr
       uop(enqIndex).ftqOffset := enq.bits.ftqOffset
       uop(enqIndex).pc := enq.bits.pc
-      uop(enqIndex).simInfo := enq.bits.simInfo
+      uop(enqIndex).debugInfo := enq.bits.debugInfo
       datavalid(enqIndex) := enq.bits.dataValid
     }
-    val sim_robIdx = enq.bits.robIdx.asUInt
-    XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $sim_robIdx")
+    val debug_robIdx = enq.bits.robIdx.asUInt
+    XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
   //  LoadQueueRAW deallocate
@@ -339,8 +339,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val lqViolation = lqSelect._1(0)
     val lqViolationUop = lqSelect._2(0)
 
-    if(simEn) {
-      XSSim(
+    if(debugEn) {
+      XSDebug(
         lqViolation,
         "need rollback (ld wb before store) pc %x robidx %d target %x\n",
         storeIn(i).bits.uop.pc.get, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
@@ -387,7 +387,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.sim_runahead_checkpoint_id := rollbackLqWb(i).bits.simInfo.runahead_checkpoint_id
+    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
     redirect
   })
   io.rollback := allRedirect

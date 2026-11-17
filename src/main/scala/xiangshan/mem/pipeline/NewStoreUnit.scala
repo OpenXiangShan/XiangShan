@@ -22,7 +22,7 @@ import chisel3.util._
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuInput, MemWriteBack, StoreUnitToLFST, connectSamePort}
-import xiangshan.backend.ctrlblock.SimLsInfoBundle
+import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.PMPRespBundle
@@ -226,9 +226,9 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.pmp_addr := DontCare
   // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
   io.tlbReq.bits.frm_mabuf := false.B
-  io.tlbReq.bits.sim.pc := uop.pc
-  io.tlbReq.bits.sim.robIdx := uop.robIdx
-  io.tlbReq.bits.sim.isFirstIssue := sink.bits.isFirstIssue
+  io.tlbReq.bits.debug.pc := uop.pc
+  io.tlbReq.bits.debug.robIdx := uop.robIdx
+  io.tlbReq.bits.debug.isFirstIssue := sink.bits.isFirstIssue
   io.tlbReqKill := false.B // will be assigned in S1
 
   io.dcacheReq.valid := pipeIn.fire
@@ -292,7 +292,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
 
-    val simInfo = Output(new SimLsInfoBundle)
+    val debugInfo = Output(new DebugLsInfoBundle)
   })
 
   val pipeIn = io_pipeIn.get
@@ -440,8 +440,8 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.wlineflag := isCbo
   connectSamePort(toSqAddr.uop, uop)
   toSqAddr.uop.pc.foreach(_ := uop.pc)
-  toSqAddr.uop.simInfo.foreach(_  := uop.perfSimInfo)
-  toSqAddr.uop.sim_seqNum.foreach(_ := uop.sim_seqNum)
+  toSqAddr.uop.debugInfo.foreach(_  := uop.perfDebugInfo)
+  toSqAddr.uop.debug_seqNum.foreach(_ := uop.debug_seqNum)
   toSqAddr.uop.isFirstIssue := isFirstIssue
   toSqAddr.isHyper := isHyper
   // Unalign info
@@ -455,8 +455,8 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.memBackTypeMM := DontCare
   toSqAddr.cacheMiss := false.B
 
-  if(simEn) {
-    toSqAddr.simUop.get := uop
+  if(debugEn) {
+    toSqAddr.debugUop.get := uop
   }
 
   // Pipeline connect
@@ -483,10 +483,10 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.uop.exceptionVec(storePageFault) := pf
   stageInfo.uop.exceptionVec(storeGuestPageFault) := gpf
   stageInfo.uop.exceptionVec(storeAccessFault) := af
-  stageInfo.uop.perfSimInfo.tlbRespTime := Mux(
+  stageInfo.uop.perfDebugInfo.tlbRespTime := Mux(
     tlbHit,
     GTimer(),
-    Mux(tlbMiss, uop.perfSimInfo.tlbFirstReqTime, uop.perfSimInfo.tlbRespTime)
+    Mux(tlbMiss, uop.perfDebugInfo.tlbFirstReqTime, uop.perfDebugInfo.tlbRespTime)
   )
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
@@ -531,9 +531,9 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   io.prefetchTrainHint := fire && isFirstIssue
 
-  io.simInfo := DontCare
-  io.simInfo.s1_robIdx := robIdx.value
-  io.simInfo.s1_isTlbFirstMiss := tlbMiss && !isHwPrefetch && isFirstIssue
+  io.debugInfo := DontCare
+  io.debugInfo.s1_robIdx := robIdx.value
+  io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHwPrefetch && isFirstIssue
 
   // Perf counters
   XSPerfAccumulate("s1_valid", pipeIn.valid)
@@ -681,8 +681,8 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.toSqAddrRe.uop := DontCare
   io.toSqAddrRe.isHyper := DontCare
 
-  if(simEn) {
-    io.toSqAddrRe.simUop.get := DontCare //TODO: will be remove in the future.
+  if(debugEn) {
+    io.toSqAddrRe.debugUop.get := DontCare //TODO: will be remove in the future.
   }
 
   val prefetchTrainValid = fire && io.dcacheResp.fire && tlbHit && tlbAccessible && !hasException && !isUncache
@@ -813,13 +813,13 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
   io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
   io.stout.toRob.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
-  io.stout.toRob.bits.simInfo.isMMIO.foreach(_ := sxData.mmio.get)
-  io.stout.toRob.bits.simInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
-  io.stout.toRob.bits.simInfo.isPerfCnt.foreach(_ := false.B)
-  io.stout.toRob.bits.simInfo.paddr.foreach(_ := sxData.paddr.get)
-  io.stout.toRob.bits.simInfo.vaddr.foreach(_ := sxData.vaddr)
-  io.stout.toRob.bits.simInfo.sim_seqNum.foreach(_ := sxData.uop.sim_seqNum)
-  io.stout.toRob.bits.simInfo.perfSimInfo.foreach(_ := sxData.uop.perfSimInfo)
+  io.stout.toRob.bits.debugInfo.isMMIO.foreach(_ := sxData.mmio.get)
+  io.stout.toRob.bits.debugInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
+  io.stout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
+  io.stout.toRob.bits.debugInfo.paddr.foreach(_ := sxData.paddr.get)
+  io.stout.toRob.bits.debugInfo.vaddr.foreach(_ := sxData.vaddr)
+  io.stout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := sxData.uop.debug_seqNum)
+  io.stout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := sxData.uop.perfDebugInfo)
 
   io.exceptionInfo.valid := sxValid && !sxVector
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
@@ -885,7 +885,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val perfRobHeadPtr = Input(new RobPtr)
   val writebackAtRobHead = Output(Bool())
 
-  val simInfo = Output(new SimLsInfoBundle)
+  val debugInfo = Output(new DebugLsInfoBundle)
 }
 
 class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
@@ -925,7 +925,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   io.updateLFST := s1.io.updateLFST
   io.staNukeQueryReq := s1.io.staNukeQueryReq
   io.toSqAddr := s1.io.toSqAddr
-  io.simInfo := s1.io.simInfo
+  io.debugInfo := s1.io.debugInfo
   io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
   io.toUnalignQueue <> s1.io.toUnalignQueue
   io.feedBackSlow.valid := RegNext(s1.io.feedBackSlow.valid) // for better timing

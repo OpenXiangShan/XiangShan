@@ -82,5 +82,5 @@ trait HasIttageParameters extends HasBpuParameters {
   def RegionBits:     Int    = VAddrBits - TargetOffsetWidth
 
   /* *** testing *** */
-  def sim: Boolean = !env.FPGAPlatform && env.EnableSimPerf
+  def debug: Boolean = !env.FPGAPlatform && env.EnablePerfDebug
 }

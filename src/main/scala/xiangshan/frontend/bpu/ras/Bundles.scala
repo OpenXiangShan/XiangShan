@@ -91,7 +91,7 @@ object RasCommitMeta {
   }
 }
 
-class RasSim(implicit p: Parameters) extends RasBundle {
+class RasDebug(implicit p: Parameters) extends RasBundle {
   val specQueue:   Vec[RasEntry] = Output(Vec(SpecQueueSize, new RasEntry))
   val specNos:     Vec[RasPtr]   = Output(Vec(SpecQueueSize, new RasPtr))
   val commitStack: Vec[RasEntry] = Output(Vec(CommitStackSize, new RasEntry))

@@ -13,8 +13,8 @@ class VStdWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) {
       vstd.fuOpType := inStage.bits.ctrl.opcode
       vstd.data := inStage.bits.data.src(0)
       vstd.sqIdx := inStage.bits.ctrl.sqIdx.get
-      vstd.vecSim.foreach(_.start := 0.U)
-      vstd.vecSim.foreach(_.offset := 0.U)
+      vstd.vecDebug.foreach(_.start := 0.U)
+      vstd.vecDebug.foreach(_.offset := 0.U)
     }
   }
 }

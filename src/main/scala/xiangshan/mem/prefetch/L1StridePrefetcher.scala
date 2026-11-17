@@ -249,7 +249,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     decr_mode = s2_decr_mode,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
-    // TODO: add stride sim db, not useful for now
+    // TODO: add stride debug db, not useful for now
     t_pc = 0xdeadbeefL.U,
     t_va = 0xdeadbeefL.U
     )
@@ -260,7 +260,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     decr_mode = s2_decr_mode,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
-    // TODO: add stride sim db, not useful for now
+    // TODO: add stride debug db, not useful for now
     t_pc = 0xdeadbeefL.U,
     t_va = 0xdeadbeefL.U
     )

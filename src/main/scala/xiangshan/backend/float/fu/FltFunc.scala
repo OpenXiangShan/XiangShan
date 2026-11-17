@@ -22,7 +22,7 @@ class FltNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
   val outFuBusy = IO(Output(Bool()))
 
   protected val nonFixedLatOutCtrl = RegInit(0.U.asTypeOf(new Func.OutCtrl(cfg)))
-  protected val nonFixedLatOutSim = ex(0).bits.sim.map(sim => Reg(chiselTypeOf(sim)))
+  protected val nonFixedLatOutDebug = ex(0).bits.debug.map(debug => Reg(chiselTypeOf(debug)))
 
   protected val nonFixedLatOutCtrlNext = Wire(new Func.OutCtrl(cfg))
   nonFixedLatOutCtrlNext.robIdx := ex0ctrl.robIdx

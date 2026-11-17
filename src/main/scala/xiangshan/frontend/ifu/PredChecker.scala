@@ -185,7 +185,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   // FIXME: Not a reliable block-end marker; special cases may have only half a branch predicted.(invalidTaken)
   io.resp.stage2Out.checkerRedirect.bits.endOffset := endOffsetNext
 
-  // --------- These registers are only for performance inspection purposes ---------------------/
+  // --------- These registers are only for performance debugging purposes ---------------------/
   private val jalFaultVecNext  = RegEnable(jalFaultVec, io.req.valid)
   private val jalrFaultVecNext = RegEnable(jalrFaultVec, io.req.valid)
   private val retFaultVecNext  = RegEnable(retFaultVec, io.req.valid)

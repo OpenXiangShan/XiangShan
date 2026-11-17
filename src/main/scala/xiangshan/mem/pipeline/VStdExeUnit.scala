@@ -24,8 +24,8 @@ class VStdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
           bits.fuOpType := in.uop.bits.fuOpType
           bits.data := in.uop.bits.src(0)
           bits.sqIdx := in.uop.bits.sqIdx.get
-          bits.vecSim.foreach(_.start := 0.U)
-          bits.vecSim.foreach(_.offset := 0.U)
+          bits.vecDebug.foreach(_.start := 0.U)
+          bits.vecDebug.foreach(_.offset := 0.U)
       }
   }
 
@@ -35,8 +35,8 @@ class VStdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       wb.toRob.valid := in.uop.valid
       wb.toRob.bits.robIdx := in.uop.bits.robIdx
       wb.toRob.bits.sqIdx.get := in.uop.bits.sqIdx.get
-      wb.perfSimInfo.foreach(_ := in.uop.bits.perfSimInfo.get)
-      wb.sim_seqNum.foreach(_ := in.uop.bits.sim_seqNum.get)
+      wb.perfDebugInfo.foreach(_ := in.uop.bits.perfDebugInfo.get)
+      wb.debug_seqNum.foreach(_ := in.uop.bits.debug_seqNum.get)
       in.uop.ready := true.B
   }
 }

@@ -119,7 +119,7 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
     w.addr := rcIdx
   }
 
-  if (params.basicSimEn) {
+  if (params.basicDebugEn) {
     io.diffRcIdx.get.zipWithIndex.foreach { case (x, i) =>
       when(x.wen) {
         assert(x.rcIdx === delayToWakeupQueueRCIdx(i), "When rfWen is raised, the RcIdx to the wakeupQueue three clock cycles ago must match the RcIdx written back to the RegCache in the current clock cycle.")
@@ -134,9 +134,9 @@ class RegCacheIO()(implicit p: Parameters, params: BackendParams) extends XSBund
     new RCReadPort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth))
 
   val writePorts = Vec(params.getExuRCWriteSize, 
-    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.simEn))
+    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn))
 
   val toWakeupQueueRCIdx = Vec(params.getExuRCWriteSize, Output(UInt(RegCacheIdxWidth.W)))
 
-  val diffRcIdx = Option.when(params.basicSimEn && params.intSchdParams.get.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
+  val diffRcIdx = Option.when(params.basicDebugEn && params.intSchdParams.get.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
 }

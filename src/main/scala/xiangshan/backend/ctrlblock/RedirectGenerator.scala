@@ -38,7 +38,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)
   val s1_redirect_onehot = VecInit(oldestOneHot.map(x => GatedValidRegNext(x)))
 
-  if (backendParams.simEn){
+  if (backendParams.debugEn){
     dontTouch(oldestValid)
     dontTouch(needFlushVec)
   }

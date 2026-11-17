@@ -336,8 +336,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val isMmio:      Bool      = Bool()
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
 
-  val sim_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
-  val sim_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())
+  val debug_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
+  val debug_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())
 
   def getMetaInfo(i: Int): MetaInfo = {
     val info = Wire(new MetaInfo)

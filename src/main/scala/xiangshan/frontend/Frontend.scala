@@ -47,10 +47,10 @@ import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
 import utility.sram.SramHelper
 import xiangshan.CustomCSRCtrlIO
+import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
 import xiangshan.L1BusErrorUnitInfo
 import xiangshan.SfenceBundle
-import xiangshan.SimOptionsKey
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
@@ -87,7 +87,7 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val resetInFrontend: Bool = Output(Bool())
 
   // perf
-  val simTopDown: FrontendSimTopDownInfo = Flipped(new FrontendSimTopDownInfo)
+  val debugTopDown: FrontendDebugTopDownInfo = Flipped(new FrontendDebugTopDownInfo)
 
   // mbist
   val dft:       Option[SramBroadcastBundle] = Option.when(hasDFT)(Input(new SramBroadcastBundle))
@@ -110,7 +110,7 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
 
-  if (p(SimOptionsKey).ResetGen) {
+  if (p(DebugOptionsKey).ResetGen) {
     ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
@@ -272,7 +272,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   icache.io.hartId := io.hartId
 
-  itlbRepeater1.io.simTopDown.robHeadVaddr := io.simTopDown.robHeadVaddr.map(_.toUInt)
+  itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 
   io.resetInFrontend := reset.asBool
 
@@ -414,7 +414,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   )
   XSPerfAccumulate(
     "squashCycles_memVio",
-    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.simIsMemVio
+    io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.debugIsMemVio
   )
   XSPerfAccumulate(
     "squashCycles_interrupt",

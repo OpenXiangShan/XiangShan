@@ -38,8 +38,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
     val toMicroTage: AheadBtbToMicroTageIO = Output(new AheadBtbToMicroTageIO)
 
-    val sim_bpuS2StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
-    val sim_bpuS3StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
+    val debug_bpuS2StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
+    val debug_bpuS3StartPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(Input(GuardedPc()))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -121,10 +121,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     s1_valid := false.B
   }
 
-  private val s1_setIdx     = RegEnable(s0_setIdx, s0_fire)
-  private val s1_bankIdx    = RegEnable(s0_bankIdx, s0_fire)
-  private val s1_bankMask   = RegEnable(s0_bankMask, s0_fire)
-  private val s1_simIndexPc = Option.when(!env.FPGAPlatform)(RegEnable(io.startPc, s0_fire))
+  private val s1_setIdx       = RegEnable(s0_setIdx, s0_fire)
+  private val s1_bankIdx      = RegEnable(s0_bankIdx, s0_fire)
+  private val s1_bankMask     = RegEnable(s0_bankMask, s0_fire)
+  private val s1_debugIndexPc = Option.when(!env.FPGAPlatform)(RegEnable(io.startPc, s0_fire))
 
   private val s1_entries = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
   private val s1_ctrVec  = takenCounter(s1_bankIdx)(s1_setIdx)
@@ -137,7 +137,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s1_normalState.entries  := s1_entries
   s1_normalState.ctrVec   := s1_ctrVec
   s1_normalState.hitMask  := s1_normalState.getHitMask
-  s1_normalState.sim_indexPc.zip(s1_simIndexPc).foreach { case (a, b) => a := b }
+  s1_normalState.debug_indexPc.zip(s1_debugIndexPc).foreach { case (a, b) => a := b }
 
   // compute hit mask for the override state, which is used to rematch the old S2 state or the BPU S3 replay state
   private val s1_overrideState = WireInit(Mux(io.bpuS3Override, bpuS3ReplayState.bits, s2_state))
@@ -146,12 +146,12 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val s1_state = Mux(io.bpuS3Override || io.bpuS2Override, s1_overrideState, s1_normalState)
 
-  s2_state.sim_indexPc.zip(io.sim_bpuS2StartPc).foreach { case (indexPc, bpuStartPc) =>
+  s2_state.debug_indexPc.zip(io.debug_bpuS2StartPc).foreach { case (indexPc, bpuStartPc) =>
     when(io.enable && !io.redirect && io.bpuS2Override && !io.bpuS3Override && s2_valid) {
       assert(indexPc === bpuStartPc, "AheadBtb S2 override reuses entries indexed by the wrong PC")
     }
   }
-  bpuS3ReplayState.bits.sim_indexPc.zip(io.sim_bpuS3StartPc).foreach { case (indexPc, bpuStartPc) =>
+  bpuS3ReplayState.bits.debug_indexPc.zip(io.debug_bpuS3StartPc).foreach { case (indexPc, bpuStartPc) =>
     when(io.enable && !io.redirect && io.bpuS3Override && bpuS3ReplayState.valid) {
       assert(indexPc === bpuStartPc, "AheadBtb S3 override reuses entries indexed by the wrong PC")
     }
@@ -209,7 +209,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.result.sim_startPc.foreach(_ := s2_state.startPc)
+  io.result.debug_startPc.foreach(_ := s2_state.startPc)
 
   /* --------------------------------------------------------------------------------------------------------------
      old state for bpu s3 override

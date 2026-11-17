@@ -409,14 +409,14 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   XSPerfAccumulate("train_alloc_failed", (t1_normalAllocMask === 0.U) && t1_needAlloc && t1_fire)
   XSPerfAccumulate("train_useful_low_reset", lowTickCounter(LowTickWidth))
   XSPerfAccumulate("train_useful_high_reset", highTickCounter(HighTickWidth))
-  val sim_allocNumSets = 32 // Configurable for simulation inspection
-  for (i <- 0 until sim_allocNumSets) {
-    // Bucket allocation failures by the lower log2(sim_allocNumSets) bits of the set index.
+  val debug_allocNumSets = 32 // Configurable for debugging
+  for (i <- 0 until debug_allocNumSets) {
+    // Bucket allocation failures by the lower log2(debug_allocNumSets) bits of the set index.
     // Helps identify hash conflicts or table capacity bottlenecks during training.
     XSPerfAccumulate(
       f"train_alloc_failed_index${i}",
       (t1_normalAllocMask === 0.U) &&
-        t1_needAlloc && t1_fire && (t1_trainIdx(0)(log2Ceil(sim_allocNumSets) - 1, 0) === i.U)
+        t1_needAlloc && t1_fire && (t1_trainIdx(0)(log2Ceil(debug_allocNumSets) - 1, 0) === i.U)
     )
   }
 
@@ -440,7 +440,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   utageTrace.bits.setIdx           := t1_trainIdx
   utageTrace.bits.branches         := t1_trainResult
 
-  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableSimTrace)
+  private val utageTraceDBTables = ChiselDB.createTable(s"microTageTrace", new MicroTageTrace, EnableTraceAndDebug)
   utageTraceDBTables.log(
     data = utageTrace.bits,
     en = t1_fire && utageTrace.valid,

@@ -6,12 +6,12 @@ import chisel3.util._
 import xiangshan.XSBundle
 import xiangshan.mem.LoadReplayCauses
 
-class SimMdpInfo(implicit p: Parameters) extends XSBundle{
+class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val ssid = UInt(SSIDWidth.W)
   val waitAllStore = Bool()
 }
 
-class SimLsInfo(implicit p: Parameters) extends XSBundle{
+class DebugLsInfo(implicit p: Parameters) extends XSBundle{
   val s1_isTlbFirstMiss = Bool() // in s1
   val s1_isLoadToLoadForward = Bool()
   val s2_isBankConflict = Bool()
@@ -24,17 +24,17 @@ class SimLsInfo(implicit p: Parameters) extends XSBundle{
   val replayCause = Vec(LoadReplayCauses.allCauses, Bool())
   val replayCnt = UInt(XLEN.W)
 
-  def s1SignalEnable(ena: SimLsInfo) = {
+  def s1SignalEnable(ena: DebugLsInfo) = {
     when(ena.s1_isTlbFirstMiss) { s1_isTlbFirstMiss := true.B }
     when(ena.s1_isLoadToLoadForward) { s1_isLoadToLoadForward := true.B }
   }
 
-  def s2SignalEnable(ena: SimLsInfo) = {
+  def s2SignalEnable(ena: DebugLsInfo) = {
     when(ena.s2_isBankConflict) { s2_isBankConflict := true.B }
     when(ena.s2_isDcacheFirstMiss) { s2_isDcacheFirstMiss := true.B }
     when(ena.s2_isForwardFail) { s2_isForwardFail := true.B }
   }
-  def s3SignalEnable(ena: SimLsInfo) = {
+  def s3SignalEnable(ena: DebugLsInfo) = {
     when(ena.s3_isReplayFast) { s3_isReplayFast := true.B }
     when(ena.s3_isReplaySlow) { s3_isReplaySlow := true.B }
     when(ena.s3_isReplayRS) { s3_isReplayRS := true.B }
@@ -48,9 +48,9 @@ class SimLsInfo(implicit p: Parameters) extends XSBundle{
   }
 }
 
-object SimLsInfo {
-  def init(implicit p: Parameters): SimLsInfo = {
-    val lsInfo = Wire(new SimLsInfo)
+object DebugLsInfo {
+  def init(implicit p: Parameters): DebugLsInfo = {
+    val lsInfo = Wire(new DebugLsInfo)
     lsInfo.s1_isTlbFirstMiss := false.B
     lsInfo.s1_isLoadToLoadForward := false.B
     lsInfo.s2_isBankConflict := false.B
@@ -66,15 +66,15 @@ object SimLsInfo {
   }
 }
 
-class SimLsInfoBundle(implicit p: Parameters) extends SimLsInfo {
+class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
   // unified processing at the end stage of load/store  ==> s2  ==> bug that will write error robIdx data
   val s1_robIdx = UInt(log2Ceil(RobSize).W)
   val s2_robIdx = UInt(log2Ceil(RobSize).W)
   val s3_robIdx = UInt(log2Ceil(RobSize).W)
 }
 
-class SimLSIO(implicit p: Parameters) extends XSBundle {
-  val simLsInfo = Vec(backendParams.LduCnt + backendParams.HyuCnt + backendParams.StaCnt + backendParams.HyuCnt, Output(new SimLsInfoBundle))
+class DebugLSIO(implicit p: Parameters) extends XSBundle {
+  val debugLsInfo = Vec(backendParams.LduCnt + backendParams.HyuCnt + backendParams.StaCnt + backendParams.HyuCnt, Output(new DebugLsInfoBundle))
 }
 class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
   val s1 = new Bundle {

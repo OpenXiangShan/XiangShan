@@ -18,7 +18,7 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{XSDebug => XSSim}
+import utility.XSDebug
 import utils.PrintTriggerInfo
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.MatchTriggerIO
@@ -56,7 +56,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
   private val triggerEnableVec =
     RegInit(VecInit(Seq.fill(TriggerNum)(false.B))) // From CSR, controlled by priv mode, etc.
   triggerEnableVec := io.frontendTrigger.tEnableVec
-  XSSim(triggerEnableVec.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
+  XSDebug(triggerEnableVec.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
 
   private val triggerTimingVec = VecInit(tdataVec.map(_.timing))
   private val triggerChainVec  = VecInit(tdataVec.map(_.chain))
@@ -85,7 +85,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
 
     // Priority may select last when no trigger fire.
     io.triggered(i) := triggerAction
-    XSSim(
+    XSDebug(
       triggerCanFireVec.asUInt.orR,
       p"Debug Mode: Predecode Inst No. $i has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
     )

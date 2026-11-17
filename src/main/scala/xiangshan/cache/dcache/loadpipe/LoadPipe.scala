@@ -21,7 +21,7 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions
 import org.chipsalliance.cde.config.Parameters
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
@@ -524,19 +524,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.mtrack.s2.bits.paddr := s2_paddr
   io.mtrack.s2.bits.way := s2_real_way_en
   io.mtrack.s2.bits.hit := s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
-  resp.bits.sim_robIdx := s2_req.sim_robIdx
-  // sim info
+  resp.bits.debug_robIdx := s2_req.debug_robIdx
+  // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
-  io.lsu.sim_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
+  io.lsu.debug_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
   if(dwpuParam.enWPU) {
-    io.lsu.sim_s2_pred_way_num := OneHot.OHToUIntStartOne(s2_pred_way_en)
+    io.lsu.debug_s2_pred_way_num := OneHot.OHToUIntStartOne(s2_pred_way_en)
   }else{
-    io.lsu.sim_s2_pred_way_num := 0.U
+    io.lsu.debug_s2_pred_way_num := 0.U
   }
   if(dwpuParam.enWPU && dwpuParam.enCfPred || !env.FPGAPlatform){
-    io.lsu.sim_s2_dm_way_num :=  s2_dm_way_num + 1.U
+    io.lsu.debug_s2_dm_way_num :=  s2_dm_way_num + 1.U
   }else{
-    io.lsu.sim_s2_dm_way_num := 0.U
+    io.lsu.debug_s2_dm_way_num := 0.U
   }
 
 
@@ -568,7 +568,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   resp.bits.dump(resp.valid)
 
-  io.lsu.sim_s1_hit_way := s1_tag_match_way_dup_dc
+  io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_rr_bank_conflict := io.rr_bank_conflict_slow
@@ -666,15 +666,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)
 
   // --------------------------------------------------------------------------------
-  // Simulation logging functions
+  // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {
-      XSSim(valid, s"$pipeline_stage_name: ")
+      XSDebug(valid, s"$pipeline_stage_name: ")
       req.dump(valid)
   }
 
   def dump_pipeline_valids(pipeline_stage_name: String, signal_name: String, valid: Bool) = {
-    XSSim(valid, s"$pipeline_stage_name $signal_name\n")
+    XSDebug(valid, s"$pipeline_stage_name $signal_name\n")
   }
 
   val load_trace = Wire(new LoadPfDbBundle)

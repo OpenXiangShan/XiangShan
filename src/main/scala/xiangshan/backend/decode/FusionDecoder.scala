@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
-import utility.{XSDebug => XSSim, _}
+import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.FuType
@@ -447,7 +447,7 @@ class FusedLui32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 
   def fusionName: String = "lui_addi"
 
-  XSSim(isValid, p"[fusedLui32] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+  XSDebug(isValid, p"[fusedLui32] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
 }
 
 // Case: get 32 bits imm (in word format)
@@ -469,7 +469,7 @@ class FusedLui32w(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 
   def fusionName: String = "lui_addiw"
 
-  XSSim(isValid, p"[fusedLui32w] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+  XSDebug(isValid, p"[fusedLui32w] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
 }
 
 class FusionDecodeInfo extends Bundle {

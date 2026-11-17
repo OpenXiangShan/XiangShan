@@ -19,8 +19,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
-import utility.{XSDebug => XSSim}
 import utility.ParallelXOR
+import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
@@ -279,39 +279,39 @@ class IttageTable(
     .reduce(_ || _)
   XSPerfAccumulate("ittage_table_update_overwrite", io.update.valid && updateOverwrite)
 
-  if (sim) {
+  if (debug) {
     val u    = io.update
     val bank = s0_bankIdx
     val idx  = s0_setIdx
     val tag  = s0_tag
-    XSSim(
+    XSDebug(
       io.req.fire,
       p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.startPc.toUInt)}, bank=$bank, idx=$idx, tag=$tag\n"
     )
-    XSSim(
+    XSDebug(
       RegNext(io.req.fire) && s1_reqReadHit,
       p"ITTageTableResp: bankMask=${Binary(s1_bankMask)}, idx=$s1_setIdx, hit:${s1_reqReadHit}, " +
         p"ctr:${io.resp.bits.cnt}, u:${io.resp.bits.usefulCnt}, tar:${Hexadecimal(io.resp.bits.targetOffset.offset.toUInt)}\n"
     )
-    XSSim(
+    XSDebug(
       io.update.valid,
       p"update ITTAGE Table: pc:${Hexadecimal(u.startPc.toUInt)}}, bank=${updateBankIdx}, " +
         p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCnt}, " +
         p"target:${Hexadecimal(u.targetOffset.offset.toUInt)}, old_target:${Hexadecimal(u.oldTargetOffset.offset.toUInt)}\n"
     )
-    XSSim(
+    XSDebug(
       io.update.valid,
       p"update ITTAGE Table: writing bank=${updateBankIdx}, tag:${updateTag}, " +
         p"ctr: ${updateWdata.confidenceCnt}, target:${Hexadecimal(updateWdata.targetOffset.offset.toUInt)}" +
         p" in idx $updateIdx\n"
     )
-    XSSim(RegNext(io.req.fire) && !s1_reqReadHit, "TageTableResp: no hits!\n")
+    XSDebug(RegNext(io.req.fire) && !s1_reqReadHit, "TageTableResp: no hits!\n")
 
-    // ----------------------------Simulation----------------------------------
+    // ------------------------------Debug-------------------------------------
     val valids = RegInit(VecInit.fill(NumBanks)(VecInit.fill(NumSetsPerBank)(false.B)))
     when(io.update.valid)(valids(updateBankIdx)(updateIdx) := true.B)
-    XSSim("ITTAGE Table usage:------------------------\n")
+    XSDebug("ITTAGE Table usage:------------------------\n")
     val totalValid = valids.map(bankVec => PopCount(bankVec)).reduce(_ +& _)
-    XSSim("%d out of %d rows are valid\n", totalValid, nRows.U)
+    XSDebug("%d out of %d rows are valid\n", totalValid, nRows.U)
   }
 }

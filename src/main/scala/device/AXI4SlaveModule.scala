@@ -19,7 +19,7 @@ package device
 import chisel3._
 import chisel3.util._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
@@ -62,23 +62,23 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
 
 
 //  val timer = GTimer()
-  XSSim(in.ar.fire,
+  XSDebug(in.ar.fire,
     p"[ar] addr: ${Hexadecimal(in.ar.bits.addr)} " +
     p"arlen:${in.ar.bits.len} arsize:${in.ar.bits.size} " +
     p"id: ${in.ar.bits.id}\n"
   )
-  XSSim(in.aw.fire,
+  XSDebug(in.aw.fire,
     p"[aw] addr: ${Hexadecimal(in.aw.bits.addr)} " +
     p"awlen:${in.aw.bits.len} awsize:${in.aw.bits.size} " +
     p"id: ${in.aw.bits.id}\n"
   )
-  XSSim(in.w.fire,
+  XSDebug(in.w.fire,
     p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last} data:${Hexadecimal(in.w.bits.data)}\n"
   )
-  XSSim(in.b.fire,
+  XSDebug(in.b.fire,
     p"[b] id: ${in.b.bits.id}\n"
   )
-  XSSim(in.r.fire,
+  XSDebug(in.r.fire,
     p"[r] id: ${in.r.bits.id} data: ${Hexadecimal(in.r.bits.data)}\n"
   )
 

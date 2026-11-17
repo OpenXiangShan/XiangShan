@@ -6,7 +6,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.rob.Rob.RobSimRollingIO
+import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.HasL1PrefetchSourceParameter
 
@@ -60,7 +60,7 @@ class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with Ha
 
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
 
-  val simRolling = Flipped(new RobSimRollingIO)
+  val debugRolling = Flipped(new RobDebugRollingIO)
 }
 
 class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
@@ -126,25 +126,25 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   XSPerfRolling(
     "L1PrefetchAccuracyIns",
     hit_pf_in_cache, total_prefetch,
-    1000, io.simRolling.robTrueCommit, clock, reset
+    1000, io.debugRolling.robTrueCommit, clock, reset
   )
   
   XSPerfRolling(
     "L1PrefetchLatenessIns",
     hit_pf_in_mshr, prefetch_miss,
-    1000, io.simRolling.robTrueCommit, clock, reset
+    1000, io.debugRolling.robTrueCommit, clock, reset
   )
 
   XSPerfRolling(
     "L1PrefetchPollutionIns",
     pollution, demand_miss_in_ldu,
-    1000, io.simRolling.robTrueCommit, clock, reset
+    1000, io.debugRolling.robTrueCommit, clock, reset
   )
 
   XSPerfRolling(
     "IPCIns",
-    io.simRolling.robTrueCommit, 1.U,
-    1000, io.simRolling.robTrueCommit, clock, reset
+    io.debugRolling.robTrueCommit, 1.U,
+    1000, io.debugRolling.robTrueCommit, clock, reset
   )
 }
 

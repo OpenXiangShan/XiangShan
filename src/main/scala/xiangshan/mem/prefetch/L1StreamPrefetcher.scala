@@ -67,7 +67,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
 
-  // sim usage
+  // debug usage
   val trigger_full_va = UInt(VAddrBits.W)
 
   def reset(index: Int) = {
@@ -127,7 +127,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val bit_vec = UInt(BIT_VEC_WITDH.W)
   val source = new L1PrefetchSource()
   val confidence = UInt(1.W)
-  // sim usage
+  // debug usage
   val trigger_pc = UInt(VAddrBits.W)
   val trigger_va = UInt(VAddrBits.W)
 
@@ -233,7 +233,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     replacement.access(s0_index)
   }
 
-  val stream_pf_train_sim_table = ChiselDB.createTable("StreamTrainTraceTable" + p(XSCoreParamsKey).HartId.toString, new StreamTrainTraceEntry, basicDB = false)
+  val stream_pf_train_debug_table = ChiselDB.createTable("StreamTrainTraceTable" + p(XSCoreParamsKey).HartId.toString, new StreamTrainTraceEntry, basicDB = false)
 
   val spf_log_enable = s0_valid
   val spf_log_data = Wire(new StreamTrainTraceEntry)
@@ -250,7 +250,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   spf_log_data.Score := DontCare
   spf_log_data.Miss := io.train_req.bits.miss
 
-  stream_pf_train_sim_table.log(
+  stream_pf_train_debug_table.log(
     data = spf_log_data,
     en = spf_log_enable,
     site = "StreamTrainTraceTable",

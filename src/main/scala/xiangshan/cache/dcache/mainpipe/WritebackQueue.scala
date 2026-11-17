@@ -22,7 +22,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
-import utility.{XSDebug => XSSim, XSPerfAccumulate, HasPerfEvents}
+import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
@@ -40,7 +40,7 @@ class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
   val addr = UInt(PAddrBits.W)
 
   def dump(cond: Bool) = {
-    XSSim(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
+    XSDebug(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
       addr, param, voluntary, hasData)
   }
 }
@@ -53,7 +53,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
   val data = UInt((cfg.blockBytes * 8).W)
 
   override def dump(cond: Bool) = {
-    XSSim(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
+    XSDebug(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
       addr, param, voluntary, hasData, data)
   }
 
@@ -190,7 +190,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   s_data_override := true.B // data_override takes only 1 cycle
   //s_data_merge := true.B // data_merge takes only 1 cycle
 
-  XSSim(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
+  XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
 
   // --------------------------------------------------------------------------------
   // s_invalid: receive requests
@@ -409,7 +409,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   // sanity check
-  // print all input/output requests for sim purpose
+  // print all input/output requests for debug purpose
   // print req
   io.req.bits.dump(io.req.fire)
 
@@ -417,8 +417,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     io.mem_grant(ch).bits.dump(io.mem_grant(ch).fire)
   }
 
-  // XSSim(io.miss_req.valid, "miss_req: addr: %x\n", io.miss_req.bits)
-  // XSSim(io.block_miss_req, "block_miss_req\n")
+  // XSDebug(io.miss_req.valid, "miss_req: addr: %x\n", io.miss_req.bits)
+  // XSDebug(io.block_miss_req, "block_miss_req\n")
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire)

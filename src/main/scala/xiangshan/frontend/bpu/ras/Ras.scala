@@ -28,9 +28,9 @@ package xiangshan.frontend.bpu.ras
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{XSDebug => XSSim}
 import utility.HasCircularQueuePtrHelper
 import utility.RegNextWithEnable
+import utility.XSDebug
 import utility.XSPerfAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.GuardedPcInit
@@ -114,33 +114,33 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
 
-  private val specSim  = stack.sim
-  private val specFire = io.specIn.valid
-  XSSim(specFire, "----------------RAS----------------\n")
-  XSSim(specFire, " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
-  XSSim(specFire, "  index       addr           ctr           nos (spec part)\n")
+  private val specDebug = stack.debug
+  private val specFire  = io.specIn.valid
+  XSDebug(specFire, "----------------RAS----------------\n")
+  XSDebug(specFire, " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
+  XSDebug(specFire, "  index       addr           ctr           nos (spec part)\n")
   for (i <- 0 until SpecQueueSize) {
-    XSSim(
+    XSDebug(
       specFire,
       "  (%d)   0x%x      %d       %d",
       i.U,
-      specSim.specQueue(i).retAddr.toUInt,
-      specSim.specQueue(i).ctr,
-      specSim.specNos(i).value
+      specDebug.specQueue(i).retAddr.toUInt,
+      specDebug.specQueue(i).ctr,
+      specDebug.specNos(i).value
     )
-    XSSim(specFire && i.U === stack.meta.tosw.value, "   <----TOSW")
-    XSSim(specFire && i.U === stack.meta.tosr.value, "   <----TOSR")
-    XSSim(specFire && i.U === specSim.bos.value, "   <----BOS")
-    XSSim(specFire, "\n")
+    XSDebug(specFire && i.U === stack.meta.tosw.value, "   <----TOSW")
+    XSDebug(specFire && i.U === stack.meta.tosr.value, "   <----TOSR")
+    XSDebug(specFire && i.U === specDebug.bos.value, "   <----BOS")
+    XSDebug(specFire, "\n")
   }
-  XSSim(specFire, "  index       addr           ctr   (committed part)\n")
+  XSDebug(specFire, "  index       addr           ctr   (committed part)\n")
   for (i <- 0 until CommitStackSize) {
-    XSSim(
+    XSDebug(
       specFire,
       "  (%d)   0x%x      %d",
       i.U,
-      specSim.commitStack(i).retAddr.toUInt,
-      specSim.commitStack(i).ctr
+      specDebug.commitStack(i).retAddr.toUInt,
+      specDebug.commitStack(i).ctr
     )
   }
 }

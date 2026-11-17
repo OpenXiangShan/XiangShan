@@ -95,9 +95,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val icachectrl_port_opt = Option.when(icacheCtrlEnabled)(TLTempNode())
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
 
-  val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !simOpts.FPGAPlatform) // l1D & l1I & PTW
+  val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
 
-  val enbale_tllog = !simOpts.FPGAPlatform && simOpts.AlwaysBasicDB
+  val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = Seq.tabulate(numMemChannelsFromDcache)(i =>
     TLLogger(s"L2_L1D_${coreParams.HartId}_ch$i", enbale_tllog)
   )
@@ -124,7 +124,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
-        FPGAPlatform = simOpts.FPGAPlatform,
+        FPGAPlatform = debugOpts.FPGAPlatform,
         hasMbist = hasMbist,
         PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
         sliceCoherentClientMap = sliceCoherentClientMap
@@ -225,7 +225,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Flipped(new TraceCoreInterface)
         val toTile   = new TraceCoreInterface
       }
-      val simTopDown = new Bundle() {
+      val debugTopDown = new Bundle() {
         val robTrueCommit = Input(UInt(64.W))
         val robHeadPaddr = Flipped(Valid(UInt(36.W)))
         val l2MissMatch = Output(Bool())
@@ -332,9 +332,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_fdbk_pf_ctrl := l2.io.l2_fdbk_pf_ctrl
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
-      l2.io.debugTopDown.robHeadPaddr := io.simTopDown.robHeadPaddr
-      l2.io.debugTopDown.robTrueCommit := io.simTopDown.robTrueCommit
-      io.simTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
+      l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
+      l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
+      io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
       io.l2Miss := l2.io.l2Miss
       io.l2_flush_done.foreach { _ := l2.io.l2FlushDone.getOrElse(false.B) }
       l2.io.l2Flush.foreach { _ := io.l2_flush_en.getOrElse(false.B) }
@@ -389,7 +389,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
-      io.simTopDown <> DontCare
+      io.debugTopDown <> DontCare
       io.l2Miss := false.B
 
       io.l2_tlb_req.req.valid := false.B
@@ -418,7 +418,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val reset_core = IO(Output(Reset()))
     io <> inner.module.io
 
-    if (simOpts.ResetGen) {
+    if (debugOpts.ResetGen) {
       ResetGen(ResetGenNode(Seq(
         CellNode(reset_core),
         ModuleNode(inner.module)

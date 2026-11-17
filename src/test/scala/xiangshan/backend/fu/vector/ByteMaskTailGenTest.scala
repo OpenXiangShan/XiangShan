@@ -32,12 +32,12 @@ class ByteMaskTailGenTest extends AnyFlatSpec with Matchers with ChiselSim {
         m.io.in.vsew.poke(VSew.e8)
         m.io.in.maskUsed.poke("b0101_0101_0101_0101".U)
 
-        println("startBytes: " + m.io.simOnly.startBytes.peek().litValue.toInt)
-        println("vlBytes: " + m.io.simOnly.vlBytes.peek().litValue.toInt)
-        println("prestartEn: " + m.io.simOnly.prestartEn.peek().litValue.toString(2))
-        println("bodyEn: " + m.io.simOnly.bodyEn.peek().litValue.toString(2))
-        println("tailEn: " + m.io.simOnly.tailEn.peek().litValue.toString(2))
-        println("maskEn: " + m.io.simOnly.maskEn.peek().litValue.toString(2))
+        println("startBytes: " + m.io.debugOnly.startBytes.peek().litValue.toInt)
+        println("vlBytes: " + m.io.debugOnly.vlBytes.peek().litValue.toInt)
+        println("prestartEn: " + m.io.debugOnly.prestartEn.peek().litValue.toString(2))
+        println("bodyEn: " + m.io.debugOnly.bodyEn.peek().litValue.toString(2))
+        println("tailEn: " + m.io.debugOnly.tailEn.peek().litValue.toString(2))
+        println("maskEn: " + m.io.debugOnly.maskEn.peek().litValue.toString(2))
         println("activeEn: " + m.io.out.activeEn.peek().litValue.toString(2))
         println("agnosticEn: " + m.io.out.agnosticEn.peek().litValue.toString(2))
     }

@@ -54,7 +54,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     resolve.bits.taken      := wbRedirect.bits.taken
     resolve.bits.mispredict := true.B
     resolve.bits.attribute  := wbRedirect.bits.attribute
-    resolve.bits.sim_isRVC.foreach(_ := wbRedirect.bits.isRVC)
+    resolve.bits.debug_isRVC.foreach(_ := wbRedirect.bits.isRVC)
 
     val ftqIdx = Wire(Valid(new FtqPtr))
     ftqIdx.valid := redirect.valid

@@ -36,7 +36,7 @@ case class BpuParameters(
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // ppa
     NumStartPcDuplicate: Int = 3, // duplicate pc-related register to control fan-out
-    // sim
+    // debug
     EnableBpTrace: Boolean = false,
     // history
     phrParameters:      PhrParameters = PhrParameters(),

@@ -233,7 +233,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   QueuePerf(RabSize, numValidEntries, numValidEntries === size.U)
 
-  if (backendParams.simEn) {
+  if (backendParams.debugEn) {
     dontTouch(deqPtrVec)
     dontTouch(walkPtrNext)
     dontTouch(walkSizeNxt)

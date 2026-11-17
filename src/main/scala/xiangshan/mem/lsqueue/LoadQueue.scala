@@ -221,7 +221,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val rarValidCount = Output(UInt())
 
-    val simTopDown = new LoadQueueTopDownIO
+    val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
     val specialMode = Output(Bool())
   })
@@ -321,7 +321,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
   loadQueueReplay.io.ncWakeup := uncacheBuffer.io.ncWakeup
 
-  loadQueueReplay.io.simTopDown <> io.simTopDown
+  loadQueueReplay.io.debugTopDown <> io.debugTopDown
   loadQueueReplay.io.replayAllocate <> io.replayAllocate
   io.specialMode := loadQueueReplay.io.specialMode
 

@@ -67,7 +67,7 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   )
 
   private class ResolveWithSource(implicit p: Parameters) extends Resolve {
-    val sim_source: UInt = ResolveSource()
+    val debug_source: UInt = ResolveSource()
 
     def fromResolve(source: UInt, resolve: Resolve): ResolveWithSource = {
       this.ftqIdx     := resolve.ftqIdx
@@ -77,8 +77,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
       this.taken      := resolve.taken
       this.mispredict := resolve.mispredict
       this.attribute  := resolve.attribute
-      this.sim_isRVC.foreach(_ := resolve.sim_isRVC.get)
-      this.sim_source := source
+      this.debug_isRVC.foreach(_ := resolve.debug_isRVC.get)
+      this.debug_source := source
       this
     }
   }
@@ -131,10 +131,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   resolve.zipWithIndex.foreach { case (branch, i) =>
     when(branch.valid && !full) {
-      mem(enqIndex(i)).valid           := true.B
-      mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
-      mem(enqIndex(i)).bits.startPc    := branch.bits.pc
-      mem(enqIndex(i)).bits.sim_source := branch.bits.sim_source
+      mem(enqIndex(i)).valid             := true.B
+      mem(enqIndex(i)).bits.ftqIdx       := branch.bits.ftqIdx
+      mem(enqIndex(i)).bits.startPc      := branch.bits.pc
+      mem(enqIndex(i)).bits.debug_source := branch.bits.debug_source
 
       val firstEmpty = mem(enqIndex(i)).bits.branches.indexWhere(!_.valid)
       val branchSlot = mem(enqIndex(i)).bits.branches(firstEmpty + PopCount(hitPrevious(i)))
@@ -144,11 +144,11 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
       branchSlot.bits.cfiPosition := getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
       branchSlot.bits.attribute   := branch.bits.attribute
       branchSlot.bits.mispredict  := branch.bits.mispredict
-      if (branchSlot.bits.sim_realCfiPc.isDefined) {
-        branchSlot.bits.sim_realCfiPc.get := getRealCfiPcFromOffset(
+      if (branchSlot.bits.debug_realCfiPc.isDefined) {
+        branchSlot.bits.debug_realCfiPc.get := getRealCfiPcFromOffset(
           branch.bits.pc,
           branch.bits.ftqOffset,
-          branch.bits.sim_isRVC.get
+          branch.bits.debug_isRVC.get
         )
       }
     }

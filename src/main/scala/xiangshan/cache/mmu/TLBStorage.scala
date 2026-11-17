@@ -240,7 +240,7 @@ class TLBFA(
   println(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
-// TLBFakeFA: Software TLB implementation using DPI-C PteHelper for sim/simulation
+// TLBFakeFA: Software TLB implementation using DPI-C PteHelper for debug/simulation
 // This module bypasses hardware page table walk and uses C++ reference model instead
 class TLBFakeFA(
   ports: Int,
@@ -261,9 +261,9 @@ class TLBFakeFA(
   val sv39x4Enable = io.csr.hgatp.mode === Sv39x4
   val sv48x4Enable = io.csr.hgatp.mode === Sv48x4
 
-  val vmEnable = if (EnableTlbSim) (sv39Enable || sv48Enable)
+  val vmEnable = if (EnableTlbDebug) (sv39Enable || sv48Enable)
     else ((sv39Enable || sv48Enable) && (mode < ModeM))
-  val s2xlateEnable = if (EnableTlbSim) {
+  val s2xlateEnable = if (EnableTlbDebug) {
     sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable
   } else {
     (sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable) && (mode < ModeM)

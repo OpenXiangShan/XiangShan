@@ -54,7 +54,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
         )
       ),
       beatBytes = L3OuterBusWidth / 8,
-      requestKeys = if (simOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
+      requestKeys = if (debugOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
     )
   ))
 

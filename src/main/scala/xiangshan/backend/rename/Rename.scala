@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
-import utility.{XSDebug => XSSim, _}
+import utility._
 import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
@@ -88,15 +88,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // for rat
     val hartId        = Input(UInt(8.W))
     val ratOldPdest      = Output(new RatToVecExcpMod)
-    val diffRatCommitRobIdx = Option.when(backendParams.basicSimEn)(Input(Valid(new RobPtr)))
+    val diffRatCommitRobIdx = Option.when(backendParams.basicDebugEn)(Input(Valid(new RobPtr)))
     val diffRatCommitRobIdxVec =
-      Option.when(backendParams.basicSimEn)(Input(Vec(CommitWidth, Valid(new RobPtr))))
-    val diff_vl_rat      = Option.when(backendParams.basicSimEn)(Output(Vec(VlLogicRegs, UInt(PhyRegIdxWidth.W))))
+      Option.when(backendParams.basicDebugEn)(Input(Vec(CommitWidth, Valid(new RobPtr))))
+    val diff_vl_rat      = Option.when(backendParams.basicDebugEn)(Output(Vec(VlLogicRegs, UInt(PhyRegIdxWidth.W))))
     val ratSnpt = Input(new SnapshotPort)
     // perf only
-    val simDispatchAllFire = OptionWrapper(backendParams.simEn, Input(Bool()))
-    val simOutValidVec = OptionWrapper(backendParams.simEn, Vec(RenameWidth, Input(Bool())))
-    val simRobHeadStall = Option.when(backendParams.simEn)(Flipped(ValidIO(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))))
+    val debugDispatchAllFire = OptionWrapper(backendParams.debugEn, Input(Bool()))
+    val debugOutValidVec = OptionWrapper(backendParams.debugEn, Vec(RenameWidth, Input(Bool())))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(ValidIO(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
       val out = new StallReasonIO(RenameWidth)
@@ -104,8 +104,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
-    o.bits.sim.foreach{ x =>
-      PerfCCT.updateInstPos(x.sim_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+    o.bits.debug.foreach{ x =>
+      PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
     }
   }
 
@@ -132,11 +132,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val vec_old_pdest = Wire(Vec(RabCommitWidth, UInt(PhyRegIdxWidth.W)))
   val vl_old_pdest  = Wire(Vec(RabCommitWidth, UInt(PhyRegIdxWidth.W)))
 
-  // sim arch ports
-  val sim_int_rat = Option.when(backendParams.simEn)(Wire(Vec(IntLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
-  val sim_fp_rat  = Option.when(backendParams.simEn)(Wire(Vec(FpLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
-  val sim_vec_rat = Option.when(backendParams.simEn)(Wire(Vec(VecStdLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
-  val sim_vl_rat  = Option.when(backendParams.simEn)(Wire(Vec(VlLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
+  // debug arch ports
+  val debug_int_rat = Option.when(backendParams.debugEn)(Wire(Vec(IntLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
+  val debug_fp_rat  = Option.when(backendParams.debugEn)(Wire(Vec(FpLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
+  val debug_vec_rat = Option.when(backendParams.debugEn)(Wire(Vec(VecStdLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
+  val debug_vl_rat  = Option.when(backendParams.debugEn)(Wire(Vec(VlLogicRegs, Input(UInt(PhyRegIdxWidth.W)))))
 
   intFreeList.io.commit match {
     case commit =>
@@ -145,7 +145,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         case (valid, info) => valid && info.rfWen && !info.isMove
       }
   }
-  intFreeList.io.sim_rat.foreach(_ := sim_int_rat.get)
+  intFreeList.io.debug_rat.foreach(_ := debug_int_rat.get)
 
   fpFreeList.io.commit match {
     case commit =>
@@ -155,7 +155,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
           valid && info.fpWen
       }
   }
-  fpFreeList.io.sim_rat.foreach(_ := sim_fp_rat.get)
+  fpFreeList.io.debug_rat.foreach(_ := debug_fp_rat.get)
 
   vecFreeList.io.commit match {
     case commit =>
@@ -165,14 +165,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
           valid && info.vecWen
       }
   }
-  vecFreeList.io.sim_rat.foreach(_ := sim_vec_rat.get)
+  vecFreeList.io.debug_rat.foreach(_ := debug_vec_rat.get)
 
   vlFreeList.io.commit match {
     case commit =>
       commit.doCommit := io.vlCommits.isCommit
       commit.archAlloc := io.vlCommits.commitValid
   }
-  vlFreeList.io.sim_rat.foreach(_ := sim_vl_rat.get)
+  vlFreeList.io.debug_rat.foreach(_ := debug_vl_rat.get)
 
   val intReadPorts = rat.io.intReadPorts
   val fpReadPorts  = rat.io.fpReadPorts
@@ -221,10 +221,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vec_old_pdest := rat.io.vec_old_pdest
   vl_old_pdest := rat.io.vl_old_pdest
 
-  sim_int_rat.foreach(_ := rat.io.sim_int_rat.get)
-  sim_fp_rat.foreach (_ := rat.io.sim_fp_rat.get)
-  sim_vec_rat.foreach(_ := rat.io.sim_vec_rat.get)
-  sim_vl_rat.foreach (_ := rat.io.sim_vl_rat.get)
+  debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
+  debug_fp_rat.foreach (_ := rat.io.debug_fp_rat.get)
+  debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
+  debug_vl_rat.foreach (_ := rat.io.debug_vl_rat.get)
 
   io.diff_vl_rat.foreach(_ := rat.io.diff_vl_rat.get)
 
@@ -369,16 +369,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   (uops zip io.in.map(_.bits)).zipWithIndex.foreach { case((uop, in), i) =>
     connectSamePort(uop, in)
-    uop.sim zip in.sim foreach { case (uopDbg, inDbg) =>
+    uop.debug zip in.debug foreach { case (uopDbg, inDbg) =>
       uopDbg.pc := inDbg.pc
-      uopDbg.sim_seqNum := inDbg.sim_seqNum
+      uopDbg.debug_seqNum := inDbg.debug_seqNum
       uopDbg.instr := in.instr
       val slotMask = Mux(slotIsFormer(i), formerSlotMaskVec(i), latterSlotMaskVec(i))
       uopDbg.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse))
-      // Only assign performance counters in simInfo
-      uopDbg.perfSimInfo := 0.U.asTypeOf(uopDbg.perfSimInfo)
-      uopDbg.perfSimInfo.renameTime := GTimer()
-      uopDbg.sim_trigger := (slotMask & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
+      // Only assign performance counters in debugInfo
+      uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
+      uopDbg.perfDebugInfo.renameTime := GTimer()
+      uopDbg.debug_sim_trig := (slotMask & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
     }
   }
   private val fuType       = uops.map(_.fuType)
@@ -514,7 +514,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val slotMask = Mux(slotIsFormer(i), formerMask, latterMask)
     val slotLastMask = Reverse(PriorityEncoderOH(Reverse(slotMask)))
     uops(i).lastIsRVC := (slotLastMask & Cat(io.in.map(_.bits.isRVC).reverse)).orR
-    uops(i).sim.foreach(_.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse)))
+    uops(i).debug.foreach(_.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse)))
 
     val hasWideFormer = formerMask(i) && io.in(i).bits.numWB > 2.U
     for (k <- 0 until RenameWidth) {
@@ -590,7 +590,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).pdestV0 := 0.U // TODO: reimplement as pdestMask
 
     // Assign performance counters
-    uops(i).sim.foreach(_.perfSimInfo.renameTime := GTimer())
+    uops(i).debug.foreach(_.perfDebugInfo.renameTime := GTimer())
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
     io.out(i).bits := uops(i)
@@ -847,7 +847,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   uops.map{ x =>
     x.hasException := x.exceptionVec.orR || TriggerAction.isDmode(x.trigger)
   }
-  if(backendParams.simEn){
+  if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
     dontTouch(genSnapshot)
@@ -902,10 +902,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   /*
-  Simulation and performance counters
+  Debug and performance counters
    */
   def printRenameInfo(in: DecoupledIO[DecodeOutUop], out: DecoupledIO[RenameOutUop]) = {
-    val pc = if(backendParams.simEn) in.bits.sim.get.pc else 0.U
+    val pc = if(backendParams.debugEn) in.bits.debug.get.pc else 0.U
     XSInfo(out.fire, p"pc:${Hexadecimal(pc)} in(${in.valid},${in.ready}) " +
       p"lsrc(0):${in.bits.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
       p"lsrc(1):${in.bits.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
@@ -927,12 +927,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val inValidVec = io.in.map(_.valid)
   val inReadyVec = io.in.map(_.ready)
-  val outValidVec = io.simOutValidVec.getOrElse(VecInit.fill(RenameWidth)(false.B))
+  val outValidVec = io.debugOutValidVec.getOrElse(VecInit.fill(RenameWidth)(false.B))
   val outReadyVec = io.out.map(_.ready)
   val outFireVec = outReadyVec.zip(outValidVec).map { case (ready, valid) =>
     ready && valid
   }
-  val dispatchAllFire = io.simDispatchAllFire.getOrElse(false.B)
+  val dispatchAllFire = io.debugDispatchAllFire.getOrElse(false.B)
 
   // pre pipe stall/bubble
   val decodeReason = io.stallReason.in.reason
@@ -964,8 +964,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // current stall
   // bad speculation (redirect)
   val redirectStall       = io.redirect.valid
-  val ctrlRedirectStall   = io.redirect.bits.simIsCtrl
-  val mvioRedirectStall   = io.redirect.bits.simIsMemVio
+  val ctrlRedirectStall   = io.redirect.bits.debugIsCtrl
+  val mvioRedirectStall   = io.redirect.bits.debugIsMemVio
   val otherRedirectStall  = redirectStall && !(ctrlRedirectStall || mvioRedirectStall)
   val redirectStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
     ctrlRedirectStall  -> ControlRedirectStall.id.U,
@@ -974,10 +974,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   ))
 
   // bad pseculation  (rabwalk)
-  val simRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
+  val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
   val recStall      = io.rabCommits.isWalk
-  val ctrlRecStall  = simRedirect.simIsCtrl
-  val mvioRecStall  = simRedirect.simIsMemVio
+  val ctrlRecStall  = debugRedirect.debugIsCtrl
+  val mvioRecStall  = debugRedirect.debugIsMemVio
   val otherRecStall = recStall && !(ctrlRecStall || mvioRecStall)
   val recStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
     ctrlRecStall  -> ControlRecoveryStall.id.U,
@@ -1003,8 +1003,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   )) > 1.U
 
   // TODO make all stall reason option to remove getorElse
-  val robHeadStall = io.simRobHeadStall.map(_.valid).getOrElse(false.B)
-  val robHeadStallReason = io.simRobHeadStall.map(_.bits).getOrElse(0.U)
+  val robHeadStall = io.debugRobHeadStall.map(_.valid).getOrElse(false.B)
+  val robHeadStallReason = io.debugRobHeadStall.map(_.bits).getOrElse(0.U)
 
   val freelistStall = intFlStall || fpFlStall || vecFlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
@@ -1061,15 +1061,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     stallReason := stallReasonPipe.io.outReason
   }
 
-  XSSim(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
-  XSSim(io.rabCommits.isWalk, p"validVec:${Binary(io.rabCommits.walkValid.asUInt)}\n")
+  XSDebug(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
+  XSDebug(io.rabCommits.isWalk, p"validVec:${Binary(io.rabCommits.walkValid.asUInt)}\n")
   for (i <- 0 until RabCommitWidth) {
     val info = io.rabCommits.info(i)
-    XSSim(io.rabCommits.isWalk && io.rabCommits.walkValid(i), p"[#$i walk info] " +
+    XSDebug(io.rabCommits.isWalk && io.rabCommits.walkValid(i), p"[#$i walk info] " +
       p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} vecWen:${info.vecWen} v0Wen:${info.v0Wen}")
   }
 
-  XSSim(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
+  XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
 
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))

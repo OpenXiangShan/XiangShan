@@ -18,8 +18,8 @@ package xiangshan.frontend.bpu.history.phr
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{XSDebug => XSSim}
 import utility.CircularQueuePtr
+import utility.XSDebug
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuRedirect
@@ -94,7 +94,7 @@ class PhrMeta(implicit p: Parameters) extends PhrBundle {
   val phrPtr:     PhrPtr = new PhrPtr
   val phrLowBits: UInt   = UInt(PathHashHighWidth.W)
 
-  // for sim
+  // for debug
   val predFoldedHist: Option[PhrAllFoldedHistories] =
     Option.when(!env.FPGAPlatform)(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
 }
@@ -243,7 +243,7 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
 
   def display(cond: Bool): Unit =
     for (h <- hist) {
-      XSSim(
+      XSDebug(
         cond,
         p"hist len ${h.info.HistoryLength}, folded len ${h.info.FoldedLength}, value ${Binary(h.foldedHist)}\n"
       )

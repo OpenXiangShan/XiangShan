@@ -27,7 +27,7 @@ import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWrite
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.ctrlblock.{SimLsInfoBundle, LsTopdownInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.rob.RobPtr
@@ -62,7 +62,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     val tlbReq = DecoupledIO(new TlbReq)
 
     // DCache request
-    // TODO: move pf_source, is128Req, sim info like s*_pc into req
+    // TODO: move pf_source, is128Req, debug info like s*_pc into req
     // TODO: remove replacement updated
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val is128Req = Bool()
@@ -84,8 +84,8 @@ class LoadUnitS0(param: ExeUnitParams)(
     // IQ wakeup
     val wakeup = ValidIO(new MemWakeUpBundle)
 
-    // Simulation info
-    val simInfo = Output(new Bundle() {
+    // Debug info
+    val debugInfo = Output(new Bundle() {
       val pc = Output(UInt(VAddrBits.W))
     })
   })
@@ -347,8 +347,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.storeSetHit := uop.storeSetHit
   storeForwardReq.waitSqIdx := uop.waitSqIdx
 
-  if(simEn) {
-    storeForwardReq.sim_robIdx.get := uop.robIdx
+  if(debugEn) {
+    storeForwardReq.debug_robIdx.get := uop.robIdx
   }
 
   val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay()
@@ -418,9 +418,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq
   // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
   io.tlbReq.bits.frm_mabuf := false.B
-  io.tlbReq.bits.sim.pc := uop.pc
-  io.tlbReq.bits.sim.robIdx := uop.robIdx
-  io.tlbReq.bits.sim.isFirstIssue := firstIssue
+  io.tlbReq.bits.debug.pc := uop.pc
+  io.tlbReq.bits.debug.robIdx := uop.robIdx
+  io.tlbReq.bits.debug.isFirstIssue := firstIssue
 
   io.dcacheReq.valid := dcacheReqValid && !noDCacheAccess
   io.dcacheReq.bits.cmd := Mux(isPrefetch, MemoryOpConstants.M_PFR, MemoryOpConstants.M_XRD)
@@ -433,7 +433,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.bits.isFirstIssue := firstIssue
   io.dcacheReq.bits.replayCarry := DontCare
   io.dcacheReq.bits.lqIdx := uop.lqIdx
-  io.dcacheReq.bits.sim_robIdx := uop.robIdx.value
+  io.dcacheReq.bits.debug_robIdx := uop.robIdx.value
   io.is128Req := readWholeBank
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
@@ -455,7 +455,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.wakeup.valid := wakeupValid
   io.wakeup.bits := wakeup
 
-  io.simInfo.pc := uop.pc
+  io.debugInfo.pc := uop.pc
 
   /**
     *  Perf counters
@@ -490,7 +490,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   /**
    * PerfCCT
    */
-  io.ldin.bits.sim_seqNum.foreach(x =>
+  io.ldin.bits.debug_seqNum.foreach(x =>
     PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
   )
 }
@@ -551,8 +551,8 @@ class LoadUnitS1(param: ExeUnitParams)(
     // Load trigger
     val csrTrigger = Input(new CsrTriggerBundle)
 
-    // Simulation info
-    val simInfo = Output(new Bundle() {
+    // Debug info
+    val debugInfo = Output(new Bundle() {
       val isTlbFirstMiss = Bool()
       val isLoadToLoadForward = Bool()
       val robIdx = UInt(log2Ceil(RobSize).W)
@@ -704,10 +704,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.uop.exceptionVec(loadPageFault) := pf
   stageInfo.uop.exceptionVec(loadAccessFault) := af
   stageInfo.uop.exceptionVec(loadGuestPageFault) := gpf
-  stageInfo.uop.perfSimInfo.tlbRespTime := Mux(
+  stageInfo.uop.perfDebugInfo.tlbRespTime := Mux(
     pipeIn.valid && paddrEffective,
     GTimer(),
-    Mux(pipeIn.valid && tlbMiss, uop.perfSimInfo.tlbFirstReqTime, uop.perfSimInfo.tlbRespTime)
+    Mux(pipeIn.valid && tlbMiss, uop.perfDebugInfo.tlbFirstReqTime, uop.perfDebugInfo.tlbRespTime)
   )
   // update tlb response
   stageInfo.fullva := tlbResp.bits.fullva
@@ -773,13 +773,13 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.swInstrPrefetch.valid := pipeIn.valid && isSwInstrPrefetch
   io.swInstrPrefetch.bits.vaddr := vaddr
 
-  io.simInfo.isTlbFirstMiss := pipeIn.valid && !kill && tlbMiss && in.isFirstIssue()
-  io.simInfo.isLoadToLoadForward := false.B
-  io.simInfo.robIdx := robIdx.value
-  io.simInfo.hasROBEntry := in.hasROBEntry
-  io.simInfo.vaddr.valid := pipeIn.valid && !kill
-  io.simInfo.vaddr.bits := vaddr
-  io.simInfo.pc := uop.pc
+  io.debugInfo.isTlbFirstMiss := pipeIn.valid && !kill && tlbMiss && in.isFirstIssue()
+  io.debugInfo.isLoadToLoadForward := false.B
+  io.debugInfo.robIdx := robIdx.value
+  io.debugInfo.hasROBEntry := in.hasROBEntry
+  io.debugInfo.vaddr.valid := pipeIn.valid && !kill
+  io.debugInfo.vaddr.bits := vaddr
+  io.debugInfo.pc := uop.pc
 
   assert(!(pipeIn.valid && in.isUncacheReplay()) || kill || io.uncacheBypassResp.valid,
     "uncache bypass should always success")
@@ -859,8 +859,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
 
-    // Simulation info
-    val simInfo = Output(new Bundle() {
+    // Debug info
+    val debugInfo = Output(new Bundle() {
       val isBankConflict = Bool()
       val isDCacheMiss = Bool()
       val isDCacheFirstMiss = Bool() // ?
@@ -1102,7 +1102,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.ftqPtr := uop.ftqPtr
   nukeQueryReq.ftqOffset := uop.ftqOffset
   nukeQueryReq.pc := uop.pc
-  nukeQueryReq.simInfo := uop.perfSimInfo
+  nukeQueryReq.debugInfo := uop.perfDebugInfo
 
   val rarNack = io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
   val rawNack = io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
@@ -1234,17 +1234,17 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()
   io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refill_latency
 
-  io.simInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
-  io.simInfo.isDCacheMiss := pipeIn.valid && !kill && cause(C_DM)
-  io.simInfo.isDCacheFirstMiss := pipeIn.valid && !kill && cause(C_DM) && in.isFirstIssue()
-  io.simInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.real_miss
-  io.simInfo.isForwardFail := pipeIn.valid && !kill && cause(C_FF)
-  io.simInfo.isTlbNotMiss := pipeIn.valid && !kill && tlbNotMiss
-  io.simInfo.robIdx := robIdx.value
-  io.simInfo.hasROBEntry := in.hasROBEntry
-  io.simInfo.paddr.valid := pipeIn.valid && !kill
-  io.simInfo.paddr.bits := paddr
-  io.simInfo.pc := uop.pc
+  io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
+  io.debugInfo.isDCacheMiss := pipeIn.valid && !kill && cause(C_DM)
+  io.debugInfo.isDCacheFirstMiss := pipeIn.valid && !kill && cause(C_DM) && in.isFirstIssue()
+  io.debugInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.real_miss
+  io.debugInfo.isForwardFail := pipeIn.valid && !kill && cause(C_FF)
+  io.debugInfo.isTlbNotMiss := pipeIn.valid && !kill && tlbNotMiss
+  io.debugInfo.robIdx := robIdx.value
+  io.debugInfo.hasROBEntry := in.hasROBEntry
+  io.debugInfo.paddr.valid := pipeIn.valid && !kill
+  io.debugInfo.paddr.bits := paddr
+  io.debugInfo.pc := uop.pc
 
   /**
    *  Perf counters
@@ -1346,8 +1346,8 @@ class LoadUnitS3(param: ExeUnitParams)(
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
 
-    // Simulation info
-    val simInfo = Output(new Bundle() {
+    // Debug info
+    val debugInfo = Output(new Bundle() {
       val isReplayFast = Bool()
       val isReplaySlow = Bool()
       val isReplayRS = Bool()
@@ -1534,13 +1534,13 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
   ldout.toRob.bits.trigger.get := uop.trigger
   ldout.toRob.bits.isRVC.get := uop.isRVC
-  ldout.toRob.bits.simInfo.isMMIO.foreach(_ := in.isMMIOReplay())
-  ldout.toRob.bits.simInfo.isNCIO.foreach(_ := in.isNCReplay() && in.pmp.get.mmio)
-  ldout.toRob.bits.simInfo.isPerfCnt.foreach(_ := false.B)
-  ldout.toRob.bits.simInfo.paddr.foreach(_ := paddr)
-  ldout.toRob.bits.simInfo.vaddr.foreach(_ := vaddr)
-  ldout.toRob.bits.simInfo.perfSimInfo.foreach(_ := uop.perfSimInfo)
-  ldout.toRob.bits.simInfo.sim_seqNum.foreach(_ := uop.sim_seqNum)
+  ldout.toRob.bits.debugInfo.isMMIO.foreach(_ := in.isMMIOReplay())
+  ldout.toRob.bits.debugInfo.isNCIO.foreach(_ := in.isNCReplay() && in.pmp.get.mmio)
+  ldout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
+  ldout.toRob.bits.debugInfo.paddr.foreach(_ := paddr)
+  ldout.toRob.bits.debugInfo.vaddr.foreach(_ := vaddr)
+  ldout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
+  ldout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
 
   // Writeback to backend(vector)
   val vldoutValid = pipeIn.valid && shouldWriteback && uop.vecWen && endPipe
@@ -1615,7 +1615,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.last_beat := paddr(log2Up(refillBytes))
   lqWrite.rep_info.need_rep := lqWriteNeedReplay
   lqWrite.rep_info.cause := lqWriteCauseOH
-  lqWrite.rep_info.sim := uop.perfSimInfo
+  lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := lqWriteTlbId
   lqWrite.rep_info.tlb_full := lqWriteTlbFull
   lqWrite.rep_info.rep_from_unalign_head := useS4HeadReplay
@@ -1757,7 +1757,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
-  io.rollback.bits.sim_runahead_checkpoint_id := uop.perfSimInfo.runahead_checkpoint_id
+  io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid
   io.exceptionInfo.bits := exceptionInfo
@@ -1765,13 +1765,13 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.cancel := cancel
   io.perfMdpAddr := perfMdpAddr
 
-  io.simInfo.isReplayFast := pipeIn.valid && !kill && doFastReplay
-  io.simInfo.isReplaySlow := lqWriteValid && cause.asUInt.orR
-  io.simInfo.isReplayRS := false.B // load never replays from RS
-  io.simInfo.isReplay := pipeIn.valid && !kill && cause.asUInt.orR
-  io.simInfo.replayCause := cause
-  io.simInfo.replayCnt := 1.U
-  io.simInfo.robIdx := robIdx.value
+  io.debugInfo.isReplayFast := pipeIn.valid && !kill && doFastReplay
+  io.debugInfo.isReplaySlow := lqWriteValid && cause.asUInt.orR
+  io.debugInfo.isReplayRS := false.B // load never replays from RS
+  io.debugInfo.isReplay := pipeIn.valid && !kill && cause.asUInt.orR
+  io.debugInfo.replayCause := cause
+  io.debugInfo.replayCnt := 1.U
+  io.debugInfo.robIdx := robIdx.value
 
   /**
     * Perf counters
@@ -1864,11 +1864,11 @@ class LoadUnitS3(param: ExeUnitParams)(
   val perfCCTRecordAddrEn = io.ldout.toRob.fire && !kill
   val timer = GTimer()
   PerfCCT.updateInstMeta(
-    uop.sim_seqNum, PerfCCT.InstDetail.ReplayStr.id.U, perfCCTReplayCause, perfCCTReplayEn, clock, reset
+    uop.debug_seqNum, PerfCCT.InstDetail.ReplayStr.id.U, perfCCTReplayCause, perfCCTReplayEn, clock, reset
   )
-  PerfCCT.updateInstMeta(uop.sim_seqNum, PerfCCT.InstDetail.LastReplay.id.U, timer, perfCCTReplayEn, clock, reset)
-  PerfCCT.updateInstMeta(uop.sim_seqNum, PerfCCT.InstDetail.VAddress.id.U, vaddr, perfCCTRecordAddrEn, clock, reset)
-  PerfCCT.updateInstMeta(uop.sim_seqNum, PerfCCT.InstDetail.PAddress.id.U, paddr, perfCCTRecordAddrEn, clock, reset)
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.LastReplay.id.U, timer, perfCCTReplayEn, clock, reset)
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.VAddress.id.U, vaddr, perfCCTRecordAddrEn, clock, reset)
+  PerfCCT.updateInstMeta(uop.debug_seqNum, PerfCCT.InstDetail.PAddress.id.U, paddr, perfCCTRecordAddrEn, clock, reset)
 }
 
 class LoadUnitS4(param: ExeUnitParams)(
@@ -2052,8 +2052,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // CSR control signals and load trigger
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val csrTrigger = Input(new CsrTriggerBundle)
-  // Simulation info and top-down info
-  val simInfo = Output(new SimLsInfoBundle)
+  // Debug info and top-down info
+  val debugInfo = Output(new DebugLsInfoBundle)
   val topDownInfo = Output(new LsTopdownInfo)
   // ROB-head source execute-fail events for MemBlock aggregation
   val sourceExecuteFailRobHead = Output(LoadEntrance())
@@ -2213,36 +2213,36 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   rrBankConflictFastReplayPerfStatus.s3Fire := s3.io.rrBankConflictFastReplayFire
   rrBankConflictFastReplayPerfStatus.s3Denied := s3.io.rrBankConflictFastReplayDenied
 
-  // Simulation info
-  io.simInfo.s1_isTlbFirstMiss := s1.io.simInfo.isTlbFirstMiss
-  io.simInfo.s1_isLoadToLoadForward := s1.io.simInfo.isLoadToLoadForward
-  io.simInfo.s2_isBankConflict := s2.io.simInfo.isBankConflict
-  io.simInfo.s2_isDcacheFirstMiss := s2.io.simInfo.isDCacheMiss
-  io.simInfo.s2_isForwardFail := s2.io.simInfo.isForwardFail
-  io.simInfo.s3_isReplayFast := s3.io.simInfo.isReplayFast
-  io.simInfo.s3_isReplaySlow := s3.io.simInfo.isReplaySlow
-  io.simInfo.s3_isReplayRS := s3.io.simInfo.isReplayRS
-  io.simInfo.s3_isReplay := s3.io.simInfo.isReplay
-  io.simInfo.replayCause := s3.io.simInfo.replayCause
-  io.simInfo.replayCnt := s3.io.simInfo.replayCnt
-  io.simInfo.s1_robIdx := s1.io.simInfo.robIdx
-  io.simInfo.s2_robIdx := s2.io.simInfo.robIdx
-  io.simInfo.s3_robIdx := s3.io.simInfo.robIdx
+  // Debug info
+  io.debugInfo.s1_isTlbFirstMiss := s1.io.debugInfo.isTlbFirstMiss
+  io.debugInfo.s1_isLoadToLoadForward := s1.io.debugInfo.isLoadToLoadForward
+  io.debugInfo.s2_isBankConflict := s2.io.debugInfo.isBankConflict
+  io.debugInfo.s2_isDcacheFirstMiss := s2.io.debugInfo.isDCacheMiss
+  io.debugInfo.s2_isForwardFail := s2.io.debugInfo.isForwardFail
+  io.debugInfo.s3_isReplayFast := s3.io.debugInfo.isReplayFast
+  io.debugInfo.s3_isReplaySlow := s3.io.debugInfo.isReplaySlow
+  io.debugInfo.s3_isReplayRS := s3.io.debugInfo.isReplayRS
+  io.debugInfo.s3_isReplay := s3.io.debugInfo.isReplay
+  io.debugInfo.replayCause := s3.io.debugInfo.replayCause
+  io.debugInfo.replayCnt := s3.io.debugInfo.replayCnt
+  io.debugInfo.s1_robIdx := s1.io.debugInfo.robIdx
+  io.debugInfo.s2_robIdx := s2.io.debugInfo.robIdx
+  io.debugInfo.s3_robIdx := s3.io.debugInfo.robIdx
 
-  io.topDownInfo.s1.robIdx := s1.io.simInfo.robIdx
-  io.topDownInfo.s1.vaddr_valid := s1.io.simInfo.hasROBEntry && s1.io.simInfo.vaddr.valid
-  io.topDownInfo.s1.vaddr_bits := s1.io.simInfo.vaddr.bits
-  io.topDownInfo.s2.robIdx := s2.io.simInfo.robIdx
-  io.topDownInfo.s2.paddr_valid := s2.io.simInfo.hasROBEntry && s2.io.simInfo.paddr.valid &&
-    s2.io.simInfo.isTlbNotMiss
-  io.topDownInfo.s2.paddr_bits := s2.io.simInfo.paddr.bits
-  io.topDownInfo.s2.first_real_miss := s2.io.simInfo.isDCacheRealMiss
-  io.topDownInfo.s2.cache_miss_en := s2.io.simInfo.hasROBEntry && s2.io.simInfo.paddr.valid &&
-    s2.io.simInfo.isTlbNotMiss // missDbUpdated is always DontCare
+  io.topDownInfo.s1.robIdx := s1.io.debugInfo.robIdx
+  io.topDownInfo.s1.vaddr_valid := s1.io.debugInfo.hasROBEntry && s1.io.debugInfo.vaddr.valid
+  io.topDownInfo.s1.vaddr_bits := s1.io.debugInfo.vaddr.bits
+  io.topDownInfo.s2.robIdx := s2.io.debugInfo.robIdx
+  io.topDownInfo.s2.paddr_valid := s2.io.debugInfo.hasROBEntry && s2.io.debugInfo.paddr.valid &&
+    s2.io.debugInfo.isTlbNotMiss
+  io.topDownInfo.s2.paddr_bits := s2.io.debugInfo.paddr.bits
+  io.topDownInfo.s2.first_real_miss := s2.io.debugInfo.isDCacheRealMiss
+  io.topDownInfo.s2.cache_miss_en := s2.io.debugInfo.hasROBEntry && s2.io.debugInfo.paddr.valid &&
+    s2.io.debugInfo.isTlbNotMiss // missDbUpdated is always DontCare
 
-  io.dcache.s0_pc := s0.io.simInfo.pc
-  io.dcache.s1_pc := s1.io.simInfo.pc
-  io.dcache.s2_pc := s2.io.simInfo.pc
+  io.dcache.s0_pc := s0.io.debugInfo.pc
+  io.dcache.s1_pc := s1.io.debugInfo.pc
+  io.dcache.s2_pc := s2.io.debugInfo.pc
 
   val perfEvents = stages.collect { case stage if stage.isInstanceOf[HasPerfEvents] =>
     stage.asInstanceOf[HasPerfEvents]

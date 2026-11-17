@@ -55,8 +55,8 @@ class ResolveEntry(implicit p: Parameters) extends FtqBundle {
   val startPc: Pc     = Pc()
   // TODO: Reconsider branch number
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
-  // used for bptrace & other sim proposes
-  val sim_source: UInt = ResolveSource()
+  // used for bptrace & other debug proposes
+  val debug_source: UInt = ResolveSource()
 }
 
 class PrefetchQueueEntry(implicit p: Parameters) extends FtqBundle {

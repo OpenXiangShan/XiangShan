@@ -32,7 +32,7 @@ import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 
-class BasicSimInfo(implicit p: Parameters) extends XSBundle {
+class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)
   val vd = UInt(LogicRegsWidth.W)
@@ -42,10 +42,10 @@ class BasicSimInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   val isXSTrap = Bool()
 
-  def connectBasicSim(robEnq: EnqRobUop): Unit = {
+  def connectBasicDebug(robEnq: EnqRobUop): Unit = {
     this.ldest := robEnq.ldest
     this.pdest := robEnq.pdest
-    this.vd := robEnq.sim.map(_.instr.asTypeOf(new XSInstBitFields).VD).getOrElse(0.U)
+    this.vd := robEnq.debug.map(_.instr.asTypeOf(new XSInstBitFields).VD).getOrElse(0.U)
     this.fpWen := robEnq.fpWen
     this.vecWen := robEnq.vecWen
     this.v0Wen := robEnq.v0Wen
@@ -56,7 +56,7 @@ class BasicSimInfo(implicit p: Parameters) extends XSBundle {
 
 /**
  * Functional per-slot information kept by the ROB for exception handling and
- * performance accounting.  This used to live in a sim-named copy of the full
+ * performance accounting.  This used to live in a debug-named copy of the full
  * enqueue uop; only these fields are actually required by the RTL.
  */
 class RobSlotInfo(implicit p: Parameters) extends XSBundle {
@@ -98,33 +98,33 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val slotNeedFlushMask = UInt(2.W)
 
   // Entry-level fields continue to describe the former slot. Rob.scala keeps
-  // a second current-API sim copy for exact latter-slot selection.
-  val sim_pc         = OptionWrapper(backendParams.simEn, UInt(VAddrBits.W))
-  val sim_instr      = OptionWrapper(backendParams.simEn, UInt(32.W))
-  val basicSim       = OptionWrapper(backendParams.basicSimEn, new BasicSimInfo)
-  val sim_fuType     = OptionWrapper(backendParams.simEn, FuType())
-  val sim_fusionNum  = OptionWrapper(backendParams.simEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  val sim_fuOpType   = OptionWrapper(backendParams.simEn, FuOpType())
-  val perfSimInfo    = OptionWrapper(backendParams.simEn, new PerfSimInfo)
-  val sim_lqIdx      = OptionWrapper(backendParams.simEn, new LqPtr)
-  val sim_sqIdx      = OptionWrapper(backendParams.simEn, new SqPtr)
-  val sim_rfWen      = OptionWrapper(backendParams.simEn, Bool())
-  val sim_seqNum     = OptionWrapper(backendParams.simEn, InstSeqNum())
-  val sim_trigger   = OptionWrapper(backendParams.simEn, Bool())
-  val sim_vecWen     = OptionWrapper(backendParams.simEn, Bool())
-  val sim_v0Wen      = OptionWrapper(backendParams.simEn, Bool())
-  val sim_commitType = OptionWrapper(backendParams.simEn, CommitType())
-  val topdownIssued    = OptionWrapper(backendParams.simEn, Bool())
-  val topdownCanceled  = OptionWrapper(backendParams.simEn, Bool())
-  val topdownRobHead   = OptionWrapper(backendParams.simEn, Bool())
-  val topdownIdealIssue  = OptionWrapper(backendParams.simEn, Bool())
-  val topdownIssueTime = OptionWrapper(backendParams.simEn, UInt(XLEN.W))
-  val topdownLastIssueTime = OptionWrapper(backendParams.simEn, UInt(XLEN.W))
-  val topdownRobHeadTime = OptionWrapper(backendParams.simEn, UInt(XLEN.W))
-  val topdownIdealIssueTime = OptionWrapper(backendParams.simEn, UInt(XLEN.W))
-  val topdownCancelSource = OptionWrapper(backendParams.simEn, IQCancelSource())
-  val topdownCancelTimeVec = OptionWrapper(backendParams.simEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
-  val topdownCancelTimeFixVec = OptionWrapper(backendParams.simEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
+  // a second current-API debug copy for exact latter-slot selection.
+  val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
+  val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
+  val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
+  val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
+  val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
+  val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr)
+  val debug_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr)
+  val debug_rfWen      = OptionWrapper(backendParams.debugEn, Bool())
+  val debug_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum())
+  val debug_sim_trig   = OptionWrapper(backendParams.debugEn, Bool())
+  val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool())
+  val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool())
+  val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType())
+  val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownIdealIssue  = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+  val topdownLastIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+  val topdownRobHeadTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+  val topdownIdealIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+  val topdownCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
+  val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
+  val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
 
   def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
   def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
@@ -198,20 +198,20 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     // trace
     this.traceBlockInPipe := robEnq.traceBlockInPipe
     this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
-    this.basicSim.foreach(_.connectBasicSim(robEnq))
-    this.sim_fuType.foreach(_ := robEnq.fuType)
-    this.sim_fuOpType.foreach(_ := robEnq.fuOpType)
-    this.sim_rfWen.foreach(_ := robEnq.rfWen)
-    this.sim_vecWen.foreach(_ := robEnq.vecWen)
-    this.sim_v0Wen.foreach(_ := robEnq.v0Wen)
-    this.sim_commitType.foreach(_ := robEnq.commitType)
-    robEnq.sim.foreach { sim =>
-      this.sim_pc.foreach(_ := sim.pc)
-      this.sim_seqNum.foreach(_ := sim.sim_seqNum)
-      this.sim_instr.foreach(_ := sim.instr)
-      this.sim_fusionNum.foreach(_ := sim.fusionNum)
-      this.perfSimInfo.foreach(_ := sim.perfSimInfo)
-      this.sim_trigger.foreach(_ := sim.sim_trigger)
+    this.basicDebug.foreach(_.connectBasicDebug(robEnq))
+    this.debug_fuType.foreach(_ := robEnq.fuType)
+    this.debug_fuOpType.foreach(_ := robEnq.fuOpType)
+    this.debug_rfWen.foreach(_ := robEnq.rfWen)
+    this.debug_vecWen.foreach(_ := robEnq.vecWen)
+    this.debug_v0Wen.foreach(_ := robEnq.v0Wen)
+    this.debug_commitType.foreach(_ := robEnq.commitType)
+    robEnq.debug.foreach { debug =>
+      this.debug_pc.foreach(_ := debug.pc)
+      this.debug_seqNum.foreach(_ := debug.debug_seqNum)
+      this.debug_instr.foreach(_ := debug.instr)
+      this.debug_fusionNum.foreach(_ := debug.fusionNum)
+      this.perfDebugInfo.foreach(_ := debug.perfDebugInfo)
+      this.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
     }
     this.topdownIssued.foreach(_ := false.B)
     this.topdownCanceled.foreach(_ := false.B)
@@ -250,14 +250,14 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
   // trace
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
   val formerTraceIretire = UInt(IretireWidthEncoded.W)
-  // sim_begin
-  val sim_pc = OptionWrapper(backendParams.simEn, UInt(VAddrBits.W))
-  val sim_instr = OptionWrapper(backendParams.simEn, UInt(32.W))
-  val basicSim = OptionWrapper(backendParams.basicSimEn, new BasicSimInfo)
-  val sim_otherPdest = OptionWrapper(backendParams.basicSimEn, Vec(7, UInt(PhyRegIdxWidth.W)))
-  val sim_fuType = OptionWrapper(backendParams.simEn, FuType())
-  val sim_fusionNum = OptionWrapper(backendParams.simEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  // sim_end
+  // debug_begin
+  val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
+  val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
+  val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+  val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
+  // debug_end
 
   def connectCommitEntry(
     robEntry: RobEntryBundle,
@@ -283,11 +283,11 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.slotNeedFlushMask := robEntry.slotNeedFlushMask
     this.traceBlockInPipe := robEntry.traceBlockInPipe
     this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
-    this.sim_pc.foreach(_ := robEntry.sim_pc.get)
-    this.sim_instr.foreach(_ := robEntry.sim_instr.get)
-    this.basicSim.foreach(_ := robEntry.basicSim.get)
-    this.sim_fuType.foreach(_ := robEntry.sim_fuType.get)
-    this.sim_fusionNum.foreach(_ := robEntry.sim_fusionNum.get)
+    this.debug_pc.foreach(_ := robEntry.debug_pc.get)
+    this.debug_instr.foreach(_ := robEntry.debug_instr.get)
+    this.basicDebug.foreach(_ := robEntry.basicDebug.get)
+    this.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
+    this.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
   }
 }
 

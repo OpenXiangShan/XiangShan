@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan.ExceptionNO._
 import xiangshan.TopDownCounters._
 import xiangshan._
@@ -135,8 +135,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // from LsqEnqCtrl
     val fromLsqEnqCtrl = new Bundle {
       val lsqHeadPtr = Input(new LSIdx)
-      val lqStall = Option.when(backendParams.simEn)(Input(Bool()))
-      val sqStall = Option.when(backendParams.simEn)(Input(Bool()))
+      val lqStall = Option.when(backendParams.debugEn)(Input(Bool()))
+      val sqStall = Option.when(backendParams.debugEn)(Input(Bool()))
     }
     // to LsqEnqCtrl
     val toLsqEnqCtrl = new Bundle {
@@ -151,12 +151,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // perf only
     val stallReason = Flipped(new StallReasonIO(RenameWidth))
-    val simBlockBackward = Option.when(backendParams.simEn)(Input(Bool()))
-    val simWaitForward   = Option.when(backendParams.simEn)(Input(Bool()))
-    val simIQValidNumVec = Option.when(backendParams.simEn)(Vec(issueQueueNum, Input(UInt(maxIQSize.U.getWidth.W))))
-    val simIQEnqHasIssuedVec = Option.when(backendParams.simEn)(Vec(issueQueueNum, Input(Bool())))
-    val simRobHeadStall = Option.when(backendParams.simEn)(Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W))))
-    val simRobTrueCommit = Option.when(backendParams.simEn)(Input(UInt(64.W)))
+    val debugBlockBackward = Option.when(backendParams.debugEn)(Input(Bool()))
+    val debugWaitForward   = Option.when(backendParams.debugEn)(Input(Bool()))
+    val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(UInt(maxIQSize.U.getWidth.W))))
+    val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(Bool())))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W))))
+    val debugRobTrueCommit = Option.when(backendParams.debugEn)(Input(UInt(64.W)))
   })
   // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.
   val issueBlockParams = backendParams.allIssueParams
@@ -173,7 +173,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     fromRenameUpdate(i).bits.srcStateVl := 0.U // dontCare this
     fromRenameUpdate(i).bits.waitSqIdx := 0.U.asTypeOf(fromRenameUpdate(i).bits.waitSqIdx)
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
-    fromRenameUpdate(i).bits.sim.foreach(connectSamePort(_, fromRename(i).bits.sim.get))
+    fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr
     fromRenameUpdate(i).bits.isRVC := fromRename(i).bits.lastIsRVC
@@ -504,7 +504,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       }
     }
     minIQSelAll(needMultiExuidx) := minIQSel
-    if (backendParams.simEn){
+    if (backendParams.debugEn){
       dontTouch(compareMatrix)
       dontTouch(IQSort)
       dontTouch(minIQSel)
@@ -632,7 +632,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       IQSelUop(temp).bits.srcStateV0 := PriorityMux(oh, allSrcStateV0)
       IQSelUop(temp).bits.srcStateVl := PriorityMux(oh, allSrcStateVl)
       temp = temp + 1
-      if (backendParams.simEn){
+      if (backendParams.debugEn){
         dontTouch(oh)
       }
     }
@@ -650,7 +650,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     x._1.valid := x._2.valid
     x._1.bits := x._2.bits
   })
-  if (backendParams.simEn){
+  if (backendParams.debugEn){
     dontTouch(uopSelIQMatrix)
     dontTouch(IQSelUop)
     dontTouch(fromRenameUpdate)
@@ -690,7 +690,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val loadBlockVec = VecInit(loadCntVec.map(_ > numLoadDeq.U))
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
   val lsStructBlockVec = VecInit(loadBlockVec.zip(storeAMOBlockVec).map(x => x._1 || x._2))
-  if (backendParams.simEn) {
+  if (backendParams.debugEn) {
     dontTouch(loadBlockVec)
     dontTouch(storeAMOBlockVec)
     dontTouch(lsStructBlockVec)
@@ -766,7 +766,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 0 until RenameWidth) {
 
     updatedUop(i) := fromRename(i).bits
-    updatedUop(i).sim.foreach { sim => sim.perfSimInfo.eliminatedMove := fromRename(i).bits.isMove}
+    updatedUop(i).debug.foreach { debug => debug.perfDebugInfo.eliminatedMove := fromRename(i).bits.isMove}
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
@@ -789,17 +789,17 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
-    XSSim(
+    XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
-    XSSim(fromRename(i).fire && updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
+    XSDebug(fromRename(i).fire && updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     if (env.EnableDifftest) {
-      // sim runahead hint
-      val sim_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
+      // debug runahead hint
+      val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
       if(i == 0){
-        sim_runahead_checkpoint_id := checkpoint_id
+        debug_runahead_checkpoint_id := checkpoint_id
       } else {
-        sim_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
           fromRename(i).fire
         ))
       }
@@ -813,8 +813,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val storeSetPredEntry = Wire(new StoreSetPredDBEntry)
     storeSetPredEntry.timeCnt := GTimer()
     storeSetPredEntry.robIdx := updatedUop(i).robIdx.value
-    storeSetPredEntry.foldPc := updatedUop(i).sim
-      .map(sim => XORFold(sim.pc(VAddrBits - 1, 1), MemPredPCWidth))
+    storeSetPredEntry.foldPc := updatedUop(i).debug
+      .map(debug => XORFold(debug.pc(VAddrBits - 1, 1), MemPredPCWidth))
       .getOrElse(0.U(MemPredPCWidth.W))
     storeSetPredEntry.isStore := isStore(i)
     storeSetPredEntry.ssid := updatedUop(i).ssid
@@ -864,7 +864,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 1 until RenameWidth) {
     blockedByWaitForward(i) := blockedByWaitForward(i - 1) || (!io.enqRob.isEmpty || Cat(fromRename.take(i).map(_.valid)).orR) && isWaitForward(i)
   }
-  if(backendParams.simEn){
+  if(backendParams.debugEn){
     dontTouch(blockedByWaitForward)
     dontTouch(allowDispatch)
   }
@@ -899,7 +899,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val canAccept = !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept
 
   val isWaitForwardOrBlockBackward = isWaitForward.asUInt.orR || isBlockBackward.asUInt.orR
-  val hasSpecialInst = io.simBlockBackward.getOrElse(false.B) || io.simWaitForward.getOrElse(false.B)
+  val hasSpecialInst = io.debugBlockBackward.getOrElse(false.B) || io.debugWaitForward.getOrElse(false.B)
   val renameFireCnt = PopCount(fromRename.map(_.fire))
 
   val stall_rob = hasValidInstr && !io.enqRob.canAccept
@@ -917,8 +917,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
 
   val fusedVec = (0 until RenameWidth).map{ case i =>
-    if (i == 0 || !backendParams.simEn) false.B
-    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.sim.get.fusionNum =/= 0.U)
+    if (i == 0 || !backendParams.debugEn) false.B
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
   }
 
   // Topdown collect start
@@ -961,8 +961,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val firedVec = fromRename.map(_.fire)
   val inValidVec = fromRename.map(_.valid)
   val inReadyVec = fromRename.map(_.ready)
-  val issueQueueNumVec = io.simIQValidNumVec.getOrElse(VecInit(Seq.fill(issueQueueNum)(0.U)))
-  val issueQueueEnqHasIssuedVec = io.simIQEnqHasIssuedVec.getOrElse(VecInit(Seq.fill(issueQueueNum)(0.U)))
+  val issueQueueNumVec = io.debugIQValidNumVec.getOrElse(VecInit(Seq.fill(issueQueueNum)(0.U)))
+  val issueQueueEnqHasIssuedVec = io.debugIQEnqHasIssuedVec.getOrElse(VecInit(Seq.fill(issueQueueNum)(0.U)))
 
 
   val fromRenameMapIQReadyCntVec = Wire(Vec(RenameWidth, UInt(log2Ceil(io.toIssueQueues.length).W)))
@@ -1015,7 +1015,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   fromRenameMapIQEnqHasIssuedNotFull := (0 until RenameWidth).map{ idx =>
     fromRenameMapIQNotFull(idx) && fromRenameMapIQEnqHasIssuedVec(idx)
   }
-  if (backendParams.simEn) {
+  if (backendParams.debugEn) {
     dontTouch(fromRenameMapIQReadyCntVec)
     dontTouch(fromRenameSameFuNumVec)
     dontTouch(fromRenameFutypeNotOverIQ)
@@ -1039,8 +1039,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val dispatchStall = !(inReadyVec.reduce(_ || _))
   val dispatchStallReason = Wire(chiselTypeOf(io.stallReason.reason(0)))
 
-  val robHeadStall = io.simRobHeadStall.map(_.valid).getOrElse(false.B)
-  val robHeadStallReason = io.simRobHeadStall.map(_.bits).getOrElse(0.U)
+  val robHeadStall = io.debugRobHeadStall.map(_.valid).getOrElse(false.B)
+  val robHeadStallReason = io.debugRobHeadStall.map(_.bits).getOrElse(0.U)
 
 
   val robStall = !isWaitForwardOrBlockBackward && !hasSpecialInst&& !io.enqRob.canAccept
@@ -1191,7 +1191,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   dispatchPriorityBubbleReasonidx := PriorityEncoder(dispatchPriorityBubbleVec)
   dispatchBubbleReason := allDispatchReasonVec(dispatchPriorityBubbleReasonidx)
 
-  if (backendParams.simEn){
+  if (backendParams.debugEn){
     dontTouch(dispatchPriorityBubbleidx)
     dontTouch(dispatchPriorityBubbleReasonidx)
     dontTouch(dispatchBubbleReason)
@@ -1262,7 +1262,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)), XSPerfLevel.CRITICAL))
 
-  val robTrueCommit = io.simRobTrueCommit.getOrElse(0.U)
+  val robTrueCommit = io.debugRobTrueCommit.getOrElse(0.U)
   TopDownCounters.values.foreach(ctr => XSPerfRolling("td_inst_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
                                                       robTrueCommit, 1000, clock, reset))
 

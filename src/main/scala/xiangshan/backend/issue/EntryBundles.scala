@@ -178,7 +178,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //trans
     val enqReady              = Output(Bool())
     val transEntry            = ValidIO(new EntryBundle)
-    // sim
+    // debug
     val entryInValid          = Output(Bool())
     val entryOutDeqValid      = Output(Bool())
     val entryOutTransValid    = Output(Bool())
@@ -186,8 +186,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
-    val simCancelSource     = Option.when(backendParams.simEn)(Output(IQCancelSource()))
-    val simSrcReady         = Option.when(backendParams.simEn)(Output(Bool()))
+    val debugCancelSource     = Option.when(backendParams.debugEn)(Output(IQCancelSource()))
+    val debugSrcReady         = Option.when(backendParams.debugEn)(Output(Bool()))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -460,7 +460,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.payload                               := entryReg.payload
-    entryUpdate.payload.simLastIssueCancelSource.foreach ( _ := MuxCase(entryReg.payload.simLastIssueCancelSource.get, Seq(
+    entryUpdate.payload.debugLastIssueCancelSource.foreach ( _ := MuxCase(entryReg.payload.debugLastIssueCancelSource.get, Seq(
       ldIssueCancel -> IQCancelSource.ld,
       og0IssueCancel -> IQCancelSource.og0,
       og1IssueCancel -> IQCancelSource.og1,
@@ -475,7 +475,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.issued                                  := entryReg.status.issued
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
-    commonOut.simSrcReady.foreach(_                 := entryReg.status.srcReady)
+    commonOut.debugSrcReady.foreach(_                 := entryReg.status.srcReady)
     commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
@@ -559,7 +559,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.enqReady                                := common.enqReady
     commonOut.transEntry.valid                        := validReg && !common.flushed && !status.issued
     commonOut.transEntry.bits                         := entryUpdate
-    // sim
+    // debug
     commonOut.entryInValid                            := commonIn.enq.valid
     commonOut.entryOutDeqValid                        := validReg && (common.flushed || common.deqSuccess)
     commonOut.entryOutTransValid                      := validReg && commonIn.transSel && !(common.flushed || common.deqSuccess)
@@ -569,7 +569,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       commonOut.perfOg0Cancel.get                     := hasIQWakeupGet.srcWakeupByIQButCancel.map(_.asUInt.orR && validReg)
       commonOut.perfWakeupByIQ.get                    := hasIQWakeupGet.srcWakeupByIQ.map(x => VecInit(x.map(_ && validReg)))
     }
-    commonOut.simCancelSource.zip(entryReg.payload.simLastIssueCancelSource).foreach { case (sourceOut, cancelSource) =>
+    commonOut.debugCancelSource.zip(entryReg.payload.debugLastIssueCancelSource).foreach { case (sourceOut, cancelSource) =>
       sourceOut                                      := cancelSource
     }
     commonOut.validRegNext                            := common.validRegNext

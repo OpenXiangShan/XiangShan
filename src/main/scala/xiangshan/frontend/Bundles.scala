@@ -323,7 +323,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
-  val sim_seqNum:     Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
+  val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
@@ -466,6 +466,6 @@ class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
     }
 }
 
-class FrontendSimTopDownInfo(implicit p: Parameters) extends FrontendBundle {
+class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {
   val robHeadVaddr: Valid[Pc] = Valid(Pc())
 }

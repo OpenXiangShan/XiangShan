@@ -23,7 +23,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.RegField
 import utils.HasTLDump
-import utility.{XSDebug => XSSim}
+import utility.XSDebug
 
 class TLTimer(address: Seq[AddressSet], sim: Boolean, numCores: Int)(implicit p: Parameters) extends LazyModule {
 
@@ -65,7 +65,7 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean, numCores: Int)(implicit p:
     node.regmap( mapping = clintMapping:_* )
 
     val in = node.in.head._1
-    XSSim(in.a.valid, "[A] channel valid ready=%d ", in.a.ready)
+    XSDebug(in.a.valid, "[A] channel valid ready=%d ", in.a.ready)
     in.a.bits.dump(in.a.valid)
 
     for (i <- 0 until numCores) {

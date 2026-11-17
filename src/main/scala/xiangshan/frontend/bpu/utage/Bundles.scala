@@ -48,12 +48,12 @@ class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
 }
 
-class MicroTageSim(implicit p: Parameters) extends MicroTageBundle {
-  val sim_idx:      UInt = UInt(log2Ceil(MaxNumSets).W)
-  val sim_tag:      UInt = UInt(MaxTagLen.W)
-  val sim_tableId:  UInt = UInt(log2Ceil(NumTables).W)
-  val sim_useful:   UInt = UInt(UsefulWidth.W)
-  val sim_takenCtr: UInt = UInt(TakenCtrWidth.W)
+class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
+  val debug_idx:      UInt = UInt(log2Ceil(MaxNumSets).W)
+  val debug_tag:      UInt = UInt(MaxTagLen.W)
+  val debug_tableId:  UInt = UInt(log2Ceil(NumTables).W)
+  val debug_useful:   UInt = UInt(UsefulWidth.W)
+  val debug_takenCtr: UInt = UInt(TakenCtrWidth.W)
 }
 
 class AbtbResult(implicit p: Parameters) extends MicroTageBundle {

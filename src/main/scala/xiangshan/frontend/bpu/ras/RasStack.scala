@@ -42,7 +42,7 @@ class RasStack(implicit p: Parameters) extends RasModule
       val popValid:  Bool      = Input(Bool())
       val pushAddr:  GuardedPc = Input(GuardedPc())
       val metaTosw:  RasPtr    = Input(new RasPtr)
-      // for sim purpose only
+      // for debug purpose only
       val metaSsp: UInt = Input(UInt(log2Up(CommitStackSize).W))
     }
 
@@ -59,8 +59,8 @@ class RasStack(implicit p: Parameters) extends RasModule
     val redirect: RasRedirectIO   = new RasRedirectIO
     val meta:     RasInternalMeta = Output(new RasInternalMeta)
 
-    val specNearOverflow: Bool   = Output(Bool())
-    val sim:              RasSim = new RasSim
+    val specNearOverflow: Bool     = Output(Bool())
+    val debug:            RasDebug = new RasDebug
   }
   val io: RasStackIO = IO(new RasStackIO)
 
@@ -421,8 +421,8 @@ class RasStack(implicit p: Parameters) extends RasModule
 
   io.specNearOverflow := specNearOverflowed
   XSPerfAccumulate("specNearOverflow", specNearOverflowed)
-  io.sim.bos := bos
-  io.sim.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
-  io.sim.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
-  io.sim.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
+  io.debug.bos := bos
+  io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
+  io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
+  io.debug.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
 }

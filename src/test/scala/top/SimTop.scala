@@ -28,7 +28,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
-import xiangshan.SimOptionsKey
+import xiangshan.DebugOptionsKey
 import system._
 import device._
 
@@ -72,7 +72,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
         )
       ),
       beatBytes = L3OuterBusWidth / 8,
-      requestKeys = if (simOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
+      requestKeys = if (debugOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
     )
   ))
 
@@ -91,7 +91,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
 }
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
-  val simOpts = p(SimOptionsKey)
+  val debugOpts = p(DebugOptionsKey)
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -119,9 +119,9 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
 
   val l_simAXIMem = AXI4MemorySlave(
     l_memXbar.memNode,
-    simOpts.SimMemSize,
+    debugOpts.SimMemSize,
     useBlackBox = true,
-    dynamicLatency = simOpts.UseDRAMSim
+    dynamicLatency = debugOpts.UseDRAMSim
   )
   val simAXIMem = Module(l_simAXIMem.module)
 
@@ -173,8 +173,8 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   override def connectTopIOs(difftest: DifftestTopIO): Unit = {
     difftest.uart <> uart
 
-    val hasPerf = !simOpts.FPGAPlatform && simOpts.EnableSimPerf
-    val hasLog = !simOpts.FPGAPlatform && simOpts.EnableSimLog
+    val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+    val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
     val hasPerfLog = hasPerf || hasLog
     val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
     val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
@@ -190,9 +190,9 @@ object XiangShanSim extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   // tools: init to close dpi-c when in fpga
-  val envInFPGA = config(SimOptionsKey).FPGAPlatform
-  val enableChiselDB = config(SimOptionsKey).EnableChiselDB
-  val enableConstantin = config(SimOptionsKey).EnableConstantin
+  val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
+  val enableConstantin = config(DebugOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 

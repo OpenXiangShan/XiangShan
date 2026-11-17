@@ -29,7 +29,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan.backend.Bundles._
 import xiangshan.mem.SqPtr
 
@@ -109,12 +109,12 @@ class SSIT(implicit p: Parameters) extends XSModule {
     data_array.io.wdata(i) := 0.U.asTypeOf(new SSITDataEntry)
   })
 
-  val sim_valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
-  val sim_ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
+  val debug_valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
+  val debug_ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
   val strictArray = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
   if(!env.FPGAPlatform){
-    dontTouch(sim_valid)
-    dontTouch(sim_ssid)
+    dontTouch(debug_valid)
+    dontTouch(debug_ssid)
     dontTouch(strictArray)
   }
 
@@ -168,7 +168,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
       valid_array.io.wen(SSIT_MISC_WRITE_PORT) := true.B
       valid_array.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
       valid_array.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
-      sim_valid(resetStepCounter(log2Ceil(SSITSize) - 1, 0)) := false.B
+      debug_valid(resetStepCounter(log2Ceil(SSITSize) - 1, 0)) := false.B
     }
   }
   XSPerfAccumulate("reset_timeout", state === s_flush && resetCounter === 0.U)
@@ -252,8 +252,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
     data_array.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
     data_array.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).ssid := ssid
     strictWriteData(SSIT_UPDATE_LOAD_WRITE_PORT) := strict
-    sim_valid(pc) := valid
-    sim_ssid(pc) := ssid
+    debug_valid(pc) := valid
+    debug_ssid(pc) := ssid
   }
 
   def update_st_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
@@ -264,8 +264,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
     data_array.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
     data_array.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).ssid := ssid
     strictWriteData(SSIT_UPDATE_STORE_WRITE_PORT) := strict
-    sim_valid(pc) := valid
-    sim_ssid(pc) := ssid
+    debug_valid(pc) := valid
+    debug_ssid(pc) := ssid
   }
 
   when(s2_mempred_update_req_valid){
@@ -414,9 +414,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_pred_dependence", PopCount(pred_dependence))
   XSPerfAccumulate("ssit_pred_strict", PopCount(pred_dependence_strict))
 
-  // sim
-  XSSim(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
-  XSSim(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
+  // debug
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
 }
 
 

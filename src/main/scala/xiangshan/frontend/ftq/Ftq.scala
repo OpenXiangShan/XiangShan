@@ -441,9 +441,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
         cachedBranch.bits  := branch.bits
         cachedBranch.valid := branch.valid && mask
     }
-    trainCache.bits.perfMeta   := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
-    trainCache.bits.sim_source := resolveQueue.io.bpuTrain.bits.sim_source
-    trainIndexCache            := resolveQueue.io.bpuTrain.bits.ftqIdx
+    trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
+    trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
+    trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
@@ -525,8 +525,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // Topdown analysis
   io.backendRedirectTopdown.backendRedirect         := backendRedirect.valid
-  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.simIsCtrl
-  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.simIsMemVio
+  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
+  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
 
   io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
   io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional

@@ -60,7 +60,7 @@ class DecodeStageImp(
     numM2M4M8Channel = (8, 8, 8),
   ))
 
-  val sim_globalCounter = RegInit(0.U(XLEN.W))
+  val debug_globalCounter = RegInit(0.U(XLEN.W))
 
   /** whether instruction decoded are illegal */
   // Register uop fire/exception/uopBits to cut timing path before trapInstInfo output
@@ -113,7 +113,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
-        ctrl.sim.foreach(_  := inMopBits.sim.get)
+        ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
 
@@ -193,10 +193,10 @@ class DecodeStageImp(
         bits.isJr := uopInfo.isJr
         bits.numWB := uopInfo.numWb +& 1.U
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
-        bits.sim.foreach{ x =>
-          x.pc := mopInfo.sim.get.pc
-          x.sim_seqNum.seqNum := mopInfo.sim.get.sim_seqNum.seqNum
-          x.sim_seqNum.uopIdx := uopInfo.uopIdx
+        bits.debug.foreach{ x =>
+          x.pc := mopInfo.debug.get.pc
+          x.debug_seqNum.seqNum := mopInfo.debug.get.debug_seqNum.seqNum
+          x.debug_seqNum.uopIdx := uopInfo.uopIdx
         }
     }
   }
@@ -232,15 +232,15 @@ class DecodeStageImp(
   val frontendStall = !inValidVec.reduce(_ || _)
   val frontendBubble = !inValidVec.reduce(_ && _) && !frontendStall
   val decodeStall = !inReadyVec.head
-  val simRedirect = RegEnable(in.redirect.bits, in.redirect.valid)
+  val debugRedirect = RegEnable(in.redirect.bits, in.redirect.valid)
   val decodeStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    (in.isResumeVType && simRedirect.simIsCtrl) -> ControlRecoveryStall.id.U,
-    (in.isResumeVType && simRedirect.simIsMemVio) -> MemVioRecoveryStall.id.U,
+    (in.isResumeVType && debugRedirect.debugIsCtrl) -> ControlRecoveryStall.id.U,
+    (in.isResumeVType && debugRedirect.debugIsMemVio) -> MemVioRecoveryStall.id.U,
     in.isResumeVType -> OtherRecoveryStall.id.U,
   ))
   val redirectReason = MuxCase(OtherRedirectStall.id.U, Seq(
-    in.redirect.bits.simIsCtrl -> ControlRedirectStall.id.U,
-    in.redirect.bits.simIsMemVio -> MemVioRedirectStall.id.U,
+    in.redirect.bits.debugIsCtrl -> ControlRedirectStall.id.U,
+    in.redirect.bits.debugIsMemVio -> MemVioRedirectStall.id.U,
   ))
 
   for (i <- 0 until RenameWidth) {

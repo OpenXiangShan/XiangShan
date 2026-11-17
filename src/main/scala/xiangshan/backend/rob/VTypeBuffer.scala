@@ -393,7 +393,7 @@ object VTypeBuffer {
     val commits = Output(new VlCommitBundle(RabCommitWidth))
 
     // Difftest VL mappings.
-    val diffCommits = Option.when(backendParams.basicSimEn)(Output(new DiffVlCommitBundle(CommitWidth)))
+    val diffCommits = Option.when(backendParams.basicDebugEn)(Output(new DiffVlCommitBundle(CommitWidth)))
 
     // Decode VTYPE interface.
     val toDecode = Output(new VTypeBufferToDecodeIO)

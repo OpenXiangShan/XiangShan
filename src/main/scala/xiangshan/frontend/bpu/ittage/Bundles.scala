@@ -74,7 +74,7 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   val providerTarget:    Pc              = Pc()
   val altProviderTarget: Pc              = Pc()
 
-  val sim_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
+  val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 
   override def toPrintable =
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCnt u:$providerUsefulCnt tar:${Hexadecimal(providerTarget.toUInt)}), " +

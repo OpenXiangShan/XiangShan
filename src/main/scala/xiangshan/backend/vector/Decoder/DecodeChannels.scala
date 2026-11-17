@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utils.BundleUtils.makeValid
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodeInUopSim, UopIdx}
+import xiangshan.backend.Bundles.{DecodeInUopDebug, UopIdx}
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
@@ -665,7 +665,7 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val vtype            = VType()
   val oldVType         = VType()
   val rawInst          = UInt(32.W)
-  val sim            = Option.when(backendParams.simEn)(new DecodeInUopSim())
+  val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())
 }
 
 class SrcInfo extends Bundle {

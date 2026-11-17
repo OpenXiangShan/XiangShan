@@ -85,9 +85,9 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffRatBase = if (backendParams.basicSimEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val sim_rdata = if (backendParams.simEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val sim_vl = if (backendParams.simEn) reg_t match {
+    val diffRatBase = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl = if (backendParams.debugEn) reg_t match {
       case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
     } else None
@@ -165,8 +165,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
 
   io.old_pdest := old_pdest
   io.need_free := need_free
-  io.sim_rdata.foreach(_ := arch_table.take(io.sim_rdata.get.size))
-  io.sim_vl.foreach(_ := arch_table(0))
+  io.debug_rdata.foreach(_ := arch_table.take(io.debug_rdata.get.size))
+  io.debug_vl.foreach(_ := arch_table(0))
   // spec_table_next is the recovered speculative base before this cycle's rename updates.
   // Reusing it keeps Difftest aligned with the functional checkpoint, redirect, and walk recovery path.
   io.diffRatBase.foreach { base =>
@@ -189,12 +189,12 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val rabCommits = Input(new RabCommitIO)
     val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     val renameUpdates =
-      if (backendParams.basicSimEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new DiffRatRenameUpdate)))) else None
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new DiffRatRenameUpdate)))) else None
     val snapshotEnds =
-      if (backendParams.basicSimEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new RobPtr)))) else None
-    val diffRatCommitRobIdx = if (backendParams.basicSimEn) Some(Input(Valid(new RobPtr))) else None
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new RobPtr)))) else None
+    val diffRatCommitRobIdx = if (backendParams.basicDebugEn) Some(Input(Valid(new RobPtr))) else None
     val diffRatCommitRobIdxVec =
-      if (backendParams.basicSimEn) Some(Input(Vec(diffRatParams.commitWidth, Valid(new RobPtr)))) else None
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.commitWidth, Valid(new RobPtr)))) else None
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs))))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(IntLogicRegs))))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(log2Ceil(FpLogicRegs))))
@@ -211,21 +211,21 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
 
-    // for sim assertions
-    val sim_int_rat = Option.when(backendParams.simEn)(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
-    val sim_fp_rat  = Option.when(backendParams.simEn)(Vec(FpLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
-    val sim_vec_rat = Option.when(backendParams.simEn)(Vec(VecStdLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
-    val sim_vl_rat  = Option.when(backendParams.simEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    // for debug assertions
+    val debug_int_rat = Option.when(backendParams.debugEn)(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_fp_rat  = Option.when(backendParams.debugEn)(Vec(FpLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vec_rat = Option.when(backendParams.debugEn)(Vec(VecStdLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
 
     // for difftest
-    val diff_vl_rat  = Option.when(backendParams.basicSimEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
+    val diff_vl_rat  = Option.when(backendParams.basicDebugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I, 0))
   val fpRat  = Module(new RenameTable(Reg_F, 0))
   val vecRat = Module(new RenameTable(Reg_V, 0))
   val vlRat  = Module(new RenameTable(Reg_Vl, 0))
-  val diffRatBuffer = if (backendParams.basicSimEn) Some(Module(new DiffRatStateBuffer)) else None
+  val diffRatBuffer = if (backendParams.basicDebugEn) Some(Module(new DiffRatStateBuffer)) else None
 
   diffRatBuffer.foreach { rat =>
     rat.in.diffRatBase.intRat := intRat.io.diffRatBase.get
@@ -238,7 +238,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     rat.in.commitRobIdxVec := io.diffRatCommitRobIdxVec.get
   }
 
-  io.sim_int_rat .foreach(_ := intRat.io.sim_rdata.get)
+  io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     // Delay of RenameTable should be same as PhyRegFile
     val difftest = DifftestModule(new DiffArchIntRenameTable(IntPhyRegs), delay = 2)
@@ -270,8 +270,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  // sim read ports for difftest
-  io.sim_fp_rat.foreach(_ := fpRat.io.sim_rdata.get)
+  // debug read ports for difftest
+  io.debug_fp_rat.foreach(_ := fpRat.io.debug_rdata.get)
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffArchFpRenameTable(FpPhyRegs), delay = 2)
     difftest.coreid := io.hartId
@@ -311,15 +311,15 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       Seq(splitDest, splitDest + 1.U)
     })
   }
-  // sim read ports for difftest
-  io.sim_vec_rat    .foreach(_ := vecRat.io.sim_rdata.get)
+  // debug read ports for difftest
+  io.debug_vec_rat    .foreach(_ := vecRat.io.debug_rdata.get)
   vecRat.io.readPorts <> io.vecReadPorts.flatten
   vecRat.io.redirect := io.redirect
   vecRat.io.snpt := io.snpt
   io.vec_old_pdest := vecRat.io.old_pdest
 
   //TODO: RM the donTouch
-  if(backendParams.simEn) {
+  if(backendParams.debugEn) {
     dontTouch(vecRat.io)
   }
   for ((arch, i) <- vecRat.io.archWritePorts.zipWithIndex) {
@@ -340,15 +340,15 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     }
   }
 
-  // sim read ports for difftest
-  io.sim_vl_rat.foreach(_ := vlRat.io.sim_rdata.get)
+  // debug read ports for difftest
+  io.debug_vl_rat.foreach(_ := vlRat.io.debug_rdata.get)
   io.diff_vl_rat.foreach(_ := diffRatBuffer.get.out.diffRat.vlRat)
   vlRat.io.readPorts <> io.vlReadPorts
   vlRat.io.redirect := io.redirect
   vlRat.io.snpt := io.snpt
   io.vl_old_pdest := vlRat.io.old_pdest
 
-  if (backendParams.simEn) {
+  if (backendParams.debugEn) {
     dontTouch(vlRat.io)
   }
   for ((arch, i) <- vlRat.io.archWritePorts.zipWithIndex) {

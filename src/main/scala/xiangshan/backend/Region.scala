@@ -319,7 +319,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     vstdEnq.bits.lastUop.foreach(_ := staEnq.bits.lastUop.get)
     vstdEnq.bits.sqIdx.get := staEnq.bits.sqIdx.get
 
-    vstdEnq.bits.sim.foreach(_ := staEnq.bits.sim.get)
+    vstdEnq.bits.debug.foreach(_ := staEnq.bits.debug.get)
     val vstdSrcIdx = 2 // vector store data is vs3
     vstdEnq.bits.srcState(0) := staEnq.bits.srcState(vstdSrcIdx)
     vstdEnq.bits.srcLoadDependency(0) := staEnq.bits.srcLoadDependency(vstdSrcIdx)
@@ -342,7 +342,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       iq := in
     }
 
-    if (backendParams.basicSimEn && params.isIntSchd) {
+    if (backendParams.basicDebugEn && params.isIntSchd) {
       val delayedWakeupQueueRcIdx = issueQueues.flatMap(_.io.wakeupToIQ).map { case x =>
         val delayed = Wire(new DiffRCIdx)
         delayed.wen   := RegNextN(x.bits.rfWen, 3)
@@ -816,8 +816,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       out.valid := x.valid && x.bits.redirect.get.valid &&
         !x.bits.robIdx.needFlush(Seq(io.flush, flushCopyRegVec(flushCopyRegVec.length - 2)))
       out.bits := x.bits.redirect.get.bits
-      out.bits.simIsCtrl := true.B
-      out.bits.simIsMemVio := false.B
+      out.bits.debugIsCtrl := true.B
+      out.bits.debugIsMemVio := false.B
       out
     }).toSeq
     val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
@@ -856,7 +856,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   }
 
 
-  val issueQueueValidNumVec: Vec[UInt] = io.simIQValidNumVec.getOrElse(VecInit(Seq.fill(io.IQNum)(0.U)))
+  val issueQueueValidNumVec: Vec[UInt] = io.debugIQValidNumVec.getOrElse(VecInit(Seq.fill(io.IQNum)(0.U)))
   issueQueues.filter(_.param.StdCnt == 0).zip(issueQueueValidNumVec).foreach{ case (issueQueue, validNum) =>
     validNum := PopCount(issueQueue.io.validVec)
   }
@@ -864,7 +864,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     issueQueueValidNumVec(sta) := Mux(staValidNum(i) > stdValidNum(i), staValidNum(i), stdValidNum(i))
   }
 
-  val issueQueueEnqHasIssuedVec : Vec[Bool] = io.simIQEnqHasIssuedVec.getOrElse(VecInit(Seq.fill(io.IQNum)(false.B)))
+  val issueQueueEnqHasIssuedVec : Vec[Bool] = io.debugIQEnqHasIssuedVec.getOrElse(VecInit(Seq.fill(io.IQNum)(false.B)))
   issueQueues.filter(_.param.StdCnt == 0).zip(issueQueueEnqHasIssuedVec).foreach{ case (issueQueue, enqIssued) =>
     enqIssued := andVec(issueQueue.io.issuedVec, issueQueue.io.validVec).take(issueQueue.param.numEnq).reduce(_ & _)
   }
@@ -891,7 +891,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     pipeLineNum.asUInt
   })
 
-  if(backendParams.simEn) {
+  if(backendParams.debugEn) {
     val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
     val topdownIQInfoCollect = Module(new TopdownIQInfoCollect(io.iqEntryNum))
     topdownIQInfoCollect.io.in.zip(topdownIQInfoVec).foreach{ case (sink, source) =>
@@ -978,8 +978,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val flush = Flipped(ValidIO(new Redirect))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   val fromPcTargetMem = Option.when(params.isIntSchd)(Flipped(new PcToDataPathIO(backendParams)))
-  val diffVlRat = Option.when(backendParams.basicSimEn && params.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
-  val diffVl = Option.when(backendParams.basicSimEn && params.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
+  val diffVlRat = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
+  val diffVl = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
   val vlWriteBackInfoIn = new Bundle {
     val vlFromIntIsZero = Input(Bool())
     val vlFromIntIsVlmax = Input(Bool())
@@ -1109,7 +1109,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val uopTopDown = new UopTopDown
   val iqDeqSum = params.issueBlockParams.map(_.numDeq).sum
   val iqEntryNum = params.issueBlockParams.map(_.numEntries).sum
-  val simIQValidNumVec = Option.when(backendParams.simEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
-  val simIQEnqHasIssuedVec = Option.when(backendParams.simEn)(Vec(IQNum, Output(Bool())))
-  val topdownIQInfoVec = Option.when(backendParams.simEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
+  val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
+  val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
 }

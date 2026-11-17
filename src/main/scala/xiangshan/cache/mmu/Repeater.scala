@@ -22,7 +22,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -74,9 +74,9 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
   XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(req_in.fire, tlb.resp.fire || flush))
   XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire, ptw.resp.fire || flush))
 
-  XSSim(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${flush} req:${req} resp:${resp}")
-  XSSim(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
-  XSSim(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
+  XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${flush} req:${req} resp:${resp}")
+  XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
   XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
   XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.s1.entry.tag), "ptw repeater recv resp with wrong tag")
@@ -125,8 +125,8 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
     XSPerfAccumulate("req_blank_ignore_ready", req_in.valid && sent)
     XSPerfAccumulate("resp_blank_ignore_ready", ptw.resp.valid && recv)
   }
-  XSSim(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
-  XSSim(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
+  XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
 }
 
 class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends MMUIOBaseBundle {
@@ -134,7 +134,7 @@ class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) 
   val ptw = new TlbPtwIO()
   val hint = if (hasHint) Some(new TlbHintIO) else None
   val rob_head_miss_in_tlb = Output(Bool())
-  val simTopDown = new Bundle {
+  val debugTopDown = new Bundle {
     val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
   }
 
@@ -320,7 +320,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   }
 
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
-    vi && io.simTopDown.robHeadVaddr.valid && vpni === get_pn(io.simTopDown.robHeadVaddr.bits)
+    vi && io.debugTopDown.robHeadVaddr.valid && vpni === get_pn(io.debugTopDown.robHeadVaddr.bits)
   }}).asUInt.orR
 
 
@@ -388,7 +388,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   filter.map(_.flush := flush)
   filter.map(_.sfence := io.sfence)
   filter.map(_.csr := io.csr)
-  filter.map(_.simTopDown.robHeadVaddr := io.simTopDown.robHeadVaddr)
+  filter.map(_.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr)
 
   io.tlb.req.map(_.ready := true.B)
   io.tlb.resp.valid := ptwResp_valid
@@ -657,7 +657,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     inflight_counter := 0.U
   }
 
-  val robHeadVaddr = io.simTopDown.robHeadVaddr
+  val robHeadVaddr = io.debugTopDown.robHeadVaddr
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
     vi && robHeadVaddr.valid && vpni === get_pn(robHeadVaddr.bits)
   }}).asUInt.orR

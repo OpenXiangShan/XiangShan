@@ -189,10 +189,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
       )
     }
-    val sim_robIdx = enq.bits.robIdx.asUInt
+    val debug_robIdx = enq.bits.robIdx.asUInt
     XSError(
       needEnqueue(w) && enq.ready && allocated(enqIndex),
-      p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $sim_robIdx")
+      p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
   //  LoadQueueRAR deallocate

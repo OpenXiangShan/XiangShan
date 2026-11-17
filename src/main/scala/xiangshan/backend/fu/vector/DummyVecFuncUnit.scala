@@ -12,8 +12,8 @@ class DummyVecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncU
   
   // Drive res outputs to 0 (HasPipelineReg already handles ctrl/valid/ready)
   io.out.bits.res.data := 0.U
-  io.out.bits.perfSimInfo.foreach(_ := 0.U.asTypeOf(io.out.bits.perfSimInfo.get))
-  io.out.bits.sim_seqNum.foreach(_ := 0.U.asTypeOf(io.out.bits.sim_seqNum.get))
+  io.out.bits.perfDebugInfo.foreach(_ := 0.U.asTypeOf(io.out.bits.perfDebugInfo.get))
+  io.out.bits.debug_seqNum.foreach(_ := 0.U.asTypeOf(io.out.bits.debug_seqNum.get))
   if (cfg.writeVxsat) {
     io.out.bits.res.vxsat.get := false.B
   }
@@ -28,8 +28,8 @@ class DummyVecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends Fu
   io.out.valid := false.B
   io.out.bits.ctrl := 0.U.asTypeOf(io.out.bits.ctrl)
   io.out.bits.res.data := 0.U
-  io.out.bits.perfSimInfo.foreach(_ := 0.U.asTypeOf(io.out.bits.perfSimInfo.get))
-  io.out.bits.sim_seqNum.foreach(_ := 0.U.asTypeOf(io.out.bits.sim_seqNum.get))
+  io.out.bits.perfDebugInfo.foreach(_ := 0.U.asTypeOf(io.out.bits.perfDebugInfo.get))
+  io.out.bits.debug_seqNum.foreach(_ := 0.U.asTypeOf(io.out.bits.debug_seqNum.get))
   if (cfg.writeVxsat) {
     io.out.bits.res.vxsat.get := false.B
   }

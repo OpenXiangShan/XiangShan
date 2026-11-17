@@ -69,7 +69,7 @@ private[top] object CacheSizeParser {
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
-  case SimOptionsKey => SimOptions()
+  case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
   case CVMParamsKey => CVMParameters()
   case PMParameKey => PMParameters()
@@ -357,10 +357,10 @@ case class L2CacheConfig
           (if (cdp) Seq(CDPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
-        enablePerf = !site(SimOptionsKey).FPGAPlatform && site(SimOptionsKey).EnableSimPerf,
-        enableRollingDB = site(SimOptionsKey).EnableRollingDB,
-        enableMonitor = site(SimOptionsKey).AlwaysBasicDB,
-        elaboratedTopDown = !site(SimOptionsKey).FPGAPlatform,
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
+        enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
+        enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
         hasMbist = site(DFTOptionsKey).EnableMbist,
         hasSramCtl = site(DFTOptionsKey).EnableSramCtl,
       )),
@@ -391,8 +391,8 @@ case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Co
             ways = l2params.ways + 2
           )
         },
-        enablePerf = !site(SimOptionsKey).FPGAPlatform && site(SimOptionsKey).EnableSimPerf,
-        elaboratedTopDown = !site(SimOptionsKey).FPGAPlatform
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
 })
@@ -426,21 +426,21 @@ case class ZhuJiangConfig(size: String, ways: Int = 16) extends Config((site, he
     ))
 })
 
-class WithL3SimConfig extends Config(
+class WithL3DebugConfig extends Config(
   OpenLLCConfig("256KB") ++ L2CacheConfig("64KB")
 )
 
-class MinimalL3SimConfig(n: Int = 1) extends Config(
-  new WithL3SimConfig ++ new MinimalConfig(n)
+class MinimalL3DebugConfig(n: Int = 1) extends Config(
+  new WithL3DebugConfig ++ new MinimalConfig(n)
 ) with DeprecatedConfigWarning
 
-class DefaultL3SimConfig(n: Int = 1) extends Config(
-  new WithL3SimConfig ++ new DefaultConfig(n)
+class DefaultL3DebugConfig(n: Int = 1) extends Config(
+  new WithL3DebugConfig ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 
 class WithFuzzer extends Config((site, here, up) => {
-  case SimOptionsKey => up(SimOptionsKey).copy(
-    EnableSimPerf = false,
+  case DebugOptionsKey => up(DebugOptionsKey).copy(
+    EnablePerfDebug = false,
   )
   case SoCParamsKey => up(SoCParamsKey).copy(
     OpenLLCParamsOpt = up(SoCParamsKey).OpenLLCParamsOpt.map(_.copy(
@@ -456,14 +456,14 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
-class FrontendSimConfig(n: Int = 1) extends Config(
+class FrontendDebugConfig(n: Int = 1) extends Config(
   (new DefaultConfig(n)).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map{ p => p.copy(
       frontendParameters = p.frontendParameters.copy(
         bpuParameters = p.frontendParameters.bpuParameters.copy(
           EnableBpTrace = true,
           utageParameters = p.frontendParameters.bpuParameters.utageParameters.copy(
-            EnableSimTrace = true,
+            EnableTraceAndDebug = true,
           ),
           mbtbParameters = p.frontendParameters.bpuParameters.mbtbParameters.copy(
             EnableMainbtbTrace = true,
@@ -480,7 +480,7 @@ class FrontendSimConfig(n: Int = 1) extends Config(
         ),
       )
     )}
-    case SimOptionsKey => up(SimOptionsKey).copy(
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
       EnableChiselDB = true,
       EnableConstantin = true,
     )
@@ -558,7 +558,7 @@ class CVMTestCompile extends Config((site, here, up) => {
     HasBitmapCheck =true))
 })
 
-class MinimalAliasSimConfig(n: Int = 1) extends Config(
+class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   OpenLLCConfig("512KB")
     ++ L2CacheConfig("256KB", inclusive = true)
     ++ WithNKBL1D(128)
@@ -625,7 +625,7 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
-    case SimOptionsKey => up(SimOptionsKey).copy(
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,
       AlwaysBasicDB = false
     )
@@ -637,7 +637,7 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
-    case SimOptionsKey => up(SimOptionsKey).copy(
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
       AlwaysBasicDB = false
     )
@@ -649,7 +649,7 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
 
 class FpgaDiffMinimalConfig(n: Int = 1) extends Config(
   (new MinimalConfig(n)).alter((site, here, up) => {
-    case SimOptionsKey => up(SimOptionsKey).copy(
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
       AlwaysBasicDB = false
     )

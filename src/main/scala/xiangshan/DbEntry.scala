@@ -3,7 +3,7 @@ package xiangshan
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.log2Ceil
-import xiangshan.backend.ctrlblock.{SimLsInfo, SimMdpInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 import xiangshan.backend.fu.FuType
 import utility.MemReqSource
@@ -32,7 +32,7 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val robIdx = UInt(log2Ceil(RobSize).W)
   // val globalID = UInt(XLEN.W)
   // val instType = FuType()
-  // val mdpInfo = new SimMdpInfo
+  // val mdpInfo = new DebugMdpInfo
   // val ivaddr = UInt(VAddrBits.W)
   val dvaddr = UInt(VAddrBits.W) // the l/s access address
   val dpaddr = UInt(VAddrBits.W) // need the physical address when the TLB is valid
@@ -46,7 +46,7 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val rsFuLatency = UInt(XLEN.W)
   // val commitLatency = UInt(XLEN.W) // can not record when writing back
   val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
-  val lsInfo = new SimLsInfo
+  val lsInfo = new DebugLsInfo
   val exceptType = UInt(ExceptSparseVec.ExceptionVecSize.W)
 }
 

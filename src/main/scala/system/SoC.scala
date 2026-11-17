@@ -36,7 +36,7 @@ import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource, AsyncBundl
 import top.{BusPerfMonitor, LLCType}
 import zhujiang.ZJParameters
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
-import xiangshan.{SimOptionsKey, PMParameKey, XSTileKey}
+import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import device.SYSCNTConsts.timeWidth
 
 case object SoCParamsKey extends Field[SoCParameters]
@@ -155,7 +155,7 @@ trait HasSoCParameter {
 
   val soc = p(SoCParamsKey)
   val cvm = p(CVMParamsKey)
-  val simOpts = p(SimOptionsKey)
+  val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val issue = p(CHIIssue)
   val isOpenLLC = soc.LLC == LLCType.OpenLLC
@@ -261,7 +261,7 @@ trait HasPeripheralRanges {
     "PLL"   -> soc.PLLRange,
     "UARTLITE" -> soc.UARTLiteRange,
     "UART16550" -> soc.UART16550Range,
-    "SIM" -> dm.get.address,
+    "DEBUG" -> dm.get.address,
     "MMPMA" -> AddressSet(mmpma.address, mmpma.mask)
   ) ++ imsicRanges ++ (
     if (cvm.HasMEMencryption)
@@ -326,7 +326,7 @@ trait HaveAXI4MemPort {
         )
       ),
       beatBytes = L3OuterBusWidth / 8,
-      requestKeys = if (simOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
+      requestKeys = if (debugOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
     )
   ))
 

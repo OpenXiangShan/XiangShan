@@ -27,9 +27,9 @@ import xiangshan.backend.Bundles.{DynInst, ExuInput, ExuOutput, MemExuOutput, Me
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.ctrlblock.{SimLsInfoBundle, LsTopdownInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.ctrlblock.SimLsInfoBundle
+import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
@@ -60,8 +60,8 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   val need_rep        = Bool()
   // replay cause
   val cause           = Vec(LoadReplayCauses.allCauses, Bool())
-  // performance sim information
-  val sim           = new PerfSimInfo
+  // performance debug information
+  val debug           = new PerfDebugInfo
   // tlb hint
   val tlb_id          = UInt(log2Up(loadfiltersize).W)
   val tlb_full        = Bool()

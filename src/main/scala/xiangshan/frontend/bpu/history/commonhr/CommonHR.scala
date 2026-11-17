@@ -36,7 +36,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s3DedupHitMask: Vec[Bool]           = Output(Vec(NumBtbResultEntries, Bool()))
     val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
-    val s0_startPc: Option[Pc] = Some(Input(Pc())) // for sim
+    val s0_startPc: Option[Pc] = Some(Input(Pc())) // for debug
   }
   val io = IO(new CommonHRIO)
 
@@ -60,7 +60,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s2_commonHR            = RegEnable(s1_commonHR, 0.U.asTypeOf(new CommonHREntry), s1_fire)
   private val s3_commonHR            = RegEnable(s2_commonHR, 0.U.asTypeOf(new CommonHREntry), s2_fire)
   private val commonHR               = RegInit(0.U.asTypeOf(new CommonHREntry))
-  private val simCommonHR            = RegInit(0.U.asTypeOf(new CommonHREntry))
+  private val debugCommonHR          = RegInit(0.U.asTypeOf(new CommonHREntry))
   private val s3_commonHRResolveMeta = WireInit(0.U.asTypeOf(new CommonHRResolveMeta))
 
   private val r1_valid    = RegNext(io.redirect.valid, false.B)
@@ -214,37 +214,37 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   dontTouch(r1_commonHR)
 
   /*
-   * Directly resume and update commonHR after redirection for simulation inspection
+   * Directly resume and update commonHR after redirection for debugging
    */
-  private val sim_metaGhr      = io.redirect.meta.ghr
-  private val sim_metaBW       = io.redirect.meta.bw
-  private val sim_oldPositions = io.redirect.meta.position
-  private val sim_oldCondHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
+  private val debug_metaGhr      = io.redirect.meta.ghr
+  private val debug_metaBW       = io.redirect.meta.bw
+  private val debug_oldPositions = io.redirect.meta.position
+  private val debug_oldCondHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
     case (hit, attr) => hit && attr.isConditional
   })
-  private val sim_oldHits       = dedupHitPositions(sim_oldCondHits, sim_oldPositions)
-  private val sim_taken         = io.redirect.taken
-  private val sim_isCond        = io.redirect.attribute.isConditional
-  private val sim_bwTaken       = isBackwardBranch(io.redirect.cfiPc, io.redirect.target)
-  private val sim_takenPosition = getAlignedInstOffset(io.redirect.cfiPc)
-  private val sim_lessThanPc = sim_oldPositions.zip(sim_oldHits).map {
-    case (pos, hit) => hit && (pos < sim_takenPosition)
+  private val debug_oldHits       = dedupHitPositions(debug_oldCondHits, debug_oldPositions)
+  private val debug_taken         = io.redirect.taken
+  private val debug_isCond        = io.redirect.attribute.isConditional
+  private val debug_bwTaken       = isBackwardBranch(io.redirect.cfiPc, io.redirect.target)
+  private val debug_takenPosition = getAlignedInstOffset(io.redirect.cfiPc)
+  private val debug_lessThanPc = debug_oldPositions.zip(debug_oldHits).map {
+    case (pos, hit) => hit && (pos < debug_takenPosition)
   } // positions less than redirect branch pc
-  private val sim_numLess  = PopCount(sim_lessThanPc)
-  private val sim_numHit   = PopCount(sim_oldHits)
-  private val sim_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
-  sim_commonHR.valid           := false.B
-  sim_commonHR.predStartPc.get := io.s0_startPc.get
-  sim_commonHR.ghr := getNewHR(sim_metaGhr, sim_numLess, sim_numHit, sim_taken, sim_isCond)(
+  private val debug_numLess  = PopCount(debug_lessThanPc)
+  private val debug_numHit   = PopCount(debug_oldHits)
+  private val debug_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
+  debug_commonHR.valid           := false.B
+  debug_commonHR.predStartPc.get := io.s0_startPc.get
+  debug_commonHR.ghr := getNewHR(debug_metaGhr, debug_numLess, debug_numHit, debug_taken, debug_isCond)(
     GhrHistoryLength
   )
-  sim_commonHR.bw := getNewHR(
-    sim_metaBW,
-    sim_numLess,
-    sim_numHit,
-    sim_taken,
-    sim_isCond,
-    Option(sim_bwTaken && sim_taken)
+  debug_commonHR.bw := getNewHR(
+    debug_metaBW,
+    debug_numLess,
+    debug_numHit,
+    debug_taken,
+    debug_isCond,
+    Option(debug_bwTaken && debug_taken)
   )(
     BWHistoryLength
   )
@@ -259,9 +259,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   }
 
   when(r0_valid) {
-    simCommonHR := sim_commonHR
+    debugCommonHR := debug_commonHR
   }.elsewhen(s3_fire) {
-    simCommonHR := s3_newCommonHR
+    debugCommonHR := s3_newCommonHR
   }
 
   // On r1 redirect recovery, overwrite s1/s2 history with the recomputed CommonHR
@@ -405,11 +405,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     )
   )
 
-  private val diffCommonHR         = simCommonHR.asUInt =/= commonHR.asUInt
-  private val diffSimAndR1CommonHR = simCommonHR.asUInt =/= r1_commonHR.asUInt
+  private val diffCommonHR           = debugCommonHR.asUInt =/= commonHR.asUInt
+  private val diffDebugAndR1CommonHR = debugCommonHR.asUInt =/= r1_commonHR.asUInt
   XSError(
-    (!r1_valid && diffCommonHR) || (r1_valid && diffSimAndR1CommonHR),
-    "simCommonHR is not equal commonHR!"
+    (!r1_valid && diffCommonHR) || (r1_valid && diffDebugAndR1CommonHR),
+    "debugCommonHR is not equal commonHR!"
   )
 
   dontTouch(diffCommonHR)

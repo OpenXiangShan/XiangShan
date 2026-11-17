@@ -24,7 +24,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
@@ -1024,12 +1024,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     MuxLookup(source, true.B)((0 until PtwWidth).map(i => i.U -> mergeArb(i).in(port).ready))
   }
 
-  // sim info
+  // debug info
   for (i <- 0 until PtwWidth) {
-    XSSim(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
+    XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
   }
-  XSSim(p"[sfence] ${io.sfence}\n")
-  XSSim(p"[io.csr.tlb] ${io.csr.tlb}\n")
+  XSDebug(p"[sfence] ${io.sfence}\n")
+  XSDebug(p"[io.csr.tlb] ${io.csr.tlb}\n")
 
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire)
@@ -1180,7 +1180,7 @@ object PTWDelayN {
 }
 
 // FakePTW: Software PTW implementation using DPI-C PteHelper
-// Used when coreParams.softPTW is enabled for sim/simulation
+// Used when coreParams.softPTW is enabled for debug/simulation
 // Supports H-extension two-stage address translation
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)

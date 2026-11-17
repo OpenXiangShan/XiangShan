@@ -33,7 +33,7 @@ class FltIssueQueue(
   val out = IO(Output(new Out))
 
   in.enq.foreach { case enq =>
-    enq.bits.sim.foreach(x => PerfCCT.updateInstPos(x.sim_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
+    enq.bits.debug.foreach(x => PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
   }
 
   // Modules
@@ -198,7 +198,7 @@ class FltIssueQueue(
   private val fastEntryCancel = Wire(Vec(param.numFastEntry, Bool()))
   private val entryCancel: Seq[Bool] = enqEntryCancel ++ fastEntryCancel
   private val fltExuWBPort = param.backendParams.getFltRegionParam.issueParams.map(_.fpWbPortIds.head)
-  private val entryCancelSourceNext = Option.when(backendParams.simEn)(Wire(Vec(param.numEntry, IQCancelSource())))
+  private val entryCancelSourceNext = Option.when(backendParams.debugEn)(Wire(Vec(param.numEntry, IQCancelSource())))
   for (((cancel, entry, srcCancel), entryIdx) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel).zipWithIndex) {
     val status = entry.bits.status
     val deqPortIdx = status.deqPortIdx
@@ -208,16 +208,16 @@ class FltIssueQueue(
     }
     cancel := issueFail.reduce(_ || _) || entryFmaM4Cancel(entryIdx) ||
       entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
-    entry.bits.simLastIssueCancelSource.foreach { _ =>
+    entry.bits.debugLastIssueCancelSource.foreach { _ =>
       val pipeCancelSource = Mux1H(issueFail.zip(Seq(in.resps.is0(deqPortIdx), in.resps.is1(deqPortIdx),
         in.resps.ex0(deqPortIdx), in.resps.ex1(deqPortIdx))).map { case (fail, resp) =>
-        fail -> resp.simCancelSource.get
+        fail -> resp.debugCancelSource.get
       })
       val loadCancel = entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
       val cancelSource = Mux(loadCancel, IQCancelSource.ld,
         Mux(issueFail.reduce(_ || _), pipeCancelSource, IQCancelSource.og0))
       entryCancelSourceNext.get(entryIdx) :=
-        Mux(entry.valid && status.issued && cancel, cancelSource, entry.bits.simLastIssueCancelSource.get)
+        Mux(entry.valid && status.issued && cancel, cancelSource, entry.bits.debugLastIssueCancelSource.get)
     }
     srcCancel.zipWithIndex.map { case (srccancel, srcidx) =>
       val issuedSrcCancel =
@@ -279,7 +279,7 @@ class FltIssueQueue(
     enq.valid := inEnq.valid
     enq.bits.payload.fromEnq(inEnqBits)
     enq.bits.status.fromEnq(inEnqBits)
-    enq.bits.simLastIssueCancelSource.foreach(_ := IQCancelSource.none)
+    enq.bits.debugLastIssueCancelSource.foreach(_ := IQCancelSource.none)
     enq.bits.perfLoadM4Woken.foreach(_ := false.B)
   }
 
@@ -354,7 +354,7 @@ class FltIssueQueue(
   for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), enqIdx) <- (enqEntriesKeepNext lazyZip enqEntries).zipWithIndex) {
     // Connect all bundles by default
     etyKeepNext := ety
-    etyKeepNext.bits.simLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqIdx))
+    etyKeepNext.bits.debugLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqIdx))
     // Invalid the entry if it is issued successfully or is flushed
     etyKeepNext.valid := ety.valid && !enqEntrySuccess(enqIdx) && !enqEntryFlush(enqIdx) && !fastEntryEmptySel(enqIdx).valid
     // Change the connection of status
@@ -396,7 +396,7 @@ class FltIssueQueue(
   for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), fastIdx) <- (fastEntriesKeepNext lazyZip fastEntries).zipWithIndex) {
     // Connect all bundles by default
     etyKeepNext := ety
-    etyKeepNext.bits.simLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqEntries.size + fastIdx))
+    etyKeepNext.bits.debugLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqEntries.size + fastIdx))
     // Invalid the entry if it is issued successfully
     etyKeepNext.valid := ety.valid && !fastEntrySuccess(fastIdx) && !fastEntryFlush(fastIdx)
     // Change the connection of status
@@ -536,7 +536,7 @@ class FltIssueQueue(
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
-  out.simEnqHasIssued.foreach(_ := enqEntries.map(e => e.valid && e.bits.status.issued).reduce(_ && _))
+  out.debugEnqHasIssued.foreach(_ := enqEntries.map(e => e.valid && e.bits.status.issued).reduce(_ && _))
   out.topdownIQInfoVec.foreach { infoVec =>
     infoVec.zip(entries).foreach { case (info, entry) =>
       info.valid := entry.valid
@@ -544,7 +544,7 @@ class FltIssueQueue(
       info.bits.fuType := entry.bits.status.fuType
       info.bits.srcReady := entry.bits.status.srcReady
       info.bits.issued := entry.bits.status.issued
-      info.bits.cancelSource := entry.bits.simLastIssueCancelSource.get
+      info.bits.cancelSource := entry.bits.debugLastIssueCancelSource.get
     }
   }
 
@@ -725,7 +725,7 @@ object FltIssueQueue {
   }
 
   class Entry(implicit p: Parameters, param: IssueParam) extends VecIssueQueue.Entry {
-    val simLastIssueCancelSource = Option.when(param.backendParams.simEn)(IQCancelSource())
+    val debugLastIssueCancelSource = Option.when(param.backendParams.debugEn)(IQCancelSource())
     // Track one load-M4 wakeup episode until cancellation or entry retirement.
     val perfLoadM4Woken = Option.when(p(PerfCounterOptionsKey).enablePerfPrint)(Bool())
   }
@@ -792,8 +792,8 @@ object FltIssueQueue {
     val canAccept: Bool = Bool()
 
     val validNum: UInt = UInt(log2Ceil(param.numEntry + 1).W)
-    val simEnqHasIssued = Option.when(backendParams.simEn)(Bool())
-    val topdownIQInfoVec = Option.when(backendParams.simEn)(Vec(param.numEntry, ValidIO(new TopdownIQInfo())))
+    val debugEnqHasIssued = Option.when(backendParams.debugEn)(Bool())
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Vec(param.numEntry, ValidIO(new TopdownIQInfo())))
   }
 
   def connectWbFuBusyTableIn(
@@ -863,7 +863,7 @@ object FltIssueQueue {
     val fail = Bool()
     val success = Bool()
     val srcCancel = Vec(param.numRegSrc, Bool())
-    val simCancelSource = Option.when(backendParams.simEn)(IQCancelSource())
+    val debugCancelSource = Option.when(backendParams.debugEn)(IQCancelSource())
   }
 
   class InResp(implicit p: Parameters, param: IssueParam) extends XSBundle {

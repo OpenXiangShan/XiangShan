@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.rob.RobPtr
@@ -71,10 +71,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val committed = Reg(Vec(VirtualLoadQueueSize, Bool()))
 
   /**
-   * used for sim
+   * used for debug
    */
-  val sim_mmio = Reg(Vec(VirtualLoadQueueSize, Bool())) // mmio: inst is an mmio inst
-  val sim_paddr = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
+  val debug_mmio = Reg(Vec(VirtualLoadQueueSize, Bool())) // mmio: inst is an mmio inst
+  val debug_paddr = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
 
   //  maintain pointers
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
@@ -188,8 +188,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       isvec(i) := LSUOpType.isVecMemOp(selectBits.fuOpType)
       committed(i) := false.B
 
-      sim_mmio(i) := false.B
-      sim_paddr(i) := 0.U
+      debug_mmio(i) := false.B
+      debug_paddr(i) := 0.U
     }
     XSError(entryCanEnq && allocated(i), s"can't allocated entry twice! ${i}\n")
   }
@@ -222,7 +222,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  XSSim(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
 
   /**
     * Writeback load from load units
@@ -243,9 +243,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       val hasExceptions = io.ldin(i).bits.uop.exceptionVec.selectByFu(LduCfg).orR
       when (!need_rep && need_valid) {
         committed(loadWbIndex) := true.B
-        //  Simulation info
-        sim_mmio(loadWbIndex) := io.ldin(i).bits.mmio
-        sim_paddr(loadWbIndex) := io.ldin(i).bits.paddr
+        //  Debug info
+        debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
+        debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
       }
     }
     XSError((io.ldin(i).bits.uop.robIdx =/= robIdx(loadWbIndex)) && io.ldin(i).valid, s"writeback load robIdx missMatch! at pipeline ${i}\n")
@@ -271,19 +271,19 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 
-  // sim info
-  XSSim("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtr.flag, deqPtr.value)
+  // debug info
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtr.flag, deqPtr.value)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
-    XSSim(false, flag, name) // when(flag)
-    XSSim(false, !flag, " ") // otherwise
+    XSDebug(false, flag, name) // when(flag)
+    XSDebug(false, !flag, " ") // otherwise
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && committed(i), "c")
     PrintFlag(allocated(i) && isvec(i), "v")
-    XSSim(false, true.B, "\n")
+    XSDebug(false, true.B, "\n")
   }
   // end
 }

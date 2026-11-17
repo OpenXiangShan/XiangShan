@@ -17,7 +17,7 @@ import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
-import xiangshan.backend.vector.VecRegionModule.SimBundle
+import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import xiangshan._
@@ -262,7 +262,7 @@ object Exu {
       this.ctrl := source.ctrl
       this.data := source.data
       this.bypassCtrl := source.bypassCtrl
-      this.sim.foreach(_ := source.sim.get)
+      this.debug.foreach(_ := source.debug.get)
     }
   }
 
@@ -270,7 +270,7 @@ object Exu {
     val ctrl = new InCtrl(param)
     val data = new InData(param)
     val bypassCtrl = new InBypassCtrl(param)
-    val sim = Option.when(backendParams.simEn)(new SimBundle())
+    val debug = Option.when(backendParams.debugEn)(new DebugBundle())
 
     def <#=:(sink: Func.InCtrl): Unit = {
       sink.opcode                      := this.ctrl.opcode
@@ -306,7 +306,7 @@ object Exu {
     def <#=:(sink: Func.InUop) : Unit = {
       sink.data <#=: this
       sink.ctrl <#=: this
-      sink.sim.foreach(x => x := this.sim.get)
+      sink.debug.foreach(x => x := this.debug.get)
     }
   }
 
@@ -328,7 +328,7 @@ object Exu {
       this.toRob.redirect.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.redirect.getOrElse(0.U.asTypeOf(x)))))
       this.toRob.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.fflags.getOrElse(0.U.asTypeOf(x)))))
       this.toRob.exceptionVec := ExceptSparseVec.mux1h(fuOutValidOH, fuOuts.map(_.bits.ctrl.exceptionVec))
-      this.toRob.sim.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.sim.get)))
+      this.toRob.debug.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.debug.get)))
 
       this.toGpRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.rfWen.getOrElse(false.B)))
@@ -396,7 +396,7 @@ object Exu {
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
 
-    val sim     = Option.when(backendParams.simEn)(new SimBundle)
+    val debug     = Option.when(backendParams.debugEn)(new DebugBundle)
 
     def fromIssueDeq(deq: VecIssueQueue.Deq): Unit = {
       this.robIdx := deq.robIdx
@@ -427,7 +427,7 @@ object Exu {
       this.vtype.foreach(_ := deq.vtype.get)
       this.oldVType.foreach(_ := deq.oldVType.get)
 
-      this.sim.foreach(_ := deq.sim.get)
+      this.debug.foreach(_ := deq.debug.get)
     }
   }
 
@@ -477,7 +477,7 @@ object Exu {
     val vxsat         = Option.when(param.needVxsatWen)(Bool())
     val exceptionVec  = ExceptSparseVec(param.exceptionOut)
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
-    val sim         = Option.when(backendParams.simEn)(new SimBundle)
+    val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
       val toRob = Wire(new Bundles.WriteBackRobBundle(param.getExeUnitParams(), backendParams))
@@ -497,9 +497,9 @@ object Exu {
       toRob.pdest         := 0.U
       toRob.vecWen        .foreach(_ := false.B)
       toRob.v0Wen         .foreach(_ := false.B)
-      toRob.sim                    := this.sim.map(_.sim).getOrElse(0.U.asTypeOf(toRob.sim))
-      toRob.perfSimInfo .foreach(_ := this.sim.get.perfSimInfo)
-      toRob.sim_seqNum  .foreach(_ := this.sim.get.seqNum)
+      toRob.debug                    := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(toRob.debug))
+      toRob.perfDebugInfo .foreach(_ := this.debug.get.perfDebugInfo)
+      toRob.debug_seqNum  .foreach(_ := this.debug.get.seqNum)
 
       toRob
     }
@@ -513,10 +513,10 @@ object Exu {
       this.vxsat       .foreach(_ := source.toRob.bits.vxsat       .get)
       this.exceptionVec := source.toRob.bits.exceptionVec
       this.trigger     .foreach(_ := source.toRob.bits.trigger     .get)
-      this.sim.foreach { case x =>
-        x.sim         := source.sim
-        x.perfSimInfo := source.perfSimInfo.get
-        x.seqNum        := source.sim_seqNum.get
+      this.debug.foreach { case x =>
+        x.debug         := source.debug
+        x.perfDebugInfo := source.perfDebugInfo.get
+        x.seqNum        := source.debug_seqNum.get
       }
     }
 
@@ -529,7 +529,7 @@ object Exu {
       this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
       this.exceptionVec.zeroInit()
       this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
-      this.sim       .foreach(x => x := source.ctrl.sim.get)
+      this.debug       .foreach(x => x := source.ctrl.debug.get)
     }
   }
 }

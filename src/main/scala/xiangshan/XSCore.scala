@@ -107,7 +107,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
     val l2PfqBusy = Input(Bool())
-    val simTopDown = new Bundle {
+    val debugTopDown = new Bundle {
       val robTrueCommit = Output(UInt(64.W))
       val robHeadPaddr = Valid(UInt(PAddrBits.W))
       val l2MissMatch = Input(Bool())
@@ -125,7 +125,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   dontTouch(io.l2_flush_en)
   dontTouch(io.power_down_en)
 
-  println(s"FPGAPlatform:${env.FPGAPlatform} EnableSimLog:${env.EnableSimLog}")
+  println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
   val frontend = outer.frontend.module
   val backend = outer.backend.module
@@ -166,7 +166,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
   backend.io.mem.exceptionAddr.isForVSnonLeafPTE := memBlock.io.mem_to_ooo.lsqio.isForVSnonLeafPTE
-  backend.io.mem.simLS := memBlock.io.sim_ls
+  backend.io.mem.debugLS := memBlock.io.debug_ls
   backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
   backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
@@ -180,7 +180,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 
-  backend.io.mem.storeSimInfo <> memBlock.io.mem_to_ooo.storeSimInfo
+  backend.io.mem.storeDebugInfo <> memBlock.io.mem_to_ooo.storeDebugInfo
 
   // top -> memBlock
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
@@ -230,15 +230,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
 
   // top-down info
-  memBlock.io.simTopDown.robHeadVaddr := backend.io.simTopDown.fromRob.robHeadVaddr
-  frontend.io.simTopDown.robHeadVaddr.bits := backend.io.simTopDown.fromRob.robHeadVaddr.bits
-  frontend.io.simTopDown.robHeadVaddr.valid := backend.io.simTopDown.fromRob.robHeadVaddr.valid
-  io.simTopDown.robHeadPaddr := backend.io.simTopDown.fromRob.robHeadPaddr
-  io.simTopDown.robTrueCommit := backend.io.simRolling.robTrueCommit
-  backend.io.simTopDown.fromCore.l2MissMatch := io.simTopDown.l2MissMatch
-  backend.io.simTopDown.fromCore.l3MissMatch := io.simTopDown.l3MissMatch
-  backend.io.simTopDown.fromCore.fromMem := memBlock.io.simTopDown.toCore
-  memBlock.io.simRolling := backend.io.simRolling
+  memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr.bits := backend.io.debugTopDown.fromRob.robHeadVaddr.bits
+  frontend.io.debugTopDown.robHeadVaddr.valid := backend.io.debugTopDown.fromRob.robHeadVaddr.valid
+  io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
+  io.debugTopDown.robTrueCommit := backend.io.debugRolling.robTrueCommit
+  backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
+  memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_wfi := memBlock.io.outer_cpu_wfi
   io.l2_flush_en := memBlock.io.outer_l2_flush_en
@@ -269,7 +269,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.topDownInfo.l2TopMiss.l3Miss := memBlock.io.topDownInfo.toBackend.l2TopMiss.l3Miss
 
 
-  if (simOpts.ResetGen) {
+  if (debugOpts.ResetGen) {
     backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
   }

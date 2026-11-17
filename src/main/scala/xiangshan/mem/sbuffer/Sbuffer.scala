@@ -22,7 +22,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util._
 import utils._
-import utility.{XSDebug => XSSim, _}
+import utility._
 import xiangshan._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.FuType._
@@ -172,11 +172,11 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   //         for(word <- 0 until CacheLineWords){
   //           for(byte <- 0 until DataBytes){
   //             mask(line)(word)(byte) := false.B
-  //             val sim_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
+  //             val debug_last_cycle_write_byte = RegNext(req.valid && req.bits.wvec(line) && (
   //               req.bits.mask(byte) && (req.bits.wordOffset(WordsWidth-1, 0) === word.U) ||
   //               req.bits.wline
   //             ))
-  //             assert(!sim_last_cycle_write_byte)
+  //             assert(!debug_last_cycle_write_byte)
   //           }
   //         }
   //       }
@@ -219,7 +219,7 @@ class Sbuffer(implicit p: Parameters)
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
-  val sim_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+  val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
   val data = dataModule.io.dataOut
   val mask = dataModule.io.maskOut
@@ -380,7 +380,7 @@ class Sbuffer(implicit p: Parameters)
   io.in.req(0).ready := (firstCanInsert || canMerge(0)) && enqAllowed
   io.in.req(1).ready := (secondCanInsert || canMerge(1)) && io.in.req(0).ready
 
-  // this group of signals are only for sim or assert
+  // this group of signals are only for debug or assert
   val evenRawInsertIdx = PriorityEncoderWithFlag(evenInvalidMask)._1
   val oddRawInsertIdx = PriorityEncoderWithFlag(oddInvalidMask)._1
   val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W))
@@ -478,7 +478,7 @@ class Sbuffer(implicit p: Parameters)
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
-    val sim_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
+    val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
     assert(!((PopCount(insertVec) > 1.U) && in.fire && in.bits.vecValid))
     val insertIdx = OHToUInt(insertVec)
@@ -486,8 +486,8 @@ class Sbuffer(implicit p: Parameters)
     accessIdx(i).valid := RegNext(accessValid)
     accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessValid)
 
-    XSSim(accessValid && canMerge(i), p"merge req $i to line [${mergeIdx(i)}]\n")
-    XSSim(accessValid && !canMerge(i), p"insert req $i to line[$insertIdx]\n")
+    XSDebug(accessValid && canMerge(i), p"merge req $i to line [${mergeIdx(i)}]\n")
+    XSDebug(accessValid && !canMerge(i), p"insert req $i to line[$insertIdx]\n")
     when(accessValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
@@ -495,12 +495,12 @@ class Sbuffer(implicit p: Parameters)
       }.otherwise({
         writeReq(i).bits.wvec := insertVec
         wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, vwordOffset)
-        assert(sim_insertIdx === insertIdx)
+        assert(debug_insertIdx === insertIdx)
       })
     }
-    // XSSim of mergeWordReq
+    // XSDebug of mergeWordReq
     (0 until StoreBufferSize).map(entryIdx => {
-      XSSim(
+      XSDebug(
         accessValid && canMerge(i) &&
           mergeVec(i)(entryIdx) && invtags(i) =/= vtag(entryIdx),
         "reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
@@ -514,19 +514,19 @@ class Sbuffer(implicit p: Parameters)
 
 
   for(i <- 0 until StoreBufferSize){
-    XSSim(stateVec(i).isValid(),
+    XSDebug(stateVec(i).isValid(),
       p"[$i] timeout:${cohCount(i)(EvictCountBits-1)} state:${stateVec(i)}\n"
     )
   }
 
   for((req, i) <- io.in.req.zipWithIndex){
-    XSSim(req.fire && req.bits.vecValid,
+    XSDebug(req.fire && req.bits.vecValid,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
         p"data:${Hexadecimal(shiftDataToLow(req.bits.addr,req.bits.data))}\n"
     )
-    XSSim(req.valid && !req.ready,
+    XSDebug(req.valid && !req.ready,
       p"req [$i] blocked by sbuffer\n"
     )
   }
@@ -552,7 +552,7 @@ class Sbuffer(implicit p: Parameters)
   val do_eviction = GatedValidRegNext(ActiveCount >= forceThreshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
-  XSSim(p"ActiveCount[$ActiveCount]\n")
+  XSDebug(p"ActiveCount[$ActiveCount]\n")
 
   io.sbempty := GatedValidRegNext(cmo_empty)
   io.sbFull  := GatedValidRegNext(ValidCount === (StoreBufferSize).U)
@@ -590,7 +590,7 @@ class Sbuffer(implicit p: Parameters)
       }
     }
   }
-  XSSim(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${all_empty} cmo_empty:${cmo_empty}\n")
+  XSDebug(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${all_empty} cmo_empty:${cmo_empty}\n")
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
@@ -682,12 +682,12 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).w_timeout := false.B
     // stateVec(sbuffer_out_s0_evictionIdx).s_pipe_req := true.B
   }
-  XSSim(sbuffer_out_s0_fire, p"$sbuffer_out_s0_evictionIdx will be sent to Dcache\n")
+  XSDebug(sbuffer_out_s0_fire, p"$sbuffer_out_s0_evictionIdx will be sent to Dcache\n")
 
-  XSSim(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
-  XSSim(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
+  XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
+  XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
     p"blocked:${!noSameBlockInflight(sbuffer_out_s0_evictionIdx)} v:${activeMask(sbuffer_out_s0_evictionIdx)}\n")
-  XSSim(p"sbuffer_out_s0_valid:$sbuffer_out_s0_valid evictIdx:$sbuffer_out_s0_evictionIdx dcache ready:${io.dcache.req.ready}\n")
+  XSDebug(p"sbuffer_out_s0_valid:$sbuffer_out_s0_valid evictIdx:$sbuffer_out_s0_evictionIdx dcache ready:${io.dcache.req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may not accurate
   accessIdx(EnsbufferWidth).valid :=
@@ -706,7 +706,7 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
 
-  XSSim(sbuffer_out_s1_fire,
+  XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
   )
 
@@ -806,7 +806,7 @@ class Sbuffer(implicit p: Parameters)
     when (tag_mismatch) {
       forward_need_uarch_drain := true.B
     }
-    XSSim(
+    XSDebug(
       tag_mismatch,
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
       RegNext(ptag_matches.asUInt),
@@ -862,7 +862,7 @@ class Sbuffer(implicit p: Parameters)
   }
 
   for (i <- 0 until StoreBufferSize) {
-    XSSim("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_timeout %x\n",
+    XSDebug("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_timeout %x\n",
       ptag(i) << OffsetWidth,
       vtag(i) << OffsetWidth,
       stateVec(i).isValid(),

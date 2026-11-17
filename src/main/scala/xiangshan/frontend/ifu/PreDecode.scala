@@ -18,7 +18,7 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{XSDebug => XSSim}
+import utility.XSDebug
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.bpu.BranchAttribute
@@ -61,7 +61,7 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   }
 
   for (i <- 0 until IBufferEnqueueWidth) {
-    XSSim(
+    XSDebug(
       true.B,
       p"instr ${Hexadecimal(io.resp.instr(i))}, " +
         p"isRVC ${Binary(io.resp.pd(i).isRVC)}, " +

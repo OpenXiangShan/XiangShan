@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLBundleB, TLBundleC, TLBundleD, TLBundleE, TLChannel}
-import utility.{XSDebug => XSSim}
+import utility.XSDebug
 
 trait HasTLDump {
 
@@ -56,20 +56,20 @@ trait HasTLDump {
       cond && a.opcode === opCode && paramComp
     }
 
-    XSSim(false, ACond(PutFullData), APrintable("PutFullData"))
-    XSSim(false, ACond(PutPartialData), APrintable("PutPartialData"))
-    XSSim(false, ACond(ArithmeticData), APrintable("ArithmeticData"))
-    XSSim(false, ACond(LogicalData), APrintable("LogicalData"))
-    XSSim(false, ACond(Get), APrintable("Get"))
-    XSSim(false, ACond(Hint), APrintable("Intent"))
+    XSDebug(false, ACond(PutFullData), APrintable("PutFullData"))
+    XSDebug(false, ACond(PutPartialData), APrintable("PutPartialData"))
+    XSDebug(false, ACond(ArithmeticData), APrintable("ArithmeticData"))
+    XSDebug(false, ACond(LogicalData), APrintable("LogicalData"))
+    XSDebug(false, ACond(Get), APrintable("Get"))
+    XSDebug(false, ACond(Hint), APrintable("Intent"))
 
-    XSSim(false, ACond(AcquireBlock, Some(NtoB)), APrintable("AcquireBlock", "NtoB"))
-    XSSim(false, ACond(AcquireBlock, Some(NtoT)), APrintable("AcquireBlock", "NtoT"))
-    XSSim(false, ACond(AcquireBlock, Some(BtoT)), APrintable("AcquireBlock", "BtoT"))
+    XSDebug(false, ACond(AcquireBlock, Some(NtoB)), APrintable("AcquireBlock", "NtoB"))
+    XSDebug(false, ACond(AcquireBlock, Some(NtoT)), APrintable("AcquireBlock", "NtoT"))
+    XSDebug(false, ACond(AcquireBlock, Some(BtoT)), APrintable("AcquireBlock", "BtoT"))
 
-    XSSim(false, ACond(AcquirePerm, Some(NtoB)), APrintable("AcquirePerm", "NtoB"))
-    XSSim(false, ACond(AcquirePerm, Some(NtoT)), APrintable("AcquirePerm", "NtoT"))
-    XSSim(false, ACond(AcquirePerm, Some(BtoT)), APrintable("AcquirePerm", "BtoT"))
+    XSDebug(false, ACond(AcquirePerm, Some(NtoB)), APrintable("AcquirePerm", "NtoB"))
+    XSDebug(false, ACond(AcquirePerm, Some(NtoT)), APrintable("AcquirePerm", "NtoT"))
+    XSDebug(false, ACond(AcquirePerm, Some(BtoT)), APrintable("AcquirePerm", "BtoT"))
   }
 
   def printChannelB(b: TLBundleB, cond: Bool): Unit = {
@@ -85,16 +85,16 @@ trait HasTLDump {
       cond && b.opcode === opCode && paramComp
     }
 
-    XSSim(false, BCond(PutFullData), BPrintable("PutFullData"))
-    XSSim(false, BCond(PutPartialData), BPrintable("PutPartialData"))
-    XSSim(false, BCond(ArithmeticData), BPrintable("ArithmeticData"))
-    XSSim(false, BCond(LogicalData), BPrintable("LogicalData"))
-    XSSim(false, BCond(Get), BPrintable("Get"))
-    XSSim(false, BCond(Hint), BPrintable("Intent"))
+    XSDebug(false, BCond(PutFullData), BPrintable("PutFullData"))
+    XSDebug(false, BCond(PutPartialData), BPrintable("PutPartialData"))
+    XSDebug(false, BCond(ArithmeticData), BPrintable("ArithmeticData"))
+    XSDebug(false, BCond(LogicalData), BPrintable("LogicalData"))
+    XSDebug(false, BCond(Get), BPrintable("Get"))
+    XSDebug(false, BCond(Hint), BPrintable("Intent"))
 
-    XSSim(false, BCond(Probe, Some(toN)), BPrintable("Probe", "toN"))
-    XSSim(false, BCond(Probe, Some(toB)), BPrintable("Probe", "toB"))
-    XSSim(false, BCond(Probe, Some(toT)), BPrintable("Probe", "toT"))
+    XSDebug(false, BCond(Probe, Some(toN)), BPrintable("Probe", "toN"))
+    XSDebug(false, BCond(Probe, Some(toB)), BPrintable("Probe", "toB"))
+    XSDebug(false, BCond(Probe, Some(toT)), BPrintable("Probe", "toT"))
   }
 
   def printChannelC(c: TLBundleC, cond: Bool): Unit = {
@@ -110,37 +110,37 @@ trait HasTLDump {
       cond && c.opcode === opCode && paramComp
     }
 
-    XSSim(false, CCond(AccessAck), CPrintable("AccessAck"))
-    XSSim(false, CCond(AccessAckData), CPrintable("AccessAckData"))
-    XSSim(false, CCond(HintAck), CPrintable("HintAck"))
+    XSDebug(false, CCond(AccessAck), CPrintable("AccessAck"))
+    XSDebug(false, CCond(AccessAckData), CPrintable("AccessAckData"))
+    XSDebug(false, CCond(HintAck), CPrintable("HintAck"))
 
-    XSSim(false, CCond(ProbeAck, Some(TtoB)), CPrintable("ProbeAck", "TtoB"))
-    XSSim(false, CCond(ProbeAck, Some(TtoN)), CPrintable("ProbeAck", "TtoN"))
-    XSSim(false, CCond(ProbeAck, Some(BtoN)), CPrintable("ProbeAck", "BtoN"))
-    XSSim(false, CCond(ProbeAck, Some(TtoT)), CPrintable("ProbeAck", "TtoT"))
-    XSSim(false, CCond(ProbeAck, Some(BtoB)), CPrintable("ProbeAck", "BtoB"))
-    XSSim(false, CCond(ProbeAck, Some(NtoN)), CPrintable("ProbeAck", "NtoN"))
+    XSDebug(false, CCond(ProbeAck, Some(TtoB)), CPrintable("ProbeAck", "TtoB"))
+    XSDebug(false, CCond(ProbeAck, Some(TtoN)), CPrintable("ProbeAck", "TtoN"))
+    XSDebug(false, CCond(ProbeAck, Some(BtoN)), CPrintable("ProbeAck", "BtoN"))
+    XSDebug(false, CCond(ProbeAck, Some(TtoT)), CPrintable("ProbeAck", "TtoT"))
+    XSDebug(false, CCond(ProbeAck, Some(BtoB)), CPrintable("ProbeAck", "BtoB"))
+    XSDebug(false, CCond(ProbeAck, Some(NtoN)), CPrintable("ProbeAck", "NtoN"))
 
-    XSSim(false, CCond(ProbeAckData, Some(TtoB)), CPrintable("ProbeAckData", "TtoB"))
-    XSSim(false, CCond(ProbeAckData, Some(TtoN)), CPrintable("ProbeAckData", "TtoN"))
-    XSSim(false, CCond(ProbeAckData, Some(BtoN)), CPrintable("ProbeAckData", "BtoN"))
-    XSSim(false, CCond(ProbeAckData, Some(TtoT)), CPrintable("ProbeAckData", "TtoT"))
-    XSSim(false, CCond(ProbeAckData, Some(BtoB)), CPrintable("ProbeAckData", "BtoB"))
-    XSSim(false, CCond(ProbeAckData, Some(NtoN)), CPrintable("ProbeAckData", "NtoN"))
+    XSDebug(false, CCond(ProbeAckData, Some(TtoB)), CPrintable("ProbeAckData", "TtoB"))
+    XSDebug(false, CCond(ProbeAckData, Some(TtoN)), CPrintable("ProbeAckData", "TtoN"))
+    XSDebug(false, CCond(ProbeAckData, Some(BtoN)), CPrintable("ProbeAckData", "BtoN"))
+    XSDebug(false, CCond(ProbeAckData, Some(TtoT)), CPrintable("ProbeAckData", "TtoT"))
+    XSDebug(false, CCond(ProbeAckData, Some(BtoB)), CPrintable("ProbeAckData", "BtoB"))
+    XSDebug(false, CCond(ProbeAckData, Some(NtoN)), CPrintable("ProbeAckData", "NtoN"))
 
-    XSSim(false, CCond(Release, Some(TtoB)), CPrintable("Release", "TtoB"))
-    XSSim(false, CCond(Release, Some(TtoN)), CPrintable("Release", "TtoN"))
-    XSSim(false, CCond(Release, Some(BtoN)), CPrintable("Release", "BtoN"))
-    XSSim(false, CCond(Release, Some(TtoT)), CPrintable("Release", "TtoT"))
-    XSSim(false, CCond(Release, Some(BtoB)), CPrintable("Release", "BtoB"))
-    XSSim(false, CCond(Release, Some(NtoN)), CPrintable("Release", "NtoN"))
+    XSDebug(false, CCond(Release, Some(TtoB)), CPrintable("Release", "TtoB"))
+    XSDebug(false, CCond(Release, Some(TtoN)), CPrintable("Release", "TtoN"))
+    XSDebug(false, CCond(Release, Some(BtoN)), CPrintable("Release", "BtoN"))
+    XSDebug(false, CCond(Release, Some(TtoT)), CPrintable("Release", "TtoT"))
+    XSDebug(false, CCond(Release, Some(BtoB)), CPrintable("Release", "BtoB"))
+    XSDebug(false, CCond(Release, Some(NtoN)), CPrintable("Release", "NtoN"))
 
-    XSSim(false, CCond(ReleaseData, Some(TtoB)), CPrintable("ReleaseData", "TtoB"))
-    XSSim(false, CCond(ReleaseData, Some(TtoN)), CPrintable("ReleaseData", "TtoN"))
-    XSSim(false, CCond(ReleaseData, Some(BtoN)), CPrintable("ReleaseData", "BtoN"))
-    XSSim(false, CCond(ReleaseData, Some(TtoT)), CPrintable("ReleaseData", "TtoT"))
-    XSSim(false, CCond(ReleaseData, Some(BtoB)), CPrintable("ReleaseData", "BtoB"))
-    XSSim(false, CCond(ReleaseData, Some(NtoN)), CPrintable("ReleaseData", "NtoN"))
+    XSDebug(false, CCond(ReleaseData, Some(TtoB)), CPrintable("ReleaseData", "TtoB"))
+    XSDebug(false, CCond(ReleaseData, Some(TtoN)), CPrintable("ReleaseData", "TtoN"))
+    XSDebug(false, CCond(ReleaseData, Some(BtoN)), CPrintable("ReleaseData", "BtoN"))
+    XSDebug(false, CCond(ReleaseData, Some(TtoT)), CPrintable("ReleaseData", "TtoT"))
+    XSDebug(false, CCond(ReleaseData, Some(BtoB)), CPrintable("ReleaseData", "BtoB"))
+    XSDebug(false, CCond(ReleaseData, Some(NtoN)), CPrintable("ReleaseData", "NtoN"))
   }
 
   def printChannelD(d: TLBundleD, cond: Bool): Unit = {
@@ -156,27 +156,27 @@ trait HasTLDump {
       cond && d.opcode === opCode && paramComp
     }
 
-    XSSim(false, DCond(AccessAck), DPrintable("AccessAck"))
-    XSSim(false, DCond(AccessAckData), DPrintable("AccessAckData"))
-    XSSim(false, DCond(HintAck), DPrintable("HintAck"))
+    XSDebug(false, DCond(AccessAck), DPrintable("AccessAck"))
+    XSDebug(false, DCond(AccessAckData), DPrintable("AccessAckData"))
+    XSDebug(false, DCond(HintAck), DPrintable("HintAck"))
 
-    XSSim(false, DCond(Grant, Some(toT)), DPrintable("Grant", "toT"))
-    XSSim(false, DCond(Grant, Some(toB)), DPrintable("Grant", "toB"))
-    XSSim(false, DCond(Grant, Some(toN)), DPrintable("Grant", "toN"))
+    XSDebug(false, DCond(Grant, Some(toT)), DPrintable("Grant", "toT"))
+    XSDebug(false, DCond(Grant, Some(toB)), DPrintable("Grant", "toB"))
+    XSDebug(false, DCond(Grant, Some(toN)), DPrintable("Grant", "toN"))
 
-    XSSim(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
-    XSSim(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
-    XSSim(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
+    XSDebug(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
+    XSDebug(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
+    XSDebug(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
 
-    XSSim(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
-    XSSim(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
-    XSSim(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
+    XSDebug(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
+    XSDebug(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
+    XSDebug(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
 
-    XSSim(false, DCond(ReleaseAck), DPrintable("ReleaseAck"))
+    XSDebug(false, DCond(ReleaseAck), DPrintable("ReleaseAck"))
   }
 
   def printChannelE(e: TLBundleE, cond: Bool): Unit = {
-    XSSim(false, cond, e.channelName + "GrantAck sink: %d\n", e.sink)
+    XSDebug(false, cond, e.channelName + "GrantAck sink: %d\n", e.sink)
   }
 
 }

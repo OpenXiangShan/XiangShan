@@ -71,7 +71,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
   }
 
   val toDataPath: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
-    Flipped(new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.simEn)))
+    Flipped(new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)))
 }
 
 class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSModule {
@@ -131,7 +131,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       VecInit(fromDPsHasBypass2Source.map(exuOH(_))).asUInt
     )))
   )
-  if(params.simEn){
+  if(params.debugEn){
     dontTouch(bypass2ValidVec3)
   }
   private val bypass2DateEn = VecInit(

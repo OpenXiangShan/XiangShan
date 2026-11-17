@@ -55,14 +55,14 @@ class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
     val loadWaitStrict  = Bool()
     val ssid            = UInt(SSIDWidth.W)
     val storeSetHit     = Bool() // inst has been allocated an store set
-    // sim signal
-    val pc              = Option.when(simEn)(UInt(VAddrBits.W))
+    // debug signal
+    val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   }
   class FromDispatchReq(implicit p: Parameters) extends MemBlockBundle {
     val needAlloc       = Bool()
     val uop             = new ReqUopInfo
-    // sim signal
-    val simUop        = Option.when(simEn)(new DynInst()) // only for difftest
+    // debug signal
+    val debugUop        = Option.when(debugEn)(new DynInst()) // only for difftest
   }
 
   // to Dispatch
@@ -96,10 +96,10 @@ class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
   val isFirstIssue    = Bool()
   val isRVC           = Bool()
 
-  // sim info
-  val pc              = Option.when(simEn)(UInt(VAddrBits.W))
-  val simInfo       = Option.when(simEn)(new PerfSimInfo)
-  val sim_seqNum    = Option.when(simEn)(InstSeqNum())
+  // debug info
+  val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
+  val debugInfo       = Option.when(debugEn)(new PerfDebugInfo)
+  val debug_seqNum    = Option.when(debugEn)(InstSeqNum())
 }
 // TODO: distinguish storeAddrIn and storeAddrInRe
 class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
@@ -128,7 +128,7 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   // ctrl signal
   val isLastRequest      = Bool() /* It's last request to write to storeQueue. if is normal request, it will be true,
                                       if it was unalign splited, first request will be false, second will be true. */
-  val simUop           = Option.when(simEn)(new DynInst())
+  val debugUop           = Option.when(debugEn)(new DynInst())
 }
 
 class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
@@ -136,7 +136,7 @@ class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
   val fuOpType           = FuOpType()
   val data               = UInt(VLEN.W)
   val sqIdx              = new SqPtr
-  val vecSim           = Option.when(simEn)(new VecMissalignedSimBundle)
+  val vecDebug           = Option.when(debugEn)(new VecMissalignedDebugBundle)
 
 }
 
@@ -206,7 +206,7 @@ class StoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends Me
   val exceptionInfo      = ValidIO(new MemExceptionInfo)// to exceptionInfoGen, only for mmio/cbo writeback exception gen
   val sqDeq              = ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)) // to backend, dispatch
   val sqDeqPtr           = Output(new SqPtr) // to store unit
-  val diffStore          = Option.when(simEn)(Flipped(new DiffStoreIO)) // for store difftest
+  val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO)) // for store difftest
   val physicalUpperSqIdx = Output(new SqPtr)
 }
 
@@ -236,7 +236,7 @@ class PhysicalStoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) ex
   val sqDeqPtr           = Output(new SqPtr)
   val physicalUpperSqIdx = Output(new SqPtr)
   // for store difftest
-  val diffStore          = Option.when(simEn)(Flipped(new DiffStoreIO))
+  val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
 }
 
 class VirtualStoreQueueEnqIO(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_]) (implicit p: Parameters) extends MemBlockBundle {
@@ -246,19 +246,19 @@ class VirtualStoreQueueEnqIO(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_]) (im
     val numLsElem       = NumLsElem()
     val uopIdx          = UopIdx()
     val isVec           = Bool()
-    // sim info
+    // debug info
     val ssid            = UInt(SSIDWidth.W) // maybe not used
     val storeSetHit     = Bool() // inst has been allocated an store set. maybe not used
-    // sim signal
-    val pc              = Option.when(simEn)(UInt(VAddrBits.W))
+    // debug signal
+    val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   }
   class FromDispatchReq (implicit p: Parameters) extends MemBlockBundle {
     val needAlloc       = Bool()
     val uop             = new ReqUopInfo
     val reqEndPtr       = new LSIdx // uop end lqIdx/sqIdx
     val reqStartPtr     = new LSIdx // uop start lqIdx/sqIdx
-    // sim signal
-    val simUop        = Option.when(simEn)(new DynInst()) // only for difftest
+    // debug signal
+    val debugUop        = Option.when(debugEn)(new DynInst()) // only for difftest
   }
   class ToDispatchResp(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_]) (implicit p: Parameters) extends MemBlockBundle {
     val physicalQueuePtr = Output(PhysicalQueuePtr.cloneType)
