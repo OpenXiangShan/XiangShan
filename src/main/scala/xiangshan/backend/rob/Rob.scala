@@ -2210,9 +2210,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       sample.context.headReasonValid := !isEmpty && !hasTeaCommit && out.debugRobHeadStall.get.valid
       sample.context.headReason := Mux(sample.context.headReasonValid, out.debugRobHeadStall.get.bits, 0.U)
 
-      val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
+      val teaTable = ChiselDB.createTable(s"perf_tea_$hartId", new TeaEntry, basicDB = true)
       teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)
-      val llcTable = ChiselDB.createTable(s"TeaLlc_$hartId", new TeaLlcRecord, basicDB = true)
+      val llcTable = ChiselDB.createTable(s"perf_tea_llc_$hartId", new TeaLlcRecord, basicDB = true)
       teaLlc.get.events.zipWithIndex.foreach { case (event, port) =>
         val record = Wire(new TeaLlcRecord)
         record.cycle := teaCycle
@@ -2221,7 +2221,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         llcTable.log(record, tracker.io.enable && event.kind =/= 0.U && (!release || event.a.orR),
           s"port$port", clock, reset)
       }
-      val finalTable = ChiselDB.createTable(s"TeaDelayedFinal_$hartId", new TeaDelayedFinal, basicDB = true)
+      val finalTable = ChiselDB.createTable(s"perf_tea_delayed_final_$hartId", new TeaDelayedFinal, basicDB = true)
       tracker.io.finals.zipWithIndex.foreach { case (res, rank) =>
         finalTable.log(res, s"member$rank", clock, reset)
       }
@@ -2243,9 +2243,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           stats.io.state := tapOrGet(teaState)
           stats.io.retired := tapOrGet(teaRetired)
           stats.io.gapThreshold := tapOrGet(teaGapThreshold)
-          val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
+          val summaryTable =
+            ChiselDB.createTable(s"perf_tea_cycle_summary_$hartId", new TeaCycleSummary, basicDB = true)
           summaryTable.log(stats.io.summary, "summary", teaClock, teaReset)
-          val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
+          val intervalTable = ChiselDB.createTable(s"perf_tea_no_commit_$hartId", new TeaNoCommit, basicDB = true)
           intervalTable.log(stats.io.interval, "interval", teaClock, teaReset)
         }
       }

@@ -1,6 +1,6 @@
 # TEA visualization and analysis
 
-`scripts/tea_visualize.py` opens `Tea_0` and `TeaDelayedFinal_0` read-only and
+`scripts/tea_visualize.py` opens `perf_tea_0` and `perf_tea_delayed_final_0` read-only and
 produces PICS figures, hotspot tables, timelines, and summaries. It requires
 Python 3, Matplotlib, and NumPy and accepts the current per-instruction schema.
 See [TEA implementation](tea-implementation.md) for tracker and attribution rules.

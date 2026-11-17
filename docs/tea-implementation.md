@@ -114,7 +114,7 @@ address match during a no-commit cycle. It describes the physical entry and may
 match another hart's same-address traffic; it never sets a member's PSV.
 `head_context.csv` exports it as `head_llc_miss_observed`.
 
-The optional `TeaLlc_0` database table records the raw probes for independent
+The optional `perf_tea_llc_0` database table records the raw probes for independent
 replay. It contains `CYCLE` and six event words `EVENT_KIND/ID/A/B/C/D`:
 
 | Kind | ID | Arguments |
@@ -179,8 +179,8 @@ For hart 0, retain both tables:
 
 | Table | Content |
 | --- | --- |
-| `Tea_0` | Sample cycle/state, direct PC/PSV vectors or delayed target, and ROB context |
-| `TeaDelayedFinal_0` | Selected member retirement/cancellation or a Drained successor |
+| `perf_tea_0` | Sample cycle/state, direct PC/PSV vectors or delayed target, and ROB context |
+| `perf_tea_delayed_final_0` | Selected member retirement/cancellation or a Drained successor |
 
 The context records the current architectural retirement count, raw overlapping
 commit-block conditions, head readiness, and the existing entry-level Top-down
@@ -204,8 +204,8 @@ It counts the four TEA states, retired instructions, and complete no-commit gap
 buckets of 1–7, 8–31, 32–127, 128–511, and at least 512 cycles. It also reports
 left/right-censored intervals and pending tails.
 
-`TeaCycleSummary_0` contains periodic and dump/clean/disable snapshots;
-`TeaNoCommit_0` contains long or censored no-commit intervals. Summary collection
+`perf_tea_cycle_summary_0` contains periodic and dump/clean/disable snapshots;
+`perf_tea_no_commit_0` contains long or censored no-commit intervals. Summary collection
 is enabled by `enableTeaStats0` or `enableTea0` and reuses the existing XSLog
 performance dump/clean controls. It has fixed-size counters and no per-member
 history. `teaGapThreshold0` defaults to 128.
@@ -241,7 +241,7 @@ For summary-only collection, use `enableTea0 0` and `enableTeaStats0 1` instead.
 build/emu -i ready-to-run/coremark-2-iteration.bin \
   --diff ready-to-run/riscv64-nemu-interpreter-so --max-instr 5000 \
   --cst-file build/tea.cst \
-  --dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0 TeaLlc_0' \
+  --dump-select-db 'perf_tea_0 perf_tea_delayed_final_0 perf_tea_cycle_summary_0 perf_tea_no_commit_0 perf_tea_llc_0' \
   --db-path build/tea.db
 python3 scripts/tea_visualize.py build/tea.db --labels coremark --output build/tea-profile
 ```

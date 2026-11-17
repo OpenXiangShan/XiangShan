@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot XiangShan Tea_0 samples; PICS layout follows TEA (ISCA 2023), Figs. 6/10."""
+"""Plot XiangShan perf_tea_0 samples; PICS layout follows TEA (ISCA 2023), Figs. 6/10."""
 
 import argparse
 from bisect import bisect_right
@@ -59,8 +59,8 @@ def read_spec_roi(directory, database):
         raise ValueError(f"{directory}: counters do not match the default SPEC 20M warmup / 40M total window")
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as con:
         con.row_factory = sqlite3.Row
-        if con.execute("SELECT 1 FROM sqlite_master WHERE name='TeaCycleSummary_0'").fetchone():
-            first = con.execute("SELECT min(CYCLE) FROM TeaCycleSummary_0").fetchone()[0]
+        if con.execute("SELECT 1 FROM sqlite_master WHERE name='perf_tea_cycle_summary_0'").fetchone():
+            first = con.execute("SELECT min(CYCLE) FROM perf_tea_cycle_summary_0").fetchone()[0]
             if first is not None and first > 1:
                 # TEA starts after warmup in the ROB reset domain; PERF uses the top-level timer.
                 start, end = first - 1, first - 1 + final[1]
@@ -84,7 +84,7 @@ def sampling_coverage(path, cycle_range, sample_period):
             "count(DISTINCT CASE WHEN CYCLE % ? = ? THEN CYCLE END), "
             "min(CASE WHEN CYCLE % ? = ? THEN CYCLE END), "
             "max(CASE WHEN CYCLE % ? = ? THEN CYCLE END) "
-            "FROM Tea_0 WHERE CYCLE >= ? AND CYCLE < ?",
+            "FROM perf_tea_0 WHERE CYCLE >= ? AND CYCLE < ?",
             (sample_period, phase, sample_period, phase, sample_period, phase, sample_period, phase,
              start, end)).fetchone()
     span = (high - low) // sample_period + 1 if low is not None else 0
@@ -123,15 +123,15 @@ def load_data(path, label, args):
     summary.update({name + "_weight": 0.0 for name in ("cancelled", "unresolved", "unknown")})
     summary.update({f"state_{state.lower()}": 0 for state in STATES})
     summary.update({f"state_{state.lower()}_weight": 0.0 for state in STATES})
-    query, params = "SELECT * FROM Tea_0", ()
+    query, params = "SELECT * FROM perf_tea_0", ()
     if args.cycle_range:
         query += " WHERE CYCLE >= ? AND CYCLE < ?"
         params = tuple(args.cycle_range)
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
         con.row_factory = sqlite3.Row
-        columns = {row["name"] for row in con.execute("PRAGMA table_info(Tea_0)")}
+        columns = {row["name"] for row in con.execute("PRAGMA table_info(perf_tea_0)")}
         if "CONTEXT_LLCSUPPORTED" in columns:
-            supported = con.execute("SELECT min(CONTEXT_LLCSUPPORTED) FROM Tea_0").fetchone()[0]
+            supported = con.execute("SELECT min(CONTEXT_LLCSUPPORTED) FROM perf_tea_0").fetchone()[0]
             if supported == 1:
                 summary["unsupported_events"] = ""
         width = sum(name.startswith("PCVEC_") for name in columns)
@@ -141,7 +141,7 @@ def load_data(path, label, args):
         rank_width = width // chunks
         finals = {}
         drains = []
-        for final in con.execute("SELECT * FROM TeaDelayedFinal_0 ORDER BY CYCLE"):
+        for final in con.execute("SELECT * FROM perf_tea_delayed_final_0 ORDER BY CYCLE"):
             if final["ISDRAIN"]:
                 drains.append(final)
             else:
@@ -268,8 +268,8 @@ def write_csv(path, rows, fields):
 
 def cycle_summary_snapshots(con):
     return con.execute(
-        "SELECT * FROM TeaCycleSummary_0 WHERE CLEARED != 0 OR ID = "
-        "(SELECT ID FROM TeaCycleSummary_0 ORDER BY CYCLE DESC, ID DESC LIMIT 1) "
+        "SELECT * FROM perf_tea_cycle_summary_0 WHERE CLEARED != 0 OR ID = "
+        "(SELECT ID FROM perf_tea_cycle_summary_0 ORDER BY CYCLE DESC, ID DESC LIMIT 1) "
         "ORDER BY CYCLE, ID").fetchall()
 
 
@@ -278,7 +278,7 @@ def export_cycle_stats(path, directory):
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
         con.row_factory = sqlite3.Row
         tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "TeaCycleSummary_0" not in tables:
+        if "perf_tea_cycle_summary_0" not in tables:
             return
         snapshots = cycle_summary_snapshots(con)
         if not snapshots:
@@ -302,9 +302,9 @@ def export_cycle_stats(path, directory):
                                                   enumerate(("1-7", "8-31", "32-127", "128-511", "512+"))},
                           censored_gaps=totals["CENSOREDGAPS"], pending_gap_cycles=row["PENDING"])
             (directory / "cycle_summary.json").write_text(json.dumps(result, indent=2) + "\n")
-        if "TeaNoCommit_0" in tables:
+        if "perf_tea_no_commit_0" in tables:
             def intervals():
-                for row in con.execute("SELECT * FROM TeaNoCommit_0 ORDER BY START"):
+                for row in con.execute("SELECT * FROM perf_tea_no_commit_0 ORDER BY START"):
                     length = row["ENDCYCLE"] - row["START"]
                     states = {state: row[f"STATES_{i}"] for i, state in enumerate(STATES[1:])}
                     if length <= 0 or sum(states.values()) != length:
@@ -619,7 +619,7 @@ def plot_timeline(run, directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("databases", nargs="+", type=Path, help="Tea_0 SQLite databases (read-only)")
+    parser.add_argument("databases", nargs="+", type=Path, help="perf_tea_0 SQLite databases (read-only)")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--labels", nargs="+", help="one display label per database; default: parent directory")
     parser.add_argument("--compare-first", action="store_true",
