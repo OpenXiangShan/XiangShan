@@ -11,9 +11,9 @@ from .owner_v3_funcov import mark_owner_v3_checked
 
 
 _IFU_INTERNAL_PREFIXES = (
-    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu.",
     "Frontend_top.Frontend._inner_ifu_",
+    "inner_ifu.",
 )
 _IFU_OUTPUT_SLOT_COUNT = 36
 _FETCH_BLOCK_INST_COUNT = 32

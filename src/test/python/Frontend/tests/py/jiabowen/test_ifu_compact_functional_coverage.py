@@ -20,7 +20,7 @@ from env.support.pc_utils import fold_pc
 from env.support.rvc_decoder import expand_rvc
 
 
-_PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
+_PREFIX = "Frontend_top.Frontend.inner_ifu."
 _FTQ_PREFIX = "Frontend_top.Frontend.inner_ftq."
 _TRIGGER_PREFIX = "Frontend_top.Frontend.inner_ifu.frontendTrigger."
 _IBUFFER_PREFIX = "Frontend_top.Frontend.inner_ibuffer."
@@ -3066,8 +3066,9 @@ def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flus
 def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
     root = Path(__file__).resolve().parents[7]
     offset = root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
+    from env.funcov.registry import decode_signal_inventory_name
     names = {
-        line[len("  - name: ") :].strip()
+        decode_signal_inventory_name(line[len("  - name: ") :])
         for line in offset.read_text(encoding="utf-8").splitlines()
         if line.startswith("  - name: ")
     }
@@ -3081,7 +3082,7 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_toIBuffer_bits_isRvc_0",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_offset",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_predTaken",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__fixedTakenVec_0",
+        "Frontend_top.Frontend.inner_ifu.predChecker.fixedTakenVec_0",
         # Ifu.scala output is optimized away; all native expression parents remain required.
         "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
         "Frontend_top.Frontend.inner_ifu.select_0",
@@ -3170,16 +3171,16 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_frontendTrigger_debugMode",
         _PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp",
         "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_valid",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_target_addr",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_taken",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isRVC",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_attribute_branchType",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_endOffset",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_blockSel",
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_valid",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_target_addr",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_taken",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_isRVC",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_attribute_branchType",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_endOffset",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_blockSel",
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
         _FTQ_PREFIX + "ifuResolve_valid",
         _FTQ_PREFIX + "ifuResolve_bits_ftqIdx_value",
         _FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid",
@@ -3248,7 +3249,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + f"s2_alignedJumpOffsetVec_{index}_addr"
         for index in range(35)
     }
-    assert required <= names
+    missing = {name for name in required
+               if not ({name, name.removeprefix("Frontend_top.Frontend.")} & names)}
+    assert not missing, {"missing_native_signals": sorted(missing)}
 
 
 def test_frontend_trigger_timing_contract_is_hardwired_false():
@@ -3282,3 +3285,18 @@ def test_frontend_trigger_timing_contract_is_hardwired_false():
                    or "frontendTrigger_tUpdate_bits_tdata_timing" in name
                    or ("frontendTrigger." in name and name.endswith("_timing"))
                    for name in names)
+
+
+
+def test_compact_internal_prefers_native_and_rejects_shadow_only(tmp_path):
+    from env.funcov.py.ifu.compact_funcov import _read_ifu_internal_with_path
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    stem = "s2_valid_valid"
+    semantic = "Frontend_top.Frontend.inner_ifu." + stem
+    shadow = "Frontend_top.Frontend.inner_ifu.__Vtogcov__" + stem
+    dut.set(semantic, 1)
+    setattr(dut, shadow, _Signal(0))
+    assert _read_ifu_internal_with_path(recorder, dut, stem) == (1, semantic)
+    delattr(dut, semantic)
+    recorder._dut_signal_cache.clear()
+    assert _read_ifu_internal_with_path(recorder, dut, stem) == (None, None)
