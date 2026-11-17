@@ -82,8 +82,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Banked ROB Entries
    */
-  val bankNum = 8
-  assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
+  private val enqBanking = new RobBanking(RobSize, RenameWidth)
+  private val deqBanking = new RobBanking(RobSize, CommitWidth)
+  require(isPow2(CommitWidth), "ROB commit rows require a power-of-two CommitWidth")
   val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
   // Per-slot functional state used by exception handling and performance
   // accounting.
@@ -97,41 +98,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
-  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
-
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
+  val enqPtr = enqPtrVec(0)
+  val deqPtr = deqPtrVec(0)
+  val walkPtr = walkPtrVec(0)
+
+  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
+
   val allowEnqueue = RegInit(true.B)
   val allowEnqueueForDispatch = RegInit(true.B)
+
+  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
+
+  val hasBlockBackward = RegInit(false.B)
+  val hasWaitForward = RegInit(false.B)
 
   /**
    * Enqueue (from dispatch)
    */
-  // special cases
-  val hasBlockBackward = RegInit(false.B)
-  val hasWaitForward = RegInit(false.B)
-  val enqPtr = enqPtrVec(0)
-  val deqPtr = deqPtrVec(0)
-  val walkPtr = walkPtrVec(0)
-  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
   in.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.in.canEnq && vtypeBuffer.in.canEnq && !in.fromVecExcpMod.busy
   in.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.in.canEnqForDispatch && vtypeBuffer.in.canEnqForDispatch && !in.fromVecExcpMod.busy
   in.enq.resp := allocatePtrVec
   val uopCanEnqueue = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   val canEnqueue = VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop && in.enq.canAccept))
 
-  require(isPow2(bankNum))
-  require(RenameWidth <= bankNum)
-  val enqBankBits = log2Ceil(bankNum)
-
-  // robEntries enqueue
-  val bankHeadUop = (0 until bankNum).map { bank =>
-    val select = VecInit(canEnqueue.zip(allocatePtrVec).map { case (valid, ptr) =>
-      valid && ptr.value(enqBankBits - 1, 0) === bank.U
-    })
-    Mux1H(select, in.enq.req.map(_.bits))
-  }
+  // Share enqueue payload selection using a view sized for the allocation bandwidth.
+  val entryHeadUops = enqBanking.selectEnqueue(canEnqueue.toSeq, allocatePtrVec.map(_.value), in.enq.req.map(_.bits))
 
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
@@ -140,8 +134,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !in.redirect.valid){
-      // TODO: enq
-      val entryHeadUop = bankHeadUop(i % bankNum)
+      val entryHeadUop = entryHeadUops(i)
       robEntries(i).connectEnq(entryHeadUop)
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, in.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
@@ -171,29 +164,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  val bankAddrWidth = log2Up(CommitWidth)
-  val robBanks = VecInit((0 until bankNum).map(i => VecInit(robEntries.zipWithIndex.filter(_._2 % bankNum == i).map(_._1))))
-  // all banks use same raddr
-  // read BankNum*2 entries to ensure read all the entries we want
-  val eachBankEntrieNum = robBanks(0).length
-  val robBanksRaddrThisLine = RegInit(1.U(eachBankEntrieNum.W))
-  val robBanksRaddrNextLine = Wire(UInt(eachBankEntrieNum.W))
+  val commitOffsetWidth = log2Ceil(CommitWidth)
+  val robBanksRaddrThisLine = RegInit(deqBanking.firstRowSelect)
+  val robBanksRaddrNextLine = Wire(chiselTypeOf(robBanksRaddrThisLine))
   robBanksRaddrThisLine := robBanksRaddrNextLine
-  val bankNumWidth = log2Up(bankNum)
-  val deqPtrWidth = deqPtr.value.getWidth
-  val highDeqPtrThisLine = deqPtr.value(deqPtrWidth - 1, bankNumWidth)
-  val highDeqPtrMax = (RobSize - 1).U(deqPtrWidth - 1, bankNumWidth)
-  val highDeqPtrNextLine = Mux(highDeqPtrThisLine === highDeqPtrMax, 0.U, highDeqPtrThisLine + 1.U)
-  val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrThisLine, i.U(bankNumWidth.W))))
-  val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrNextLine, i.U(bankNumWidth.W))))
-  // robBanks read
-  val robBanksRdataThisLine = VecInit(robBanks.map{ case bank =>
-    Mux1H(robBanksRaddrThisLine, bank)
-  })
-  val robBanksRdataNextLine = VecInit(robBanks.map{ case bank =>
-    val shiftBank = bank.drop(1) :+ bank(0)
-    Mux1H(robBanksRaddrThisLine, shiftBank)
-  })
+  val (robBanksRdataThisLine, robBanksRdataNextLine) =
+    deqBanking.readRows(robEntries.toSeq, robBanksRaddrThisLine, backendParams.debugEn)
+  val needUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
   val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val needUpdateCommitW = Wire(Vec(2 * CommitWidth, Bool()))
@@ -213,18 +190,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walkPtrHead = Wire(new RobPtr)
   val changeBankAddrToDeqPtr = walkPtrVec.head.addEntries(CommitWidth.U).isAfterSlot(lastWalkPtr)
   when(in.redirect.valid){
-    robBanksRaddrNextLine := UIntToOH(walkPtrHead.value(walkPtrHead.value.getWidth-1, bankAddrWidth))
+    robBanksRaddrNextLine := deqBanking.rowSelect(walkPtrHead.value)
   }.elsewhen(allCommitted || out.commits.isWalk && !changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := Mux(robBanksRaddrThisLine.head(1) === 1.U, 1.U, robBanksRaddrThisLine << 1)
+    robBanksRaddrNextLine := deqBanking.nextRowSelect(robBanksRaddrThisLine)
   }.elsewhen(out.commits.isWalk && changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := UIntToOH(deqPtr.value(deqPtr.value.getWidth-1, bankAddrWidth))
+    robBanksRaddrNextLine := deqBanking.rowSelect(deqPtr.value)
   }.otherwise(
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
-  val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
-  val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
-  val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
-  val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
+  val robDeqGroup = Reg(Vec(CommitWidth, new RobCommitEntryBundle))
+  val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1, 0)))).toSeq
+  val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1,0)))).toSeq
+  val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(commitOffsetWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
     robDeqGroup(i).connectCommitEntry(robBanksRdataThisLineUpdate(i), needUpdateCommitW(i))
     when(allCommitted){
@@ -995,7 +972,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
   val commit_vDeqGroup = VecInit(robDeqGroup.map(_.commit_v))
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
-  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U)).asFormer
+  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(commitOffsetWidth, 1.U)).asFormer
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
   val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && (x.slotNeedFlushMask(0) || x.slotNeedFlushMask(1) && CompressType.isNotNORMAL(x.entryPairType)))).asUInt.orR || intrBitSetReg || diffTrapPending
   // for instructions that may block others, we don't allow them to commit
@@ -1169,7 +1146,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.in.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.in.hasNoSpecExec := hasWaitForward
   deqPtrGenModule.in.allowOnlyOneCommit := allowOnlyOneCommit
-  deqPtrGenModule.in.interruptSafe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interruptSafe
+  deqPtrGenModule.in.interruptSafe := robDeqGroup(deqPtr.value(commitOffsetWidth-1,0)).interruptSafe
   deqPtrGenModule.in.blockCommit := blockCommit
   deqPtrGenModule.in.hasCommitted := hasCommitted
   deqPtrGenModule.in.allCommitted := allCommitted
@@ -1202,9 +1179,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   walkPtrVec := walkPtrVec_next
   walkPtrTrue := walkPtrTrue_next
   // T in.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
-  val walkPtrLowBits = Reg(UInt(bankAddrWidth.W))
+  val walkPtrLowBits = Reg(UInt(commitOffsetWidth.W))
   when(in.redirect.valid){
-    walkPtrLowBits := Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0).value(bankAddrWidth-1, 0), deqPtrVec_next(0).value(bankAddrWidth-1, 0))
+    walkPtrLowBits := Mux(
+      in.snpt.useSnpt,
+      snapshots(in.snpt.snptSelect)(0).value(commitOffsetWidth-1, 0),
+      deqPtrVec_next(0).value(commitOffsetWidth-1, 0)
+    )
   }
   when(in.redirect.valid) {
     donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
@@ -1481,7 +1462,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val robBanksRdata = VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
   val needUpdate = Wire(Vec(2 * CommitWidth, new RobEntryBundle))
   needUpdate := VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
-  val needUpdateRobIdx = robIdxThisLine ++ robIdxNextLine
   for (i <- 0 until 2 * CommitWidth) {
     val enqHeadOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === needUpdateRobIdx(i))).map {
       case (valid, ptrMatch) => valid && ptrMatch
@@ -1554,8 +1534,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       needUpdate(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
-  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(bankNum))
-  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(bankNum))
+  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(CommitWidth))
+  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(CommitWidth))
   // end update robBanksRdata
 
   /**
@@ -2447,7 +2427,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(deqPtrVec)
     dontTouch(robEntries)
     dontTouch(robDeqGroup)
-    dontTouch(robBanks)
     dontTouch(robBanksRaddrThisLine)
     dontTouch(robBanksRaddrNextLine)
     dontTouch(robBanksRdataThisLine)
