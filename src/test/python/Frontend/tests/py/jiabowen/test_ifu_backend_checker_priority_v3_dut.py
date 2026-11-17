@@ -35,9 +35,10 @@ def test_backend_redirect_wins_younger_checker_writeback(env):
     entries.extend(TraceEntry(i + 2, target_pc + 2 * i, _CNOP, 2) for i in range(256))
     trace = GoldenTrace(entries)
     env.backend_model.set_golden_trace(trace)
-    # Natural checker writeback is cycle 588; backend queued at 580 and
-    # takes two interface/FTQ cycles after its six-cycle execution delay.
-    env.backend_model.redirect_min_delay = env.backend_model.redirect_max_delay = 6
+    # Let the JALR fallthrough refetch reach the younger cold JAL before
+    # backend recovery. A shorter delay kills that request before S2 and
+    # cannot exercise the same-cycle priority check below.
+    env.backend_model.redirect_min_delay = env.backend_model.redirect_max_delay = 15
     paths, timeline, collisions = {}, [], []
     source_entries, backend_redirects, checker_requests = [], [], []
     pending = None
