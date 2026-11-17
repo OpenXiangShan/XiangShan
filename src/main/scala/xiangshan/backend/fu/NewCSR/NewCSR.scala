@@ -490,6 +490,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val NumPMPReal = p(PMParameKey).NumPMPReal
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
+  pmpEntryMod.io.in.rlb := Option.when(HasEpmp)(mseccfg.regOut.RLB.asBool).getOrElse(false.B)
   pmpEntryMod.io.in.pmpCfg  := pmpcfgs.map(_.regOut.asInstanceOf[PMPCfgBundle])
   pmpEntryMod.io.in.ren   := ren
   pmpEntryMod.io.in.wen   := wenLegalReg
@@ -635,6 +636,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpCfgWData(8*((i%8)+1)-1,8*(i%8))
+  }
+
+  if (HasEpmp) {
+    mseccfg.anyPmpLocked.get := pmpcfgs.map(_.regOut.asInstanceOf[PMPCfgBundle].L.asBool).foldLeft(false.B)(_ || _)
   }
 
   pmacfgs.zipWithIndex.foreach { case (mod, i) =>

@@ -498,7 +498,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     timer.node := device_xbar.get
   }
 
-  val pma = LazyModule(new TLPMA)
+  val pma = LazyModule(TLPMA())
   pma.node := TLBuffer.chainNode(4) := device_xbar.get
   if (HasMEMencryption) {
     axi4memencrpty.get.ctrl_node := TLToAPB() := device_xbar.get

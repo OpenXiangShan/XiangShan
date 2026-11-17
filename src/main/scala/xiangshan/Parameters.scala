@@ -55,6 +55,7 @@ case class XSCoreParameters
   HSXLEN: Int = 64,
   HasShadowStack: Boolean = false,
   HasZicfilp: Boolean = true, // Zicfilp
+  HasEpmp: Boolean = false,
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
@@ -669,6 +670,7 @@ trait HasXSParameter {
   def HasShadowStack = coreParams.HasShadowStack
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
   def HasBitmapCheck = coreParams.HasBitmapCheck
+  def HasEpmp = coreParams.HasEpmp
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher

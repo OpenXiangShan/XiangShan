@@ -362,10 +362,22 @@ trait MachineLevel { self: NewCSR =>
     }
     val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
     val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
-    val RLB   = RO( 2).withDescription("Rule-locking bypass control from the Smepmp extension.")
-    val MMWP  = RO( 1).withDescription("Machine-mode whitelist policy control from the Smepmp extension.")
-    val MML   = RO( 0).withDescription("Machine-mode lock-down control from the Smepmp extension.")
-  })).setAddr(CSRs.mseccfg)
+    val RLB   = RO( 2).withReset(false.B).withDescription("Rule-locking bypass control from the Smepmp extension.")
+    val MMWP  = RO( 1).withReset(false.B).withDescription("Machine-mode whitelist policy control from the Smepmp extension.")
+    val MML   = RO( 0).withReset(false.B).withDescription("Machine-mode lock-down control from the Smepmp extension.")
+  }){
+    val anyPmpLocked = Option.when(HasEpmp)(IO(Input(Bool())))
+    if (HasEpmp) {
+      reg.RLB.setRW()
+      reg.MMWP.setRW()
+      reg.MML.setRW()
+      when (wen) {
+        reg.MML  := reg.MML.asBool  || wdata.MML.asBool
+        reg.MMWP := reg.MMWP.asBool || wdata.MMWP.asBool
+        reg.RLB := wdata.RLB.asBool && !(!reg.RLB.asBool && anyPmpLocked.get)
+      }
+    }
+  }).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle", new CounterValueBundle("Machine cycle counter value.")) with HasMachineCounterControlBundle with SmcntrpmfBundle with HasSiregCounterBundle {
     toSireg := regOut.asUInt

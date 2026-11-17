@@ -58,3 +58,14 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
 
   lazy val module = new TLPMAImp(this)
 }
+
+object TLPMA {
+  def apply()(implicit p: Parameters): TLPMA = {
+    // TLPMA is a SoC-level PMA checker, so derive a local core-parameter view
+    // and suppress ePMP ports that are meaningless for PMA-only checking.
+    val tlpmaParams = p.alter((site, here, up) => {
+      case XSCoreParamsKey => up(XSTileKey).head.copy(HasEpmp = false)
+    })
+    new TLPMA()(tlpmaParams)
+  }
+}
