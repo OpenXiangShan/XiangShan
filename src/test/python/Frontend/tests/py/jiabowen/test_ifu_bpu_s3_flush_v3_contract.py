@@ -5,6 +5,7 @@ from pathlib import Path
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
 from env.funcov.py.ifu.cacheable_pipeline_funcov import (
     _SIGNALS as _IFU_CACHEABLE_SIGNALS,
+    _native_signal_names,
 )
 from env.runtime.pylib import frontend_offset_path
 
@@ -36,23 +37,39 @@ def _compact(source: str) -> str:
     return " ".join(source.split())
 
 
-def test_bin814_observation_contract_matches_current_dut_inventory() -> None:
-    offset = frontend_offset_path()
-    assert offset.is_file(), "compile Frontend before running BIN-814 contract tests"
-    registered = {
-        line[len("  - name: ") :].strip()
-        for line in _read(offset).splitlines()
+def _inventory_names(source: str) -> set[str]:
+    return {
+        line[len("  - name: ") :].strip().strip('"')
+        for line in source.splitlines()
         if line.startswith("  - name: ")
     }
+
+
+def _missing_signal_groups(registered: set[str]) -> dict[str, list[str]]:
     required = {
-        **{key: _IFU_CACHEABLE_SIGNALS[key] for key in _REQUIRED_IFU_KEYS},
+        **{key: _native_signal_names(_IFU_CACHEABLE_SIGNALS[key]) for key in _REQUIRED_IFU_KEYS},
         **{key: _TWO_FETCH_SIGNALS[key] for key in _REQUIRED_TWO_FETCH_KEYS},
     }
-    missing = {
+    return {
         key: list(candidates)
         for key, candidates in required.items()
         if not any(path in registered for path in candidates)
     }
+
+
+def test_bin814_contract_reports_missing_native_groups() -> None:
+    registered = _inventory_names('  - name: "inner_icache.mainPipe.io_toIfu_req_ready"\n')
+    missing = _missing_signal_groups(registered)
+    assert "req_ready" not in missing
+    assert "req_valid" in missing
+    assert all("__Vtogcov__" not in name for name in missing["req_valid"])
+
+
+def test_bin814_observation_contract_matches_current_dut_inventory() -> None:
+    offset = frontend_offset_path()
+    assert offset.is_file(), "compile Frontend before running BIN-814 contract tests"
+    registered = _inventory_names(_read(offset))
+    missing = _missing_signal_groups(registered)
 
     assert not missing, {"missing_bin814_signal_groups": missing}
 
