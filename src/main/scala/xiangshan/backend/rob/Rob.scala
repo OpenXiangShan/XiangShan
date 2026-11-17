@@ -222,6 +222,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   val isEmpty = enqPtr.isSameEntry(deqPtr)
+
+  /**
+   * Recovery snapshots
+   */
   val snptEnq = in.enq.canAccept && in.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
   val snapshotPtrVec = Wire(Vec(CommitWidth, new RobPtr))
   snapshotPtrVec(0) := in.enq.req(0).bits.robIdx
