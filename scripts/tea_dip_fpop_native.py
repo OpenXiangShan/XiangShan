@@ -1,4 +1,4 @@
-"""Read existing FPOP feedback proxies from closed single-core GSIM artifacts.
+"""Read existing FPOP feedback and prefetch admission from closed GSIM artifacts.
 
 Definitions follow XSCache a041f075 PrefetchController. Component sums are
 weighted controller estimates, not CPU cycles or the epoch PE accumulator.
@@ -66,9 +66,17 @@ def analyze(folder, receipt_path):
                 table_not_ready_cycles=scalar(top + generator + '.bop_train_stall_for_st_not_ready'),
                 student_not_ready_cycles=scalar(top + generator + '.bop_train_stall_for_stu_not_ready'),
                 feedback_zero_s1_valid_cycles=scalar(top + generator + '.bop_l2_feedback_control_drop'))
+        admission = {}
+        for generator in ['L1', 'VBOP', 'PBOP', 'TP', 'NL', 'CDP']:
+            valid = scalar(top + 'prefetch_req_from' + generator)
+            fire = scalar(top + 'prefetch_req_select' + generator)
+            assert fire <= valid, ('Prefetch handshakes exceed valid cycles', label, generator)
+            admission[generator] = dict(valid_cycles=valid, queue_enqueues=fire)
+        ports = [scalar(f'.l2cache.slices_{bank}.sinkA.sinkA_prefetch_req') for bank in range(4)]
         frames.append(dict(phase=label, native_print_stamp=stamp,
                            native_cycles=scalar('.rob.clock_cycle'), native_retired=scalar('.rob.commitInstr'),
                            epoch_end_events=scalar(PREFIX + 'epochCount'), roles=roles,
+                           prefetch_admission=dict(engines=admission, slice_port_fires=ports),
                            BOP_training=dict(incoming_valid_cycles=scalar(top + 'prefetch_train_valid'),
                                              generators=training)))
     return dict(point=folder.name, source=receipt['source'], runtime_constants=constants, frames=frames,
@@ -84,8 +92,13 @@ def analyze(folder, receipt_path):
                       'BOP buffer acceptance, input-drop conditions and learner-consumed events are separate stages. '
                       'The total incoming train-valid population may include inputs filtered before BOP; '
                       'it is not assumed to partition into either generator buffer acceptance and drops. '
+                      'BOP generated_requests counts actual io.req.fire after output gates, not raw predictions. '
                       'Table/student not-ready conditions omit other downstream blockers. '
                       'Feedback-zero s1-valid counts are condition cycles, not unique dropped requests. '
+                      'Engine valid cycles may repeatedly present held requests; subtracting handshakes '
+                      'does not count unique drops or distinguish queue pressure from arbitration. '
+                      'Multiple engines and banks can fire in one core cycle. Slice-port fires are '
+                      'downstream of the engine-output queues, not S3/data completion. '
                       'No request-level causality, full-suite gain or live database read is inferred.')
 
 
