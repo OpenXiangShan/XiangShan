@@ -193,7 +193,7 @@ def test_frozen_inventory_gaps_remain_explicit_and_fail_closed(tmp_path):
     from pathlib import Path
     from env.funcov.py.ifu.compact_funcov import _IFU_INTERNAL_PREFIXES
     root = Path(__file__).resolve().parents[7]
-    names = {line[len("  - name: "):].strip() for line in
+    names = {line[len("  - name: "):].strip().strip('"') for line in
              (root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml").read_text().splitlines()
              if line.startswith("  - name: ")}
     stems = {"io_toIBuffer_valid", "io_toIBuffer_ready", "io_toIBuffer_bits_valid",
