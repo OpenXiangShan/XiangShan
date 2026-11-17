@@ -101,11 +101,9 @@ IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS = frozenset(
 
 
 _SIGNALS = {
-    "req_valid": (
-        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_valid",
-    ),
-    "req_ready": (f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_ready",),
+    # ICache wires these ports directly to MainPipe in the current RTL.
+    "req_valid": (f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_valid",),
+    "req_ready": (f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_ready",),
     "s0_fire": (f"{_IFU_PREFIX}s0_fire", f"{_IFU_PREFIX}__Vtogcov__s0_fire"),
     "s0_flush": (f"{_IFU_PREFIX}s0_flush", f"{_IFU_PREFIX}__Vtogcov__s0_flush"),
     "s0_flush_bpu": (

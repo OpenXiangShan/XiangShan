@@ -1793,8 +1793,7 @@ def test_cacheable_shadow_only_control_is_unobservable(tmp_path):
     from env.funcov.py.ifu.cacheable_pipeline_funcov import _read_signal
     recorder, env, dut = _make_recorder(tmp_path)
     key = "req_ready"
-    for name in _SIGNALS[key]:
-        native = name.replace(".__Vtogcov__", ".")
+    for native in _SIGNALS[key]:
         if hasattr(dut, native): delattr(dut, native)
-        setattr(dut, name, _Signal(1))
+    setattr(dut, _ICACHE_PREFIX + "__Vtogcov__io_toIfu_req_ready", _Signal(1))
     assert _read_signal(recorder, key) is None
