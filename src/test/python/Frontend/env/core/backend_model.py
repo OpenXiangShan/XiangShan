@@ -140,6 +140,7 @@ class BackendModel:
         self.ibuf_full_streak = 0
         self._ftq_start_pc_cache: Dict[int, int] = {}
         self._ftq_start_pc_by_value: Dict[int, int] = {}
+        self._ftq_write_proof_by_value: Dict[int, tuple[int, int, int]] = {}
         self._ftq_previous_start_pc_cache: Dict[int, int] = {}
         self._ftq_previous_start_pc_by_value: Dict[int, int] = {}
         self._ftq_group_pc_history: Dict[tuple[int, int], list[tuple[int, bool]]] = {}
@@ -376,7 +377,36 @@ class BackendModel:
         if episode is not None and episode["redirect_driven_cycle"] is not None:
             if int(entry.cycle) <= int(episode["redirect_driven_cycle"]):
                 return False
-        return (int(entry.ftq_flag), int(entry.ftq_value)) == expected_ftq
+        entry_ftq = (int(entry.ftq_flag), int(entry.ftq_value))
+        if entry_ftq == expected_ftq:
+            return True
+        # cfVec carries the FTQ of the instruction's ending halfword. A
+        # noncompressed target straddling the first two recovery blocks has
+        # endOffset=0 in the immediately following FTQ entry. Require both
+        # fromFtq start PCs to have been freshly observed after this redirect;
+        # never accept a matching PC with an arbitrary different FTQ identity.
+        driven_cycle = None if episode is None else episode["redirect_driven_cycle"]
+        if (
+            driven_cycle is None
+            or bool(entry.is_rvc)
+            or int(entry.ftq_offset) != 0
+            or int(entry.exception_bits) != 0
+            or int(target_pc) & 1
+            or entry_ftq != self._increment_ftq_ptr(*expected_ftq)
+        ):
+            return False
+        for (flag, value), start_pc in (
+            (expected_ftq, int(target_pc)),
+            (entry_ftq, int(target_pc) + 2),
+        ):
+            proof = self._ftq_write_proof_by_value.get(int(value))
+            if proof is None:
+                return False
+            observed_flag, observed_pc, observed_cycle = proof
+            if (observed_flag != int(flag) or observed_pc != start_pc
+                    or not int(driven_cycle) < observed_cycle <= int(entry.cycle)):
+                return False
+        return True
 
     def _queue_entry_is_after_expected_recovery_ftq(self, entry: QueueInstr) -> bool:
         expected_ftq = self._current_expected_recovery_ftq()
@@ -3629,6 +3659,14 @@ class BackendModel:
             if previous_by_value is not None and int(previous_by_value) != int(start_pc):
                 self._ftq_previous_start_pc_by_value[value_key] = int(previous_by_value)
             self._ftq_start_pc_by_value[value_key] = start_pc
+            # Every slot write replaces any prior generation proof. The
+            # public write index contains no flag; only a same-cycle native
+            # prediction-pointer observation can supply it.
+            self._ftq_write_proof_by_value.pop(value_key, None)
+            if observation.from_ftq_flag in (0, 1):
+                self._ftq_write_proof_by_value[value_key] = (
+                    int(observation.from_ftq_flag), start_pc, int(self.current_cycle)
+                )
 
     def _resolve_cfvec_pc(
         self,

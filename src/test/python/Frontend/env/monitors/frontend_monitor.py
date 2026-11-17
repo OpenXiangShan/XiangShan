@@ -84,6 +84,7 @@ class FrontendMonitor:
         self.uncache_if = None
         self.icache_control_if = None
         self.ptw_get_gpa_provider = None
+        self.ftq_write_flag_provider = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
         self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
         self.uncache_request_snapshot: Optional[UncacheRequestSnapshot] = None
@@ -172,10 +173,11 @@ class FrontendMonitor:
             raise TypeError("FrontendMonitor requires an explicitly bound BackendFromIfuBundle")
         self.backend_from_ifu_if = target
 
-    def bind_observation_interfaces(self, *, from_ftq_if, ptw_if, ptw_get_gpa_provider) -> None:
+    def bind_observation_interfaces(self, *, from_ftq_if, ptw_if, ptw_get_gpa_provider, ftq_write_flag_provider=None) -> None:
         self.from_ftq_if = from_ftq_if
         self.ptw_if = ptw_if
         self.ptw_get_gpa_provider = ptw_get_gpa_provider
+        self.ftq_write_flag_provider = ftq_write_flag_provider
 
     def bind_ptw_context(self, csr_ctrl_if) -> None:
         self.csr_ctrl_if = csr_ctrl_if
@@ -292,10 +294,14 @@ class FrontendMonitor:
             or self.ptw_if is None
         ):
             raise AssertionError("FrontendMonitor observation interfaces are not bound")
+        wen = self._read(self.from_ftq_if.io_backend_fromFtq_wen)
+        index = self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx)
+        flag = self.ftq_write_flag_provider(index) if wen and self.ftq_write_flag_provider else None
         backend = BackendObservationSnapshot(
-            from_ftq_wen=self._read(self.from_ftq_if.io_backend_fromFtq_wen),
-            from_ftq_ftq_idx=self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx),
+            from_ftq_wen=wen,
+            from_ftq_ftq_idx=index,
             from_ftq_start_pc_addr=self._read(self.from_ftq_if.io_backend_fromFtq_startPc_addr),
+            from_ftq_flag=flag,
         )
         cfvec = self.capture_cfvec_snapshot(cycle)
         req_valid = self._read(self.ptw_if.req_0_valid)

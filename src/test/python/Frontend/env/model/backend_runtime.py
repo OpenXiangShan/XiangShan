@@ -87,6 +87,7 @@ class BackendObservationSnapshot:
     from_ftq_wen: int = 0
     from_ftq_ftq_idx: int = 0
     from_ftq_start_pc_addr: int = 0
+    from_ftq_flag: Optional[int] = None
     ibuf_full: int = 0
 
 

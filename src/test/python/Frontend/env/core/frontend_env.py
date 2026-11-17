@@ -51,6 +51,7 @@ from ..support.pmp_pma import (
     encode_pmp_pma_cfg,
 )
 from ..support.signal_utils import read_internal_signal
+from ..support.ftq_write_identity import read_ftq_write_flag
 from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
@@ -298,6 +299,7 @@ class FrontendEnv:
             from_ftq_if=self.backend_from_ftq_if,
             ptw_if=self.ptw_if,
             ptw_get_gpa_provider=lambda: read_internal_signal(self.dut, self.itlb_ptw_req_get_gpa_path),
+            ftq_write_flag_provider=lambda index: read_ftq_write_flag(self.dut, index),
         )
         self.flow_checker.bind_monitor(self.monitor)
         if hasattr(self.backend_model, "bind_interfaces"):
