@@ -63,7 +63,11 @@ The Stalled policy adapts to ROB compression; it is not a critical-path proof.
 A complete PSV combination is one PICS category, rather than separate allocations
 to every set bit. Cancelled, unresolved, and unknown attribution remain explicit
 and retain weight. **No recorded event** means PSV zero, not an absence of stalls.
-ST_LLC is not implemented.
+ST_LLC is bit 8. Its support is recorded in `CONTEXT_LLCSUPPORTED`; an
+unsupported integration is reported explicitly in the summary and comparison
+plots. See the [transaction semantics](tea-implementation.md#llc-transaction-attribution).
+`head_context.csv` also exports the separate entry-level `head_llc_miss_observed`
+context, which is not a member event.
 
 Full PCs are restored from signed SQLite values before filtering and ELF
 matching. Member masks are split by physical commit lane. `CYCLE` is the sample

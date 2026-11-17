@@ -600,6 +600,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       }
     }
 
+    chi_openllc_opt.foreach { llc =>
+      core_with_l2.zipWithIndex.filter(_._1.core.backendParams.teaTrackerEn).foreach { case (tile, rn) =>
+        TeaLlcObserver.connect(tile, llc, rn)
+      }
+    }
+
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.hartIsInReset)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := reset_sync

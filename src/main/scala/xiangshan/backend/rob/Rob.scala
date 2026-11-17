@@ -2064,6 +2064,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     info.flush.bits.isInterrupt := intrEnable
     info.flushEcho := RegNext(out.flushOut.valid, false.B)
   }
+  val teaLlc = Option.when(backendParams.teaTrackerEn)(TeaLlcTrace.sink)
   val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
   val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
   if (!backendParams.teaTrackerEn) {
@@ -2142,6 +2143,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(enableTea.asBool) { started := true.B }
       tracker.io.enable := enableTea.asBool || started
       tracker.io.cycle := teaCycle
+      tracker.io.llc := teaLlc.get
       tracker.io.addrTransType := in.debugInstrAddrTransType
       tracker.io.head := deqPtr
       tracker.io.redirect := in.redirect
@@ -2202,12 +2204,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       sample.context.commitBlockMask := VecInit(Seq(misPredBlock, lastCycleFlush, hasWFI,
         in.redirect.valid, deqNeedFlush && !deqHasFlushed, deqFlushBlock,
         criticalErrorState, traceBlock, state === s_walk)).asUInt
+      sample.context.llcSupported := teaLlc.get.supported
+      sample.context.headLlcMissObserved := !isEmpty && !hasTeaCommit && l3Miss
       sample.context.headReady := !isEmpty && robEntries(deqPtr.value).isWritebacked
       sample.context.headReasonValid := !isEmpty && !hasTeaCommit && out.debugRobHeadStall.get.valid
       sample.context.headReason := Mux(sample.context.headReasonValid, out.debugRobHeadStall.get.bits, 0.U)
 
       val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
       teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)
+      val llcTable = ChiselDB.createTable(s"TeaLlc_$hartId", new TeaLlcRecord, basicDB = true)
+      teaLlc.get.events.zipWithIndex.foreach { case (event, port) =>
+        val record = Wire(new TeaLlcRecord)
+        record.cycle := teaCycle
+        record.event := event
+        val release = event.kind === 3.U || event.kind === 7.U
+        llcTable.log(record, tracker.io.enable && event.kind =/= 0.U && (!release || event.a.orR),
+          s"port$port", clock, reset)
+      }
       val finalTable = ChiselDB.createTable(s"TeaDelayedFinal_$hartId", new TeaDelayedFinal, basicDB = true)
       tracker.io.finals.zipWithIndex.foreach { case (res, rank) =>
         finalTable.log(res, s"member$rank", clock, reset)

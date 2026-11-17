@@ -62,6 +62,7 @@ A PSV is an OR-accumulated signature, not a counter or a latency:
 | 5 | `FL_MO` | Memory-order redirect |
 | 6 | `ST_L1` | Data-cache miss |
 | 7 | `ST_TLB` | Any-issue data-TLB miss |
+| 8 | `ST_LLC` | Demand load waited on a transaction that missed the integrated OpenLLC |
 
 Frontend packet events belong only to the earliest valid instruction. Fusion
 preserves each architectural member's original frontend PSV. Enqueue adds only
@@ -71,8 +72,63 @@ identity; enqueue events additionally identify member rank. Same-cycle events
 are visible to retirement, recovery snapshots, and delayed final records.
 
 `PSV=0` means **No recorded event**. A long arithmetic stall can have no recorded
-cache, TLB, or recovery event. ST_LLC is not implemented. Event bits can overlap;
+cache, TLB, or recovery event. Event bits can overlap;
 their weights must not be summed as a disjoint partition of stall cycles.
+
+## LLC transaction attribution
+
+`WITH_TEA=1` installs read-only probes in `XSTop` when CoupledL2 and the internal
+OpenLLC are present. `DefaultConfig` simulation is the supported integration.
+`XSNoCTop`, external LLCs, and ZhuJiang do not supply this observation; samples
+carry `CONTEXT_LLCSUPPORTED=0`, and the visualizer marks ST_LLC unsupported rather
+than interpreting zero as a hit. Runtime monitoring starts with TEA and continues
+after sampling is disabled. Transactions already in flight before monitoring
+starts have no reconstructed history.
+
+The native tracker associates accepted L1 MissQueue allocation and load merge
+with the LSU S2 full ROB pointer and architectural member rank. Non-demand
+requests, fully forwarded loads, killed requests and requests without a ROB
+member do not add waiters; the LSU must still require cache data.
+L2 allocation and AMergeTask provide the upstream source ID; the probe reverses
+Diplomacy's client source-range remapping and uses CoupledL2's `setSliceID` for
+the actual downstream CHI transaction identity. Locally generated L2 Hint tasks
+have no L1 parent; a subsequent demand merge adds the actual parent. No identity
+is added to functional cache or CHI messages. Multiple loads waiting for one request all inherit its
+miss, including a demand load that joins an outstanding prefetch transaction.
+
+OpenLLC S3 read lookup supplies the requester RN, transaction ID, and local LLC
+hit/miss. A local LLC miss serviced by a peer cache still counts as an LLC miss;
+this bit does not mean a DRAM access. Fetch, PTW, writeback, MMIO and prefetch
+traffic cannot set a load's bit without an accepted demand-load waiter on the
+same transaction. Physical address equality alone never establishes membership.
+
+L1 allocation epochs, L2 allocation/release and ROB allocation cycles protect
+reusable IDs. Redirect and retirement remove dead waiters. The member's PSV
+retains ST_LLC after the request completes, including completion before the
+member reaches the ROB head. Observation runs every cycle and same-cycle
+retirement/cancellation sees the lookup result. Repeated simulator evaluation
+replaces a pending frame instead of applying it twice.
+
+`CONTEXT_HEADLLCMISSOBSERVED` separately records the existing Top-down head
+address match during a no-commit cycle. It describes the physical entry and may
+match another hart's same-address traffic; it never sets a member's PSV.
+`head_context.csv` exports it as `head_llc_miss_observed`.
+
+The optional `TeaLlc_0` database table records the raw probes for independent
+replay. It contains `CYCLE` and six event words `EVENT_KIND/ID/A/B/C/D`:
+
+| Kind | ID | Arguments |
+| --- | --- | --- |
+| 1 | L1 MSHR | Accepted allocation (all request types) |
+| 2 | L1 MSHR | A=ROB index, B=wrap flag, C=Former, D=member rank |
+| 3 | 0 | A=mask of released L1 MSHRs |
+| 4 | Encoded L2 CHI ID | A=L1 MSHR, or all-ones for another client |
+| 5 | Encoded L2 CHI ID | A=merging L1 MSHR |
+| 6 | Encoded L2 CHI ID | A=LLC miss; only this hart's read lookups |
+| 7 | Encoded L2 bank base | A=mask of released L2 MSHRs |
+
+This simulation state and probe traffic add host work and database volume;
+they do not implement cache state or an optimization to guest execution.
 
 ## Sampling and attribution
 
@@ -167,7 +223,7 @@ Constantin support:
 NOOP_HOME="$PWD" make emu WITH_TEA=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j8
 ```
 
-For GSIM, use `make gsim GSIM=1` with the same feature options. Build parallelism
+For GSIM, use `make gsim GSIM=1 DISABLE_XMR=1` with the same feature options. Build parallelism
 must fit the available memory and CPUs. `WITH_TEA_STATS` defaults to `WITH_TEA`;
 set it to zero to omit statistics. Summary-only builds use
 `WITH_TEA=0 WITH_TEA_STATS=1` and omit the tracker and frontend PSV metadata.
@@ -185,7 +241,7 @@ For summary-only collection, use `enableTea0 0` and `enableTeaStats0 1` instead.
 build/emu -i ready-to-run/coremark-2-iteration.bin \
   --diff ready-to-run/riscv64-nemu-interpreter-so --max-instr 5000 \
   --cst-file build/tea.cst \
-  --dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0' \
+  --dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0 TeaLlc_0' \
   --db-path build/tea.db
 python3 scripts/tea_visualize.py build/tea.db --labels coremark --output build/tea-profile
 ```

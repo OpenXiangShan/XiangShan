@@ -39,6 +39,7 @@ class TeaCompletion(implicit p: Parameters) extends XSBundle {
 class TeaMemberTrackerIO(writebackPorts: Int, eventPorts: Int)(implicit p: Parameters) extends XSBundle {
   val enable = Input(Bool())
   val cycle = Input(UInt(64.W))
+  val llc = Input(new TeaLlcTrace)
   val addrTransType = Input(new AddrTransType)
   val alloc = Input(Vec(RenameWidth, Valid(new TeaRenameMember)))
   val enqPsv = Input(Vec(RenameWidth, Valid(new TeaPsvUpdate)))
@@ -105,10 +106,12 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
     ptr(x.bits)
   }
 
+  io.llc.events.foreach(e => put(e.kind, e.id, e.a, e.b, e.c, e.d))
+
   private val outputWords = 2 * 2 + 4 + CommitWidth * RenameWidth * 6 + RenameWidth * 9
   private val helper = Module(new TeaMemberTrackerNative(
     RobSize, RenameWidth, CommitWidth, writebackPorts, eventPorts, p(XSCoreParamsKey).HartId,
-    inputs.size, outputWords))
+    io.llc.events.size, inputs.size, outputWords))
   helper.io.reset := reset.asBool || !io.enable
   helper.io.phase := phase
   helper.io.in := Mux(io.enable, VecInit(inputs.toSeq).asUInt, 0.U)

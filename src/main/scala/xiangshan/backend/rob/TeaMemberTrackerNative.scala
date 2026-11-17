@@ -24,13 +24,13 @@ private[xiangshan] object TeaMemberTrackerNative {
     try source.mkString finally source.close()
   }
 
-  def cpp(name: String, rob: Int, rename: Int, commit: Int, wb: Int, events: Int): String = {
+  def cpp(name: String, rob: Int, rename: Int, commit: Int, wb: Int, events: Int, llc: Int): String = {
     val outputWords = 8 + commit * rename * 6 + rename * 9
     s"""
        |$implementation
        |extern "C" void $name(unsigned char reset, unsigned char phase,
        |  const uint32_t *in, uint32_t *out) {
-       |  static TeaNativeMemberTracker<$rob, $rename, $commit, $wb, $events> tracker;
+       |  static TeaNativeMemberTracker<$rob, $rename, $commit, $wb, $events, $llc> tracker;
        |  alignas(8) uint64_t outputs[$outputWords];
        |  tracker.evaluate(reset, phase, reinterpret_cast<const uint64_t *>(in), outputs);
        |  std::memcpy(out, outputs, sizeof(outputs));
@@ -40,9 +40,9 @@ private[xiangshan] object TeaMemberTrackerNative {
 }
 
 private[rob] class TeaMemberTrackerNative(
-  rob: Int, rename: Int, commit: Int, wb: Int, events: Int, hart: Int, inWords: Int, outWords: Int)
+  rob: Int, rename: Int, commit: Int, wb: Int, events: Int, hart: Int, llc: Int, inWords: Int, outWords: Int)
   extends BlackBox with HasBlackBoxInline {
-  override def desiredName: String = s"TeaMemberTrackerNative_${rob}_${rename}_${commit}_${wb}_${events}_$hart"
+  override def desiredName: String = s"TeaMemberTrackerNative_${rob}_${rename}_${commit}_${wb}_${events}_${llc}_$hart"
   val io = IO(new Bundle {
     val reset = Input(Bool())
     val phase = Input(Bool())
@@ -58,13 +58,13 @@ private[rob] class TeaMemberTrackerNative(
     |  always @(*) $function(reset, phase, in, out);
     |endmodule
     |""".stripMargin)
-  private val cpp = TeaMemberTrackerNative.cpp(function, rob, rename, commit, wb, events)
+  private val cpp = TeaMemberTrackerNative.cpp(function, rob, rename, commit, wb, events, llc)
   difftest.DifftestModule.createCppDPICModule(function, cpp)
   difftest.DifftestModule.createCppExtModule(desiredName, s"""
     |${TeaMemberTrackerNative.implementation}
     |void $desiredName(uint8_t reset, uint8_t phase,
     |  unsigned _BitInt(${64 * inWords}) in, unsigned _BitInt(${64 * outWords}) &out) {
-    |  static TeaNativeMemberTracker<$rob, $rename, $commit, $wb, $events> tracker;
+    |  static TeaNativeMemberTracker<$rob, $rename, $commit, $wb, $events, $llc> tracker;
     |  alignas(8) uint64_t outputs[$outWords];
     |  tracker.evaluate(reset, phase, reinterpret_cast<const uint64_t *>(&in), outputs);
     |  std::memcpy(&out, outputs, sizeof(outputs));

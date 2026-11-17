@@ -20,8 +20,105 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
+#include <utility>
 
-template <int RobSize, int RenameWidth, int CommitWidth, int Writebacks, int Events>
+// The L1 epoch and allocationCycle protect both reusable transaction IDs and ROB slots.
+// A late demand merging into a prefetch inherits the outstanding transaction's miss.
+class TeaNativeLlcTracker {
+public:
+  struct Event { uint64_t kind, id, a, b, c, d; };
+  struct Token {
+    uint64_t index, flag, former, rank, cycle;
+    bool operator==(const Token &b) const {
+      return index == b.index && flag == b.flag && former == b.former && rank == b.rank && cycle == b.cycle;
+    }
+  };
+private:
+  struct Ref { uint64_t id, epoch; };
+  struct L1 {
+    uint64_t epoch;
+    bool miss = false;
+    std::vector<Token> waiters;
+  };
+  struct L2 {
+    bool miss = false;
+    std::vector<Ref> requests;
+  };
+  uint64_t epoch = 0;
+  std::unordered_map<uint64_t, L1> l1;
+  std::unordered_map<uint64_t, L2> l2;
+
+public:
+  template <typename Alive> void prune(Alive alive) {
+    for (auto &request : l1) {
+      auto &waiters = request.second.waiters;
+      waiters.erase(std::remove_if(waiters.begin(), waiters.end(),
+        [&](const Token &t) { return !alive(t); }), waiters.end());
+    }
+  }
+  template <typename Resolve, typename Notify>
+  void observe(const Event *events, int count, Resolve resolve, Notify notify) {
+    // Each pass follows the cache handoff order, independent of probe port order.
+    for (int i = 0; i < count; ++i) {
+      const auto &e = events[i];
+      if (e.kind == 1) l1[e.id] = L1{++epoch, false, {}};
+    }
+    for (int i = 0; i < count; ++i) {
+      const auto &e = events[i];
+      if (e.kind != 2) continue;
+      auto request = l1.find(e.id);
+      Token token{};
+      if (request == l1.end() || !resolve(e, token)) continue;
+      auto &r = request->second;
+      if (std::find(r.waiters.begin(), r.waiters.end(), token) == r.waiters.end()) r.waiters.push_back(token);
+      if (r.miss) notify(token);
+    }
+    for (int i = 0; i < count; ++i) {
+      const auto &e = events[i];
+      if (e.kind != 4 && e.kind != 5) continue;
+      if (e.kind == 4) l2[e.id] = L2{};
+      auto transaction = l2.find(e.id);
+      auto request = l1.find(e.a);
+      if (transaction == l2.end() || request == l1.end()) continue;
+      auto &t = transaction->second;
+      auto &r = request->second;
+      t.requests.push_back({e.a, r.epoch});
+      if (t.miss) {
+        r.miss = true;
+        for (const auto &token : r.waiters) notify(token);
+      }
+    }
+    for (int i = 0; i < count; ++i) {
+      const auto &e = events[i];
+      if (e.kind != 6 || !e.a) continue;
+      auto transaction = l2.find(e.id);
+      if (transaction == l2.end()) continue;
+      transaction->second.miss = true;
+      for (const auto &ref : transaction->second.requests) {
+        auto request = l1.find(ref.id);
+        if (request == l1.end() || request->second.epoch != ref.epoch) continue;
+        auto &r = request->second;
+        r.miss = true;
+        for (const auto &token : r.waiters) notify(token);
+      }
+    }
+    // A final result in the release cycle still belongs to the old lifetime.
+    for (int i = 0; i < count; ++i) {
+      const auto &e = events[i];
+      if (e.kind != 3 && e.kind != 7) continue;
+      for (uint64_t mask = e.a; mask; mask &= mask - 1) {
+        const auto id = e.id + __builtin_ctzll(mask);
+        if (e.kind == 3) l1.erase(id);
+        else l2.erase(id);
+      }
+    }
+  }
+};
+
+template <int RobSize, int RenameWidth, int CommitWidth, int Writebacks, int Events, int LlcEvents>
 class TeaNativeMemberTracker {
   struct Ptr {
     uint64_t index, flag, former;
@@ -74,6 +171,7 @@ class TeaNativeMemberTracker {
     Completion wb[Writebacks];
     Event events[Events];
     Commit commits[2 * CommitWidth];
+    TeaNativeLlcTracker::Event llc[LlcEvents];
   };
   struct Member {
     uint64_t former = 0, owner = 0, pc = 0, psv = 0, remaining = 0;
@@ -84,6 +182,13 @@ class TeaNativeMemberTracker {
     Member members[RenameWidth];
   };
   Entry entries[RobSize];
+  TeaNativeLlcTracker llc, pendingLlc;
+  std::vector<TeaNativeLlcTracker::Token> llcUpdates;
+  bool live(const TeaNativeLlcTracker::Token &t) const {
+    const auto &e = entries[t.index];
+    const auto &m = e.members[t.rank];
+    return m.live && e.flag == t.flag && m.former == t.former && e.cycle == t.cycle;
+  }
   Ptr sampledEntry{};
   Frame previous{};
   bool previousValid = false, previousPhase = false;
@@ -107,6 +212,8 @@ class TeaNativeMemberTracker {
     for (const auto &e : in.events) {
       if (e.valid && e.ptr.same(p)) psv |= e.mask;
     }
+    const TeaNativeLlcTracker::Token token{p.index, p.flag, p.former, uint64_t(rank), entries[p.index].cycle};
+    if (std::find(llcUpdates.begin(), llcUpdates.end(), token) != llcUpdates.end()) psv |= uint64_t(1) << 8;
     return psv;
   }
   int unfinished(const Frame &in) const {
@@ -121,6 +228,11 @@ class TeaNativeMemberTracker {
     return -1;
   }
   void advance(const Frame &in) {
+    llc = std::move(pendingLlc);
+    for (const auto &t : llcUpdates) {
+      if (live(t)) entries[t.index].members[t.rank].psv |= uint64_t(1) << 8;
+    }
+    llcUpdates.clear();
     const int stalled = unfinished(in);
     const bool mark = in.mark && stalled >= 0 &&
                       !retired(in, ptr(in.head.index, stalled)) && !killed(in, ptr(in.head.index, stalled));
@@ -198,6 +310,7 @@ class TeaNativeMemberTracker {
     }
     if (in.mark && stalled >= 0) sampledEntry = in.head;
     if (mark) entries[in.head.index].members[stalled].sampled = true;
+    llc.prune([&](const TeaNativeLlcTracker::Token &t) { return live(t); });
   }
   void result(const Frame &in, int entry, int rank, uint64_t *&out) const {
     const auto &e = entries[entry];
@@ -218,6 +331,9 @@ public:
         }
         sampledEntry = {};
         previousValid = false;
+        llc = TeaNativeLlcTracker{};
+        pendingLlc = TeaNativeLlcTracker{};
+        llcUpdates.clear();
       }
       std::memset(out, 0, (8 + CommitWidth * RenameWidth * 6 + RenameWidth * 9) * sizeof(uint64_t));
       return;
@@ -229,6 +345,15 @@ public:
     previous = in;
     previousPhase = phase;
     previousValid = true;
+    pendingLlc = llc;
+    llcUpdates.clear();
+    pendingLlc.observe(in.llc, LlcEvents,
+      [&](const TeaNativeLlcTracker::Event &e, TeaNativeLlcTracker::Token &t) {
+        if (e.a >= RobSize || e.d >= RenameWidth) return false;
+        t = {e.a, e.b, e.c, e.d, entries[e.a].cycle};
+        return live(t);
+      },
+      [&](const TeaNativeLlcTracker::Token &t) { if (live(t)) llcUpdates.push_back(t); });
     for (const auto &query : in.read) {
       const auto &p = query.ptr;
       int rank = RenameWidth - 1;

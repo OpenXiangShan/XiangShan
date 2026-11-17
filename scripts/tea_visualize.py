@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-EVENTS = ("DR_L1", "DR_TLB", "DR_SQ", "FL_MB", "FL_EX", "FL_MO", "ST_L1", "ST_TLB")
+EVENTS = ("DR_L1", "DR_TLB", "DR_SQ", "FL_MB", "FL_EX", "FL_MO", "ST_L1", "ST_TLB", "ST_LLC")
 INCOMPLETE = {-1: "Cancelled", -2: "Unresolved", -3: "Unknown target/cause"}
 STATES = ("Computing", "Stalled", "Flushed", "Drained")
 SPEC_EXCLUSIONS = ((0x10000000, 0x10100000), (0x80000000, 0x80000C00))
@@ -130,6 +130,10 @@ def load_data(path, label, args):
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
         con.row_factory = sqlite3.Row
         columns = {row["name"] for row in con.execute("PRAGMA table_info(Tea_0)")}
+        if "CONTEXT_LLCSUPPORTED" in columns:
+            supported = con.execute("SELECT min(CONTEXT_LLCSUPPORTED) FROM Tea_0").fetchone()[0]
+            if supported == 1:
+                summary["unsupported_events"] = ""
         width = sum(name.startswith("PCVEC_") for name in columns)
         chunks = sum(name.startswith("VALIDMASK_") for name in columns)
         if not chunks:
@@ -204,7 +208,8 @@ def load_data(path, label, args):
                 state_weights[STATES[state]][pc][psv] += weight
                 mask = row["CONTEXT_COMMITBLOCKMASK"]
                 reason = row["CONTEXT_HEADREASON"] if row["CONTEXT_HEADREASONVALID"] else -1
-                contexts[(pc, state, mask, reason, row["CONTEXT_HEADREADY"])] += weight
+                head_llc = row["CONTEXT_HEADLLCMISSOBSERVED"] if "CONTEXT_HEADLLCMISSOBSERVED" in columns else None
+                contexts[(pc, state, mask, reason, row["CONTEXT_HEADREADY"], head_llc)] += weight
                 summary["selected_lanes"] += 1
                 summary["sample_weight"] += weight
                 summary[f"state_{STATES[state].lower()}_weight"] += weight
@@ -312,7 +317,7 @@ def export_cycle_stats(path, directory):
 
 def export_context(run, directory):
     rows = []
-    for (pc, state, mask, reason, ready), weight in run["contexts"].most_common():
+    for (pc, state, mask, reason, ready, head_llc), weight in run["contexts"].most_common():
         blocks = [name for bit, name in enumerate(COMMIT_BLOCKS) if mask & (1 << bit)]
         head_reason = (HEAD_REASONS[reason] if 0 <= reason < len(HEAD_REASONS)
                        else f"reason_{reason}" if reason >= 0 else "Unknown")
@@ -322,10 +327,10 @@ def export_context(run, directory):
         rows.append(dict(pc=hex(pc) if pc is not None else "unknown", state=STATES[state],
                          primary=primary, scope=scope, commit_block_mask=mask,
                          commit_blocks="|".join(blocks), head_reason_id=reason,
-                         head_reason=head_reason, head_ready=ready, sample_weight=weight))
+                         head_reason=head_reason, head_ready=ready, head_llc_miss_observed=head_llc, sample_weight=weight))
     write_csv(directory / "head_context.csv", rows,
               ("pc", "state", "primary", "scope", "commit_block_mask", "commit_blocks",
-               "head_reason_id", "head_reason", "head_ready", "sample_weight"))
+               "head_reason_id", "head_reason", "head_ready", "head_llc_miss_observed", "sample_weight"))
 
 
 def save_figure(fig, path):
@@ -453,7 +458,9 @@ def plot_comparison(runs, output, categories, labels, colors):
     fig.legend(*axes[0].get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(0.5, 0.96), ncol=3, fontsize=8)
     quality = [f"{s['label']}: cancelled {s['cancelled_rows']}, unresolved {s['unresolved_rows']}, unknown {s['unknown_rows']}"
                for s in (run["summary"] for run in runs)]
-    fig.text(0.5, 0.01, "Incomplete attribution (included): " + "\n".join(quality) + "\nST_LLC is unsupported.", ha="center", fontsize=8)
+    fig.text(0.5, 0.01, "Incomplete attribution (included): " + "\n".join(quality) + "\n" + "\n".join(
+        f"{run['summary']['label']}: unsupported events: {run['summary']['unsupported_events']}"
+        for run in runs if run["summary"]["unsupported_events"]), ha="center", fontsize=8)
     fig.subplots_adjust(left=0.1, right=0.9, bottom=0.12 + 0.017 * len(runs), top=0.83, hspace=0.3)
     fig.colorbar(heatmap, ax=axes, label="% of selected sample weight", fraction=0.025, pad=0.02)
     save_figure(fig, output / "comparison")
