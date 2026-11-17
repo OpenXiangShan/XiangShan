@@ -1,0 +1,31 @@
+--- a/perf_trigger/main.py
++++ b/perf_trigger/main.py
+@@ -736,0 +737,6 @@
++    parser.add_argument(
++        "--dump-select-db",
++        type=str,
++        help="Space-separated ChiselDB table names to collect instead of all tables",
++    )
++
+@@ -903,0 +910 @@
++                    dump_select_db=args.dump_select_db,
+--- a/perf_trigger/modules/types.py
++++ b/perf_trigger/modules/types.py
+@@ -24,0 +25 @@
++    dump_select_db: str | None = None
+--- a/perf_trigger/modules/server.py
++++ b/perf_trigger/modules/server.py
+@@ -367,6 +367,7 @@
+-                    [
+-                        "--dump-db",
+-                        "--db-path",
+-                        shlex.quote(str(gcpt.db_path)),
+-                    ]
+-                    if emu_config.dump_db
++                    (
++                        ["--dump-select-db", shlex.quote(emu_config.dump_select_db)]
++                        if emu_config.dump_select_db
++                        else ["--dump-db"]
++                    )
++                    + ["--db-path", shlex.quote(str(gcpt.db_path))]
++                    if emu_config.dump_db or emu_config.dump_select_db

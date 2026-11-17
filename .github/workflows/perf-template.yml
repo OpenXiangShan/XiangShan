@@ -40,6 +40,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_tea:
+        description: Collect TEA tables only (TEA CST required); enable_db or enable_rolling requests full DB
+        required: false
+        type: boolean
+        default: false
       enable_rolling:
         description: Enable rolling DB dump, which implies enable_db
         required: false
@@ -131,6 +136,11 @@ jobs:
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
+          if [[ "${{ inputs.enable_tea }}" == "true" && -z "${{ inputs.cst_file }}" ]]; then
+            echo "Error: TEA requires a Constantin file with enableTea0 set to 1"
+            exit 1
+          fi
+
           if [[ -z "${{ inputs.servers }}" ]]; then
             if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
               echo "SERVER_LIST=node" >> $GITHUB_ENV
@@ -142,6 +152,9 @@ jobs:
           fi
 
           SPEC_TAG="-${{ inputs.xs_config }}"
+          if [[ "${{ inputs.enable_tea }}" == "true" ]]; then
+            SPEC_TAG="${SPEC_TAG}-tea"
+          fi
           # Set CST_COMPILE_OPT and CST_RUN_OPT based on cst_file
           if [[ -n "${{ inputs.cst_file }}" ]]; then
             if [[ ! -f "${{ inputs.cst_file }}" ]]; then
@@ -153,7 +166,7 @@ jobs:
             SPEC_TAG="${SPEC_TAG}-${CONST_TAG}"
 
             echo "CST_COMPILE_OPT=--with-constantin" >> $GITHUB_ENV
-            echo "CST_RUN_OPT=--cst-file ${{ inputs.cst_file }}" >> $GITHUB_ENV
+            echo "CST_RUN_OPT=--cst-file $(realpath "${{ inputs.cst_file }}")" >> $GITHUB_ENV
           else
             echo "CST_COMPILE_OPT=" >> $GITHUB_ENV
             echo "CST_RUN_OPT=" >> $GITHUB_ENV
@@ -244,6 +257,15 @@ jobs:
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
 
+      - name: Prepare TEA-only database runner
+        if: inputs.enable_tea && !inputs.enable_db && !inputs.enable_rolling
+        run: |
+          TEA_SCRIPTS_HOME="$RUNNER_TEMP/tea-env-scripts-${{ github.run_id }}"
+          mkdir -p "$TEA_SCRIPTS_HOME"
+          cp -r "$SCRIPTS_HOME/perf_trigger" "$TEA_SCRIPTS_HOME/perf_trigger"
+          patch -d "$TEA_SCRIPTS_HOME" -p1 < "$GITHUB_WORKSPACE/scripts/ci/perf-select-db.patch"
+          echo "SCRIPTS_HOME=$TEA_SCRIPTS_HOME" >> "$GITHUB_ENV"
+
       - name: Initialize submodules
         run: make init-force
 
@@ -252,6 +274,8 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
       - name: Build EMU with DRAMsim3
+        env:
+          WITH_TEA: ${{ inputs.enable_tea && '1' || '0' }}
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -261,7 +285,7 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
-              ${{ inputs.enable_db && '--enable-db' || '' }} \
+              ${{ (inputs.enable_db || inputs.enable_tea) && '--enable-db' || '' }} \
               ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
@@ -274,6 +298,12 @@ jobs:
       - name: Run SPEC CPU checkpoints
         run: |
           cd $SCRIPTS_HOME/perf_trigger
+          DB_OPTS=()
+          if [[ "${{ inputs.enable_tea }}" == "true" && "${{ inputs.enable_db }}" != "true" && "${{ inputs.enable_rolling }}" != "true" ]]; then
+            DB_OPTS+=(--dump-select-db "perf_tea_0 perf_tea_delayed_final_0 perf_tea_cycle_summary_0 perf_tea_no_commit_0")
+          elif [[ "${{ inputs.enable_db }}" == "true" || "${{ inputs.enable_rolling }}" == "true" ]]; then
+            DB_OPTS+=(--dump-db)
+          fi
           EXTRA_OPTS=()
           if [[ -n "${{ inputs.warmup }}" ]]; then
             EXTRA_OPTS+=(--warmup "${{ inputs.warmup }}")
@@ -294,7 +324,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             ${{ !inputs.disable_diff && '--nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so' || '' }} \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
+            "${DB_OPTS[@]}" \
             --run \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
