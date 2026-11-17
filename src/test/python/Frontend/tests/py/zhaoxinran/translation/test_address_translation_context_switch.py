@@ -18,6 +18,8 @@ from tests.py.support.translation_context_switch import (
     OLD_VA as _OLD_VA,
     NEW_VA as _NEW_VA,
     OLD_PA as _OLD_PA,
+    NEW_PA as _NEW_PA,
+    OLD_GPA as _OLD_GPA,
     randomize_context_timing as _randomize_context_timing,
     scenario as _scenario,
     translation_complete as _translation_complete,
@@ -138,25 +140,101 @@ def test_tlb_csr_change_retranslates_same_vpn_with_new_pte_signature(env) -> Non
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_all_stage_context_change_after_refill(env, scenario_id, context_update, changed_name) -> None:
     scenario = _randomize_context_timing(env, _all_stage_scenario(scenario_id))
+    new_scenario = replace(scenario, scenario_id=f"{scenario_id}-new", pa=_NEW_PA)
+    if changed_name == "vsatp":
+        new_scenario = replace(
+            new_scenario,
+            gpa=_OLD_GPA + (_NEW_PA - _OLD_PA),
+            vsatp_asid=context_update["vsatp_asid"],
+            s1_pte=replace(scenario.s1_pte, asid=context_update["vsatp_asid"]),
+        )
+    elif changed_name == "hgatp":
+        new_scenario = replace(
+            new_scenario,
+            hgatp_vmid=context_update["hgatp_vmid"],
+            s1_pte=replace(scenario.s1_pte, vmid=context_update["hgatp_vmid"]),
+            s2_pte=replace(scenario.s2_pte, vmid=context_update["hgatp_vmid"]),
+        )
+    else:
+        new_scenario = replace(
+            new_scenario,
+            gpa=None,
+            s2xlate=0,
+            priv_virt=0,
+            s1_pte=TranslationPte(asid=scenario.satp_asid),
+        )
+    builder = TranslationScenarioBuilder(env)
+    new_state = builder.build(new_scenario)
     initialize_frontend(
         env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
     )
-    state = TranslationScenarioBuilder(env).build(scenario)
+    state = builder.build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
     env.arm_translation_scenario(state)
     _wait_until(env, lambda: _translation_complete(env), description="all-stage translation refill")
     env.assert_translation_scenario()
+    old_active = env.translation_oracle.get_active()
+    assert old_active is not None
+    assert (_OLD_PA & ~0x3F) in old_active["observed_fetch_pas"]
 
     req_count = int(env.ptw_agent.get_stats()["req_count"])
-    change = env.update_translation_context(**context_update)
-
+    for page in range(new_scenario.page_count):
+        env.page_table.map_page(
+            (scenario.va >> 12) + page,
+            ((new_scenario.gpa if new_scenario.gpa is not None else new_scenario.pa) >> 12) + page,
+            **new_scenario.s1_pte.as_mapping_kwargs(),
+        )
+        if new_scenario.gpa is not None:
+            stage2_pte = new_scenario.s2_pte.as_mapping_kwargs()
+            stage2_pte.pop("asid")
+            env.page_table.map_stage2_page(
+                (new_scenario.gpa >> 12) + page,
+                (new_scenario.pa >> 12) + page,
+                **stage2_pte,
+            )
+    env.load_program(new_scenario.payload, new_scenario.pa)
+    change = env.prepare_translation_context_change(**context_update)
     assert change["changed"][changed_name]
+    new_state = replace(new_state, translation_epoch=env.translation_epoch)
+    env.monitor.set_expected_pc(new_scenario.va)
+    env.arm_translation_scenario(new_state)
+    env.translation_oracle.set_fetch_observation_ready(ready=False)
+    redirect_count = int(env.monitor.redirect_count)
+    redirect = InjectRedirectSequence(
+        RedirectTxn(
+            target_pc=new_scenario.va,
+            reason=f"{scenario_id}-new-context",
+        )
+    )
+    redirect.inject(env)
+    env.step(1)
+    env.release_translation_context_change(change)
     _wait_until(
         env,
-        lambda: int(env.ptw_agent.get_stats()["req_count"]) > req_count,
-        description=f"retranslation after {changed_name} change",
+        lambda: int(env.monitor.redirect_count) > redirect_count,
+        description=f"redirect after {changed_name} change",
     )
+    env.translation_oracle.set_fetch_observation_ready(ready=True)
+    _wait_until(
+        env,
+        lambda: _translation_complete(env),
+        description=f"complete translation after {changed_name} change",
+    )
+    env.assert_translation_scenario()
+    active = env.translation_oracle.get_active()
+    assert active is not None
+    expected_ptw = {
+        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+        for request in active["expected_ptw_requests"]
+    }
+    assert len(expected_ptw) == new_scenario.page_count
+    assert expected_ptw.issubset(active["requested_ptw_request_keys"])
+    assert expected_ptw.issubset(active["responded_ptw_request_keys"])
+    assert (_NEW_PA & ~0x3F) in active["observed_fetch_pas"]
+    assert (_OLD_PA & ~0x3F) not in active["observed_fetch_pas"]
+    assert active["translation_epoch"] == env.translation_epoch
+    assert int(env.ptw_agent.get_stats()["req_count"]) > req_count
     assert env.translation_epoch == state.translation_epoch + 1
     assert not env.get_errors()
 
