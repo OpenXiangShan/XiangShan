@@ -307,8 +307,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(1).value))
   )
 
+  // Experiment: issue one fetch block per request. Re-enable here for the baseline.
+  private val enableTwoFetch = false
   // as in 2-prefetch, the second fetch block must have passed the point of no return
-  private val rawTwoFetchValid = passedPnr(fetchPtr(1)) &&
+  private val rawTwoFetchValid = enableTwoFetch.B && passedPnr(fetchPtr(1)) &&
     (fetchReq(0).size +& fetchReq(1).size) <= FetchBlockInstNum.U && // the unit of fetchReq size is half-word
     fetchReq(0).vPageNumber === fetchReq(1).vPageNumber &&
     !(hasBackendFlag && (backendFlagPtr === fetchPtr(0) || backendFlagPtr === fetchPtr(1)))

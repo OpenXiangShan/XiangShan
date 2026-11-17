@@ -87,6 +87,9 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   }
 
   /* *** dequeue *** */
+  // Experiment: issue one prefetch per request, including queued and mixed sources.
+  private val enableTwoPrefetch = false
+
   private class PrefetchGroup extends Bundle {
     val req:             Vec[Valid[FtqPrefetchReq]] = Vec(MaxPrefetchReqNum, Valid(new FtqPrefetchReq))
     val twoPrefetchCase: TwoPrefetchCase            = new TwoPrefetchCase
@@ -103,8 +106,12 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
     def apply(req: Vec[Valid[FtqPrefetchReq]], t: String): PrefetchGroup = {
       val group = Wire(new PrefetchGroup)
       group.req := req
+      if (!enableTwoPrefetch) {
+        group.req.tail.foreach(_.valid := false.B)
+      }
       // io.deq.fire is passed to apply(..., canAssert) to prevent assert(x-state)
-      group.twoPrefetchCase := TwoPrefetchCase(req, io.deq.fire)
+      // Use the masked requests for both pairing and pointer movements, retaining the second entry.
+      group.twoPrefetchCase := TwoPrefetchCase(group.req, io.deq.fire)
       // pointer movements
       t match {
         case "fdip" =>
