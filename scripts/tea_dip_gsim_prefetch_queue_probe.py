@@ -15,10 +15,10 @@ FIELDS = ['head', 'tail', 'maybe_full', 'enqueue', 'pipe_ready', 'flow', 'overwr
           'enqueue_count', 'dequeue_count', 'overwrite_count', 'port_fire_count']
 
 
-def add_capture(root, header, cpp):
+def add_capture(root, header, cpp, *, standalone=False):
     cache = Path(root) / 'XSCache/src/main/scala/coupledL2'
     requirements = {
-        'utils/OverwriteQueue.scala': ['io.enq.ready := true.B',
+        'utils/OverwriteQueue.scala': [
             'val overwriteHappens =  full &&  do_enq && !do_deq',
             'io.deq.bits := Mux(flowHappens, io.enq.bits, queue(headPtr))'],
         'prefetch/Prefetcher.scala': ['pipe(i).io.in <> pftQueue(i).io.deq',
@@ -27,6 +27,18 @@ def add_capture(root, header, cpp):
     for name, fragments in requirements.items():
         for fragment in fragments:
             assert fragment in (cache / name).read_text(), (name, fragment)
+    queue_text = (cache / 'utils/OverwriteQueue.scala').read_text()
+    prefetch_text = (cache / 'prefetch/Prefetcher.scala').read_text()
+    if 'allowOverwrite = false' in prefetch_text:
+        assert 'io.enq.ready := (if (allowOverwrite) true.B else !full || io.deq.ready)' in queue_text
+        propagated = 'req.ready := (0 until banks).map(i => selectOH(i)(j) && pftQueue(i).io.enq.ready).reduce(_ || _)'
+        selected = 'req.ready := (0 until banks).map(i => selectOH(i)(j)).reduce(_ || _)'
+        assert (propagated in prefetch_text) != (selected in prefetch_text)
+        policy = 'backpressure' if propagated in prefetch_text else 'drop_new'
+    else:
+        assert 'io.enq.ready := true.B' in queue_text
+        policy = 'overwrite'
+    assert standalone or policy == 'overwrite', 'Non-overwrite policies require admission capture'
     declarations = dict(re.findall(r'uint(?:8|16|32|64)_t (\S+); // width = (\d+),', header))
 
     def field(name, width=1):
@@ -43,6 +55,10 @@ def add_capture(root, header, cpp):
         full_flag = field(queue + 'maybe_full')
         enqueue = field(parent + f'_pftQueue_{bank}_io_enq_valid_T_1')
         pipe_ready = field(pipe + 'io__DOT__enq__DOT__ready')
+        raw_enqueue = enqueue
+        if policy != 'overwrite':
+            enqueue = f'({raw_enqueue} && (!({head}=={tail} && {full_flag}) || {pipe_ready}))'
+        source_fire = enqueue if policy == 'backpressure' else raw_enqueue
         pipe_valid = field(pipe + '_io_deq_valid_T')
         port_ready = field(sink + 'sinkA__DOT___io_prefetchReq_ready_T_1')
         reqbuf_ready = field(sink + 'reqBuf__DOT___io_in_ready_T_10')
@@ -107,7 +123,7 @@ def add_capture(root, header, cpp):
     if(!q_seen || row[3] || !empty || row[7]) q_write(1,{bank},row);
     if(context.clean || context.dump) q_footer(0,{bank});
   }}''')
-        bindings.append(dict(bank=bank, values=values, a_valid_equation=result.stdout.strip()))
+        bindings.append(dict(bank=bank, values=values, raw_enqueue=raw_enqueue, source_fire=source_fire, a_valid_equation=result.stdout.strip()))
     helper = f'''
 static FILE *q_output=nullptr;
 static uint64_t q_counts[4][4]{{}},q_next[4][4]{{}},q_last_cycle=0;
@@ -142,6 +158,10 @@ static void prefetch_queue_observe(SSimTop *model) {{
   q_seen=true;
 }}
 '''
+    binding = dict(fields=FIELDS, banks=4, entries_per_bank=32, policy=policy, bindings=bindings,
+        source_sha256={name:digest(cache/name) for name in requirements}, new_RTL_state_bits=0)
+    if standalone:
+        return helper, binding
     assert cpp.count('static void pbop_observe(SSimTop *model)') == 1
     assert cpp.count('  pbop_observe(model);') == 1
     cpp = cpp.replace('static void pbop_observe(SSimTop *model)', helper + '\nstatic void pbop_observe(SSimTop *model)')
