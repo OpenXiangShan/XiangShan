@@ -659,6 +659,7 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val isRVC            = Bool()
   val predTaken        = Bool()
   val crossPageIPFFix  = Bool()
+  val perfPsv           = UInt((if (backendParams.perfPsvEn) xiangshan.PerfEvent.width else 0).W)
   val ftqPtr           = new FtqPtr
   val ftqOffset        = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()

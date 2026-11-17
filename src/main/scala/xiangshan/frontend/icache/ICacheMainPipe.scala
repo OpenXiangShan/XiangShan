@@ -26,6 +26,8 @@ import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
+import xiangshan.PerfEvent
+import xiangshan.PerfPsvOps
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
@@ -432,6 +434,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_exceptionOut = VecInit((s1_exception zip s1_tlException).map { case (e, tl) => e || tl })
 
   io.toIfu.req.valid := s1_valid && s1_fetchFinish && !s1_flush
+  io.toIfu.req.bits.perfPsv := (if (backendParams.perfPsvEn) {
+                                  val s1_missSeen = RegInit(false.B)
+                                  when(s1_flush || s1_fire) {
+                                    s1_missSeen := false.B
+                                  }.elsewhen(s1_valid && !s1_fetchFinish) {
+                                    s1_missSeen := true.B
+                                  }
+                                  val s1_perfItlbMiss = s1_req.zip(s1_wayLookupEntry).map {
+                                    case (req, entry) => req.valid && entry.perfItlbMiss.asBool
+                                  }.reduce(_ || _)
+                                  Mux(s1_missSeen, PerfEvent.bit(PerfEvent.DR_L1), PerfPsvOps.empty) |
+                                    Mux(s1_perfItlbMiss, PerfEvent.bit(PerfEvent.DR_TLB), PerfPsvOps.empty)
+                                } else 0.U)
   io.toIfu.req.bits.maybeRvcMap :=
     s1_alignedMaybeRvcMapVec.flatten.zip(s1_alignedMaybeRvcMaskVec.flatten).map { case (a, b) => a & b }.reduce(_ | _)
   io.toIfu.req.bits.firstRange := s1_firstBlockRange

@@ -53,6 +53,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt   = UInt(MemPredPCWidth.W)
   val isRvc:            Bool   = Bool()
   val predTaken:        Bool   = Bool()
+  val perfPsv:          UInt   = UInt((if (backendParams.perfPsvEn) xiangshan.PerfEvent.width else 0).W)
   val ftqPtr:           FtqPtr = new FtqPtr
   val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
   val triggered:        UInt   = TriggerAction()
@@ -83,6 +84,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.foldpc             := foldpc
     result.isRvc              := isRvc
     result.predTaken          := predTaken
+    result.perfPsv            := perfPsv
     result.ftqPtr             := ftqPtr
     result.exceptionType      := exception.exceptionType
     result.exceptionCrossPage := exception.exceptionCrossPage
@@ -122,6 +124,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:             UInt          = UInt(MemPredPCWidth.W)
   val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
+  val perfPsv:            UInt          = UInt((if (backendParams.perfPsvEn) xiangshan.PerfEvent.width else 0).W)
   val ftqPtr:             FtqPtr        = new FtqPtr
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()
@@ -152,6 +155,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.isRvc                                         := isRvc
     cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := exceptionCrossPage
+    cf.perfPsv                                       := perfPsv
     cf.storeSetHit                                   := DontCare
     cf.waitSqIdx                                     := DontCare
     cf.loadWaitBit                                   := DontCare
