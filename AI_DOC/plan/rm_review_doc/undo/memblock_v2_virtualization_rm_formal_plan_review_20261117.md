@@ -2,7 +2,7 @@
 
 - 日期：2026-11-17。
 - 分支：`mem_ut_uvm_v2`。
-- 对象：[RM与PMM正式方案](../../rm_plan/undo/memblock_v2_virtualization_rm_checker_support_formal_plan_20261117.md)。
+- 对象：[RM与PMM正式方案](../../rm_plan/do/memblock_v2_virtualization_rm_checker_support_formal_plan_20261117.md)。
 - 独立评审者：`/root/rm_pmm_plan_review`。
 - 结论：第三轮正式稿评审通过，无必须修改项，可作为coding依据；代码未实施，未编译或仿真。
 

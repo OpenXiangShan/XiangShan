@@ -454,15 +454,24 @@ soft_test_memblock_rob_admission_window_sequence::build_later_split_pending_owne
     memblock_rob_key_t rob_key;
     memblock_tlb_lookup_key_t lookup_key;
     memblock_later_split_tlb_record owner;
+    memblock_uid_tlb_record first_record;
+    mmu_csr_runtime_state issue_csr;
 
     split_va = (data.main_table_by_uid[uid].vaddr & 64'hfffffffffffff000) + 64'h1000;
     rob_key = data.main_table_by_uid[uid].get_rob_key();
+    // 中文注释：正式token绑定要求首页issue的冻结CSR，fixture同步提供该输入。
+    issue_csr=mmu_csr_runtime_state::type_id::create("later_split_fixture_csr");
+    issue_csr.satp_mode=8;issue_csr.priv_dmode=1;
+    first_record=memblock_uid_tlb_record::type_id::create("later_split_fixture_first");
+    first_record.init_context(uid,{14'b0,data.main_table_by_uid[uid].vaddr[49:12]},
+        0,0,issue_csr,sample_seq);
+    data.uid_tlb_record_by_uid[uid]=first_record;
+    data.add_waiting_uid_to_index(uid,first_record);
     // 通过实际 observer 和 token 绑定入口建立在途记录，保留与 pending response 相同的对象句柄。
     data.observe_later_split_tlb_sample(
         1'b1, rob_key, split_va, 1'b1, 1'b1, 1'b0,
         rob_key, split_va, 1'b1, split_va[49:12], 2'b00, sample_seq);
-    lookup_key = '{default:'0};
-    lookup_key.vpn = split_va[63:12];
+    lookup_key = issue_csr.make_lookup_key({14'b0,split_va[49:12]},0);
     owner = data.bind_later_split_l2_request_token(lookup_key, token, sample_seq + 1);
     if (owner == null || owner.uid != uid || owner.response_token != token ||
         owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE) begin

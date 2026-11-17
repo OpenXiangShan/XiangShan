@@ -71,6 +71,7 @@ package tc_pkg;
     import plus_pkg::*;
     import seq_pkg::*;
 
+    `include "memblock_virtualization_rm_selftest_vseq.sv"
     `include "basicTest.sv"
     `include "tc_dtlb_0501_0504_live.sv"
     `include "tc_dtlb_0505_0508_live.sv"

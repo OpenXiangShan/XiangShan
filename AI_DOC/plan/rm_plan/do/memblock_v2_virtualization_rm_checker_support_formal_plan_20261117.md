@@ -3,8 +3,8 @@
 - 创建日期：2026-11-17。
 - 更新说明：补入 PMM 指针掩码的 CSR 快照、选择优先级、地址预检查、异常地址及数据检查方案；保留已有 `rob_commit` 门槛、CMO fault 例外和后台采集，不新增 replay 记账机制。
 - 适用版本：V2，当前分支 `mem_ut_uvm_v2`。
-- 状态：正式可 coding 方案；2026-11-17 独立复审及主代理最终自查通过，无必须修改项。未实施、未编译或仿真。
-- 授权边界：本轮仅更新本 RM plan，不修改 RM、测试框架、配置或 RTL。
+- 状态：2026-11-17 已进入授权 coding；主体源码及文档已落地，rm5编译及95场景184检查自测通过，真实专项及整轮 basicTest 回归待最终收口。尚未归档。
+- 授权边界：用户已授权顺序执行三份 plan 的 coding、配套文档、验证及逐项本地提交；本项不修改 RTL、不自动 push。
 - 目标：HLV/HLVX/HSV 及普通 Guest 访存复用当前翻译服务和内存模型，补齐访问身份、权限、数据、异常和异常地址检查；普通 Host 与 Guest 标量访存共同接入 PMM 地址参考语义，HLVX按RTL禁用掩码。
 - 主要约束：不重复建模两阶段页表遍历或 L2TLB；不建立第二套 HFENCE/HINVAL 失效 owner；翻译失效不清除已提交的物理内存期望。
 - 激励方案：[虚拟化指令公共测试框架支持方案](../../test_framework/plan/do/memblock_virtualization_framework_support_formal_plan_20261117.md)。
@@ -745,6 +745,7 @@ PMM及首末字节高位检查按5.5～5.8、6.9～6.11列为本次必需实现�
 | `address_csr`、`csr_update_seq` | 存储为深复制 `mmu_csr_runtime_state`，导出时扩展现有 `tlb_request_context_view_t`，包含SPVP、imode/dmode/dvirt、模式/ID、MXR/SUM及五组PMM；稳定四拍后issue冻结 |
 | `raw_address/request_fullva/request_vaddr/checkfullva/cmd/size` | 输入地址及标量首段几何；原始值不被PMM覆盖 |
 | `pages[2]`、`page_count` | 存储为首后页 `memblock_tlb_entry` 深复制及基础provenance字段，readonly导出为 `tlb_entry_view_t`/`tlb_response_provenance_view_t`；不复制整张表 |
+| `pmm_arch_reference_valid/pmm_arch_vpn/pmm_arch_reference` | IMPLEMENTATION_DELTA新增：issue时已有masked canonical参考的独立深复制，限定only-S2/Sv48x4高两位变化；不是第三实际访问页，不可供未来请求命中 |
 | 每页 `vpn/s2xlate/request_key/entry_key/generation/response_token/response_sample/source` | 源于issue-hit、响应完成、后页hit或补GPA记录；source区分实际来源 |
 | `fault_segment/first_segment_stopped/address_source` | 独立分段事实；不从最终WB异常反向选择expected |
 | 实际地址事件（独立actual对象，不进入reference快照） | fault frame、S、S+2及原始整组输出；由后端正式方案采集，RM按实例关联，地址到齐可晚于数据 |
@@ -789,7 +790,7 @@ bundle生产中返回PENDING；真实取消返回CANCELLED；生产完成仍缺�
 
 **中文详细伪代码：** 查询只访问当前 UID 和两页，不遍历历史。完成但缺页不回查当前表；真正尚在生产时让原 RM 轮询等待。命中返回原已有值型 view，既有 `resolve_tlb_entry_for_rm()` 改为优先读取冻结 bundle，其旧后页 fallback 仅保留给仍合法的首次绑定生产路径，不能给终态 expected 使用。`try_read_completed_later_split_response_for_rm()` 复用为生产来源；后页hit增加显式来源标记，不伪造L2请求sample以通过旧miss专用门槛。
 
-生命周期固定为：实际页绑定→终态前冻结→RM数据消费→可选地址消费→RM删除副本。common data 的冻结终态输入随该 UID 原主表历史保留至当前 run 结束；这份固定每 UID 最多两页的保留量不增加每拍扫描，避免新增消费确认通道。RM活跃待检查副本按其两个完成位释放；reset/合法被冲刷的未提交旧实例直接沿原动态代次取消，不撤销较老已提交物理效果。
+生命周期固定为：实际页绑定→终态前冻结→RM数据消费→可选地址消费→RM删除副本。common data 的冻结终态输入随该 UID 原主表历史保留至当前 run 结束；这份每 UID 最多两页实际来源、另有最多两个masked架构参考的固定保留量不增加每拍扫描，避免新增消费确认通道。RM活跃待检查副本按其两个完成位释放；reset/合法被冲刷的未提交旧实例直接沿原动态代次取消，不撤销较老已提交物理效果。
 
 ### 12.3 CSR 控制快照的固定时序
 
@@ -917,3 +918,267 @@ fault数据/异常消费后保留地址责任；地址到齐独立比较，不�
 修改 `set_bare_identity_geometry()` 的抽象职责保持为建立无翻译物理几何。修改前：逐字节使用raw computed_vaddr，高位非零即返回失败。修改后：先由独立PMM预检查形成AF或成功值，成功才按请求物理路径填PA；高位合法tag不报输入错误。
 
 修改 `observer_process_current_commit()` 前：原rob_commit/CMO门槛、构造item、原commit消费。修改后：保留门槛和commit单次消费，在构造前取冻结两页和完整控制，actual增加实例过滤；地址独立责任晚完成，不重做Store提交。formatter算法、物理backing/Store overlay、error历史、LRSC及L2TLB/HFENCE唯一owner不变。
+
+
+## IMPLEMENTATION_DELTA：2026-11-17 实现差异与待闭环项
+
+本章以当前工作树实际源码为准。前文“计划新增”“未实施”保留为原始设计基线，不代表本章实现状态；验证记录由集成方补入，未有日志的项目不得记为通过。
+
+| 原方案要求 | 实际实现 | 差异、理由与验收影响 |
+|---|---|---|
+| 首后两页固定值型历史 | `memblock_rm_access_snapshot_t`、common 的 UID map/get/freeze，首后页深复制，sampled normal/fault及legacy normal/fault在rob_commit/cancel前冻结 | 不新增TLB服务、引用计数或ready owner；fence不删历史，run表重置删除。过代readonly返回取消，不能向live回退 |
+| 完整身份与五PMM | issue record冻结完整CSR；snapshot保存reset/UID/ROB/dynamic/issue/replay/sample、hyperinst、raw/fullva及真实50位请求几何 | `request_vaddr`用零扩展50位，页VPN零扩展38位；异常报告另按模式扩展；不以高tag raw地址查页 |
+| 后页hit/miss与Store来源 | Load请求时冻结已有completed response；真实PTW可替换候选hit。Store增加既有L2TLB agent被动13字段，按split fire/STU0/PTW0绑定同later record | 单StoreMisalignBuffer使用active UID游标；未新增response调度。没有独立Store kill wire：当前请求kill固定false，使用真实valid/frm_mabuf/active实例 |
+| GPF补GPA的原始payload | completed首页GPF在后续真实response完成时刷新payload/token/sample，后页真实PTW继续用原token链；readonly保留S1 ppn_low[8] | aggregate responder口没有getGpa字段，不伪造该字段；补响应实际时序仍需专项验证 |
+| 冻结查询不晚查current | readonly统一identity helper，所有snapshot context/翻译入口核对reset/ROB/dynamic/issue/replay；FOUND必须有source/sample/generation/key证据 | Bare/预异常读取控制不强求页；无真实issue的旧soft人工构造保留原接口 |
+| PMM、权限、数据与地址 | 两纯PMM helper、13op、SPVP、VS/G MXR、HLVX READ_EXEC、首末预异常、Guest GPA推导、独立地址队列，普通Store/HSV共用原提交路径 | `EnbaleTlbDebug`是编译profile，不把runtime priv_debug误当DTLB模式门控。AMO/CMO保留原预检查分支 |
+| only-S2+Sv48x4+PMLEN16独立架构语义 | 同一冻结范围可覆盖时原helper直接证明；否则消费issue时已有canonical masked映射的独立深复制，重新比较PA、G权限/异常、PBMT和PMA路径 | 测试输入必须在issue前预定义所需masked参考；缺失报告框架参考输入错误并禁止整体PASS。参考不同不自动判错，以可观察结果为准；不晚查current、不创建新walker、不改responder key |
+| 首段停止与分段来源 | 实际算法保留原first-split数据错误事实、按首个参考fault段选VA/GPA，不从actual反选 | snapshot的`first_segment_stopped/fault_segment/address_source`目前为预留默认字段，不宣称已有完整生产赋值；应以算法和已有事实为准 |
+| 测试与文档 | 新RM生产构造soft自测与CSV、implementation review、原flow及接口矩阵增量 | 编译/仿真及全部basicTest结果待主代理补入。PMM tagged跨页首D-error已按低50位修复，仍需专项确认 |
+
+### 差异函数抽象职责与实现说明
+
+`validate_access_snapshot_identity_for_rm()` 的抽象职责是在任何冻结参考消费前确认同一执行实例，不更改common状态。详细中文伪代码：先检查对象有效及请求身份；reset与当前代次不同返回取消；读取当前UID的status和主表；ROB或dynamic不同返回取消；按fuType选择LOAD或STA issue，核对issue/replay；全部匹配才允许复制CSR或页面。页面入口另外核对来源枚举、sample非零、generation及key同源；token零合法。
+
+`observe_later_split_store_tlb_sample()` 的抽象职责是把真实Store分段旁路转为现有后页参考来源，不接管DUT请求。详细中文伪代码：split fire通过active ROB map定位UID，仅跨页才建立record和单buffer游标；STU0的有效frm_mabuf请求与ROB、地址匹配后记录请求拍并尝试冻结已完成hit；PTW0到来仅查询该游标，匹配VPN和当前实例才转入原WAIT_L2_TOKEN；原completion保存payload和来源供终态freeze。
+
+`rm_ls_check_pmm_stage2_reference()` 的抽象职责是以原冻结G-stage范围证明掩码地址，区分结果相同、已证明不同和缺参考。详细中文伪代码：按level/N得到该范围可忽略的VPN低位；分别检查原VPN和masked VPN是否都属于原reference前缀；任一不覆盖返回MISSING；都覆盖则分别将各VPN低位拼入原PPN，投影48位PA并比较，返回MATCH或MISMATCH。生产保留原映射结果比较，数据游标消费后根据该独立状态报告；MISSING不是RTL错误结论，但不允许本次整体PASS。PMLEN16改变VPNbit37:36，单个现有payload通常不足；此时继续消费issue阶段已冻结的独立masked参考，完整链路见下节。未预定义该参考时报告框架输入缺失。
+
+PMM tagged首段D-error几何补充：common首段/后页识别改比较vaddr[49:12]；readonly先将原地址截为50位再按既有size规则对齐，request的page/line/对齐比较仅看低50位。原始主表VA一致性仍比较完整64位，request/data/response之间保留同源完整扩展值比较；兼容connect对bit49符号扩展。
+
+### [IMPLEMENTATION_DELTA] 联合验证后补齐的参考、并发及取消逻辑
+
+本节是第三项实现期间的明确补充。第二项框架提交遗漏的LSQ agent局部白名单由第三项联合验证发现并在本项修复；不将该修复描述为第二项原提交已经完整覆盖。
+
+新增术语：`masked reference`为issue前已定义、在issue时深复制的掩码后GPA映射输入；`token bucket`为一个既有L2 token关联的后页记录句柄集合，最多Load/Store各一个，既不是第二个请求调度器，也不是第三个实际访问页。`CANCELLED_RESET/CANCELLED_COVERED`分别表示复位及已有覆盖事件合法取消尚未采到的地址责任。
+
+#### 独立masked参考生产和只读导出
+
+`capture_pmm_arch_reference_on_issue()`的抽象功能描述：真实issue计划阶段从公共canonical映射服务保存已存在的独立masked输入，供终态RM延迟比较；它只保留输入，不创建PTE、不发送请求、不改变实际请求VPN。
+
+实现逻辑与中文伪代码：
+```text
+本函数负责保存only-S2高位掩码所需的独立输入。
+若record/冻结CSR缺失，或不是s2xlate=2、hgatp=Sv48x4，或VPN[37:36]已为零，直接返回。
+将实际VPN的bit37:36清零，得到masked VPN。
+调用find_existing_l2tlb_entry_by_req_with_snapshot：按同一冻结CSR查询预先定义的canonical映射，允许已有range命中；查询不建表。
+若不存在映射或其generation为零，保留reference_valid=0；终态checker必须报告缺输入。
+否则深复制entry，并保存masked VPN和valid；原实际VPN及issue-hit输入保持原值。
+后续commit_context_prechecked深复制该输入；freeze_access_reference_for_rm再复制到最终snapshot。
+```
+
+`read_pmm_arch_reference_for_rm()`的抽象功能描述：RM只读取得当前实例在issue时已保存的独立参考与同源CSR；它复用冻结身份核对，不查询当前TLB。
+
+实现逻辑与中文伪代码：
+```text
+本函数负责把冻结masked参考导出为既有只读context/entry视图。
+先按UID取最终snapshot，并调用统一identity helper核对reset、ROB、dynamic、issue及replay。
+若没有有效参考、payload或非零generation，返回false；不能以current表补齐。
+复制同一snapshot中的完整CSR、地址和身份，将返回视图的request VPN/key改为masked VPN对应值。
+复制保存的entry，并由derive_tlb_request_fields仅根据该payload和同一CSR解析masked请求PPN/GVPN。
+将derive是否成功写入request_translation_valid，返回输入可用；权限fault可在PPN无效时独立判定。
+```
+
+字段`pmm_arch_reference_valid/pmm_arch_vpn/pmm_arch_reference`在UID record初始化/复位清空，重新issue按新上下文生产；record提交及终态snapshot均深复制。它是最多两个独立架构参考槽，不计入实际两页page_count；fence不替换旧snapshot内的副本。
+
+#### 独立架构语义比较
+
+`observer_check_pmm_arch_reference()`的抽象功能描述：生产item完成实际请求参考结果后，用已冻结的masked输入独立核对其架构可观察结果；它不覆盖原数据期望、实际PA列表或responder key。
+
+实现逻辑与中文伪代码：
+```text
+本函数负责only-S2 PMM16改变有效VPN高位时的独立比较。
+若没有此类地址差异，直接返回；先前同一冻结范围已能证明的结果继续保留。
+调用readonly导出issue时masked输入；没有输入则保留MISSING，禁止晚查live。
+取得输入后先把结果置MISSING，并要求only-S2、Sv48x4及真实S2参考。
+按Store/HLVX/普通Load选择WRITE/READ_EXEC/READ，独立判断PBMT保留值、GAF/GPF及G-stage权限。
+没有翻译fault时必须能解析正常PPN；然后按最多8字节使用level/N和raw PPN构造masked PA。
+需要PMA/PMP时复用原只读模型，以完整size判断AF，以逐字节查询判断cacheable/mmio路径。
+按既有优先级合并非对齐和访问错误；比较本阶段可独立决定的cause位。
+两边成功访问时，再比较逐字节PA、PBMT、cacheable和uncache路径；同结果为MATCH，可证明不同为MISMATCH。
+下游D错误继续由原错误证据链检查；数据游标只消费一次，独立责任MISSING/MISMATCH使本条整体失败。
+```
+
+测试构造必须在真实issue前定义所需masked映射。只有原输入和masked输入的可观察结果一致才允许别名PASS；缺参考是框架输入错误，不是已证明的RTL错误。
+
+#### 后页并发与活跃窗口
+
+`bind_later_split_l2_request_token()`的抽象功能描述：把原responder已经接受的token关联到当前活跃的后页Load/Store记录，允许同VPN合法并发；它不拥有ready和响应调度。
+
+实现逻辑与中文伪代码：
+```text
+本函数负责建立真实token与至多两个后页实例的归属。
+要求非零sample，拒绝同一未完成token重复绑定。
+固定检查Load/Store两个active游标；不扫描历史UID表。
+对每个当前WAIT_L2_TOKEN实例核对VPN/stage、active/dynamic，以及其首页冻结CSR生成的完整key。
+匹配时保存token、sample与key，将该记录转WAIT_RESPONSE，并将handle加入token bucket。
+无匹配返回null；有匹配返回首handle，原pending_req接口不变。
+```
+
+`complete_later_split_l2_response()`的抽象功能描述：一次responder完成事件向其已关联的所有后页owner发布同源payload，保持原token单次记账。
+
+实现逻辑与中文伪代码：
+```text
+按token找到bucket，并要求原pending保存的首handle与bucket首项相同。
+对最多两个handle调用complete_one_later_split_l2_response：复用原实例、replay、key、generation校验，保存各自最终payload/sample。
+全部处理后删除bucket；不重复完成responder token。
+cancel_later_split_l2_token同样只读对应bucket，取消其中WAIT_RESPONSE记录后删除bucket。
+只有取消handle仍是UID当前canonical记录时才清active游标，避免晚取消旧replay token误清新attempt。
+```
+
+Load与Store的真实后页split分别设置`active_load_later_split_uid/valid`和`active_store_later_split_uid/valid`；各自PTW只读本buffer游标。UID取消及reset清相应游标，reset清token bucket；完成历史仍按UID保留供freeze，无每拍全历史扫描。
+
+#### 合法取消地址责任及LSQ白名单补漏
+
+`observer_service_exception_addresses()`的抽象功能描述：独立收口数据已消费的地址责任，包括真实到齐比较与原恢复已经决定的合法取消；它不重做Store提交。
+
+实现逻辑与中文伪代码：先通过readonly按UID/ROB/dynamic取得原frame；未到齐则停在队首，终场缺失报错。若frame标记合法reset/covered取消，且required、未capture、非missing，并与冻结reset/issue/replay身份匹配，则仅删除此地址责任；不能把任意missing当cancel。其余必须满足S+2及身份合同，按四态比较VA、GPF的GPA及VS标记，最后删除责任。
+
+LSQ局部白名单的抽象职责是让agent按已经确认的LDU/STU身份接纳这13种标量特殊操作。真实HLVB联合探针在issue前暴露旧宏缺`0x10`；现LDU宏加入16..22、29、30，STU宏加入16..19，driver原fuType核对继续生效。没有扩大MOU/AMO接纳范围，修复随本第三项提交，并纳入专项与普通回归。
+
+### [IMPLEMENTATION_DELTA] 独立masked参考扩为固定两槽
+
+最终只读review发现单个masked参考不能覆盖合法跨4K页访问：即使masked首页/后页均已预定义，逐字节checker使用同一4K范围仍会在后页报缺输入。本节替换上文中“单个masked参考”的实现细节，保持实际访问仍最多两页，不新增TLB、walker或晚查机制。
+
+`capture_pmm_arch_reference_on_issue()`的抽象功能描述：真实issue计划阶段按标量完整范围保存最多两份已存在的masked参考，允许后页权限与物理映射独立。
+
+详细中文伪代码：先复用公共behavior按fuType/op确认标量读写；依据原size低两位编码取得1/2/4/8字节。先由record VPN低36位与主表地址低12位形成零扩展的masked首地址，再以50位加法得到末地址；slot0取masked首页，跨页时slot1取masked末页，保留末地址的新bit48进位，不对加法结果再次清高位。用同一issue CSR调用existing查询；缺输入保留该valid为零，存在且generation非零才深复制。三字段名变为`pmm_arch_reference_valid[2]/pmm_arch_vpn[2]/pmm_arch_reference[2]`；构造、reset、init、commit及终态freeze均固定两项处理。
+
+`read_pmm_arch_reference_for_rm(uid,dynamic_epoch,rob_key,masked_request_vpn,context,entry)`的抽象功能描述：只读导出指定masked页在issue时保存的参考，保持同实例身份隔离。
+
+详细中文伪代码：先按原identity helper验证snapshot；固定检查两个slot，要求请求VPN相等、valid、payload存在且generation非零。找到则复制同源CSR与该entry，生成masked request key，标明range_hit，并仅从保存payload解析该请求PPN；缺项返回false，不读live。
+
+`observer_check_pmm_arch_reference()`的抽象功能描述：逐页选择相应冻结masked输入，独立形成整个实际消费范围的架构结果，首fault或首段D错误均不强求未执行后页。
+
+详细中文伪代码：先从原PA有效前缀识别首页独立D错误停止，仅检查已消费字节，并把D denied从翻译cause临时比较值剥离。逐byte计算masked VPN，首次或换页时调用readonly选择对应slot，独立检查该页PBMT/GAF/GPF与权限；首次fault即停止，不要求后续PPN/参考。正常字节按该页level/N拼PA，累计可缓存/PBMT/uncache及PMA属性；首页立即异常或不支持非对齐时停止。仅全部PA成功取得时查询完整size PMA，其他按前缀/首字节合同；最后比较独立cause与成功访问PA/路径。缺首页输入时只有原payload真正覆盖两地址的既有证明可保留；已消费前页后缺后页必须MISSING。两页参考允许不同4K映射，不限定superpage、不屏蔽跨页组合。
+
+
+
+### [IMPLEMENTATION_DELTA] 专项真实PMM入口与既有自测适配
+
+本节记录最终代码冻结时新增的测试源码与入口适配，状态全部以最终同版日志为准。`fixture`指软件自测手工建立的最小前置状态，不是DUT驱动或RM答案；`factory instance override`指仅在指定sequence实例路径替换测试子类，其他生产worker继续复用。
+
+| 测试入口 | 输入与目标 | 当前证据边界 |
+|---|---|---|
+| `memblock_pmm10_real_vseq` | Bare LD→HSVD→LD→HLVD，高7位不同、低57位同地址，PMM10；HSV数据明确冻结为AABBCCDDEEFF0011 | rm5编译通过，真实运行待复测 |
+| `memblock_pmm11_real_vseq` | 同组输入，PMM11，普通与特殊访问共享HPA数据 | rm5编译通过，真实运行待复测 |
+| `memblock_pmm00_preaf_real_vseq` | 相同tag且PMM00，三条Load类与一条HSV分别按Load/Store AF检查恢复及地址 | rm5编译通过，真实运行待复测；实际四条为LD、HSVD、LD、HLVD |
+| `memblock_pmm_s2_alias_real_vseq` | Host普通LD走Bare，HLV/HSV走only-S2 Sv48x4/PMM11；原VPN与masked VPN独立canonical输入映到同HPA | rm5编译通过，真实运行待复测 |
+
+以上入口位于`seq/virtual_sequence/memblock_pmm_real_vseq.sv`，由`seq_pkg.sv`include并在`seq.f`说明登记，`basicTest::vseq_starts_l2tlb()`和`vseq_supports_control_worker_topology()`两处白名单均同步四类，确保AUTO dedicated worker与唯一显式L2TLB owner。真实CSV从30扩为34个场景；soft CSV先从81扩为89项（最终B1/B2/B3再增6项，共95），其中8项针对两4K页、后页权限/PBMT/fault/缺失以及首fault/首页D错误停止。全basicTest清单保留原89组合并追加4入口，共93组合/50入口，暂存清单仅作回归调度输入，不能代替结果。
+
+`memblock_pmm10_real_vseq::pre_body()/body()`的抽象功能描述：专项vseq在自己的两个准确子实例位置选择测试输入生产方，并在父生命周期结束后证明目标输入确实被执行；不复制生产调度主循环。
+
+实现逻辑与中文伪代码：
+```text
+pre_body先执行父初始化，随后对get_full_name()+.initial_csr_seq及.main_seq建立精确instance override。
+initial子类只覆盖本场景CSR候选，PMP初始化、真实驱动、monitor确认与四拍稳定沿用父类。
+main子类通过既有manual table import构造四条明确opcode/imm/src0/STD输入，AUTO dedicated生命周期仍沿父类运行。
+only-S2 initial子类在父body完成后零时间publish预定义原VPN和masked VPN，之后其他worker下一次#1轮询才开放issue。
+body先运行完整父生命周期，再要求main数量为4；逐条核对opcode、imm、raw地址形状和terminal/cause，避免默认随机主表恰好4条冒充覆盖。
+数据、异常值及PMM子责任仍由生产RM检查，专项检查不读DUT值来生成expected。
+```
+
+`build_later_split_pending_owner()`的抽象功能描述：旧ROB admission软件自测通过正式split observer/token bind构造pending场景，现补齐真实issue形状的CSR前置输入，保持生产key完整检查。
+
+实现逻辑与中文伪代码：先由主表确定后页地址和ROB；建立Sv39、有效S身份的issue CSR，用`init_context`保存首页VPN/CSR/sample并写入原UID record位置；随后调用正式Load split/PTW observer构造后页owner，再用同一CSR的`make_lookup_key`生成后页key并调用正式bind；最后检查返回owner UID/token/WAIT_RESPONSE。该适配不放宽生产断言，不另造token完成，不改变原admission调度。
+
+`check_tagged_first_split()`的抽象功能描述：PMM首段几何自测临时建立一致的active ROB归属，调用正式observer后恢复原测试状态。
+
+实现逻辑与中文伪代码：保存旧active map及status.active，写入测试ROB owner时同步把active置1；执行低50位几何、tag和bit49符号扩展检查；结束后恢复原map和active。旧版只写map未置active，导致生产正确报stale active rob map；修复仅限新fixture，不放宽生产lookup。
+
+### 验证事实与待完成项
+
+旧`virt_rm3_20261117`编译版本的30组真实虚拟化矩阵已全部通过；该证据早于最终固定两槽、四个真实PMM入口及fixture适配，不能作为这些最新改动的通过结论。
+
+同旧版RM selftest在seed6111801报active map/status不一致，原seed debug复现同错；责任已登记[W47测试框架缺陷](../../../buglist/rm/v2/rm_buglist_2026-W47_20261116.md)。`check_tagged_first_split`修复已落源码，rm5原seed95场景184检查自测通过；旧ROB admission定向、34组真实专项以及整轮93组合basicTest等待主代理最终日志和统计；待测不记PASS。Buglist最终状态由主代理根据原seed复测结果更新。
+
+
+
+### [IMPLEMENTATION_DELTA] B1/B2/B3最终闭环与PMM bootstrap
+
+本节覆盖独立复查发现的三个架构参考计算缺口及真实PMM测试启动遗漏；是最终源码合同，替代前述较早的简化内部步骤。修复只影响已有固定两槽参考/checker及测试主表初始化，未新增walker、TLB、ready owner或RTL修改。
+
+| 编号 | 原缺口 | 最终实现与边界 |
+|---|---|---|
+| B1 | 首字节独立PMA/PMP AF使完整size查询跳过，原累计AF可能保持零 | 每个可信PA字节立即OR累计AF，完整size查询存在时继续OR；不能覆盖首fault；翻译fault仍不查无效PA的PMA |
+| B2 | 后页NC与翻译fault优先级简化，且把NC/IO混同 | misaligned Load后页PBMT=NC独立覆盖为bit4；IO的mmio受翻译异常屏蔽，IO+GPF/GAF保留翻译fault；成功翻译的PMA-MMIO由独立模型证明且无AF才可委托非对齐 |
+| B3 | 原地址先加末字节再清高位，会丢失masked地址的新bit48进位 | 先构成零扩展48位masked首地址，再以50位加size-1，直接取首末VPN，不再次mask末地址 |
+| PMM测试bootstrap | 测试专用build_main_table只import，遗漏正式control runtime reset握手 | 先ensure_dispatch_runtime_helpers，import后按uses_control_barrier_topology调用既有initialize_control_runtime_bootstrap；不手置ready/done、不删四拍确认、不多建随机表 |
+
+`observer_check_pmm_arch_reference()`最终抽象职责：从issue时两份独立masked输入重建实际消费范围的架构结果，区分翻译fault、PMA/PMP、NC和IO的条件，并与原实现参考结果比较。
+
+源码支撑位置：`mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv`，同名函数。
+
+```systemverilog
+if(i>0 && !store_access && misaligned && reference.s2_entry_pbmt==1) begin
+    reference_exception=0;reference_exception[4]=1;break;
+end
+pma_fault |= byte_access_fault;
+if(i>0 && !store_access && misaligned && byte_mmio && !pma_fault) begin
+    reference_exception=0;reference_exception[4]=1;break;
+end
+```
+
+详细中文伪代码：本函数先限制到only-S2高位差异责任，保存原实现cause；若首页独立D错误已停止，按PA有效前缀限制字节数。每个masked页入口从readonly固定两槽选择同CSR旧输入，先独立形成该页GAF/GPF/PBMT/权限fault；后页misaligned Load的NC位独立存在，因此NC优先转bit4后停止。其他翻译fault先终止，不查无效PA的PMA；IO在此不覆盖翻译fault。正常PA逐字节查询只读PMA/PMP，将byte AF立即OR累计；首页另保存first_pma_fault/first_mmio，成功后页只有独立证明PMA-MMIO且无已知AF才转bit4。完整size PA全部可用且门禁允许时再查询完整size AF，并OR进已有结果，不能覆盖逐字节已证明AF。最后按原非对齐/访问异常规则合并cause，成功访问另比较PA和缓存路由；缺实际需要输入保持MISSING。各helper只解释冻结输入，不采DUT值作为期望。
+
+`capture_pmm_arch_reference_on_issue()`最终抽象职责：issue时按masked有效地址范围保存最多两份已有canonical映射，确保末字节进位和checker's effective_fullva+byte一致。
+
+源码支撑位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`。
+
+```systemverilog
+request_start={2'b0,record.vpn[35:0],main_tr.vaddr[11:0]};
+request_end=request_start+50'(size_bytes-1);
+masked_vpn=slot==0?request_start[49:12]:request_end[49:12];
+```
+
+详细中文伪代码：复用公共标量分类和原size编码；先从原VPN低36位、页内offset组成零扩展masked首地址，再做50位末字节加法。首页和末页不同才保存第二槽，每槽直接取masked VPN，保留新产生的bit48。按同一冻结CSR只读existing精确/range输入，缺输入保持valid=0；非零generation的payload深复制。readonly按请求masked VPN选择固定两项，record与snapshot生命周期保持前述全链合同。
+
+`memblock_pmm_main_sequence::build_main_table()`最终抽象职责：专项构造四条主表后完成生产控制服务的正式启动前置，后续真实CSR确认与流量开放仍归父生命周期。
+
+源码支撑位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_pmm_real_vseq.sv`。
+
+```systemverilog
+ensure_dispatch_runtime_helpers();
+// 构造四条确定输入。
+import_manual_main_table();
+if(memblock_sync_pkg::uses_control_barrier_topology())
+    control_barrier_service.initialize_control_runtime_bootstrap();
+```
+
+详细中文伪代码：进入测试build时建立父类运行期helper；构造四条既定访存并导入，保持主表数量/opcode/STD不变；只有既有控制拓扑开启才调用幂等bootstrap，正式清action并请求当前epoch的真实多路driver/monitor ack。initial CSR继续等main ready/runtime ready，随后真实驱动PMP/PMA、等待四个连续CSR样本再置initial_done。未绕过等待，未伪造ready/done，未扩超时。初次PMM10 seed6111900超时发生在任何真实issue之前，责任已登记W47测试框架缺陷，修复后的四真实PMM已通过最终rm5复测（seed6111900..6111903）。
+
+
+### 最终同版验证快照（2026-11-17，rm5）
+
+- `virt_rm5_20261117`最终编译完成；seed6111801、`basicTest ts=memblock_virtualization_rm_selftest_vseq cfg=default`的95个场景通过，共184个检查，日志末有`TEST CASE PASSED checks=184`及`UVM_ERROR=0/UVM_FATAL=0`。
+- 权威日志：`/nfs/home/lixiangrui/.tmp/memblock_virtualization_impl_20261117/rm5_selftest/status/seed_6111801.final.log`。报告有2条被catch的预期UVM_ERROR，来自故意错误地址sample/GPA的负例，测试分别要求恰好捕获一次；它们不属于被忽略的未知错误。
+- 该同版自测覆盖固定两槽跨4K、首fault/首页D错误停止、后页NC+GPF优先级、独立对齐Load/Store PMP AF与差异，以及mask后跨bit48进位捕获。IO+GPF门控本轮为源码独立核对，未另加独立动态断言，不宣称该子组合已动态通过。
+- 旧rm3的30组真实Guest矩阵通过仅是早期版本证据；最终rm5的30 Guest矩阵和4组真实PMM入口均已通过（seed6111810..6111839、6111900..6111903）。旧ROB admission入口、整轮93配置组合/50入口basicTest最终结果等待集成方统计；不得据soft PASS推定这些结果。
+- 文档/源码格式检查通过；最终plan继续留在undo，不提前归档或提交。全任务完成仍需真实专项、普通回归和已登记缺陷原seed闭环。
+
+### 验证记录
+
+- 静态格式检查：实施期间 `git diff --check` 通过；最终提交前须重复。
+- 新增Store旁路：已逐字段核对V2生成RTL内部wire及interface/xaction/driver/connect链；monitor通过driver不可变运输结构接收。
+- rm5编译与RM生产自测结果见上节；定向DUT专项和全部basicTest仍待主代理写入实际命令、日志、统计及失败闭环。
+- 未闭环项不得因已有通过子测试或回归自然结束而改写为整体完成。
+
+### [IMPLEMENTATION_DELTA] ROB自测首页等待索引完整性
+
+抽象功能描述：既有ROB admission自测的后页构建helper提供完整的首页冻结CSR输入，供正式token匹配；其WAITING记录必须同时加入正式等待反查索引，保持后续redirect原子计划的前置条件。
+
+```systemverilog
+data.uid_tlb_record_by_uid[uid]=first_record;
+data.add_waiting_uid_to_index(uid,first_record);
+```
+
+中文伪代码：构造并发布首页WAITING记录后，调用正式索引API校验uid/key/state、清过期成员、拒绝重复并加入唯一成员，再继续原后页observer/token绑定。仅修改软件fixture，生产检查与激励不变。该遗漏由原seed6111999及带波形复现确认，独立责任和最小方案review通过，见W47 Buglist；重新编译后必须原参数复测。
+
+## 最终提交验收记录
+
+第三方案源码与配套文档已完成，主代理独立检查diff、关键调用链及冻结/恢复边界，无已知blocker。独立整体review为 `/nfs/home/lixiangrui/.tmp/rm_final_independent_review.md`，B1/B2/B3独立复核及ROB索引最小修复review均通过。
+
+验证：95场景184项RM检查、34个真实虚拟化/PMM组合、空vseq与普通dispatch smoke全部通过。ROB fixture索引修复后已重编译，同原seed6111999复测通过，结果目录 `/nfs/home/lixiangrui/.tmp/memblock_virtualization_impl_20261117/rm5_rob_retest`；原四个redirect迟到completion场景通过。最后重编仅增加旧软件fixture的一次正式索引登记，不改变生产RM、真实专项输入或DUT。所有结果已核验稳定summary/results、UVM_ERROR/FATAL=0和remote_unknown_jobs=0。
+
+plan按实现完成归入do，implementation review保留undo。用户要求的93组合/50入口全部basicTest将用同版simv继续执行，结果单独更新；此处不把尚未运行的回归标成通过。IO+GPF目前仅有静态独立核验，不宣称独立动态场景覆盖。未修改RTL，未push。

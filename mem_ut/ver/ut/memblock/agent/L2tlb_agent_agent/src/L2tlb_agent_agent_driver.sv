@@ -346,6 +346,23 @@ task L2tlb_agent_agent_driver::sample_previous_vif(
         this.vif.mon_mp.mon_cb.lu1_ptw_req_vpn;
     sample.sampled_lu1_ptw_req_s2xlate =
         this.vif.mon_mp.mon_cb.lu1_ptw_req_s2xlate;
+    sample.sampled_split_store_req_valid=this.vif.mon_mp.mon_cb.split_store_req_valid;
+    sample.sampled_split_store_req_ready=this.vif.mon_mp.mon_cb.split_store_req_ready;
+    sample.sampled_split_store_req_rob_flag=this.vif.mon_mp.mon_cb.split_store_req_rob_flag;
+    sample.sampled_split_store_req_rob_value=this.vif.mon_mp.mon_cb.split_store_req_rob_value;
+    sample.sampled_split_store_req_vaddr=this.vif.mon_mp.mon_cb.split_store_req_vaddr;
+    sample.sampled_stu0_tlb_req_valid=this.vif.mon_mp.mon_cb.stu0_tlb_req_valid;
+    sample.sampled_stu0_tlb_req_frm_mabuf=this.vif.mon_mp.mon_cb.stu0_tlb_req_frm_mabuf;
+    sample.sampled_stu0_tlb_req_rob_flag=this.vif.mon_mp.mon_cb.stu0_tlb_req_rob_flag;
+    sample.sampled_stu0_tlb_req_rob_value=this.vif.mon_mp.mon_cb.stu0_tlb_req_rob_value;
+    sample.sampled_stu0_tlb_req_vaddr=this.vif.mon_mp.mon_cb.stu0_tlb_req_vaddr;
+    sample.sampled_stu0_ptw_req_valid=this.vif.mon_mp.mon_cb.stu0_ptw_req_valid;
+    sample.sampled_stu0_ptw_req_vpn=this.vif.mon_mp.mon_cb.stu0_ptw_req_vpn;
+    sample.sampled_stu0_ptw_req_s2xlate=this.vif.mon_mp.mon_cb.stu0_ptw_req_s2xlate;
+    if (!sample.sampled_reset_active && memblock_sync_pkg::is_hard_xz_check_en() &&
+        $isunknown({sample.sampled_split_store_req_valid,sample.sampled_split_store_req_ready,
+                    sample.sampled_stu0_tlb_req_valid,sample.sampled_stu0_ptw_req_valid}))
+        memblock_sync_pkg::report_hard_xz_error(get_type_name(),"Store split observer handshake contains X/Z");
     sample.sampled_resp_bits_s2xlate = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s2xlate;
     sample.sampled_resp_bits_s1_entry_tag = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s1_entry_tag;
     sample.sampled_resp_bits_s1_entry_asid = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s1_entry_asid;

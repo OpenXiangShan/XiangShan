@@ -378,6 +378,9 @@ class memblock_later_split_tlb_record extends uvm_object;
         MEMBLOCK_LATER_SPLIT_CANCELED = 5
     } memblock_later_split_state_e;
 
+    // 中文注释：同一后页记录复用Load/Store被动来源；hit不伪造本次PTW/L2请求。
+    bit is_store;
+    bit issue_hit;
     memblock_uid_t uid;
     int unsigned dynamic_epoch;
     memblock_rob_key_t rob_key;
@@ -410,6 +413,7 @@ class memblock_later_split_tlb_record extends uvm_object;
     endfunction:new
 
     function void reset();
+        is_store = 0; issue_hit = 0;
         uid = 0;
         dynamic_epoch = 0;
         rob_key = '{default:'0};
@@ -460,6 +464,9 @@ class memblock_uid_tlb_record extends uvm_object;
     longint unsigned uid_wait_start_sample_seq;
     longint unsigned uid_tlb_first_request_fire_sample_seq;
     longint unsigned pte_update_cycle;
+    // 中文注释：真实response完成的运输身份；token零合法，以sample非零区分未生产。
+    longint unsigned response_token;
+    longint unsigned response_sample_seq;
     memblock_tlb_entry payload;
     // A UID can hit an entry already installed in the DUT L1 TLB and therefore
     // produce no new L2TLB request/response.  Keep that issue-time evidence
@@ -474,10 +481,17 @@ class memblock_uid_tlb_record extends uvm_object;
     bit [43:0] request_s2_resolved_ppn;
     bit [51:0] request_gvpn;
 
+    // 中文注释：issue时独立复制已存在的masked映射，仅供PMM架构语义检查。
+    bit pmm_arch_reference_valid[2];
+    bit [51:0] pmm_arch_vpn[2];
+    memblock_tlb_entry pmm_arch_reference[2];
+
     `uvm_object_utils(memblock_uid_tlb_record)
 
     function new(string name = "memblock_uid_tlb_record");
         super.new(name);
+        foreach(pmm_arch_reference[i])
+            pmm_arch_reference[i]=memblock_tlb_entry::type_id::create($sformatf("%s_pmm_arch_reference_%0d",name,i));
         csr_snapshot = mmu_csr_runtime_state::type_id::create({name, "_csr_snapshot"});
         payload = memblock_tlb_entry::type_id::create({name, "_payload"});
         issue_hit_payload = memblock_tlb_entry::type_id::create(
@@ -486,6 +500,10 @@ class memblock_uid_tlb_record extends uvm_object;
     endfunction:new
 
     function void reset();
+        foreach(pmm_arch_reference[i]) begin
+            pmm_arch_reference_valid[i]=0;pmm_arch_vpn[i]=0;
+            if(pmm_arch_reference[i]!=null) pmm_arch_reference[i].reset();
+        end
         uid = 0; record_valid = 0; pte_valid = 0; vpn = '0; s2xlate = '0;
         is_hypervisor_inst = 0; lookup_key = '{default:'0};
         if (csr_snapshot == null) csr_snapshot = mmu_csr_runtime_state::type_id::create("csr_snapshot");
@@ -498,6 +516,7 @@ class memblock_uid_tlb_record extends uvm_object;
         issue_hit_entry_generation = 0;
         uid_tlb_wait_state = MEMBLOCK_UID_TLB_CANCELED;
         uid_wait_start_sample_seq = 0; uid_tlb_first_request_fire_sample_seq = 0;
+        response_token = 0; response_sample_seq = 0;
         pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
         request_s2_resolved_ppn = '0; request_gvpn = '0;
     endfunction:reset
@@ -519,13 +538,22 @@ class memblock_uid_tlb_record extends uvm_object;
         lookup_key = csr_snapshot.make_lookup_key(vpn_i, s2xlate_i);
         uid_tlb_wait_epoch++; uid_tlb_wait_state = MEMBLOCK_UID_TLB_WAITING;
         uid_wait_start_sample_seq = sample_seq_i; uid_tlb_first_request_fire_sample_seq = 0;
+        response_token = 0; response_sample_seq = 0;
         pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
         request_s2_resolved_ppn = '0; request_gvpn = '0;
         clear_issue_hit_snapshot();
+        foreach(pmm_arch_reference[i]) begin
+            pmm_arch_reference_valid[i]=0;pmm_arch_vpn[i]=0;pmm_arch_reference[i].reset();
+        end
     endfunction:init_context
 
     function void commit_context_prechecked(
         input memblock_uid_tlb_record planned_record);
+        foreach(pmm_arch_reference[i]) begin
+            pmm_arch_reference_valid[i]=planned_record.pmm_arch_reference_valid[i];
+            pmm_arch_vpn[i]=planned_record.pmm_arch_vpn[i];
+            pmm_arch_reference[i].copy_from(planned_record.pmm_arch_reference[i]);
+        end
         uid = planned_record.uid;
         record_valid = planned_record.record_valid;
         pte_valid = planned_record.pte_valid;
@@ -540,6 +568,8 @@ class memblock_uid_tlb_record extends uvm_object;
         uid_tlb_first_request_fire_sample_seq =
             planned_record.uid_tlb_first_request_fire_sample_seq;
         pte_update_cycle = planned_record.pte_update_cycle;
+        response_token = planned_record.response_token;
+        response_sample_seq = planned_record.response_sample_seq;
         issue_hit_snapshot_valid = planned_record.issue_hit_snapshot_valid;
         issue_hit_response_token = planned_record.issue_hit_response_token;
         issue_hit_response_sample_seq =
@@ -636,5 +666,62 @@ class memblock_uid_tlb_record extends uvm_object;
         return record_valid && uid_tlb_wait_state == MEMBLOCK_UID_TLB_WAITING;
     endfunction:is_waiting
 endclass:memblock_uid_tlb_record
+
+// 抽象职责：持有一个最终标量执行实例在恢复/重映射前的参考输入。
+// 内容由common显式复制，消费者只读；固定两页，不拥有TLB ready或映射生命周期。
+class memblock_rm_access_snapshot_t extends uvm_object;
+    // 中文注释：终态前freeze设置，后续只读；本run重置后随公共map删除。
+    bit valid, frozen;
+    longint unsigned reset_epoch;
+    memblock_uid_t uid;
+    memblock_rob_key_t rob_key;
+    int unsigned dynamic_epoch, issue_epoch, replay_seq;
+    longint unsigned issue_sample;
+    mmu_csr_runtime_state address_csr;
+    int unsigned csr_update_seq;
+    // 中文注释：raw/fullva保留完整操作数；request_vaddr为真实50位请求零扩展，
+    // VPN仅取低50位。PMM由RM派生，不提前改写这些输入。
+    bit [63:0] raw_address, request_fullva, request_vaddr;
+    bit checkfullva;
+    bit is_hypervisor_inst;
+    bit [2:0] cmd, size;
+    int unsigned page_count;
+    memblock_tlb_entry pages[2];
+    // 中文注释：有实际响应/hit来源才置位；Bare或首段预异常允许没有PTE。
+    bit page_valid[2];
+    bit [51:0] vpn[2];
+    bit [1:0] s2xlate[2];
+    memblock_tlb_lookup_key_t request_key[2], entry_key[2];
+    longint unsigned generation[2], response_token[2], response_sample[2];
+    // 0缺失，1首页hit，2首页response，3后页hit，4后页response。
+    int unsigned source[2];
+    bit pmm_arch_reference_valid[2];
+    bit [51:0] pmm_arch_vpn[2];
+    memblock_tlb_entry pmm_arch_reference[2];
+    bit first_segment_stopped;
+    int unsigned fault_segment, address_source;
+
+    `uvm_object_utils(memblock_rm_access_snapshot_t)
+    function new(string name="memblock_rm_access_snapshot_t");
+        super.new(name);
+        valid=0; frozen=0; reset_epoch=0; uid=0; rob_key='{default:'0};
+        dynamic_epoch=0; issue_epoch=0; replay_seq=0; issue_sample=0;
+        address_csr=mmu_csr_runtime_state::type_id::create({name,"_csr"});
+        csr_update_seq=0; raw_address=0; request_fullva=0; request_vaddr=0;
+        checkfullva=1; is_hypervisor_inst=0; cmd=0; size=0; page_count=0;
+        foreach(pmm_arch_reference[i]) begin
+            pmm_arch_reference_valid[i]=0;pmm_arch_vpn[i]=0;
+        end
+        foreach(pmm_arch_reference[i])
+            pmm_arch_reference[i]=memblock_tlb_entry::type_id::create($sformatf("%s_pmm_arch_reference_%0d",name,i));
+        first_segment_stopped=0; fault_segment=0; address_source=0;
+        foreach (pages[idx]) begin
+            pages[idx]=memblock_tlb_entry::type_id::create($sformatf("%s_page_%0d",name,idx));
+            page_valid[idx]=0; vpn[idx]=0; s2xlate[idx]=0;
+            request_key[idx]='{default:'0}; entry_key[idx]='{default:'0};
+            generation[idx]=0; response_token[idx]=0; response_sample[idx]=0; source[idx]=0;
+        end
+    endfunction
+endclass:memblock_rm_access_snapshot_t
 
 `endif

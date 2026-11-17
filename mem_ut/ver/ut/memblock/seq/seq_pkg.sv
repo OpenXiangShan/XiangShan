@@ -158,6 +158,7 @@ package seq_pkg;
     `include "soft_test/memblock_l2tlb_routed_ppn_soft_vseq.sv"
     `include "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq.sv"
     `include "memblock_csr_random_config_vseq.sv"
+    `include "memblock_pmm_real_vseq.sv"
     `include "memblock_csr_mapping_transport_negative_vseq.sv"
     `include "memblock_virtualization_framework_selftest_vseq.sv"
     `include "memblock_csr_scalar_stress_vseq_base.sv"

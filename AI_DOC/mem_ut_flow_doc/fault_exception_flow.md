@@ -1,6 +1,6 @@
 # V2 Fault / Exception Flow
 
-更新日期：2026-11-17。本文描述当前第一项实现中的真实scheduler调用链；专项验收仍以implementation review的证据与待办为准。虚拟化激励与RM快照功能分别由后续方案实现。
+更新日期：2026-11-17。本文描述后端周期帧与RM参考冻结衔接后的真实scheduler调用链；专项验收仍以implementation review的证据与待办为准。
 
 ## 1. 术语与抽象功能说明
 
@@ -19,6 +19,7 @@
 | fault head、fault token、terminal | 故障ROB队首、故障恢复私有记录、指令最终收口 | `fault_head_waiting`及终态状态 | fault的rob_commit并非正常退休 |
 | rollback、reissue、cancel | 访存违例冲刷、重发旧UID、取消旧执行实例 | 原redirect恢复路径 | 违例指令无需成为fault head |
 | sideband、level、pulse | 随附控制信号、保持值、单拍脉冲 | 类别/pending与scommit/flushSb | 清fault token不撤销异常类别保持值 |
+| CANCELLED_RESET/CANCELLED_COVERED | 原公共恢复对尚未采到地址的合法复位/覆盖取消 | 地址frame.address_status及只读cancel_reason | 数据已消费后S+2前发生reset，地址责任按同实例取消 |
 | raw、bounded history、FIFO | 原始采样、固定容量历史、按序队列 | `backend_*_by_sample`、运输队列 | 同值和零地址仍连续记录 |
 | LSQ、LQ、SQ、STA、STD、WB、IQ | 访存队列、读/写队列、Store地址/数据目标、写回、发射反馈 | 原agent与handler | Store fault保持STA/STD真实WB屏障 |
 | AF、PF、GPF、AMO、CMO、VLS | 访问/页/Guest页错误、原子、缓存块操作、向量访存 | `exception_vec/op_class` | AMO类别沿既有load-like规则 |
@@ -450,3 +451,52 @@ reset_runtime取消运输、未完成地址、prepared intent及来源槽；原r
 当前`compile_backend12.log`成功，`run_backend_transport.log`的两真实driver/monitor专项81项通过，生产helper、两正常Store及真Store PF分别由`run_backend_helpers_final.log`、`run_backend_normal_final.log`、`run_backend_final_storepf_wave.log`通过，均UVM_ERROR/FATAL=0。日志位于`~/.tmp/memblock_virtualization_impl_20261117`。
 
 运输自测无LSQ入队且scommit/pending为0，只证明共同E/S、紧邻尾拍、同值与准备取消；合法older业务前缀由生产helper验证，不能据此宣称真实访存违例端到端完成。波形检查由主代理继续，reset主尾/flushSb准备窗口等未另实测部分保留证据边界。详见[实现评审](../plan/test_framework/review_doc/undo/memblock_v2_backend_cycle_frame_implementation_review_20261117.md)。
+
+
+## 2026-11-17：恢复前参考冻结与RM独立地址责任
+
+抽象功能描述：`apply_sampled_backend_cycle()`在真实输入已经确认后，先保存fault访问的参考值，再开放原rob_commit门槛和恢复；RM另行消费地址，不成为资源恢复的新owner。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`。功能摘要：normal/fault批内先freeze后rob_commit；fault随后沿原quiesce、fault head与redirect放行流程。
+
+```systemverilog
+data.freeze_access_reference_for_rm(frame.uid);
+data.backend_fault_address_by_uid[frame.uid] = frame;
+status.rob_commit = 1;
+data.quiesce_fault_uid_pending_work(frame.uid, 0);
+```
+
+中文伪代码：本段负责让恢复不销毁RM输入。帧获得实际sample确认后，普通批准UID逐个冻结参考再提交；fault把原UID/ROB/dynamic/issue/replay对应的完整CSR、首页及真实后页payload深复制，随后登记独立地址frame并置rob_commit，最后按原quiesce取消等待。freeze不计算expected、不延迟原资源回收；legacy mark入口为软件自测保留相同冻结时机。
+
+抽象功能描述：`observer_service_exception_addresses()`对数据已经按原程序游标消费的异常item核对地址责任，不再执行Store commit。
+
+源码位置：`mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv`。功能摘要：读取frame已保存的四态整组输出，与独立VA/GPA参考比较。
+
+```systemverilog
+identity_ok=actual.sample_seq==actual.target_sample && actual.sample_seq==actual.input_sample+2;
+if(guest_fault) mismatch |= actual.gpaddr !== item.expected_gpaddr;
+```
+
+中文伪代码：本段负责异常地址检查。数据compare/commit推进current_uid后，异常Load/Store item进入地址责任队列；服务只消费已经到齐的队首，未到齐则保留等待。readonly按UID/ROB/dynamic复制原frame事实；若required、有效且未capture/非missing的frame明确为reset/covered取消，并匹配冻结reset/issue/replay，RM仅删除地址责任；其他样本核对reset/issue/replay及S+2；独立预异常使用fault_report_va，普通VA按模式扩展，GPF从原S1 sector或onlyS2输入推导GPA与VS标记。VA/GPA使用四态不等，零地址和重复值不影响valid。到齐比较后删除该责任；终场仍缺必需样本则报错。frame读取不重新采样，GPA函数不从actual决定leaf/nonleaf或故障段。
+
+端到端行为总结：真实fault WB→原fault head/frame→S实际采样→freeze参考→原rob_commit/quiesce/恢复；S+2样本仍由原公共采集器保存；RM数据比较与原内存游标只推进一次，地址责任另行到齐并比较，缺失或失败不会因框架terminal收口而自动变成通过。详见[RM实现评审](../plan/rm_review_doc/undo/memblock_v2_virtualization_rm_implementation_review_20261117.md)。
+
+
+### 合法取消的独立地址责任
+
+抽象功能描述：`observer_service_exception_addresses()`消费原恢复已经明确取消的地址责任，允许数据完成与地址收口跨拍；它不将缺样本默认视作取消。
+
+源码位置：`mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv`；只读字段来自`memblock_rm_readonly_api::read_backend_exception_address_for_rm()`。
+
+```systemverilog
+if(actual.canceled && actual.valid && actual.required && !actual.captured && !actual.missing &&
+   actual.cancel_reason inside {int'(memblock_backend_cycle_frame_t::CANCELLED_RESET),
+                                int'(memblock_backend_cycle_frame_t::CANCELLED_COVERED)})
+    observer_pending_address.delete(index);
+```
+
+上面摘要省略了源码紧接的冻结reset/issue/replay身份条件；取消必须仍属于当前待检查item。
+
+中文文字伪代码：本段负责在S+2前reset或覆盖发生时正确结束地址责任。服务先通过UID/ROB/dynamic索引取得原frame，未到齐则等待队首，终场仍缺则报错。frame合法reset/covered取消时要求有效、required、未capture、非missing，并核对冻结reset/issue/replay；满足才删除责任且不重做Store效果。其余样本必须满足目标S+2、同执行实例，并与独立VA/GPA/VS标记比较；缺证据及非法取消保留错误，不能因terminal_done而通过。
+
+端到端文字伪代码：已消费异常item→地址队列→原frame合法取消→同实例核对→仅删除地址责任；地址仍需采样且没有取消→等待S+2事实→独立比较→删除责任；未有样本又未合法取消→最终报缺失。

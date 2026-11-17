@@ -29,7 +29,7 @@
 |---|---|---|
 | [虚拟化框架正式方案](../../plan/do/memblock_virtualization_framework_support_formal_plan_20261117.md) | `/root/virtualization_plan_review` | 最终全稿复审：无必须修改项 |
 | [后端周期帧正式方案](../../plan/do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md) | `/root/backend_frame_plan_review` | 最终复审及RM冻结插入点补充复核：无必须修改项 |
-| [RM与PMM正式方案](../../../rm_plan/undo/memblock_v2_virtualization_rm_checker_support_formal_plan_20261117.md) | `/root/rm_pmm_plan_review` | 第三轮正式稿复审：无必须修改项，详见独立RM记录 |
+| [RM与PMM正式方案](../../../rm_plan/do/memblock_v2_virtualization_rm_checker_support_formal_plan_20261117.md) | `/root/rm_pmm_plan_review` | 第三轮正式稿复审：无必须修改项，详见独立RM记录 |
 
 主代理负责写正式稿、逐项落回合理意见、交叉接口核对及最终自查；三个独立代理只读review。初稿均保留，不覆盖既有讨论记录。
 

@@ -206,13 +206,25 @@ class common_data_transaction extends uvm_object;
     // 中文注释：live entry 的单调身份；普通 reset/flush 只清 table，不回退该计数器。
     longint unsigned         next_tlb_entry_generation;
     memblock_uid_tlb_record  uid_tlb_record_by_uid[memblock_uid_t];
-    // Later-page scalar Load split provenance is owned by the architectural
+    // 中文注释：按UID保存最终实例的固定两页参考历史。提交/fault恢复前写入，
+    // fence不删除；reset_all_tables结束本run时清空，RM查询不修改公共翻译状态。
+    memblock_rm_access_snapshot_t rm_access_snapshot_by_uid[memblock_uid_t];
+    // Later-page scalar Load/Store split provenance is owned by the architectural
     // UID instance, not by a reusable translation key.  A completed record is
     // retained through RM commit and invalidated on redirect/reset.
     memblock_later_split_tlb_record
         later_split_tlb_record_by_uid[memblock_uid_t];
     // 中文注释：active L2TLB owner完成全部split observer后推进的连续消费边界。
     // constructor清0，reset以epoch隔离；缺口冻结，RM不得把尚未消费的高页当作不存在。
+    // 中文注释：Load/StoreMisalignBuffer各自单owner的PTW反查游标；真实后页fire设置，
+    // cancel/reset清除，避免每笔PTW扫描已完成的全部split历史。
+    bit active_load_later_split_valid;
+    memblock_uid_t active_load_later_split_uid;
+    // 中文注释：一个真实L2 token可以服务Load/Store两个后页owner；仅保存handle，
+    // 不接管pending调度。completion/cancel删除，reset清空，窗口上限为当前outstanding。
+    memblock_later_split_tlb_record later_split_owners_by_token[longint unsigned][$];
+    bit active_store_later_split_valid;
+    memblock_uid_t active_store_later_split_uid;
     longint unsigned split_observed_reset_epoch;
     longint unsigned split_observed_sample_seq;
     // WAITING UID 的 request-fire 候选索引。key 只包含 DTLB request 可见的
@@ -394,6 +406,8 @@ class common_data_transaction extends uvm_object;
         main_trans_num      = 0;
         next_uid            = 0;
         main_table_ready    = 1'b0;
+        active_load_later_split_valid=0; active_load_later_split_uid=0;
+        active_store_later_split_valid=0; active_store_later_split_uid=0;
         split_observed_reset_epoch = 0;
         split_observed_sample_seq = 0;
         global_stop_requested = 1'b0;
@@ -664,7 +678,11 @@ class common_data_transaction extends uvm_object;
         sfence_invalidate_pending_q.delete();
         l2tlb_ppn_history_q.delete();
         uid_tlb_record_by_uid.delete();
+        rm_access_snapshot_by_uid.delete();
         later_split_tlb_record_by_uid.delete();
+        later_split_owners_by_token.delete();
+        active_load_later_split_valid=0;
+        active_store_later_split_valid=0;
         clear_issue_queues();
         clear_feedback_events();
         clear_redirect_drive_queue();
@@ -7063,6 +7081,10 @@ class common_data_transaction extends uvm_object;
             return;
         end
         record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
+        if (!record.is_store && active_load_later_split_valid && active_load_later_split_uid==uid)
+            active_load_later_split_valid=0;
+        if (record.is_store && active_store_later_split_valid && active_store_later_split_uid==uid)
+            active_store_later_split_valid=0;
         `uvm_info("LATER_SPLIT_TLB",
                   $sformatf("cancel uid=%0d dynamic_epoch=%0d vpn=0x%0h token=%0d reason=%s",
                             uid, dynamic_epoch, record.split_vpn,
@@ -7079,6 +7101,9 @@ class common_data_transaction extends uvm_object;
             end
         end
         later_split_tlb_record_by_uid.delete();
+        later_split_owners_by_token.delete();
+        active_load_later_split_valid=0;
+        active_store_later_split_valid=0;
         `uvm_info("LATER_SPLIT_TLB",
                   $sformatf("clear all later-split records reason=%s", reason),
                   UVM_LOW)
@@ -7116,7 +7141,7 @@ class common_data_transaction extends uvm_object;
                         context_value.dynamic_epoch == status.dynamic_epoch &&
                         context_value.reset_epoch == reset_epoch &&
                         context_value.rob_key == rob_key;
-        if (vaddr[63:12] != main_tr.vaddr[63:12]) begin
+        if (vaddr[49:12] != main_tr.vaddr[49:12]) begin
             if (!same_instance) begin
                 `uvm_fatal("FIRST_SPLIT_ACCESS", "later-page split lacks first-page context")
                 return;
@@ -7204,6 +7229,27 @@ class common_data_transaction extends uvm_object;
         status.first_split_access.response_need_replay = need_replay;
     endfunction:observe_first_split_response_sample
 
+    // 抽象职责：在真实分段请求拍保存该页当时已完成的参考映射；
+    // 如果随后出现本requestor PTW请求，原记录转miss并由真实token替换，不制造L2 sample。
+    function void capture_later_split_issue_hit(input memblock_later_split_tlb_record record,
+                                                input longint unsigned sample_seq);
+        memblock_uid_tlb_record first;
+        memblock_tlb_entry entry;
+        longint unsigned response_token, response_sample;
+        if (record==null || !uid_tlb_record_by_uid.exists(record.uid)) return;
+        first=uid_tlb_record_by_uid[record.uid];
+        if (first==null || first.csr_snapshot==null) return;
+        record.s2xlate=first.s2xlate;
+        record.request_lookup_key=first.csr_snapshot.make_lookup_key(record.split_vpn,record.s2xlate);
+        if (!find_completed_tlb_response_for_issue(record.request_lookup_key,
+            first.csr_snapshot,sample_seq,entry,response_token,response_sample)) return;
+        record.payload.copy_from(entry); record.entry_anchor_key=entry.lookup_key;
+        record.entry_generation=entry.entry_generation;
+        record.response_token=response_token; record.response_sample_seq=response_sample;
+        record.issue_hit=1;
+        record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED;
+    endfunction:capture_later_split_issue_hit
+
     function void observe_later_split_tlb_sample(
         input bit split_fire,
         input memblock_rob_key_t split_rob_key,
@@ -7248,8 +7294,10 @@ class common_data_transaction extends uvm_object;
             status = get_status(uid);
             main_tr = get_main_transaction(uid);
             split_is_later_page =
-                split_fullva[63:12] != main_tr.vaddr[63:12];
+                split_fullva[49:12] != main_tr.vaddr[49:12];
             if (split_is_later_page) begin
+                active_load_later_split_valid=1;
+                active_load_later_split_uid=uid;
                 if (lu1_tlb_valid && lu1_frm_mabuf && !lu1_kill &&
                     (split_rob_key != lu1_rob_key ||
                      split_fullva != lu1_fullva)) begin
@@ -7326,7 +7374,7 @@ class common_data_transaction extends uvm_object;
                     record.dynamic_epoch = status.dynamic_epoch;
                     record.rob_key = split_rob_key;
                     record.split_vaddr = split_fullva;
-                    record.split_vpn = split_fullva[63:12];
+                    record.split_vpn = {14'b0,split_fullva[49:12]};
                     record.split_fire_sample_seq = sample_seq;
                     record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST;
                     later_split_tlb_record_by_uid[uid] = record;
@@ -7346,7 +7394,7 @@ class common_data_transaction extends uvm_object;
             if (lookup_active_uid_by_rob(lu1_rob_key, uid)) begin
                 main_tr = get_main_transaction(uid);
                 lu1_is_later_page =
-                    lu1_fullva[63:12] != main_tr.vaddr[63:12];
+                    lu1_fullva[49:12] != main_tr.vaddr[49:12];
                 if (lu1_is_later_page) begin
                     if (!later_split_tlb_record_by_uid.exists(uid) ||
                         later_split_tlb_record_by_uid[uid] == null) begin
@@ -7375,6 +7423,7 @@ class common_data_transaction extends uvm_object;
                         end
                         record.lu1_request_sample_seq = sample_seq;
                         record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW;
+                        capture_later_split_issue_hit(record,sample_seq);
                         `uvm_info("LATER_SPLIT_TLB",
                                   $sformatf("bind LU1 frm_mabuf uid=%0d epoch=%0d vpn=0x%0h sample=%0d",
                                             uid, record.dynamic_epoch,
@@ -7391,27 +7440,32 @@ class common_data_transaction extends uvm_object;
         end
         candidate_count = 0;
         candidate_uid = 0;
-        foreach (later_split_tlb_record_by_uid[scan_uid]) begin
-            record = later_split_tlb_record_by_uid[scan_uid];
-            if (record != null &&
+        // 中文注释：LoadMisalignBuffer只有一个活跃owner，不扫描已完成历史。
+        if (active_load_later_split_valid &&
+            later_split_tlb_record_by_uid.exists(active_load_later_split_uid)) begin
+            uid=active_load_later_split_uid;
+            record = later_split_tlb_record_by_uid[uid];
+            if (record != null && !record.is_store &&
                 record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST &&
                 record.split_vpn[37:0] == lu1_ptw_vpn &&
-                status_by_uid[scan_uid] != null &&
-                status_by_uid[scan_uid].active &&
-                status_by_uid[scan_uid].dynamic_epoch == record.dynamic_epoch) begin
+                status_by_uid[uid] != null &&
+                status_by_uid[uid].active &&
+                status_by_uid[uid].dynamic_epoch == record.dynamic_epoch) begin
                 `uvm_fatal("LATER_SPLIT_TLB",
                            $sformatf("LU1 PTW request arrived before frm_mabuf request uid=%0d epoch=%0d vpn=0x%0h sample=%0d",
-                                     scan_uid, record.dynamic_epoch,
+                                     uid, record.dynamic_epoch,
                                      lu1_ptw_vpn, sample_seq))
                 return;
             end
-            if (record != null &&
-                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW &&
+            if (record != null && !record.is_store &&
+                (record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW ||
+                 ((record.issue_hit || record.payload.fault_effective_s2_gpf) &&
+                  record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED)) &&
                 record.split_vpn[37:0] == lu1_ptw_vpn &&
-                status_by_uid[scan_uid] != null &&
-                status_by_uid[scan_uid].active &&
-                status_by_uid[scan_uid].dynamic_epoch == record.dynamic_epoch) begin
-                candidate_uid = scan_uid;
+                status_by_uid[uid] != null &&
+                status_by_uid[uid].active &&
+                status_by_uid[uid].dynamic_epoch == record.dynamic_epoch) begin
+                candidate_uid = uid;
                 candidate_count++;
             end
         end
@@ -7426,6 +7480,7 @@ class common_data_transaction extends uvm_object;
             return;
         end
         record = later_split_tlb_record_by_uid[candidate_uid];
+        record.issue_hit=0;
         record.s2xlate = lu1_ptw_s2xlate;
         record.lu1_ptw_sample_seq = sample_seq;
         record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN;
@@ -7435,6 +7490,73 @@ class common_data_transaction extends uvm_object;
                             lu1_ptw_vpn, lu1_ptw_s2xlate,
                             sample_seq), UVM_LOW)
     endfunction:observe_later_split_tlb_sample
+
+    // 抽象职责：复用唯一later-split记录，以StoreMisalignBuffer真实fire、
+    // STU0请求和store requestor0 PTW逐步绑定后页；不接管ready或驱动翻译。
+    function void observe_later_split_store_tlb_sample(
+        input bit split_fire, input memblock_rob_key_t split_rob,
+        input bit [63:0] split_vaddr, input bit stu_valid, input bit stu_frm_mabuf,
+        input memblock_rob_key_t stu_rob, input bit [63:0] stu_vaddr,
+        input bit ptw_valid, input bit [37:0] ptw_vpn, input bit [1:0] ptw_s2xlate,
+        input longint unsigned sample_seq);
+        memblock_uid_t uid, candidate_uid;
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_later_split_tlb_record record;
+        int unsigned candidate_count;
+        if (split_fire && lookup_active_uid_by_rob(split_rob,uid)) begin
+            status=get_status(uid); main_tr=get_main_transaction(uid);
+            if (split_vaddr[49:12]!=main_tr.vaddr[49:12]) begin
+                record=null;
+                if (later_split_tlb_record_by_uid.exists(uid)) record=later_split_tlb_record_by_uid[uid];
+                if (record==null || record.dynamic_epoch!=status.dynamic_epoch ||
+                    record.state==memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+                    record=memblock_later_split_tlb_record::type_id::create($sformatf("store_later_uid_%0d",uid));
+                    record.is_store=1; record.uid=uid; record.dynamic_epoch=status.dynamic_epoch;
+                    record.rob_key=split_rob;record.split_vaddr=split_vaddr;
+                    record.split_vpn={14'b0,split_vaddr[49:12]};
+                    record.split_fire_sample_seq=sample_seq;
+                    record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST;
+                    later_split_tlb_record_by_uid[uid]=record;
+                end
+                active_store_later_split_uid=uid;active_store_later_split_valid=1;
+            end
+        end
+        if (stu_valid && stu_frm_mabuf && lookup_active_uid_by_rob(stu_rob,uid) &&
+            later_split_tlb_record_by_uid.exists(uid)) begin
+            record=later_split_tlb_record_by_uid[uid]; status=get_status(uid);
+            if (record!=null && record.is_store && record.dynamic_epoch==status.dynamic_epoch &&
+                record.rob_key==stu_rob && record.split_vaddr==stu_vaddr &&
+                record.state==memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST) begin
+                record.lu1_request_sample_seq=sample_seq;
+                record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW;
+                capture_later_split_issue_hit(record,sample_seq);
+            end
+        end
+        if (!ptw_valid) return;
+        candidate_count=0;candidate_uid=0;
+        // 单StoreMisalignBuffer的owner已经在真实split fire绑定，PTW只读该UID。
+        if (active_store_later_split_valid && later_split_tlb_record_by_uid.exists(active_store_later_split_uid)) begin
+            uid=active_store_later_split_uid;record=later_split_tlb_record_by_uid[uid];
+            if (record!=null && record.is_store && record.split_vpn[37:0]==ptw_vpn &&
+                (record.state==memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW ||
+                 ((record.issue_hit || record.payload.fault_effective_s2_gpf) &&
+                  record.state==memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED)) &&
+                status_by_uid[uid]!=null && status_by_uid[uid].active &&
+                record.dynamic_epoch==status_by_uid[uid].dynamic_epoch) begin
+                candidate_count=1;candidate_uid=uid;
+            end
+        end
+        if (candidate_count>1) begin
+            `uvm_fatal("LATER_SPLIT_TLB","store PTW has ambiguous active split owner")
+            return;
+        end
+        if (candidate_count==1) begin
+            record=later_split_tlb_record_by_uid[candidate_uid];record.issue_hit=0;
+            record.s2xlate=ptw_s2xlate;record.lu1_ptw_sample_seq=sample_seq;
+            record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN;
+        end
+    endfunction:observe_later_split_store_tlb_sample
 
     function void observe_later_split_load_response_sample(
         input bit response_valid,
@@ -7507,66 +7629,78 @@ class common_data_transaction extends uvm_object;
                             sample_seq, record.state), UVM_LOW)
     endfunction:observe_later_split_load_response_sample
 
+    // 抽象职责：将唯一responder接受的真实token关联到至多两个活跃后页owner；
+    // Load/Store共享同VPN时各自保存归属，保持responder pending接口与调度不变。
     function memblock_later_split_tlb_record bind_later_split_l2_request_token(
         input memblock_tlb_lookup_key_t request_key,
         input longint unsigned request_token,
         input longint unsigned sample_seq);
         memblock_later_split_tlb_record record;
         memblock_uid_t candidate_uid;
-        int unsigned candidate_count;
-
+        memblock_uid_tlb_record first;
+        bit candidate_valid;
         if (sample_seq == 0) begin
             `uvm_fatal("LATER_SPLIT_TLB", "L2 token bind requires non-zero sample")
             return null;
         end
-        candidate_count = 0;
-        candidate_uid = 0;
-        foreach (later_split_tlb_record_by_uid[uid]) begin
-            record = later_split_tlb_record_by_uid[uid];
-            if (record != null &&
-                record.state inside {
-                    memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE,
-                    memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED} &&
-                record.response_token == request_token) begin
-                `uvm_fatal("LATER_SPLIT_TLB",
-                           $sformatf("L2 token=%0d already owned by uid=%0d epoch=%0d",
-                                     request_token, record.uid,
-                                     record.dynamic_epoch))
-                return null;
-            end
-            if (record != null &&
-                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN &&
-                record.split_vpn == request_key.vpn &&
-                record.s2xlate == request_key.s2xlate &&
-                status_by_uid[uid] != null && status_by_uid[uid].active &&
-                status_by_uid[uid].dynamic_epoch == record.dynamic_epoch) begin
-                candidate_uid = uid;
-                candidate_count++;
-            end
-        end
-        if (candidate_count > 1) begin
-            `uvm_fatal("LATER_SPLIT_TLB",
-                       $sformatf("aggregate L2 request has ambiguous split owners vpn=0x%0h s2xlate=%0d token=%0d sample=%0d candidates=%0d",
-                                 request_key.vpn, request_key.s2xlate,
-                                 request_token, sample_seq, candidate_count))
+        if (later_split_owners_by_token.exists(request_token)) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "L2 token already owns active split records")
             return null;
         end
-        if (candidate_count == 0) begin
-            return null;
+        // 中文注释：固定检查Load/Store两个游标，复杂度不随本run历史增长。
+        for (int slot=0;slot<2;slot++) begin
+            candidate_valid=slot==0?active_load_later_split_valid:active_store_later_split_valid;
+            candidate_uid=slot==0?active_load_later_split_uid:active_store_later_split_uid;
+            if (!candidate_valid || !later_split_tlb_record_by_uid.exists(candidate_uid)) continue;
+            record=later_split_tlb_record_by_uid[candidate_uid];
+            if (record==null || record.is_store!=(slot==1) ||
+                record.state!=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN ||
+                record.split_vpn!=request_key.vpn || record.s2xlate!=request_key.s2xlate ||
+                status_by_uid[candidate_uid]==null || !status_by_uid[candidate_uid].active ||
+                status_by_uid[candidate_uid].dynamic_epoch!=record.dynamic_epoch ||
+                !uid_tlb_record_by_uid.exists(candidate_uid)) continue;
+            first=uid_tlb_record_by_uid[candidate_uid];
+            if(first==null || first.csr_snapshot==null ||
+               first.csr_snapshot.make_lookup_key(record.split_vpn,record.s2xlate)!=request_key) continue;
+            record.request_lookup_key=request_key;
+            record.response_token=request_token;
+            record.l2_request_sample_seq=sample_seq;
+            record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE;
+            later_split_owners_by_token[request_token].push_back(record);
+            `uvm_info("LATER_SPLIT_TLB",
+                      $sformatf("bind exact L2 token uid=%0d epoch=%0d vpn=0x%0h token=%0d sample=%0d",
+                                candidate_uid,record.dynamic_epoch,request_key.vpn,
+                                request_token,sample_seq),UVM_LOW)
         end
-        record = later_split_tlb_record_by_uid[candidate_uid];
-        record.request_lookup_key = request_key;
-        record.response_token = request_token;
-        record.l2_request_sample_seq = sample_seq;
-        record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE;
-        `uvm_info("LATER_SPLIT_TLB",
-                  $sformatf("bind exact L2 token uid=%0d epoch=%0d vpn=0x%0h token=%0d sample=%0d",
-                            candidate_uid, record.dynamic_epoch,
-                            request_key.vpn, request_token, sample_seq), UVM_LOW)
-        return record;
+        if (!later_split_owners_by_token.exists(request_token)) return null;
+        return later_split_owners_by_token[request_token][0];
     endfunction:bind_later_split_l2_request_token
 
+    // 抽象职责：responder只完成一次token；此处展开同token至多两个独立owner，
+    // 每个owner复用原有实例、key、generation和replay校验后保存同一response快照。
     function void complete_later_split_l2_response(
+        input memblock_later_split_tlb_record owner,
+        input longint unsigned request_token,
+        input memblock_tlb_lookup_key_t request_key,
+        input memblock_tlb_lookup_key_t entry_anchor_key,
+        input longint unsigned pending_entry_generation,
+        input memblock_tlb_entry entry,
+        input longint unsigned complete_sample_seq);
+        if (!later_split_owners_by_token.exists(request_token) ||
+            later_split_owners_by_token[request_token].size()==0 ||
+            later_split_owners_by_token[request_token][0]!=owner) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "completion lacks exact token owner bucket")
+            return;
+        end
+        foreach(later_split_owners_by_token[request_token][idx]) begin
+            complete_one_later_split_l2_response(later_split_owners_by_token[request_token][idx],
+                request_token,request_key,entry_anchor_key,pending_entry_generation,
+                entry,complete_sample_seq);
+        end
+        later_split_owners_by_token.delete(request_token);
+    endfunction:complete_later_split_l2_response
+
+    function void complete_one_later_split_l2_response(
         input memblock_later_split_tlb_record owner,
         input longint unsigned request_token,
         input memblock_tlb_lookup_key_t request_key,
@@ -7658,25 +7792,31 @@ class common_data_transaction extends uvm_object;
                             canonical.entry_anchor_key.vpn, request_token,
                             complete_sample_seq,
                             canonical.entry_generation), UVM_LOW)
-    endfunction:complete_later_split_l2_response
+    endfunction:complete_one_later_split_l2_response
 
     function void cancel_later_split_l2_token(
         input longint unsigned request_token,
         input string reason = "");
-        foreach (later_split_tlb_record_by_uid[uid]) begin
-            memblock_later_split_tlb_record record;
-            record = later_split_tlb_record_by_uid[uid];
-            if (record != null &&
-                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE &&
-                record.response_token == request_token) begin
-                record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
-                `uvm_info("LATER_SPLIT_TLB",
-                          $sformatf("cancel token owner uid=%0d epoch=%0d token=%0d reason=%s",
-                                    uid, record.dynamic_epoch,
-                                    request_token, reason), UVM_LOW)
-                return;
+        memblock_later_split_tlb_record record;
+        if (!later_split_owners_by_token.exists(request_token)) return;
+        foreach(later_split_owners_by_token[request_token][idx]) begin
+            record=later_split_owners_by_token[request_token][idx];
+            if(record==null || record.state!=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+               record.response_token!=request_token) continue;
+            record.state=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
+            // 中文注释：旧replay token的handle可以晚于新attempt取消，不能清新owner游标。
+            if(later_split_tlb_record_by_uid.exists(record.uid) &&
+               later_split_tlb_record_by_uid[record.uid]==record) begin
+                if(record.is_store && active_store_later_split_valid && active_store_later_split_uid==record.uid)
+                    active_store_later_split_valid=0;
+                if(!record.is_store && active_load_later_split_valid && active_load_later_split_uid==record.uid)
+                    active_load_later_split_valid=0;
             end
+            `uvm_info("LATER_SPLIT_TLB",
+                      $sformatf("cancel token owner uid=%0d epoch=%0d token=%0d reason=%s",
+                                record.uid,record.dynamic_epoch,request_token,reason),UVM_LOW)
         end
+        later_split_owners_by_token.delete(request_token);
     endfunction:cancel_later_split_l2_token
 
     function bit lookup_active_uid_by_lq(input memblock_lq_key_t lq_key,
@@ -10531,6 +10671,43 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:register_uid_tlb_record_on_issue
 
+    // 抽象职责：在真实issue计划阶段保存预先存在的独立masked映射；
+    // 不创建映射、不发送请求，提交后只能读取这里的深复制值。
+    function void capture_pmm_arch_reference_on_issue(input memblock_uid_tlb_record record);
+        memblock_tlb_lookup_key_t request_key,anchor_key;
+        memblock_tlb_lookup_result_e lookup_result;
+        memblock_tlb_entry entry;
+        main_control_transaction main_tr;
+        bit [49:0] request_start,request_end;
+        bit [37:0] masked_vpn;
+        int unsigned size_bytes;
+        if(record==null || record.csr_snapshot==null || record.s2xlate!=2 ||
+           record.csr_snapshot.hgatp_mode!=9 || record.vpn[37:36]==0 ||
+           !is_valid_uid(record.uid) || main_table_by_uid[record.uid]==null) return;
+        main_tr=main_table_by_uid[record.uid];
+        // 中文注释：合法标量分类复用公共behavior，宽度沿既有size低两位编码。
+        if(!((main_tr.fuType==MEMBLOCK_FUTYPE_LDU &&
+              memblock_op_behavior_util::is_load_fuoptype(main_tr.fuOpType)) ||
+             (main_tr.fuType==MEMBLOCK_FUTYPE_STU &&
+              memblock_op_behavior_util::is_store_fuoptype(main_tr.fuOpType)))) return;
+        size_bytes=1<<main_tr.fuOpType[1:0];
+        // PMM16先生成低48位有效首地址，再按50位加末字节；保留bit48进位。
+        // 对原请求末地址再清高两位会把合法的masked跨界末页错误折回VPN0。
+        request_start={2'b0,record.vpn[35:0],main_tr.vaddr[11:0]};
+        request_end=request_start+50'(size_bytes-1);
+        // 中文注释：实际标量最多跨两页，架构参考同样固定两槽；只查已定义输入。
+        for(int slot=0;slot<2;slot++) begin
+            if(slot==1 && request_end[49:12]==request_start[49:12]) break;
+            masked_vpn=slot==0?request_start[49:12]:request_end[49:12];
+            record.pmm_arch_vpn[slot]={14'b0,masked_vpn};
+            if(!find_existing_l2tlb_entry_by_req_with_snapshot(masked_vpn,record.s2xlate,
+                record.csr_snapshot,request_key,anchor_key,lookup_result,entry)) continue;
+            if(entry==null || entry.entry_generation==0) continue;
+            record.pmm_arch_reference[slot].copy_from(entry);
+            record.pmm_arch_reference_valid[slot]=1;
+        end
+    endfunction:capture_pmm_arch_reference_on_issue
+
     function bit plan_uid_tlb_record_context(
         input memblock_uid_t uid,
         input bit [51:0] vpn,
@@ -10690,6 +10867,7 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", "invalid planned issue-hit snapshot state")
             return 1'b0;
         end
+        capture_pmm_arch_reference_on_issue(planned_record);
         record_needs_commit = 1'b1;
         return 1'b1;
     endfunction:plan_uid_tlb_record_context
@@ -11790,7 +11968,9 @@ class common_data_transaction extends uvm_object;
     // CSR.  The token remains complete even when this returns zero.
     function int unsigned complete_waiting_uid_records_by_response(
         input memblock_tlb_entry entry,
-        input mmu_csr_runtime_state response_filter_csr_snapshot);
+        input mmu_csr_runtime_state response_filter_csr_snapshot,
+        input longint unsigned response_token_i=0,
+        input longint unsigned response_sample_i=0);
         int unsigned match_count;
 
         if (entry == null || response_filter_csr_snapshot == null) begin
@@ -11801,12 +11981,27 @@ class common_data_transaction extends uvm_object;
             memblock_uid_tlb_record record;
 
             record = uid_tlb_record_by_uid[uid];
+            // 中文注释：GPF命中可再发getGpa补响应；原首页已COMPLETED，
+            // 仍需在fault恢复前保存这次真实完成的原始sector，不能从actual GPA反填。
+            if (record!=null && record.pte_valid && record.payload!=null &&
+                record.payload.fault_effective_s2_gpf && status_by_uid[uid]!=null &&
+                status_by_uid[uid].active && !status_by_uid[uid].rob_commit &&
+                entry_matches_request_raw(entry,record.vpn,record.s2xlate,response_filter_csr_snapshot)) begin
+                record.payload.copy_from(entry);
+                record.response_token=response_token_i;record.response_sample_seq=response_sample_i;
+                derive_tlb_request_fields(record.payload,record.vpn,record.s2xlate,
+                    response_filter_csr_snapshot,record.request_derived_valid,
+                    record.request_s1_resolved_ppn,record.request_s2_resolved_ppn,record.request_gvpn);
+                continue;
+            end
             if (record == null || !record.is_waiting() ||
                 !entry_matches_uid_at_response(entry, record,
                                                response_filter_csr_snapshot)) begin
                 continue;
             end
             record.copy_entry_fields(entry);
+            record.response_token=response_token_i;
+            record.response_sample_seq=response_sample_i;
             populate_uid_record_derived(record, entry,
                                         response_filter_csr_snapshot);
             record.mark_completed();
@@ -11825,6 +12020,106 @@ class common_data_transaction extends uvm_object;
         end
         return match_count;
     endfunction:complete_waiting_uid_records_by_response
+
+    // 抽象职责：在真实提交或fault恢复前冻结当前标量实例的参考输入，
+    // 让RM晚于cancel/fence消费；本函数不重新查current映射，也不计算expected。
+    function void freeze_access_reference_for_rm(input memblock_uid_t uid);
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_uid_tlb_record first;
+        memblock_later_split_tlb_record later;
+        memblock_rm_access_snapshot_t snapshot;
+        bit scalar_read, scalar_write;
+        check_uid(uid,"freeze_access_reference_for_rm");
+        main_tr=get_main_transaction(uid);
+        scalar_read=main_tr.fuType==MEMBLOCK_FUTYPE_LDU &&
+            memblock_op_behavior_util::is_load_fuoptype(main_tr.fuOpType);
+        scalar_write=main_tr.fuType==MEMBLOCK_FUTYPE_STU &&
+            memblock_op_behavior_util::is_store_fuoptype(main_tr.fuOpType);
+        if (!scalar_read && !scalar_write) return;
+        status=get_status(uid);
+        if (get_rm_access_snapshot(uid,snapshot)) begin
+            if (snapshot.rob_key==status.get_rob_key() &&
+                snapshot.dynamic_epoch==status.dynamic_epoch &&
+                snapshot.issue_epoch==(scalar_read?status.load_issue_epoch:status.sta_issue_epoch) &&
+                snapshot.replay_seq==status.replay_seq &&
+                snapshot.reset_epoch==memblock_sync_pkg::get_l2tlb_current_reset_epoch()) return;
+            // 旧未提交实例可被重发替换；已经消费的实例不会再次rob_commit。
+            rm_access_snapshot_by_uid.delete(uid);
+        end
+        // 人工soft场景可以没有真实issue记录；不伪造latest CSR作该访问的控制。
+        if (!uid_tlb_record_by_uid.exists(uid) ||
+            uid_tlb_record_by_uid[uid]==null || !uid_tlb_record_by_uid[uid].record_valid) return;
+        first=uid_tlb_record_by_uid[uid];
+        if (first.csr_snapshot==null) begin
+            `uvm_error("RM_ACCESS_REFERENCE",$sformatf("uid=%0d has no issue CSR",uid))
+            return;
+        end
+        snapshot=memblock_rm_access_snapshot_t::type_id::create($sformatf("rm_access_uid_%0d",uid));
+        snapshot.uid=uid; snapshot.rob_key=status.get_rob_key();
+        snapshot.dynamic_epoch=status.dynamic_epoch;
+        snapshot.issue_epoch=scalar_read?status.load_issue_epoch:status.sta_issue_epoch;
+        snapshot.replay_seq=status.replay_seq;
+        snapshot.reset_epoch=memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        snapshot.issue_sample=first.uid_wait_start_sample_seq;
+        snapshot.address_csr.copy_from(first.csr_snapshot);
+        snapshot.csr_update_seq=first.csr_snapshot.update_seq;
+        foreach(snapshot.pmm_arch_reference[i]) begin
+            snapshot.pmm_arch_reference_valid[i]=first.pmm_arch_reference_valid[i];
+            snapshot.pmm_arch_vpn[i]=first.pmm_arch_vpn[i];
+            if(first.pmm_arch_reference_valid[i])
+                snapshot.pmm_arch_reference[i].copy_from(first.pmm_arch_reference[i]);
+        end
+        snapshot.raw_address=main_tr.src_0+{{52{main_tr.imm[11]}},main_tr.imm[11:0]};
+        snapshot.request_fullva=snapshot.raw_address;
+        snapshot.request_vaddr={14'b0,snapshot.raw_address[49:0]};
+        snapshot.is_hypervisor_inst=first.is_hypervisor_inst;
+        snapshot.checkfullva=1; snapshot.cmd=scalar_write?3'd1:3'd0;
+        snapshot.size={1'b0,main_tr.fuOpType[1:0]};
+        snapshot.page_count=1; snapshot.vpn[0]=first.vpn;
+        snapshot.s2xlate[0]=first.s2xlate; snapshot.request_key[0]=first.lookup_key;
+        if (first.pte_valid && first.payload!=null) begin
+            snapshot.pages[0].copy_from(first.payload); snapshot.page_valid[0]=1;
+            snapshot.source[0]=2; snapshot.response_token[0]=first.response_token;
+            snapshot.response_sample[0]=first.response_sample_seq;
+        end else if (first.issue_hit_snapshot_valid && first.issue_hit_payload!=null) begin
+            snapshot.pages[0].copy_from(first.issue_hit_payload); snapshot.page_valid[0]=1;
+            snapshot.source[0]=1; snapshot.response_token[0]=first.issue_hit_response_token;
+            snapshot.response_sample[0]=first.issue_hit_response_sample_seq;
+        end
+        if (snapshot.page_valid[0]) begin
+            snapshot.entry_key[0]=snapshot.pages[0].lookup_key;
+            snapshot.generation[0]=snapshot.pages[0].entry_generation;
+        end
+        if (later_split_tlb_record_by_uid.exists(uid) && later_split_tlb_record_by_uid[uid]!=null) begin
+            later=later_split_tlb_record_by_uid[uid];
+            if (later.dynamic_epoch==status.dynamic_epoch && later.rob_key==status.get_rob_key() &&
+                later.state!=memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+                snapshot.page_count=2; snapshot.vpn[1]=later.split_vpn;
+                snapshot.s2xlate[1]=later.s2xlate; snapshot.request_key[1]=later.request_lookup_key;
+                if (later.state==memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED &&
+                    later.payload!=null) begin
+                    snapshot.pages[1].copy_from(later.payload); snapshot.page_valid[1]=1;
+                    snapshot.entry_key[1]=later.entry_anchor_key;
+                    snapshot.generation[1]=later.entry_generation;
+                    snapshot.response_token[1]=later.response_token;
+                    snapshot.response_sample[1]=later.response_sample_seq;
+                    snapshot.source[1]=later.issue_hit?3:4;
+                end
+            end
+        end
+        snapshot.valid=1; snapshot.frozen=1;
+        rm_access_snapshot_by_uid[uid]=snapshot;
+    endfunction:freeze_access_reference_for_rm
+
+    // 抽象职责：按UID定位已冻结的参考值，调用者只读；不命中不触碰live/completed表。
+    function bit get_rm_access_snapshot(input memblock_uid_t uid,
+                                       output memblock_rm_access_snapshot_t snapshot);
+        snapshot=null;
+        if (!rm_access_snapshot_by_uid.exists(uid)) return 0;
+        snapshot=rm_access_snapshot_by_uid[uid];
+        return snapshot!=null && snapshot.valid && snapshot.frozen;
+    endfunction:get_rm_access_snapshot
 
     function memblock_uid_tlb_record get_uid_tlb_record(input memblock_uid_t uid);
         check_uid(uid, "get_uid_tlb_record");

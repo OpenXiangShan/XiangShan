@@ -25,6 +25,8 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     // 中文注释：RM 自有的 expected 状态 owner。框架只通过只读 value view
     // 提供事实；RM 不持有、修改或推进任一框架 owner。
     rm_ls_model_t ls_model;
+    // 中文注释：仅保存已消费数据的异常实例；地址到齐后删除，不重新执行commit。
+    rm_ls_program_item_t observer_pending_address[$];
     rm_cmo_request_observer_t cmo_requests;
     rm_dcache_error_observer dcache_errors;
     rm_uncache_error_observer uncache_errors;
@@ -92,6 +94,16 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     extern function bit observer_apply_cmo_d_error_expectation(
         rm_ls_program_item_t item, longint unsigned access_sample);
 
+    extern function void observer_service_exception_addresses(bit final_check=0);
+    extern function void observer_check_pmm_arch_reference(rm_ls_program_item_t item);
+    extern function void observer_compute_guest_fault_address(
+        rm_ls_program_item_t item,
+        memblock_rm_readonly_api::tlb_request_context_view_t context_view,
+        memblock_rm_readonly_api::tlb_entry_view_t entry_view,
+        bit [63:0] request_va);
+    extern function bit [63:0] observer_extend_exception_va(
+        bit [63:0] va,
+        memblock_rm_readonly_api::tlb_request_context_view_t context_view);
     extern function int unsigned observer_scalar_size(bit [8:0] fu_op_type);
     extern function int unsigned observer_atomic_size(bit [8:0] fu_op_type);
     extern function rm_atomic_kind_e observer_atomic_kind(bit [8:0] fu_op_type);
@@ -101,7 +113,8 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         memblock_rm_readonly_api::tlb_entry_view_t entry,
         memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
         bit store_access,
-        bit stage_one
+        bit stage_one,
+        bit hlvx = 0
     );
     // 中文注释：按当前 UID 冻结的 CSR 判断 raw PBMT 是否需要附加 PF/GPF。
     // 返回的 force bit 只属于当前 RM item，不回写 readonly entry 或公共 TLB 表。
@@ -402,6 +415,7 @@ endfunction
 function void memblock_rm::check_phase(uvm_phase phase);
     super.check_phase(phase);
     observer_service_path_facts();
+    observer_service_exception_addresses(1);
     uncache_errors.final_check(path_observed_sample);
     void'(cmo_requests.check_drained());
     if(ls_model.configured && ls_model.current_uid!=observer_main_count)
@@ -411,19 +425,263 @@ function void memblock_rm::check_phase(uvm_phase phase);
         `uvm_error("RM_STORE_NOT_DRAINED","最终Store-table比较尚未完成")
 endfunction
 
+// 抽象职责：按issue时独立冻结的masked映射核对架构地址、权限和内存类型。
+// 不改原实现几何及数据期望，不查询当前映射；参考不足保留MISSING责任。
+function void memblock_rm::observer_check_pmm_arch_reference(rm_ls_program_item_t item);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::tlb_request_context_view_t context_v;
+    memblock_rm_readonly_api::tlb_entry_view_t reference;
+    memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t pma_view;
+    bit [63:0] masked_va, reference_pa, ignored_pa, first_pa;
+    bit [51:0] masked_vpn, loaded_vpn;
+    bit [23:0] reference_exception, implementation_exception;
+    bit [1:0] first_pbmt;
+    bit force_s1,force_s2,store_access,reference_mmio,reference_cacheable;
+    bit reference_uncache,model_enabled,first_split_data_stop,reference_loaded;
+    bit all_pbmt_pma,first_mmio,first_pma_fault,misaligned;
+    bit byte_access_fault,byte_mmio;
+    int unsigned checked_bytes,pa_count;
+    bit pma_fault,reference_alignment_af,pa_mismatch;
+    rm_pmm_reference_result_e range_result;
+    pma_pmp_cmd_e cmd;
+    if(item==null || !item.pmm_address_semantic_mismatch) return;
+    ro=memblock_rm_readonly_api::get();
+    store_access=item.kind==RM_LS_KIND_STORE;
+    implementation_exception=item.expected_exception;
+    misaligned=(item.effective_fullva & (64'(item.size_bytes)-1))!=0;
+    first_split_data_stop=!store_access &&
+        (item.expected_dcache_denied || item.expected_dcache_corrupt) &&
+        item.pa_valid_mask!=(16'hffff>>(16-item.size_bytes));
+    checked_bytes=item.size_bytes;
+    if(first_split_data_stop) begin
+        // 首页独立D错误终止访问，只核对实际消费的PA前缀。
+        checked_bytes=0;
+        while(checked_bytes<item.size_bytes && item.pa_valid_mask[checked_bytes]) checked_bytes++;
+        if(checked_bytes==0) begin item.pmm_reference_result=RM_PMM_REFERENCE_MISSING;return;end
+        if(item.expected_dcache_denied) implementation_exception[5]=0;
+    end
+    cmd=store_access ? PMA_PMP_CMD_WRITE : item.hlvx ? PMA_PMP_CMD_READ_EXEC : PMA_PMP_CMD_READ;
+    model_enabled=seq_csr_common::get_pma_pmp_model_en();
+    reference_exception=0;reference_cacheable=1;reference_mmio=model_enabled;
+    reference_uncache=0;all_pbmt_pma=1;first_pbmt=0;first_pa=0;
+    pma_fault=0;first_mmio=0;first_pma_fault=0;pa_mismatch=0;reference_loaded=0;
+    reference_alignment_af=0;pa_count=0;
+    item.pmm_implementation_pa=item.pa_by_byte[0];
+    for(int unsigned i=0;i<checked_bytes;i++) begin
+        masked_va=item.effective_fullva+64'(i);masked_vpn=masked_va[63:12];
+        if(!reference_loaded || loaded_vpn!=masked_vpn) begin
+            if(!ro.read_pmm_arch_reference_for_rm(item.uid,item.dynamic_epoch,
+                '{flag:item.rob.flag,value:MEMBLOCK_ROB_VALUE_W'(item.rob.value)},
+                masked_vpn,context_v,reference)) begin
+                // 首参考缺失时保留原payload真正覆盖两地址时已有的证明；
+                // 已消费前页后缺后页则本次完整证明必然不足。
+                if(reference_loaded) item.pmm_reference_result=RM_PMM_REFERENCE_MISSING;
+                return;
+            end
+            item.pmm_reference_result=RM_PMM_REFERENCE_MISSING;
+            if(!context_v.valid || !reference.valid || context_v.s2xlate!=2 ||
+               reference.s1_stage_active || !reference.s2_stage_active ||
+               reference.s2_translation_mode_at_build!=9) return;
+            reference_loaded=1;loaded_vpn=masked_vpn;
+            if(!observer_eval_pbmt_fault_overlay(reference,context_v,0,1,force_s1,force_s2)) return;
+            if(reference.pma_af || reference.fault_effective_s2_gaf)
+                reference_exception[store_access?7:5]=1;
+            else if(reference.fault_effective_s2_gpf || force_s2 ||
+                observer_stage_permission_fault(reference,context_v,store_access,0,item.hlvx))
+                reference_exception[store_access?23:21]=1;
+            // Load后段NC在LoadUnit中不被翻译异常屏蔽，mabuf先处理nc再处理异常。
+            // IO的mmio则由LoadUnit在异常时清零，不能把IO+GPF也覆盖为misalign。
+            if(i>0 && !store_access && misaligned && reference.s2_entry_pbmt==1) begin
+                reference_exception=0;reference_exception[4]=1;break;
+            end
+            // 首个参考fault终止，不要求后续masked页或正常PPN/PMA。
+            if(reference_exception!=0) break;
+            if(!context_v.request_translation_valid) return;
+        end
+        range_result=rm_ls_check_pmm_stage2_reference(masked_vpn,masked_vpn,
+            reference.lookup_key.vpn,reference.s2_level,reference.s2_pte_n,
+            reference.s2_entry_ppn_raw,masked_va[11:0],ignored_pa,reference_pa);
+        if(range_result==RM_PMM_REFERENCE_MISSING) return;
+        pa_count++;
+        if(i==0) begin
+            first_pa=reference_pa;item.pmm_architectural_pa=reference_pa;
+            first_pbmt=reference.s2_entry_pbmt;
+        end
+        all_pbmt_pma &= reference.s2_entry_pbmt==0;
+        reference_uncache |= reference.s2_entry_pbmt!=0;
+        if(model_enabled) begin
+            if(!ro.read_pma_pmp_af_for_rm(item.uid,item.dynamic_epoch,1,
+                reference_pa[47:0],1,cmd,pma_view) || !pma_view.valid ||
+                !pma_view.translation_eligible || !pma_view.af_decided) return;
+            byte_access_fault=store_access?pma_view.st_access_fault:
+                (pma_view.ld_access_fault || (item.hlvx && pma_view.instr_access_fault));
+            byte_mmio=reference.s2_entry_pbmt==0 && !pma_view.normal_cacheable &&
+                !byte_access_fault && !pma_view.st_access_fault;
+            // 无完整size查询时也不能丢失首byte或后页已独立证明的AF。
+            pma_fault |= byte_access_fault;
+            if(i==0) begin
+                first_pma_fault=byte_access_fault;first_mmio=byte_mmio;
+            end
+            // 后页真实PMA-MMIO且无权限异常时，mabuf同样委托软件处理非对齐。
+            if(i>0 && !store_access && misaligned && byte_mmio && !pma_fault) begin
+                reference_exception=0;reference_exception[4]=1;break;
+            end
+            reference_cacheable &= pma_view.normal_cacheable &&
+                !(store_access?pma_view.st_access_fault:
+                  (pma_view.ld_access_fault || (item.hlvx && pma_view.instr_access_fault)));
+            reference_mmio &= reference.s2_entry_pbmt==0 && !pma_view.normal_cacheable &&
+                !pma_view.st_access_fault && !(store_access?pma_view.st_access_fault:
+                  (pma_view.ld_access_fault || (item.hlvx && pma_view.instr_access_fault)));
+        end
+        if(item.pa_valid_mask[i] && item.pa_by_byte[i]!=reference_pa) pa_mismatch=1;
+        // 与原生产路径一致：首页立即fault/不支持非对齐时不消费未访问的后页。
+        if(i==0 && (item.effective_fullva & (64'(item.size_bytes)-1))!=0 &&
+           (first_pma_fault || first_mmio ||
+            observer_should_expect_addr_misaligned(1,store_access,context_v,all_pbmt_pma))) begin
+            pma_fault=first_pma_fault;break;
+        end
+    end
+    if(!reference_loaded) return;
+    reference_cacheable &= all_pbmt_pma;
+    reference_uncache |= reference_mmio;
+    if(reference_exception==0) begin
+        if(model_enabled && pa_count==item.size_bytes && !first_split_data_stop &&
+           !first_pma_fault && !first_mmio) begin
+            if(!ro.read_pma_pmp_af_for_rm(item.uid,item.dynamic_epoch,1,
+                first_pa[47:0],item.size_bytes,cmd,pma_view) || !pma_view.valid ||
+                !pma_view.translation_eligible || !pma_view.af_decided) return;
+            pma_fault |= store_access?pma_view.st_access_fault:
+                (pma_view.ld_access_fault || (item.hlvx && pma_view.instr_access_fault));
+        end
+        if((item.effective_fullva & (64'(item.size_bytes)-1))!=0) begin
+            reference_alignment_af=first_pbmt==2 || (first_pbmt==0 && first_mmio);
+            if(!reference_alignment_af && (!pma_fault || (!store_access && first_pbmt==1)) &&
+               observer_should_expect_addr_misaligned(1,store_access,context_v,all_pbmt_pma))
+                reference_exception[store_access?6:4]=1;
+        end
+        if(pma_fault || reference_alignment_af) reference_exception[store_access?7:5]=1;
+    end
+    // 下游D错误沿原证据链检查；仅比较本阶段独立可判的cause和成功路径。
+    if((implementation_exception & 24'hA0A0F0)!=(reference_exception & 24'hA0A0F0))
+        item.pmm_reference_result=RM_PMM_REFERENCE_MISMATCH;
+    else if(reference_exception==0 && (pa_mismatch || first_pbmt!=item.translation_pbmt ||
+        reference_cacheable!=item.all_normal_cacheable || reference_uncache!=item.uncache_path))
+        item.pmm_reference_result=RM_PMM_REFERENCE_MISMATCH;
+    else item.pmm_reference_result=RM_PMM_REFERENCE_MATCH;
+endfunction
+
+// 抽象职责：按顶层异常地址扩展规则重建非预异常VA，不消费DUT地址。
+function bit [63:0] memblock_rm::observer_extend_exception_va(
+    bit [63:0] va, memblock_rm_readonly_api::tlb_request_context_view_t context_view);
+    bit guest;
+    bit [3:0] s1mode;
+    guest=context_view.priv_virt || context_view.is_hypervisor_inst;
+    s1mode=guest ? context_view.vsatp_mode : context_view.satp_mode;
+    if(!guest && context_view.priv_dmode==3) return {16'b0,va[47:0]};
+    if(s1mode==8) return {{25{va[38]}},va[38:0]};
+    if(s1mode==9) return {{16{va[47]}},va[47:0]};
+    if(guest && context_view.hgatp_mode==8) return {23'b0,va[40:0]};
+    if(guest && context_view.hgatp_mode==9) return {14'b0,va[49:0]};
+    return {16'b0,va[47:0]};
+endfunction
+
+// 抽象职责：从原始S1 sector解析Guest故障地址及隐式VS页表标记。
+function void memblock_rm::observer_compute_guest_fault_address(
+    rm_ls_program_item_t item,
+    memblock_rm_readonly_api::tlb_request_context_view_t context_view,
+    memblock_rm_readonly_api::tlb_entry_view_t entry_view,
+    bit [63:0] request_va);
+    bit leaf, fake, nonleaf;
+    bit [63:0] cross_va;
+    bit [51:0] vpn;
+    bit [43:0] canonical_ppn, gvpn;
+    bit [1:0] vpn_idx;
+    bit [11:0] offset;
+    cross_va=item.effective_fullva[12]!=request_va[12] ? request_va : item.effective_fullva;
+    item.expected_gpaddr_valid=1;
+    item.expected_vs_nonleaf=0;
+    if(context_view.s2xlate==2) begin item.expected_gpaddr=cross_va;return;end
+    if(!entry_view.valid || !entry_view.s1_stage_active) begin
+        item.expected_gpaddr_valid=0;return;
+    end
+    leaf=entry_view.s1_pte_v && (entry_view.s1_pte_r || entry_view.s1_pte_w || entry_view.s1_pte_x);
+    fake=!entry_view.s1_pte_v && !entry_view.fault_effective_s1_pf && !entry_view.fault_effective_s1_af;
+    nonleaf=entry_view.s1_pte_v && !(entry_view.s1_pte_r || entry_view.s1_pte_w || entry_view.s1_pte_x) &&
+        !entry_view.fault_effective_s1_pf && !entry_view.fault_effective_s1_af;
+    vpn=request_va[63:12];
+    canonical_ppn={entry_view.s1_entry_ppn_raw,entry_view.s1_ppn_low[vpn[2:0]]};
+    gvpn=canonical_ppn;
+    if(!nonleaf) begin
+        case(entry_view.s1_level)
+            3:gvpn={canonical_ppn[43:27],vpn[26:0]};
+            2:gvpn={canonical_ppn[43:18],vpn[17:0]};
+            1:gvpn={canonical_ppn[43:9],vpn[8:0]};
+            0:if(entry_view.s1_pte_n) gvpn={canonical_ppn[43:4],vpn[3:0]};
+        endcase
+    end
+    vpn_idx=fake ? (context_view.vsatp_mode==8 ? 2'd2 : 2'd3) : entry_view.s1_level-2'd1;
+    offset=leaf ? cross_va[11:0] : 12'(((cross_va>>(12+9*int'(vpn_idx))) & 64'h1ff)<<3);
+    item.expected_gpaddr={8'b0,gvpn,offset};
+    item.expected_vs_nonleaf=fake || nonleaf;
+endfunction
+
+// 抽象职责：按冻结身份消费已提交异常的地址责任；数据commit只发生一次。
+function void memblock_rm::observer_service_exception_addresses(bit final_check);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::backend_exception_address_view_t actual;
+    rm_ls_program_item_t item;
+    bit ready, identity_ok, mismatch, guest_fault;
+    ro=memblock_rm_readonly_api::get();
+    // 只推进已到齐的责任前缀；队首等待立即停止，不重复扫描历史或整个待核队列。
+    for(int index=0;index<observer_pending_address.size();) begin
+        item=observer_pending_address[index];
+        ready=ro.read_backend_exception_address_for_rm(item.uid,item.dynamic_epoch,
+            '{flag:item.rob.flag,value:MEMBLOCK_ROB_VALUE_W'(item.rob.value)},actual);
+        if(!ready || actual.pending || (!actual.captured && !actual.missing && !actual.canceled)) begin
+            if(!final_check) break;
+            `uvm_error("RM_EXCEPTION_ADDRESS_MISSING",$sformatf("uid=%0d epoch=%0d数据已消费但地址责任未完成",item.uid,item.dynamic_epoch))
+            observer_pending_address.delete(index);continue;
+        end
+        // reset或已覆盖的异常允许取消地址责任；取消必须仍属于同一冻结实例。
+        if(actual.canceled && actual.valid && actual.required && !actual.captured && !actual.missing &&
+           actual.cancel_reason inside {int'(memblock_backend_cycle_frame_t::CANCELLED_RESET),
+                                        int'(memblock_backend_cycle_frame_t::CANCELLED_COVERED)} &&
+           (!item.address_inputs_valid || (actual.reset_epoch==item.reset_epoch &&
+             actual.issue_epoch==item.issue_epoch && actual.replay_seq==item.replay_seq))) begin
+            `uvm_info("RM_EXCEPTION_ADDRESS_CANCELLED",$sformatf("uid=%0d frame=%0d合法取消地址责任 reason=%0d",item.uid,actual.frame_id,actual.cancel_reason),UVM_LOW)
+            observer_pending_address.delete(index);continue;
+        end
+        identity_ok=actual.valid && actual.required && actual.captured && !actual.missing && !actual.canceled &&
+            actual.sample_seq==actual.target_sample && actual.sample_seq==actual.input_sample+2;
+        if(item.address_inputs_valid) identity_ok &= actual.reset_epoch==item.reset_epoch &&
+            actual.issue_epoch==item.issue_epoch && actual.replay_seq==item.replay_seq;
+        guest_fault=item.expected_exception[21] || item.expected_exception[23];
+        mismatch=!identity_ok || !item.expected_address_valid || actual.vaddr !== item.expected_vaddr;
+        if(guest_fault) mismatch |= !item.expected_gpaddr_valid ||
+            actual.gpaddr !== item.expected_gpaddr || actual.is_for_vs_non_leaf !== item.expected_vs_nonleaf;
+        if(mismatch)
+            `uvm_error("RM_EXCEPTION_ADDRESS_MISMATCH",$sformatf("uid=%0d epoch=%0d frame=%0d identity=%0d VA actual=%h expected=%h GPA actual=%h expected=%h valid=%0d VSnonleaf actual=%b expected=%b",item.uid,item.dynamic_epoch,actual.frame_id,identity_ok,actual.vaddr,item.expected_vaddr,actual.gpaddr,item.expected_gpaddr,item.expected_gpaddr_valid,actual.is_for_vs_non_leaf,item.expected_vs_nonleaf))
+        else
+            `uvm_info("RM_EXCEPTION_ADDRESS",$sformatf("uid=%0d frame=%0d地址责任PASS sample=%0d",item.uid,actual.frame_id,actual.sample_seq),UVM_LOW)
+        observer_pending_address.delete(index);
+    end
+endfunction
+
 function int unsigned memblock_rm::observer_scalar_size(bit [8:0] fu_op_type);
     case (fu_op_type)
         MEMBLOCK_LSUOP_LB,
         MEMBLOCK_LSUOP_LBU,
-        MEMBLOCK_LSUOP_SB: return 1;
+        MEMBLOCK_LSUOP_SB, MEMBLOCK_LSUOP_HLVB, MEMBLOCK_LSUOP_HLVBU: return 1;
         MEMBLOCK_LSUOP_LH,
         MEMBLOCK_LSUOP_LHU,
-        MEMBLOCK_LSUOP_SH: return 2;
+        MEMBLOCK_LSUOP_SH, MEMBLOCK_LSUOP_HLVH, MEMBLOCK_LSUOP_HLVHU,
+        MEMBLOCK_LSUOP_HLVXHU: return 2;
         MEMBLOCK_LSUOP_LW,
         MEMBLOCK_LSUOP_LWU,
-        MEMBLOCK_LSUOP_SW: return 4;
+        MEMBLOCK_LSUOP_SW, MEMBLOCK_LSUOP_HLVW, MEMBLOCK_LSUOP_HLVWU,
+        MEMBLOCK_LSUOP_HLVXWU: return 4;
         MEMBLOCK_LSUOP_LD,
-        MEMBLOCK_LSUOP_SD: return 8;
+        MEMBLOCK_LSUOP_SD, MEMBLOCK_LSUOP_HLVD: return 8;
         default: return 0;
     endcase
 endfunction:observer_scalar_size
@@ -482,7 +740,8 @@ function bit memblock_rm::observer_stage_permission_fault(
     memblock_rm_readonly_api::tlb_entry_view_t entry,
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
     bit store_access,
-    bit stage_one
+    bit stage_one,
+    bit hlvx
 );
     bit pte_r;
     bit pte_w;
@@ -507,7 +766,7 @@ function bit memblock_rm::observer_stage_permission_fault(
         mxr = tlb_context.s2xlate == 2'd0 ? tlb_context.priv_mxr :
               (tlb_context.priv_mxr || tlb_context.priv_vmxr);
         sum = tlb_context.s2xlate == 0 ? tlb_context.priv_sum : tlb_context.priv_vsum;
-        privilege = tlb_context.priv_dmode;
+        privilege = tlb_context.is_hypervisor_inst ? {1'b0,tlb_context.priv_spvp} : tlb_context.priv_dmode;
     end else begin
         if (!entry.s2_stage_active) return 1'b0;
         pte_r = entry.s2_pte_r; pte_w = entry.s2_pte_w;
@@ -518,13 +777,18 @@ function bit memblock_rm::observer_stage_permission_fault(
         privilege = 2'd3;
     end
     operation_allowed = store_access ? (pte_w && pte_a && pte_d) :
-                                       ((pte_r || (pte_x && mxr)) && pte_a);
+                                       ((hlvx ? pte_x : (pte_r || (pte_x && mxr))) && pte_a);
     privilege_allowed = 1'b1;
     if (stage_one) begin
         if (privilege == 2'd0) privilege_allowed = pte_u;
         else if (privilege == 2'd1) privilege_allowed = !pte_u || sum;
     end
-    return !pte_v || (pte_w && !pte_r) || !operation_allowed || !privilege_allowed;
+    // fake/nonleaf为G-for-VS隐式访问载荷，由G-stage决定，不制造S1 PF。
+    if(stage_one && entry.s2_stage_active &&
+       (tlb_context.priv_virt || tlb_context.is_hypervisor_inst) &&
+       !entry.fault_effective_s1_pf && !entry.fault_effective_s1_af &&
+       ((!pte_v) || !(pte_r || pte_w || pte_x))) return 0;
+    return !pte_v || (stage_one && pte_w && !pte_r) || !operation_allowed || !privilege_allowed;
 endfunction:observer_stage_permission_fault
 
 // 中文注释：RM 在每个已命中的 TLB entry 上重建 PBMT/PBMTE 的 response-visible
@@ -626,12 +890,13 @@ function bit memblock_rm::observer_try_apply_first_split_data_error(
         if (!item.pa_valid_mask[idx] ||
             item.pa_by_byte[idx][47:6] != item.pa_by_byte[0][47:6] ||
             !ro.read_pma_pmp_af_for_rm(item.uid, item.dynamic_epoch, 1'b1,
-                                      item.pa_by_byte[idx][47:0], 1, PMA_PMP_CMD_READ, byte_view) ||
+                                      item.pa_by_byte[idx][47:0], 1, item.hlvx ? PMA_PMP_CMD_READ_EXEC : PMA_PMP_CMD_READ, byte_view) ||
             !byte_view.valid || !byte_view.translation_eligible || !byte_view.af_decided ||
-            !byte_view.normal_cacheable || byte_view.ld_access_fault) return 1'b0;
+            !byte_view.normal_cacheable || byte_view.ld_access_fault ||
+            (item.hlvx && byte_view.instr_access_fault)) return 1'b0;
     end
     rob_key = '{flag: item.rob.flag, value: item.rob.value};
-    if (!ro.read_dut_load_writeback_for_rm(rob_key, load_view) ||
+    if (!ro.read_dut_load_instance_for_rm(item.uid,rob_key,item.dynamic_epoch,load_view) ||
         !load_view.valid || !load_view.rob_valid || !load_view.rob_flag_valid ||
         load_view.rob_flag !== rob_key.flag || load_view.rob_value !== rob_key.value ||
         load_view.source_kind != 2'd1 || load_view.sample_seq == 0 ||
@@ -724,7 +989,10 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     bit s1_active;
     bit s2_active;
     bit bare_identity;
+    bit fault_segment_selected;
     bit [63:0] byte_va;
+    bit [63:0] fault_request_va;
+    memblock_rm_readonly_api::tlb_entry_view_t fault_entry;
     bit [51:0] first_vpn;
     bit [43:0] final_ppn;
     bit [3:0] expected_s1_mode;
@@ -756,18 +1024,23 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         item.cmo_op = rm_ls_decode_cmo_final_op(main_view.fu_op_type);
         void'(rm_ls_assign_cmo_data_semantics(item));
     end
+    item.hyperinst=memblock_op_behavior_util::is_guest_memory(main_view.fu_type,main_view.fu_op_type);
+    item.hlvx=memblock_op_behavior_util::is_hlvx(main_view.fu_type,main_view.fu_op_type);
     atomic_access = main_view.fu_type == MEMBLOCK_FUTYPE_MOU &&
                     memblock_op_behavior_util::is_amo_fuoptype(main_view.fu_op_type);
     // CMO只翻译请求地址；1B仅作为复用翻译循环的局部几何，返回前恢复CMO的0宽度。
     item.size_bytes = cmo_access ? 1 : atomic_access ? observer_atomic_size(main_view.fu_op_type) :
                                       observer_scalar_size(main_view.fu_op_type);
-    item.computed_vaddr = atomic_access ? main_view.src_0 :
+    item.computed_vaddr = (atomic_access || item.hyperinst) ? main_view.src_0 :
                                           observer_compute_vaddr(main_view.src_0,
                                                                  main_view.imm);
-    item.is_signed = main_view.fu_op_type == MEMBLOCK_LSUOP_LB ||
+    item.is_signed = main_view.fu_type == MEMBLOCK_FUTYPE_LDU &&
+                    (main_view.fu_op_type == MEMBLOCK_LSUOP_LB ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LH ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LW ||
-                     main_view.fu_op_type == MEMBLOCK_LSUOP_LD;
+                     main_view.fu_op_type == MEMBLOCK_LSUOP_LD ||
+                     (item.hyperinst && main_view.fu_op_type inside {
+                         MEMBLOCK_LSUOP_HLVB,MEMBLOCK_LSUOP_HLVH,MEMBLOCK_LSUOP_HLVW,MEMBLOCK_LSUOP_HLVD}));
     item.fp_wen = main_view.op_class == MEMBLOCK_OP_CLASS_FP_LOAD;
     if (cmo_access) begin
         item.kind = RM_LS_KIND_CMO;
@@ -798,7 +1071,13 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         end
         return 1'b1;
     end
+    if(item.hyperinst && main_view.imm!=0) begin
+        ls_model.set_error(RM_LS_ERR_MAIN_VADDR_MISMATCH,"特殊访存要求imm=0、地址独立取src_0"); return 0;
+    end
     if (item.kind == RM_LS_KIND_STORE) begin
+        if(item.hyperinst && !main_view.atomic_std_valid_mask[0]) begin
+            ls_model.set_error(RM_LS_ERR_ATOMIC_OPERAND_NOT_READY,"HSV缺少冻结STD数据入口");return 0;
+        end
         item.store_data = main_view.atomic_std_valid_mask[0] ?
                           main_view.atomic_std_data_flat[63:0] : main_view.src_0;
         item.store_byte_mask = 16'hffff >> (16 - item.size_bytes);
@@ -869,7 +1148,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     end
 
     ro = memblock_rm_readonly_api::get();
-    if (!ro.read_tlb_request_context_for_rm(item.uid, item.computed_vaddr[63:12], tlb_context) ||
+    if (!ro.read_tlb_request_context_for_rm(item.uid,
+        (item.kind inside {RM_LS_KIND_LOAD,RM_LS_KIND_STORE}) ? {14'b0,item.computed_vaddr[49:12]} : item.computed_vaddr[63:12], tlb_context) ||
         !tlb_context.valid) begin
         ls_model.set_error(RM_LS_ERR_TLB_CONTEXT_NOT_READY,
                            $sformatf("uid %0d first VPN frozen request context unavailable",
@@ -894,6 +1174,56 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                                      tlb_context.csr_update_seq));
         return 1'b0;
     end
+    if(item.kind inside {RM_LS_KIND_LOAD,RM_LS_KIND_STORE}) begin
+        item.address_inputs_valid=tlb_context.address_inputs_valid;
+        item.request_vaddr=tlb_context.address_inputs_valid ? {14'b0,tlb_context.request_vaddr[49:0]} : item.computed_vaddr;
+        item.reset_epoch=tlb_context.reset_epoch;item.issue_epoch=tlb_context.issue_epoch;
+        item.replay_seq=tlb_context.replay_seq;item.access_sample=tlb_context.issue_sample;
+        item.selected_pmm=rm_ls_select_pmm(item.hlvx,item.hyperinst,
+            tlb_context.priv_virt || item.hyperinst,tlb_context.priv_spvp,
+            tlb_context.priv_dmode,tlb_context.priv_imode,tlb_context.priv_mxr,tlb_context.priv_vmxr,
+            tlb_context.pmm_mseccfg,tlb_context.pmm_menvcfg,tlb_context.pmm_henvcfg,
+            tlb_context.pmm_hstatus,tlb_context.pmm_senvcfg);
+        if(!rm_ls_compute_address_precheck(
+            tlb_context.address_inputs_valid ? tlb_context.request_fullva : item.computed_vaddr,
+            item.selected_pmm,item.hyperinst ? {1'b0,tlb_context.priv_spvp} : tlb_context.priv_dmode,
+            tlb_context.s2xlate,tlb_context.priv_virt || item.hyperinst,
+            tlb_context.address_inputs_valid ? tlb_context.request_valid : 1'b1,
+            tlb_context.address_inputs_valid ? tlb_context.checkfullva : 1'b1,
+            tlb_context.satp_mode,tlb_context.vsatp_mode,tlb_context.hgatp_mode,
+            atomic_access ? 1 : item.size_bytes,item.effective_fullva,item.fault_report_va,
+            item.preaf,item.prepf,item.pregpf)) begin
+            ls_model.set_error(RM_LS_ERR_PMM_ENCODING,"PMM=01为非法UT控制输入");return 0;
+        end
+        if(item.address_inputs_valid && (tlb_context.raw_address!=item.computed_vaddr ||
+            tlb_context.is_hypervisor_inst!=item.hyperinst)) begin
+            ls_model.set_error(RM_LS_ERR_TLB_ENTRY_INCONSISTENT,"冻结访问输入与主表原操作数或特殊访存身份冲突");return 0;
+        end
+        item.expected_address_valid=1;
+        item.expected_vaddr=item.fault_report_va;
+        if(|(item.preaf|item.prepf|item.pregpf)) begin
+            store_access=item.kind==RM_LS_KIND_STORE || cmo_access ||
+                (atomic_access && item.atomic_kind!=RM_ATOMIC_LR);
+            item.expected_exception[store_access?7:5]=|item.preaf;
+            item.expected_exception[store_access?15:13]=|item.prepf;
+            item.expected_exception[store_access?23:21]=|item.pregpf;
+            item.expected_gpaddr_valid=|item.pregpf;item.expected_gpaddr=item.fault_report_va;
+            item.expected_vs_nonleaf=0;item.translation_valid=1;return 1;
+        end
+        // 原始vaddr可能仍含被PMM忽略的only-S2有效位；保留实现比较并独立标识语义差异。
+        if(item.selected_pmm==3 && tlb_context.s2xlate==2 && tlb_context.hgatp_mode==9 &&
+           item.request_vaddr[49:48]!=item.effective_fullva[49:48])
+        begin
+            item.pmm_address_semantic_mismatch=1;
+            item.pmm_reference_result=RM_PMM_REFERENCE_MISSING;
+        end
+        item.expected_vaddr=observer_extend_exception_va(item.fault_report_va,tlb_context);
+    end else begin
+        // AMO/CMO保留已有地址及生命周期合同，本新增标量快照不替换它们的来源。
+        item.request_vaddr=item.computed_vaddr;
+        item.effective_fullva=item.computed_vaddr;item.fault_report_va=item.computed_vaddr;
+    end
+    fault_request_va=item.request_vaddr;fault_entry='0;fault_segment_selected=0;
     if (!observer_trace_translation_path_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRANSLATION",
                   $sformatf("uid=%0d translation_path=%s satp=%0d vsatp=%0d hgatp=%0d s2xlate=%0d csr_seq=%0d",
@@ -906,7 +1236,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     end
     item.translation_key = tlb_context.request_key;
     if (!bare_identity) begin
-        if (!ro.resolve_tlb_entry_for_rm(item.uid, item.computed_vaddr[63:12],
+        if (!ro.resolve_tlb_entry_for_rm(item.uid, item.request_vaddr[63:12],
                                          tlb_context, entry)) begin
             ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
                                $sformatf("uid %0d first VPN completed UID translation unavailable",
@@ -914,6 +1244,14 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
             return 1'b0;
         end
         item.translation_key = tlb_context.entry_key;
+    end
+    if(item.pmm_address_semantic_mismatch && entry.valid && entry.s2_stage_active) begin
+        // 同一冻结payload覆盖两个VPN时权限及PBMT同源；仅独立重算PPN/offset。
+        // 覆盖不足时保留MISSING，不能用提交时current表补出一个预期别名。
+        item.pmm_reference_result=rm_ls_check_pmm_stage2_reference(
+            item.request_vaddr[63:12],item.effective_fullva[63:12],entry.lookup_key.vpn,
+            entry.s2_level,entry.s2_pte_n,entry.s2_entry_ppn_raw,item.effective_fullva[11:0],
+            item.pmm_implementation_pa,item.pmm_architectural_pa);
     end
     store_access = (cmo_access && item.cmo_permission_write) ||
                    item.kind == RM_LS_KIND_STORE ||
@@ -925,7 +1263,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         pma_pmp_cmd = item.atomic_kind == RM_ATOMIC_LR ?
                       PMA_PMP_CMD_ATOM_READ : PMA_PMP_CMD_ATOM_WRITE;
     end else begin
-        pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
+        pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : item.hlvx ? PMA_PMP_CMD_READ_EXEC : PMA_PMP_CMD_READ;
     end
     first_byte_is_pma_mmio = 1'b0;
     first_byte_pma_known = 1'b0;
@@ -950,7 +1288,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     later_split_fault_stage_two = 1'b0;
     later_split_fault_s1_af_or_s2_gaf = 1'b0;
     later_split_uncache_override = 1'b0;
-    first_vpn = item.computed_vaddr[63:12];
+    first_vpn = item.request_vaddr[63:12];
     if (bare_identity) begin
         if (!item.set_bare_identity_geometry(bad_byte_index)) begin
             ls_model.set_error(RM_LS_ERR_BARE_PA_OUT_OF_RANGE,
@@ -967,7 +1305,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         // 的测试框架翻译状态。
         dut_stops_after_first_page = 1'b0;
         for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
-            byte_va = item.computed_vaddr + byte_index;
+            byte_va = item.request_vaddr + byte_index;
+            if(item.address_inputs_valid) byte_va={14'b0,byte_va[49:0]};
             if (byte_va[63:12] != first_vpn && item.kind == RM_LS_KIND_LOAD &&
                 misaligned && tlb_context.hd_misalign_ld_enable && all_bytes_pma_pbmt &&
                 !translation_access_fault && !stage_one_fault && !stage_two_fault &&
@@ -1038,14 +1377,18 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                                     ((!entry.fault_effective_s1_pf &&
                                       !entry.fault_effective_s1_af) &&
                                      observer_stage_permission_fault(entry, tlb_context,
-                                                                     store_access, 1'b1)) ||
+                                                                     store_access, 1'b1, item.hlvx)) ||
                                     pbmt_force_s1_pf;
             entry_stage_two_fault = entry.fault_effective_s2_gpf ||
                                     ((!entry.fault_effective_s2_gpf &&
                                       !entry.fault_effective_s2_gaf) &&
                                      observer_stage_permission_fault(entry, tlb_context,
-                                                                     store_access, 1'b0)) ||
+                                                                     store_access, 1'b0, item.hlvx)) ||
                                     pbmt_force_s2_gpf;
+            // 翻译AF优先于PF，S1 PF优先于G-stage fault。
+            if(entry.fault_effective_s1_af || entry.fault_effective_s2_gaf || entry.pma_af) begin
+                entry_stage_one_fault=0;entry_stage_two_fault=0;
+            end else if(entry_stage_one_fault) entry_stage_two_fault=0;
             entry_target_translation_fault =
                 entry.fault_effective_s1_af ||
                 entry.fault_effective_s2_gaf ||
@@ -1100,14 +1443,14 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                           !response_entry.fault_effective_s1_af) &&
                          observer_stage_permission_fault(
                              response_entry, tlb_context,
-                             store_access, 1'b1));
+                             store_access, 1'b1, item.hlvx));
                     response_stage_two_fault =
                         response_entry.fault_effective_s2_gpf ||
                         ((!response_entry.fault_effective_s2_gpf &&
                           !response_entry.fault_effective_s2_gaf) &&
                          observer_stage_permission_fault(
                              response_entry, tlb_context,
-                             store_access, 1'b0));
+                             store_access, 1'b0, item.hlvx));
                     response_target_translation_fault =
                         response_entry.fault_effective_s1_af ||
                         response_entry.fault_effective_s2_gaf ||
@@ -1125,6 +1468,11 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
             end
             stage_one_fault |= entry_stage_one_fault;
             stage_two_fault |= entry_stage_two_fault;
+            if(!fault_segment_selected && (entry_stage_one_fault || entry_stage_two_fault ||
+                entry.fault_effective_s1_af || entry.fault_effective_s2_gaf || entry.pma_af)) begin
+                fault_segment_selected=1;fault_entry=entry;fault_request_va=byte_va;
+                if(byte_va[63:12]!=first_vpn) item.expected_vaddr=observer_extend_exception_va({byte_va[63:12],12'b0},tlb_context);
+            end
             if (!entry.fault && !entry.pma_af &&
                 !pbmt_force_s1_pf && !pbmt_force_s2_gpf &&
                 tlb_context.request_translation_valid) begin
@@ -1163,7 +1511,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                                        byte_pma_pmp_view.af_decided;
                 first_byte_pma_fault = first_byte_pma_known &&
                     (store_access ? byte_pma_pmp_view.st_access_fault :
-                                    byte_pma_pmp_view.ld_access_fault);
+                                    (byte_pma_pmp_view.ld_access_fault || (item.hlvx && byte_pma_pmp_view.instr_access_fault)));
                 first_byte_is_pma_mmio = first_byte_pma_known &&
                     effective_pbmt == 2'd0 &&
                     !byte_pma_pmp_view.normal_cacheable &&
@@ -1218,14 +1566,14 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
             return 1'b0;
         end
         item.expected_pmp_fault = store_access ? pma_pmp_view.pmp_st_fault :
-                                                   pma_pmp_view.pmp_ld_fault;
+                                                   (pma_pmp_view.pmp_ld_fault || (item.hlvx && pma_pmp_view.pmp_instr_fault));
         item.expected_pma_fault = store_access ? pma_pmp_view.pma_st_fault :
-                                                   pma_pmp_view.pma_ld_fault;
+                                                   (pma_pmp_view.pma_ld_fault || (item.hlvx && pma_pmp_view.pma_instr_fault));
         item.expected_keyid_fault = pma_pmp_view.keyid_fault;
         item.expected_pma_atomic_fault = pma_pmp_view.pma_atomic_fault;
         item.expected_pma_cache_path_fault = pma_pmp_view.pma_cache_path_fault;
         pma_pmp_access_fault = store_access ? pma_pmp_view.st_access_fault :
-                                               pma_pmp_view.ld_access_fault;
+                                               (pma_pmp_view.ld_access_fault || (item.hlvx && pma_pmp_view.instr_access_fault));
         // 只有 model 开启、完整尺寸 view 已决且当前 command 无基础 AF 时，
         // 才允许逐 byte 证明整笔 PMA MMIO。READ command 下 st_access_fault
         // 固定为 0，不代表额外要求 Load 具备写权限。
@@ -1234,7 +1582,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                              pma_pmp_view.translation_eligible &&
                              pma_pmp_view.af_decided &&
                              !(store_access ? pma_pmp_view.st_access_fault :
-                                              pma_pmp_view.ld_access_fault) &&
+                                              (pma_pmp_view.ld_access_fault || (item.hlvx && pma_pmp_view.instr_access_fault))) &&
                              !pma_pmp_view.st_access_fault;
         // PMA/PMP 的完整尺寸查询继续服务既有 Access-Fault 期望；非对齐放宽
         // 还必须证明每一个实际 PA byte 都属于普通可缓存区域。单字节查询
@@ -1262,7 +1610,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                 !byte_pma_pmp_view.af_decided ||
                 !byte_pma_pmp_view.normal_cacheable ||
                 (store_access ? byte_pma_pmp_view.st_access_fault :
-                                byte_pma_pmp_view.ld_access_fault)) begin
+                                (byte_pma_pmp_view.ld_access_fault || (item.hlvx && byte_pma_pmp_view.instr_access_fault)))) begin
                 all_bytes_normal_cacheable = 1'b0;
             end
             if (!byte_pma_pmp_view.valid ||
@@ -1270,7 +1618,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                 !byte_pma_pmp_view.af_decided ||
                 byte_pma_pmp_view.normal_cacheable ||
                 (store_access ? byte_pma_pmp_view.st_access_fault :
-                                byte_pma_pmp_view.ld_access_fault) ||
+                                (byte_pma_pmp_view.ld_access_fault || (item.hlvx && byte_pma_pmp_view.instr_access_fault))) ||
                 byte_pma_pmp_view.st_access_fault) begin
                 all_bytes_pma_mmio = 1'b0;
             end
@@ -1364,6 +1712,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                                      item.uid, item.pa_valid_mask));
         return 1'b0;
     end
+    if(stage_two_fault && !translation_access_fault && !stage_one_fault)
+        observer_compute_guest_fault_address(item,tlb_context,fault_entry,fault_request_va);
     item.translation_valid = 1'b1;
     item.all_pma_mmio = all_bytes_pma_mmio;
     if (!seq_csr_common::get_pma_pmp_model_en())
@@ -1377,6 +1727,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     // PMA分类在PMA-MMIO与normal cacheable之间选择。
     item.uncache_path = all_bytes_pma_mmio || !all_bytes_pma_pbmt;
     item.uncache_nc_path = first_effective_pbmt_valid && first_effective_pbmt==2'd1;
+    item.translation_pbmt=first_effective_pbmt;
+    observer_check_pmm_arch_reference(item);
     if (!observer_trace_translation_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRACE_TRANSLATION",
                   $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d hdMisalign=%0d allPbmtPma=%0d allPmaMmio=%0d allNormalCacheable=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
@@ -1603,7 +1955,7 @@ function bit memblock_rm::observer_capture_commit_actual(
         load_rob_key.flag = main_view.rob_idx_flag;
         load_rob_key.value = main_view.rob_idx_value;
         found_dut_load_writeback =
-            ro.read_dut_load_writeback_for_rm(load_rob_key, load_view);
+            ro.read_dut_load_instance_for_rm(item.uid,load_rob_key,item.dynamic_epoch,load_view);
 
         // 中文注释：status 只描述框架终态，不能替代同 ROB 的 DUT LDA 写回证据。
         // 调用者记录 UVM_ERROR 后消费该 uid，继续比较后续独立 uid。
@@ -2074,6 +2426,7 @@ function bit memblock_rm::observer_process_current_commit();
     bit any_exception;
 
     ro = memblock_rm_readonly_api::get();
+    observer_service_exception_addresses();
     if (!ro.framework_ready_for_rm()) return 1'b0;
     if (!ro.read_framework_context_for_rm(framework_view) || !framework_view.valid ||
         !framework_view.main_table_ready || framework_view.main_trans_num == 0) return 1'b0;
@@ -2292,6 +2645,25 @@ function bit memblock_rm::observer_process_current_commit();
             '{flag:item.rob.flag,value:MEMBLOCK_ROB_VALUE_W'(item.rob.value)},item.dynamic_epoch))
         `uvm_error("RM_CMO_DUPLICATE_COMPLETION","CMO提交后终态审计注册失败")
     if(ls_model.current_uid!=uid_before) begin
+        if((item.kind inside {RM_LS_KIND_LOAD,RM_LS_KIND_STORE}) &&
+           (item.expected_exception!=0 || status_view.exception_vec!=0))
+            observer_pending_address.push_back(item);
+        if(item.pmm_address_semantic_mismatch) begin
+            if(item.pmm_reference_result==RM_PMM_REFERENCE_MISSING)
+                `uvm_error("PMM_ADDRESS_REFERENCE_MISSING",$sformatf("uid=%0d冻结G-stage参考范围不足以证明masked VPN；request=%h effective=%h，不将key差异定性为RTL错误",item.uid,item.request_vaddr,item.effective_fullva))
+            else if(item.pmm_reference_result==RM_PMM_REFERENCE_MISMATCH)
+                `uvm_error("PMM_ADDRESS_SEMANTIC_MISMATCH",$sformatf("uid=%0d独立冻结范围证明架构PA=%h，实际请求参考PA=%h",item.uid,item.pmm_architectural_pa,item.pmm_implementation_pa))
+            else
+                `uvm_info("PMM_ADDRESS_SEMANTIC_MATCH",$sformatf("uid=%0d不同VPN在冻结范围内的架构地址与实现结果相同",item.uid),UVM_LOW)
+            if(item.pmm_reference_result!=RM_PMM_REFERENCE_MATCH) begin
+                // 数据游标已单次推进；独立语义责任失败不能再打印本条整体PASS。
+                compare_result=0;
+                ls_model.set_error(item.pmm_reference_result==RM_PMM_REFERENCE_MISSING ?
+                    RM_LS_ERR_PMM_ADDRESS_REFERENCE_MISSING : RM_LS_ERR_PMM_ADDRESS_SEMANTIC_MISMATCH,
+                    $sformatf("uid=%0d PMM独立架构地址责任未通过 result=%0d",item.uid,item.pmm_reference_result));
+            end
+        end
+        observer_service_exception_addresses();
         dcache_errors.release_completed_owner(item.uid,item.dynamic_epoch);
         if(item.kind==RM_LS_KIND_CMO && item.cmo_pre_access_exception==0 &&
            item.cmo_path!=RM_CMO_PATH_UNCACHE_ZERO)

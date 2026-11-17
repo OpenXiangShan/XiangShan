@@ -53,6 +53,20 @@ typedef struct {
     logic            sampled_lu1_ptw_req_valid;
     logic [37:0]     sampled_lu1_ptw_req_vpn;
     logic [1:0]      sampled_lu1_ptw_req_s2xlate;
+    // 中文注释：Store后页被动来源与transport/reset原子采样，零值不表示有效。
+    logic  sampled_split_store_req_valid;
+    logic  sampled_split_store_req_ready;
+    logic  sampled_split_store_req_rob_flag;
+    logic [7:0] sampled_split_store_req_rob_value;
+    logic [63:0] sampled_split_store_req_vaddr;
+    logic  sampled_stu0_tlb_req_valid;
+    logic  sampled_stu0_tlb_req_frm_mabuf;
+    logic  sampled_stu0_tlb_req_rob_flag;
+    logic [7:0] sampled_stu0_tlb_req_rob_value;
+    logic [63:0] sampled_stu0_tlb_req_vaddr;
+    logic  sampled_stu0_ptw_req_valid;
+    logic [37:0] sampled_stu0_ptw_req_vpn;
+    logic [1:0] sampled_stu0_ptw_req_s2xlate;
     logic            sampled_resp_valid;
     logic [1:0]      sampled_resp_bits_s2xlate;
     logic [34:0]     sampled_resp_bits_s1_entry_tag;

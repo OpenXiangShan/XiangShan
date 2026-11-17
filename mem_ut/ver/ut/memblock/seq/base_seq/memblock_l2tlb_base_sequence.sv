@@ -745,6 +745,14 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         sample.sampled_lu1_ptw_req_vpn,
         sample.sampled_lu1_ptw_req_s2xlate,
         sample_seq);
+    data.observe_later_split_store_tlb_sample(
+        sample.sampled_split_store_req_valid && sample.sampled_split_store_req_ready,
+        '{flag:sample.sampled_split_store_req_rob_flag,value:sample.sampled_split_store_req_rob_value},
+        sample.sampled_split_store_req_vaddr,
+        sample.sampled_stu0_tlb_req_valid,sample.sampled_stu0_tlb_req_frm_mabuf,
+        '{flag:sample.sampled_stu0_tlb_req_rob_flag,value:sample.sampled_stu0_tlb_req_rob_value},
+        sample.sampled_stu0_tlb_req_vaddr,sample.sampled_stu0_ptw_req_valid,
+        sample.sampled_stu0_ptw_req_vpn,sample.sampled_stu0_ptw_req_s2xlate,sample_seq);
     data.observe_later_split_load_response_sample(
         sample.sampled_split_load_resp_valid &&
             !sample.sampled_split_load_resp_misalign_need_wakeup,
@@ -1928,7 +1936,9 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
     end
     record_update_count = data.complete_waiting_uid_records_by_response(
         driving_req.entry_snapshot,
-        actual_response_csr_snapshot);
+        actual_response_csr_snapshot,
+        driving_req.request_token,
+        complete_sample_seq);
     `uvm_info(get_type_name(),
               $sformatf("complete L2TLB token=%0d bucket=%0d min_latency=%0d accept=%0d due=%0d complete=%0d extra_wait=%0d uid_records=%0d pending=%0d",
                         driving_req.request_token,

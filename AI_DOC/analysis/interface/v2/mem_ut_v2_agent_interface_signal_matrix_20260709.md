@@ -1734,3 +1734,34 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
   status补齐当前动态实例；VSTU valid在scalar-only范围内显式fatal。
 
 - V2 顶层仍有 360 个端口未归属现有 agent，主要是 TileLink/总线、perf/trace、L2 TLB/PMP、L2 prefetch、WFI/低功耗、外部控制边界端口；如后续测试目标需要覆盖，应按本文分类新增或扩展 agent。
+
+
+## 8. 2026-11-17：RM Store后页被动旁路增量
+
+本节更新测试框架接口覆盖，不更新RTL知识库。版本V2，工作分支`codex/memblock-virtualization-20261117`；权威生成RTL来自同版本原工作树`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/build/rtl/MemBlock.sv`，当前coding worktree未重新生成RTL。DUT入口`mem_ut/ver/ut/memblock/tb/dut_inst.sv`及`memblock_connect.sv`不变，本次只扩展既有`L2tlb_agent_connect.sv`被动信号。
+
+相关文件均位于`mem_ut/ver/ut/memblock`：interface/xaction/driver/monitor分别是`agent/L2tlb_agent_agent/src/L2tlb_agent_agent_{interface,xaction,driver,monitor}.sv`，connect是`tb/L2tlb_agent_connect.sv`；owner consumer是`seq/base_seq/memblock_l2tlb_base_sequence.sv`。没有新增agent，不改变`tb.f`或env实例化。
+
+所有新增信号在drv_cb和mon_cb均为input。driver采集后写`memblock_l2tlb_drv_sample_t.sampled_<信号名>`；monitor通过`get_payload()`接收driver冻结的完整运输结构，不再独立读VIF，故表中“monitor有”为结构化转发覆盖，不能误写成第二次硬件采样。
+
+| 信号 | 位宽 | interface方向 | transaction字段 | connect | connect方向/对象 | monitor采集 | driver驱动 |
+|---|---:|---|---|---|---|---|---|
+| `split_store_req_valid` | 1 | drv_cb/mon_cb input | 有：`sampled_split_store_req_valid` | 有 | RTL→IF：`_inner_storeMisalignBuffer_io_splitStoreReq_valid` | 有：冻结结构转发 | 没有：仅采集 |
+| `split_store_req_ready` | 1 | drv_cb/mon_cb input | 有：`sampled_split_store_req_ready` | 有 | RTL→IF：`_inner_StoreUnit_0_io_misalign_stin_ready` | 有：冻结结构转发 | 没有：仅采集 |
+| `split_store_req_rob_flag` | 1 | drv_cb/mon_cb input | 有：`sampled_split_store_req_rob_flag` | 有 | RTL→IF：`_inner_storeMisalignBuffer_io_splitStoreReq_bits_uop_robIdx_flag` | 有：冻结结构转发 | 没有：仅采集 |
+| `split_store_req_rob_value` | 8 | drv_cb/mon_cb input | 有：`sampled_split_store_req_rob_value` | 有 | RTL→IF：`_inner_storeMisalignBuffer_io_splitStoreReq_bits_uop_robIdx_value` | 有：冻结结构转发 | 没有：仅采集 |
+| `split_store_req_vaddr` | 64 | drv_cb/mon_cb input | 有：`sampled_split_store_req_vaddr` | 有 | RTL→IF：`_inner_storeMisalignBuffer_io_splitStoreReq_bits_vaddr，50位符号扩展` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_tlb_req_valid` | 1 | drv_cb/mon_cb input | 有：`sampled_stu0_tlb_req_valid` | 有 | RTL→IF：`_inner_StoreUnit_0_io_tlb_req_valid` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_tlb_req_frm_mabuf` | 1 | drv_cb/mon_cb input | 有：`sampled_stu0_tlb_req_frm_mabuf` | 有 | RTL→IF：`_inner_StoreUnit_0_io_tlb_req_bits_frm_mabuf` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_tlb_req_rob_flag` | 1 | drv_cb/mon_cb input | 有：`sampled_stu0_tlb_req_rob_flag` | 有 | RTL→IF：`_inner_StoreUnit_0_io_tlb_req_bits_debug_robIdx_flag` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_tlb_req_rob_value` | 8 | drv_cb/mon_cb input | 有：`sampled_stu0_tlb_req_rob_value` | 有 | RTL→IF：`_inner_StoreUnit_0_io_tlb_req_bits_debug_robIdx_value` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_tlb_req_vaddr` | 64 | drv_cb/mon_cb input | 有：`sampled_stu0_tlb_req_vaddr` | 有 | RTL→IF：`_inner_StoreUnit_0_io_tlb_req_bits_vaddr，50位符号扩展` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_ptw_req_valid` | 1 | drv_cb/mon_cb input | 有：`sampled_stu0_ptw_req_valid` | 有 | RTL→IF：`_inner_dtlb_st_tlb_st_io_ptw_req_0_valid` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_ptw_req_vpn` | 38 | drv_cb/mon_cb input | 有：`sampled_stu0_ptw_req_vpn` | 有 | RTL→IF：`_inner_dtlb_st_tlb_st_io_ptw_req_0_bits_vpn` | 有：冻结结构转发 | 没有：仅采集 |
+| `stu0_ptw_req_s2xlate` | 2 | drv_cb/mon_cb input | 有：`sampled_stu0_ptw_req_s2xlate` | 有 | RTL→IF：`_inner_dtlb_st_tlb_st_io_ptw_req_0_bits_s2xlate` | 有：冻结结构转发 | 没有：仅采集 |
+
+缺失项汇总：本增量13字段缺transaction=0、缺connect=0、缺monitor运输覆盖=0；缺driver主动驱动=13，全部为RTL产生的被动输入，属于合理例外。driver真实采集13字段并检查握手X/Z；active分支RTL→IF，inactive分支常量0→IF。没有新增DUT input、默认常量补丁或第二ready owner。
+
+DUT顶层未归属agent汇总：本增量未增删或重接DUT顶层端口，既有第6章逐端口清单及第7章360个未归属端口基线保持；未重新核验整颗顶层清单，不能把此次13条内部wire核验说成全顶层复审。版本未切换，新增位宽50→64仅为测试框架观察值扩展，真实lookup仍使用低50位/38位VPN。
+
+风险与复查：13个内部wire已静态逐项核对生成RTL存在；Store TLB req kill在当前源码固定false，生成RTL没有该独立wire，未新增虚构字段。monitor唯一采样合同保留。独立接口复查及Store后页hit/miss仿真待集成方补证；重新生成RTL后必须重新核对这些内部名称。

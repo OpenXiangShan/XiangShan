@@ -27,6 +27,10 @@ class basicTest extends tcnt_test_base ;
                  vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_csr_random_config_vseq" ||
+                 vseq_name == "memblock_pmm10_real_vseq" ||
+                 vseq_name == "memblock_pmm11_real_vseq" ||
+                 vseq_name == "memblock_pmm00_preaf_real_vseq" ||
+                 vseq_name == "memblock_pmm_s2_alias_real_vseq" ||
                  vseq_name == "memblock_csr_scalar_load_10k_vseq" ||
                  vseq_name == "memblock_csr_scalar_store_10k_vseq" ||
                  vseq_name == "memblock_csr_scalar_mixed_10k_vseq" ||
@@ -46,6 +50,10 @@ class basicTest extends tcnt_test_base ;
                  vseq_name == "memblock_dispatch_real_cbo_fault_cold_isolated_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_csr_random_config_vseq" ||
+                 vseq_name == "memblock_pmm10_real_vseq" ||
+                 vseq_name == "memblock_pmm11_real_vseq" ||
+                 vseq_name == "memblock_pmm00_preaf_real_vseq" ||
+                 vseq_name == "memblock_pmm_s2_alias_real_vseq" ||
                  vseq_name == "memblock_csr_scalar_load_10k_vseq" ||
                  vseq_name == "memblock_csr_scalar_store_10k_vseq" ||
                  vseq_name == "memblock_csr_scalar_mixed_10k_vseq" ||

@@ -112,7 +112,11 @@ typedef enum int unsigned {
     RM_LS_ERR_CMO_DUPLICATE_COMPLETION,
     RM_LS_ERR_CMO_COMPLETION_MISMATCH,
     RM_LS_ERR_CMO_REQUEST_MISMATCH,
-    RM_LS_ERR_CMO_EFFECT_MISMATCH
+    RM_LS_ERR_CMO_EFFECT_MISMATCH,
+    RM_LS_ERR_PMM_ENCODING,
+    RM_LS_ERR_PMM_ADDRESS_SEMANTIC_MISMATCH,
+    RM_LS_ERR_PMM_ADDRESS_REFERENCE_MISSING,
+    RM_LS_ERR_EXCEPTION_ADDRESS_MISMATCH
 } rm_ls_error_e;
 
 function automatic bit rm_ls_decode_translation_path(
@@ -199,6 +203,99 @@ function automatic bit rm_ls_decode_translation_path(
     return 1'b1;
 endfunction
 
+typedef enum int unsigned {
+    RM_PMM_REFERENCE_MATCH = 0,
+    RM_PMM_REFERENCE_MISMATCH,
+    RM_PMM_REFERENCE_MISSING
+} rm_pmm_reference_result_e;
+
+// 抽象职责：用同一个冻结G-stage范围证明掩码后的架构地址，不查询或改动映射。
+function automatic rm_pmm_reference_result_e rm_ls_check_pmm_stage2_reference(
+    input bit [51:0] original_vpn, masked_vpn, reference_vpn,
+    input bit [1:0] level,
+    input bit napot,
+    input bit [37:0] raw_s2_ppn,
+    input bit [11:0] offset,
+    output bit [63:0] implementation_pa, architectural_pa);
+    int unsigned ignored_bits;
+    bit [51:0] vpn_mask;
+    bit [43:0] original_ppn, masked_ppn;
+    implementation_pa=0;architectural_pa=0;
+    ignored_bits=level==0 ? (napot ? 4 : 0) : 9*int'(level);
+    vpn_mask=(52'b1<<ignored_bits)-52'd1;
+    if((original_vpn & ~vpn_mask)!=(reference_vpn & ~vpn_mask) ||
+       (masked_vpn & ~vpn_mask)!=(reference_vpn & ~vpn_mask))
+        return RM_PMM_REFERENCE_MISSING;
+    original_ppn={6'b0,raw_s2_ppn};masked_ppn=original_ppn;
+    case(level)
+        3:begin original_ppn[26:0]=original_vpn[26:0];masked_ppn[26:0]=masked_vpn[26:0];end
+        2:begin original_ppn[17:0]=original_vpn[17:0];masked_ppn[17:0]=masked_vpn[17:0];end
+        1:begin original_ppn[8:0]=original_vpn[8:0];masked_ppn[8:0]=masked_vpn[8:0];end
+        0:if(napot) begin original_ppn[3:0]=original_vpn[3:0];masked_ppn[3:0]=masked_vpn[3:0];end
+    endcase
+    // V2最终物理地址48bit，丢弃不会进入物理索引的PPN高位。
+    implementation_pa={16'b0,original_ppn[35:0],offset};
+    architectural_pa={16'b0,masked_ppn[35:0],offset};
+    return implementation_pa==architectural_pa ? RM_PMM_REFERENCE_MATCH : RM_PMM_REFERENCE_MISMATCH;
+endfunction
+
+// 抽象职责：仅按冻结控制选择指针掩码，不读取运行期状态。
+function automatic bit [1:0] rm_ls_select_pmm(
+    input bit hlvx, hyperinst, guest, spvp,
+    input bit [1:0] dmode, imode,
+    input bit mxr, vmxr,
+    input bit [1:0] mseccfg, menvcfg, henvcfg, hupmm, senvcfg);
+    bit [1:0] effective_mode;
+    effective_mode = hyperinst ? {1'b0, spvp} : dmode;
+    if (hlvx) return 0;
+    if (effective_mode == 3) return mseccfg;
+    if (guest ? (mxr || vmxr) : mxr) return 0;
+    if (!guest && effective_mode == 1) return menvcfg;
+    if (guest && effective_mode == 1) return henvcfg;
+    if (hyperinst && imode == 0) return hupmm;
+    if (effective_mode == 0) return senvcfg;
+    return 0;
+endfunction
+
+// 抽象职责：对首末字节独立做有效地址预检查，输出异常位图与故障位置。
+function automatic bit rm_ls_compute_address_precheck(
+    input bit [63:0] raw_fullva,
+    input bit [1:0] pmm, effective_mode, s2xlate,
+    input bit guest, request_valid, checkfullva,
+    input bit [3:0] satp_mode, vsatp_mode, hgatp_mode,
+    input int unsigned size_bytes,
+    output bit [63:0] effective_fullva, fault_report_va,
+    output bit [1:0] preaf, prepf, pregpf,
+    input bit tlb_debug_enable=0);
+    bit host_vm, guest_vm, sign_extend;
+    bit [63:0] checked_va[2];
+    int unsigned canonical_bits, guest_bits;
+    preaf=0;prepf=0;pregpf=0;
+    effective_fullva=raw_fullva;fault_report_va=raw_fullva;
+    if (pmm == 1) return 0;
+    host_vm=!guest && (satp_mode inside {4'd8,4'd9}) && (tlb_debug_enable || effective_mode<3);
+    guest_vm=guest && ((vsatp_mode inside {4'd8,4'd9}) ||
+        (hgatp_mode inside {4'd8,4'd9})) && effective_mode<3;
+    sign_extend=host_vm || (guest_vm && vsatp_mode!=0);
+    if(pmm==2) effective_fullva=sign_extend ? {{7{raw_fullva[56]}},raw_fullva[56:0]} : {7'b0,raw_fullva[56:0]};
+    if(pmm==3) effective_fullva=sign_extend ? {{16{raw_fullva[47]}},raw_fullva[47:0]} : {16'b0,raw_fullva[47:0]};
+    checked_va[0]=effective_fullva;
+    checked_va[1]=effective_fullva+((size_bytes inside {[1:8]}) ? 64'(size_bytes)-64'd1 : 64'd0);
+    canonical_bits=(s2xlate==0 ? satp_mode : vsatp_mode)==9 ? 48 : 39;
+    guest_bits=hgatp_mode==9 ? 50 : 41;
+    if(request_valid && checkfullva) begin
+        foreach(checked_va[i]) begin
+            if(host_vm || guest_vm) begin
+                if(s2xlate==2) pregpf[i]=(checked_va[i]>>guest_bits)!=0;
+                else if(canonical_bits==48) prepf[i]=checked_va[i]!={{16{checked_va[i][47]}},checked_va[i][47:0]};
+                else prepf[i]=checked_va[i]!={{25{checked_va[i][38]}},checked_va[i][38:0]};
+            end else preaf[i]=|checked_va[i][63:48];
+        end
+    end
+    fault_report_va=(preaf|prepf|pregpf)==2 ? {checked_va[1][63:12],12'b0} : effective_fullva;
+    return 1;
+endfunction
+
 typedef struct packed {
     bit        flag;
     bit [15:0] value;
@@ -211,6 +308,18 @@ class rm_ls_program_item_t;
     bit [8:0]       op;
     bit [63:0]      computed_vaddr;
     bit [63:0]      main_vaddr;
+    bit address_inputs_valid, hyperinst, hlvx;
+    bit [1:0] selected_pmm;
+    bit [63:0] request_vaddr, effective_fullva, fault_report_va;
+    bit [1:0] preaf, prepf, pregpf;
+    bit expected_address_valid, expected_gpaddr_valid, expected_vs_nonleaf;
+    bit [63:0] expected_vaddr, expected_gpaddr;
+    bit pmm_address_semantic_mismatch;
+    rm_pmm_reference_result_e pmm_reference_result;
+    bit [63:0] pmm_implementation_pa, pmm_architectural_pa;
+    bit [1:0] translation_pbmt;
+    longint unsigned reset_epoch;
+    int unsigned issue_epoch, replay_seq;
     longint unsigned pa_by_byte[16];
     bit [15:0]      pa_valid_mask;
     bit [85:0]      translation_key;
@@ -294,6 +403,12 @@ class rm_ls_program_item_t;
     function new(int unsigned uid_i = 0);
         valid = 0; uid = uid_i; kind = RM_LS_KIND_OTHER; op = '0;
         computed_vaddr = '0; main_vaddr = '0; pa_valid_mask = '0;
+        address_inputs_valid=0;hyperinst=0;hlvx=0;selected_pmm=0;
+        request_vaddr=0;effective_fullva=0;fault_report_va=0;
+        preaf=0;prepf=0;pregpf=0;expected_address_valid=0;expected_gpaddr_valid=0;
+        expected_vaddr=0;expected_gpaddr=0;expected_vs_nonleaf=0;
+        pmm_address_semantic_mismatch=0;pmm_reference_result=RM_PMM_REFERENCE_MATCH;
+        pmm_implementation_pa=0;pmm_architectural_pa=0;translation_pbmt=0;reset_epoch=0;issue_epoch=0;replay_seq=0;
         translation_key = '0; size_bytes = 0; is_signed = 0; fp_wen = 0;
         rob = '{default:'0}; translation_valid = 0; expected_exception = '0;
         expected_pmp_fault = 1'b0; expected_pma_fault = 1'b0;
@@ -334,8 +449,8 @@ class rm_ls_program_item_t;
         pa_valid_mask = '0;
         if (size_bytes == 0 || size_bytes > 16) return 1'b0;
         for (int unsigned i = 0; i < size_bytes; i++) begin
-            byte_va = computed_vaddr + i;
-            if (byte_va < computed_vaddr || |byte_va[63:48]) begin
+            byte_va = address_inputs_valid ? request_vaddr + i : computed_vaddr + i;
+            if (!address_inputs_valid && (byte_va < computed_vaddr || |byte_va[63:48])) begin
                 bad_byte_index = i;
                 return 1'b0;
             end

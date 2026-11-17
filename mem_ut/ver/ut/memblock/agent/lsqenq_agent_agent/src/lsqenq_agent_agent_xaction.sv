@@ -10,8 +10,10 @@
 
 `include "memblock_compile_params.svh"
 
-`define MEMBLOCK_V2_LSQ_LOAD_OR_PREFETCH_FUOPTYPE_VALUES [9'd0:9'd6], 9'd8, 9'd9, 9'd10
-`define MEMBLOCK_V2_LSQ_STORE_FUOPTYPE_VALUES [9'd0:9'd3], 9'd7, 9'd12, 9'd13, 9'd14
+// 中文注释：LSQ admission按已确认的LDU身份接纳HLV/HLVX，编码与RM同源。
+`define MEMBLOCK_V2_LSQ_LOAD_OR_PREFETCH_FUOPTYPE_VALUES [9'd0:9'd6], 9'd8, 9'd9, 9'd10, [9'd16:9'd22], 9'd29, 9'd30
+// 中文注释：HSV的0x10..0x13只在STU身份下接纳，driver仍核对fuType。
+`define MEMBLOCK_V2_LSQ_STORE_FUOPTYPE_VALUES [9'd0:9'd3], 9'd7, 9'd12, 9'd13, 9'd14, [9'd16:9'd19]
 
 class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     // Base legality follows backend dispatch->LSQ handshake:

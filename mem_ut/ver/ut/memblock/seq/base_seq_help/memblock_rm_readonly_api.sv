@@ -203,6 +203,7 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  fault_effective_s2_gaf;
         bit [1:0]            fault_stage_selected;
         bit [40:0]           s1_entry_ppn_raw;
+        bit [7:0][2:0]      s1_ppn_low;
         bit                  s1_resolved_ppn_valid;
         bit [43:0]           s1_resolved_ppn;
         bit [1:0]            s1_level;
@@ -262,6 +263,7 @@ class memblock_rm_readonly_api extends uvm_object;
         bit [43:0]           hgatp_ppn;
         bit                  priv_virt;
         bit                  priv_spvp;
+        bit [1:0]            pmm_mseccfg, pmm_menvcfg, pmm_henvcfg, pmm_hstatus, pmm_senvcfg;
         bit [1:0]            priv_imode;
         bit [1:0]            priv_dmode;
         bit                  priv_mxr;
@@ -274,7 +276,24 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  hd_misalign_st_enable;
         bit                  priv_debug;
         int unsigned         csr_update_seq;
+        bit address_inputs_valid, request_valid, checkfullva;
+        bit [63:0] raw_address, request_fullva, request_vaddr;
+        bit [2:0] cmd, size;
+        longint unsigned issue_sample, reset_epoch;
+        int unsigned issue_epoch, replay_seq;
     } tlb_request_context_view_t;
+
+    // 中文注释：异常地址actual独立于参考输入，保留四态及其真实采样身份。
+    typedef struct packed {
+        bit valid, required, pending, captured, canceled, missing;
+        memblock_uid_t uid;
+        memblock_rob_key_t rob_key;
+        int unsigned dynamic_epoch, issue_epoch, replay_seq;
+        longint unsigned frame_id, reset_epoch, input_sample, target_sample, sample_seq;
+        int unsigned address_source, cancel_reason;
+        logic [63:0] vaddr, gpaddr;
+        logic is_for_vs_non_leaf;
+    } backend_exception_address_view_t;
 
     // A value-only proof that a matching L2TLB response was sampled by the
     // DUT-facing transport.  This is intentionally separate from the live
@@ -400,6 +419,9 @@ class memblock_rm_readonly_api extends uvm_object;
         longint unsigned     latest_drained_cancel_sample_seq;
     } framework_context_view_t;
 
+    typedef enum int {RM_ACCESS_FOUND, RM_ACCESS_PENDING, RM_ACCESS_CANCELLED,
+        RM_ACCESS_MISSING} access_snapshot_result_e;
+
     static memblock_rm_readonly_api m_inst;
     static memblock_rm_observer_cache m_observer;
     static memblock_rm_dut_writeback_observer m_dut_writeback_observer;
@@ -418,6 +440,24 @@ class memblock_rm_readonly_api extends uvm_object;
     extern function bit read_dut_cmo_writeback_for_rm(input memblock_uid_t uid,
         input memblock_rob_key_t key, input int unsigned dynamic_epoch,
         output dut_writeback_view_t view, output bit duplicate);
+    extern function access_snapshot_result_e validate_access_snapshot_identity_for_rm(
+        input memblock_rm_access_snapshot_t snapshot,input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,input memblock_rob_key_t rob_key);
+    extern function void copy_access_snapshot_context(input memblock_rm_access_snapshot_t snapshot,
+        input bit [51:0] request_vpn, output tlb_request_context_view_t view);
+    extern function access_snapshot_result_e read_access_translation_snapshot_for_rm(
+        input memblock_uid_t uid, input int unsigned dynamic_epoch, input memblock_rob_key_t rob_key,
+        input bit [51:0] request_vpn, output tlb_request_context_view_t context_view,
+        output tlb_entry_view_t entry_view, output tlb_response_provenance_view_t provenance_view);
+
+    extern function bit read_backend_exception_address_for_rm(input memblock_uid_t uid,
+        input int unsigned dynamic_epoch, input memblock_rob_key_t rob_key,
+        output backend_exception_address_view_t view);
+
+    extern function bit read_dut_load_instance_for_rm(input memblock_uid_t uid,
+        input memblock_rob_key_t key, input int unsigned dynamic_epoch,
+        output dut_writeback_view_t view);
+
     extern function bit read_dut_load_writeback_for_rm(
         input memblock_rob_key_t key,
         output dut_writeback_view_t view
@@ -531,6 +571,10 @@ class memblock_rm_readonly_api extends uvm_object;
         output later_split_load_response_view_t response_view
     );
     // 中文注释：只读首段执行与独立D-error历史；pending区分尚未消费和已消费但无证明。
+    extern function bit read_pmm_arch_reference_for_rm(
+        input memblock_uid_t uid,input int unsigned dynamic_epoch,input memblock_rob_key_t rob_key,
+        input bit [51:0] masked_request_vpn,
+        output tlb_request_context_view_t context_view,output tlb_entry_view_t entry_view);
     extern function bit try_read_first_split_access_context_for_rm(
         input memblock_uid_t uid,
         input int unsigned dynamic_epoch,
@@ -701,6 +745,49 @@ function bit memblock_rm_readonly_api::mark_dut_cmo_completion_consumed_for_rm(i
     if(!read_dut_cmo_writeback_for_rm(uid,key,dynamic_epoch,completion,duplicate)) return 0;
     return m_dut_writeback_observer.mark_cmo_completion_consumed(completion);
 endfunction
+
+// 抽象职责：复制统一后端帧已经绑定的整组地址事实，不重新采样或寻找变化沿。
+function bit memblock_rm_readonly_api::read_backend_exception_address_for_rm(input memblock_uid_t uid,
+    input int unsigned dynamic_epoch, input memblock_rob_key_t rob_key,
+    output backend_exception_address_view_t view);
+    common_data_transaction data;
+    memblock_backend_cycle_frame_t frame;
+    view='0;
+    if (!try_get_common_data(data) || !data.backend_fault_address_by_uid.exists(uid)) return 0;
+    frame=data.backend_fault_address_by_uid[uid];
+    if (frame==null || frame.uid!=uid || frame.dynamic_epoch!=dynamic_epoch || frame.rob_key!=rob_key) return 0;
+    view.valid=1;view.uid=uid;view.rob_key=frame.rob_key;view.dynamic_epoch=frame.dynamic_epoch;
+    view.issue_epoch=frame.issue_epoch;view.replay_seq=frame.replay_seq;
+    view.frame_id=frame.transport.frame_id;view.reset_epoch=frame.transport.reset_epoch;
+    view.input_sample=frame.input_sample;view.target_sample=frame.target_sample;
+    view.sample_seq=frame.address.sample_seq;view.address_source=frame.address_source;
+    view.required=frame.address_required;view.captured=frame.address_captured;
+    view.cancel_reason=int'(frame.address_status);
+    view.canceled=frame.address_status inside {memblock_backend_cycle_frame_t::CANCELLED_RESET,
+        memblock_backend_cycle_frame_t::CANCELLED_COVERED};
+    view.missing=frame.address_status==memblock_backend_cycle_frame_t::ERROR_MISSING_SAMPLE;
+    view.pending=frame.address_required && !view.captured && !view.canceled && !view.missing;
+    view.vaddr=frame.address.vaddr;view.gpaddr=frame.address.gpaddr;
+    view.is_for_vs_non_leaf=frame.address.is_for_vs_non_leaf;
+    return 1;
+endfunction:read_backend_exception_address_for_rm
+
+// 抽象职责：用已冻结status实例过滤真实Load写回，不改变框架状态。
+function bit memblock_rm_readonly_api::read_dut_load_instance_for_rm(input memblock_uid_t uid,
+    input memblock_rob_key_t key, input int unsigned dynamic_epoch,
+    output dut_writeback_view_t view);
+    status_view_t status_v;
+    common_data_transaction data;
+    longint unsigned first_sample;
+    view='0;first_sample=0;
+    void'(get());
+    if (!read_status_for_rm(uid,status_v) || status_v.dynamic_epoch!=dynamic_epoch) return 0;
+    if (try_get_common_data(data) && data.uid_tlb_record_by_uid.exists(uid) &&
+        data.uid_tlb_record_by_uid[uid]!=null)
+        first_sample=data.uid_tlb_record_by_uid[uid].uid_wait_start_sample_seq;
+    return m_dut_writeback_observer.read_load_instance(uid,key,dynamic_epoch,status_v.load_issue_epoch,
+        status_v.load_instance_flush_epoch_valid,status_v.load_instance_flush_epoch,first_sample,view);
+endfunction:read_dut_load_instance_for_rm
 
 function bit memblock_rm_readonly_api::read_dut_load_writeback_for_rm(
     input memblock_rob_key_t key,
@@ -979,6 +1066,7 @@ function void memblock_rm_readonly_api::copy_tlb_entry(
     view.fault_effective_s2_gaf = source.fault_effective_s2_gaf;
     view.fault_stage_selected   = source.fault_stage_selected;
     view.s1_entry_ppn_raw       = source.s1_entry_ppn_raw;
+    foreach(source.s1_ppn_low[i]) view.s1_ppn_low[i] = source.s1_ppn_low[i];
     view.s1_resolved_ppn_valid  = source.s1_resolved_ppn_valid;
     view.s1_resolved_ppn        = source.s1_resolved_ppn;
     view.s1_level               = source.s1_level;
@@ -1276,6 +1364,139 @@ function bit memblock_rm_readonly_api::read_tlb_entry_for_rm(
     return 1'b1;
 endfunction:read_tlb_entry_for_rm
 
+// 抽象职责：为所有冻结参考入口核对同一次执行，阻止reset/重发后的旧值
+// 进入Bare预检查或页面比较；失败只返回状态，不修改公共历史或回查live映射。
+function memblock_rm_readonly_api::access_snapshot_result_e
+    memblock_rm_readonly_api::validate_access_snapshot_identity_for_rm(
+    input memblock_rm_access_snapshot_t snapshot,input memblock_uid_t uid,
+    input int unsigned dynamic_epoch,input memblock_rob_key_t rob_key);
+    common_data_transaction data;
+    status_transaction status_v;
+    main_control_transaction main_tr;
+    memblock_issue_target_e target;
+    if (snapshot==null || !snapshot.valid || !snapshot.frozen || snapshot.address_csr==null ||
+        snapshot.uid!=uid || snapshot.dynamic_epoch!=dynamic_epoch || snapshot.rob_key!=rob_key)
+        return RM_ACCESS_MISSING;
+    if (snapshot.reset_epoch!=memblock_sync_pkg::get_l2tlb_current_reset_epoch())
+        return RM_ACCESS_CANCELLED;
+    if (!try_get_common_data(data) || !data.is_valid_uid(uid) ||
+        data.status_by_uid[uid]==null || data.main_table_by_uid[uid]==null) return RM_ACCESS_MISSING;
+    status_v=data.status_by_uid[uid];main_tr=data.main_table_by_uid[uid];
+    if (status_v.dynamic_epoch!=dynamic_epoch || status_v.get_rob_key()!=rob_key)
+        return RM_ACCESS_CANCELLED;
+    target=main_tr.fuType==MEMBLOCK_FUTYPE_STU ? MEMBLOCK_ISSUE_TARGET_STA : MEMBLOCK_ISSUE_TARGET_LOAD;
+    if (snapshot.issue_epoch!=status_v.get_target_issue_epoch(target) ||
+        snapshot.replay_seq!=status_v.replay_seq) return RM_ACCESS_MISSING;
+    return RM_ACCESS_FOUND;
+endfunction:validate_access_snapshot_identity_for_rm
+
+// 抽象职责：从完整冻结快照复制控制和地址输入，允许Bare/预异常没有页表来源。
+function void memblock_rm_readonly_api::copy_access_snapshot_context(
+    input memblock_rm_access_snapshot_t snapshot, input bit [51:0] request_vpn,
+    output tlb_request_context_view_t view);
+    mmu_csr_runtime_state csr;
+    view='0;
+    if (snapshot==null) return;
+    if (validate_access_snapshot_identity_for_rm(snapshot,snapshot.uid,
+        snapshot.dynamic_epoch,snapshot.rob_key)!=RM_ACCESS_FOUND) return;
+    csr=snapshot.address_csr;
+    view.valid=1;view.uid=snapshot.uid;view.request_vpn=request_vpn;
+    view.s2xlate=snapshot.s2xlate[0];
+    view.is_hypervisor_inst=snapshot.is_hypervisor_inst;
+    view.request_key=csr.make_lookup_key(request_vpn,view.s2xlate);view.entry_key=view.request_key;
+    view.address_inputs_valid=1;view.request_valid=1;view.checkfullva=snapshot.checkfullva;
+    view.raw_address=snapshot.raw_address;view.request_fullva=snapshot.request_fullva;
+    view.request_vaddr=snapshot.request_vaddr;view.cmd=snapshot.cmd;view.size=snapshot.size;
+    view.issue_sample=snapshot.issue_sample;view.reset_epoch=snapshot.reset_epoch;
+    view.issue_epoch=snapshot.issue_epoch;view.replay_seq=snapshot.replay_seq;
+    view.satp_mode        = csr.satp_mode;
+    view.satp_asid        = csr.satp_asid;
+    view.satp_ppn         = csr.satp_ppn;
+    view.vsatp_mode       = csr.vsatp_mode;
+    view.vsatp_asid       = csr.vsatp_asid;
+    view.vsatp_ppn        = csr.vsatp_ppn;
+    view.hgatp_mode       = csr.hgatp_mode;
+    view.hgatp_vmid       = csr.hgatp_vmid;
+    view.hgatp_ppn        = csr.hgatp_ppn;
+    view.priv_virt        = csr.priv_virt;
+    view.priv_spvp        = csr.priv_spvp;
+    view.pmm_mseccfg = csr.pmm_mseccfg;
+    view.pmm_menvcfg = csr.pmm_menvcfg;
+    view.pmm_henvcfg = csr.pmm_henvcfg;
+    view.pmm_hstatus = csr.pmm_hstatus;
+    view.pmm_senvcfg = csr.pmm_senvcfg;
+    view.priv_imode       = csr.priv_imode;
+    view.priv_dmode       = csr.priv_dmode;
+    view.priv_mxr         = csr.priv_mxr;
+    view.priv_sum         = csr.priv_sum;
+    view.priv_vmxr        = csr.priv_vmxr;
+    view.priv_vsum        = csr.priv_vsum;
+    view.m_pbmt_en        = csr.m_pbmt_en;
+    view.h_pbmt_en        = csr.h_pbmt_en;
+    view.hd_misalign_ld_enable = csr.hd_misalign_ld_enable;
+    view.hd_misalign_st_enable = csr.hd_misalign_st_enable;
+    view.priv_debug       = csr.priv_debug;
+    view.csr_update_seq   = csr.update_seq;
+endfunction:copy_access_snapshot_context
+
+// 抽象职责：只读取某动态实例的两页值；生产结束缺页不向current表补取未来映射。
+function memblock_rm_readonly_api::access_snapshot_result_e
+    memblock_rm_readonly_api::read_access_translation_snapshot_for_rm(
+    input memblock_uid_t uid, input int unsigned dynamic_epoch, input memblock_rob_key_t rob_key,
+    input bit [51:0] request_vpn, output tlb_request_context_view_t context_view,
+    output tlb_entry_view_t entry_view, output tlb_response_provenance_view_t provenance_view);
+    common_data_transaction data;
+    memblock_rm_access_snapshot_t snapshot;
+    status_transaction status_v;
+    bit derived;
+    access_snapshot_result_e identity_result;
+    context_view='0;entry_view='0;provenance_view='0;
+    if (!try_get_common_data(data) || !data.get_rm_access_snapshot(uid,snapshot)) begin
+        if (data!=null && data.is_valid_uid(uid) && data.status_by_uid[uid]!=null) begin
+            status_v=data.status_by_uid[uid];
+            if (status_v.flushed || status_v.issue_killed) return RM_ACCESS_CANCELLED;
+            if (!status_v.rob_commit) return RM_ACCESS_PENDING;
+        end
+        return RM_ACCESS_MISSING;
+    end
+    identity_result=validate_access_snapshot_identity_for_rm(snapshot,uid,dynamic_epoch,rob_key);
+    if (identity_result!=RM_ACCESS_FOUND) return identity_result;
+    if (!(snapshot.page_count inside {[1:2]})) return RM_ACCESS_MISSING;
+    copy_access_snapshot_context(snapshot,request_vpn,context_view);
+    for (int page_i=0;page_i<2;page_i++) begin
+        if (page_i<int'(snapshot.page_count) && snapshot.page_valid[page_i] &&
+            snapshot.vpn[page_i]==request_vpn && snapshot.pages[page_i]!=null) begin
+            // 中文注释：FOUND必须有真实来源证据；token从0开始合法，sample/generation不得缺失。
+            if ((page_i==0 && !(snapshot.source[page_i] inside {1,2})) ||
+                (page_i==1 && !(snapshot.source[page_i] inside {3,4})) ||
+                snapshot.response_sample[page_i]==0 || snapshot.generation[page_i]==0 ||
+                snapshot.generation[page_i]!=snapshot.pages[page_i].entry_generation ||
+                snapshot.entry_key[page_i]!=snapshot.pages[page_i].lookup_key ||
+                snapshot.request_key[page_i].vpn!=request_vpn ||
+                snapshot.request_key[page_i].s2xlate!=snapshot.s2xlate[page_i] ||
+                snapshot.pages[page_i].s2xlate!=snapshot.s2xlate[page_i]) return RM_ACCESS_MISSING;
+            copy_tlb_entry(snapshot.pages[page_i],entry_view);
+            context_view.s2xlate=snapshot.s2xlate[page_i];
+            context_view.request_key=snapshot.request_key[page_i];
+            context_view.entry_key=snapshot.entry_key[page_i];
+            context_view.range_hit=context_view.request_key!=context_view.entry_key;
+            data.derive_tlb_request_fields(snapshot.pages[page_i],request_vpn,
+                context_view.s2xlate,snapshot.address_csr,derived,
+                context_view.request_s1_resolved_ppn,context_view.request_s2_resolved_ppn,context_view.request_gvpn);
+            context_view.request_translation_valid=derived;
+            provenance_view.valid=snapshot.source[page_i]!=0;
+            provenance_view.request_key=snapshot.request_key[page_i];
+            provenance_view.entry_key=snapshot.entry_key[page_i];
+            provenance_view.range_hit=context_view.range_hit;
+            provenance_view.entry_generation=snapshot.generation[page_i];
+            provenance_view.response_token=snapshot.response_token[page_i];
+            provenance_view.response_sample_seq=snapshot.response_sample[page_i];
+            return RM_ACCESS_FOUND;
+        end
+    end
+    return RM_ACCESS_MISSING;
+endfunction:read_access_translation_snapshot_for_rm
+
 function bit memblock_rm_readonly_api::read_tlb_request_context_for_rm(
     input  memblock_uid_t uid,
     input  bit [51:0] request_vpn,
@@ -1284,10 +1505,17 @@ function bit memblock_rm_readonly_api::read_tlb_request_context_for_rm(
     common_data_transaction data;
     memblock_uid_tlb_record record;
     mmu_csr_runtime_state csr;
+    memblock_rm_access_snapshot_t snapshot;
 
     view = '{default:'0};
     if (!try_get_common_data(data)) begin
         return report_query_miss("tlb_request_context", "common data owner is not initialized");
+    end
+    if (data.get_rm_access_snapshot(uid,snapshot)) begin
+        if (validate_access_snapshot_identity_for_rm(snapshot,uid,snapshot.dynamic_epoch,
+            snapshot.rob_key)!=RM_ACCESS_FOUND) return 0;
+        copy_access_snapshot_context(snapshot,request_vpn,view);
+        return view.valid;
     end
     if (!data.uid_tlb_record_by_uid.exists(uid) ||
         data.uid_tlb_record_by_uid[uid] == null ||
@@ -1318,6 +1546,11 @@ function bit memblock_rm_readonly_api::read_tlb_request_context_for_rm(
     view.hgatp_ppn        = csr.hgatp_ppn;
     view.priv_virt        = csr.priv_virt;
     view.priv_spvp        = csr.priv_spvp;
+    view.pmm_mseccfg = csr.pmm_mseccfg;
+    view.pmm_menvcfg = csr.pmm_menvcfg;
+    view.pmm_henvcfg = csr.pmm_henvcfg;
+    view.pmm_hstatus = csr.pmm_hstatus;
+    view.pmm_senvcfg = csr.pmm_senvcfg;
     view.priv_imode       = csr.priv_imode;
     view.priv_dmode       = csr.priv_dmode;
     view.priv_mxr         = csr.priv_mxr;
@@ -1373,9 +1606,7 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_key_for_rm(
     return 1'b1;
 endfunction:resolve_tlb_entry_key_for_rm
 
-// Resolve one RM byte translation and return the entry by value.  A completed
-// UID uses the payload captured by the real response completion path; a
-// waiting UID and every secondary page use the current canonical lookup.
+// 抽象职责：最终标量只消费已冻结两页；未进入真实提交的构造保留原查询入口。
 function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
     input  memblock_uid_t uid,
     input  bit [51:0] request_vpn,
@@ -1385,6 +1616,23 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
     common_data_transaction data;
     memblock_uid_tlb_record record;
 
+    memblock_rm_access_snapshot_t snapshot;
+    tlb_response_provenance_view_t provenance;
+    access_snapshot_result_e result_v;
+    if (try_get_common_data(data) && data.get_rm_access_snapshot(uid,snapshot)) begin
+        result_v=read_access_translation_snapshot_for_rm(uid,snapshot.dynamic_epoch,snapshot.rob_key,
+            request_vpn,context_view,entry_view,provenance);
+        return result_v==RM_ACCESS_FOUND;
+    end
+    // 中文注释：真实执行已提交的标量必须具有冻结参考；人工未issue的soft构造保留旧入口。
+    if (data!=null && data.is_valid_uid(uid) && data.status_by_uid[uid]!=null &&
+        data.status_by_uid[uid].rob_commit && data.uid_tlb_record_by_uid.exists(uid) &&
+        data.uid_tlb_record_by_uid[uid]!=null && data.uid_tlb_record_by_uid[uid].uid_wait_start_sample_seq!=0 &&
+        data.main_table_by_uid[uid]!=null && data.main_table_by_uid[uid].op_class inside {
+            MEMBLOCK_OP_CLASS_INT_LOAD,MEMBLOCK_OP_CLASS_FP_LOAD,MEMBLOCK_OP_CLASS_STORE}) begin
+        context_view='0;entry_view='0;
+        return report_query_miss("rm_access_snapshot","committed scalar access has no frozen reference");
+    end
     context_view = '{default:'0};
     entry_view = '{default:'0};
     if (!read_tlb_request_context_for_rm(uid, request_vpn, context_view)) begin
@@ -1459,6 +1707,15 @@ function bit memblock_rm_readonly_api::try_read_completed_later_split_response_f
     common_data_transaction data;
     memblock_later_split_tlb_record record;
 
+    memblock_rm_access_snapshot_t snapshot;
+    tlb_request_context_view_t context_v;
+    access_snapshot_result_e snapshot_result;
+    if (try_get_common_data(data) && data.get_rm_access_snapshot(uid,snapshot)) begin
+        snapshot_result=read_access_translation_snapshot_for_rm(uid,dynamic_epoch,rob_key,
+            request_vpn,context_v,entry_view,provenance_view);
+        return snapshot_result==RM_ACCESS_FOUND && context_v.s2xlate==request_s2xlate &&
+            snapshot.page_count==2 && snapshot.vpn[1]==request_vpn;
+    end
     provenance_view = '{default:'0};
     entry_view = '{default:'0};
     if (!try_get_common_data(data) ||
@@ -1473,8 +1730,8 @@ function bit memblock_rm_readonly_api::try_read_completed_later_split_response_f
         record.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED ||
         record.split_fire_sample_seq == 0 ||
         record.lu1_request_sample_seq == 0 ||
-        record.lu1_ptw_sample_seq == 0 ||
-        record.l2_request_sample_seq == 0 ||
+        (!record.issue_hit && record.lu1_ptw_sample_seq == 0) ||
+        (!record.issue_hit && record.l2_request_sample_seq == 0) ||
         record.response_sample_seq == 0 ||
         record.payload == null ||
         record.request_lookup_key.vpn != request_vpn ||
@@ -1483,7 +1740,7 @@ function bit memblock_rm_readonly_api::try_read_completed_later_split_response_f
         record.payload.lookup_key != record.entry_anchor_key ||
         record.entry_generation == 0 ||
         record.entry_generation != record.payload.entry_generation ||
-        record.response_sample_seq <= record.l2_request_sample_seq) begin
+        (!record.issue_hit && record.response_sample_seq <= record.l2_request_sample_seq)) begin
         return 1'b0;
     end
     copy_tlb_entry(record.payload, entry_view);
@@ -1541,6 +1798,37 @@ function bit memblock_rm_readonly_api::try_read_later_split_load_response_for_rm
     return 1'b1;
 endfunction:try_read_later_split_load_response_for_rm
 
+// 抽象职责：导出issue时预先存在且已冻结的独立masked映射；绝不读取当前TLB表。
+function bit memblock_rm_readonly_api::read_pmm_arch_reference_for_rm(
+    input memblock_uid_t uid,input int unsigned dynamic_epoch,input memblock_rob_key_t rob_key,
+    input bit [51:0] masked_request_vpn,
+    output tlb_request_context_view_t context_view,output tlb_entry_view_t entry_view);
+    common_data_transaction data;
+    memblock_rm_access_snapshot_t snapshot;
+    bit derived;
+    context_view='0;entry_view='0;
+    if(!try_get_common_data(data) || !data.get_rm_access_snapshot(uid,snapshot)) return 0;
+    if(validate_access_snapshot_identity_for_rm(snapshot,uid,dynamic_epoch,rob_key)!=RM_ACCESS_FOUND)
+        return 0;
+    for(int slot=0;slot<2;slot++) begin
+        if(snapshot.pmm_arch_vpn[slot]!=masked_request_vpn ||
+           !snapshot.pmm_arch_reference_valid[slot] || snapshot.pmm_arch_reference[slot]==null ||
+           snapshot.pmm_arch_reference[slot].entry_generation==0) continue;
+        copy_access_snapshot_context(snapshot,masked_request_vpn,context_view);
+        context_view.s2xlate=2;
+        context_view.request_key=snapshot.address_csr.make_lookup_key(masked_request_vpn,2);
+        context_view.entry_key=snapshot.pmm_arch_reference[slot].lookup_key;
+        context_view.range_hit=context_view.request_key!=context_view.entry_key;
+        copy_tlb_entry(snapshot.pmm_arch_reference[slot],entry_view);
+        data.derive_tlb_request_fields(snapshot.pmm_arch_reference[slot],masked_request_vpn,2,
+            snapshot.address_csr,derived,context_view.request_s1_resolved_ppn,
+            context_view.request_s2_resolved_ppn,context_view.request_gvpn);
+        context_view.request_translation_valid=derived;
+        return 1;
+    end
+    return 0;
+endfunction:read_pmm_arch_reference_for_rm
+
 function bit memblock_rm_readonly_api::try_read_first_split_access_context_for_rm(
     input memblock_uid_t uid,
     input int unsigned dynamic_epoch,
@@ -1568,7 +1856,7 @@ function bit memblock_rm_readonly_api::try_read_first_split_access_context_for_r
     if (!data.is_valid_uid(uid) || data.status_by_uid[uid] == null ||
         data.main_table_by_uid[uid] == null || data.main_table_by_uid[uid].vaddr != original_vaddr) return 1'b0;
     // V2 mabuf的低段可以向下对齐，但不能换成同页另一条line。
-    expected_low_vaddr = original_vaddr;
+    expected_low_vaddr = {14'b0, original_vaddr[49:0]};
     case (data.main_table_by_uid[uid].fuOpType[1:0])
         2'd1: ;
         2'd2: if (original_vaddr[1:0] == 2'd1) expected_low_vaddr--;
@@ -1587,9 +1875,9 @@ function bit memblock_rm_readonly_api::try_read_first_split_access_context_for_r
         candidate.dynamic_epoch != dynamic_epoch || candidate.rob_key != rob_key ||
         status.get_rob_key() != rob_key || candidate.original_vaddr != original_vaddr ||
         candidate.reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
-        candidate.request_vaddr[63:12] != original_vaddr[63:12] ||
-        candidate.request_vaddr != expected_low_vaddr ||
-        candidate.request_vaddr[63:6] != original_vaddr[63:6] ||
+        candidate.request_vaddr[49:12] != original_vaddr[49:12] ||
+        candidate.request_vaddr[49:0] != expected_low_vaddr[49:0] ||
+        candidate.request_vaddr[49:6] != original_vaddr[49:6] ||
         candidate.response_vaddr != candidate.request_vaddr ||
         candidate.request_sample_seq == 0 ||
         candidate.data_sample_seq <= candidate.request_sample_seq ||

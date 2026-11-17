@@ -103,3 +103,6 @@ seq_pkg.sv
 // ./virtual_sequence/memblock_l2tlb_routed_ppn_vseq.sv
 
 // soft_test_memblock_backend_cycle_sequence.sv and memblock_backend_cycle_selftest_vseq.sv are included by seq_pkg.sv.
+
+// Test-only PMM real-DUT classes included by seq_pkg.sv.
+// ./virtual_sequence/memblock_pmm_real_vseq.sv

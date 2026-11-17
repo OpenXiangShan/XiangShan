@@ -43,6 +43,7 @@ typedef struct packed {
     bit                  owner_valid;
     memblock_uid_t       owner_uid;
     int unsigned         owner_dynamic_epoch;
+    int unsigned         owner_issue_epoch;
     int unsigned         sample_flush_epoch;
     longint unsigned     sample_seq;
     longint unsigned     sample_cycle;
@@ -62,6 +63,7 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
     bit previous_reset_backend_done;
     writeback_record_q_t writeback_history_q;
     // STA0按ROB key索引，CMO查询不逐次扫描所有Load/Store写回历史。
+    writeback_record_q_t load_history_by_rob[bit [MEMBLOCK_ROB_VALUE_W:0]];
     writeback_record_q_t sta0_history_by_rob[bit [MEMBLOCK_ROB_VALUE_W:0]];
     // 已被RM唯一消费的CMO终态摘要，仅按物理ROB key索引；复用时由live owner优先替换。
     typedef struct packed {
@@ -106,6 +108,7 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
     function void clear_history();
         writeback_history_q.delete();
         sta0_history_by_rob.delete();
+        load_history_by_rob.delete();
         cmo_terminal_by_rob.delete(); cmo_late_error_count=0;
         writeback_count = 0;
         unknown_valid_count = 0;
@@ -433,10 +436,14 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
                 if(owner_data.is_valid_uid(owner_uid) && owner_data.status_by_uid[owner_uid]!=null) begin
                     record.owner_valid=1; record.owner_uid=owner_uid;
                     record.owner_dynamic_epoch=owner_data.status_by_uid[owner_uid].dynamic_epoch;
+                    if (source_kind == RM_WB_SOURCE_LDA)
+                        record.owner_issue_epoch=owner_data.status_by_uid[owner_uid].load_issue_epoch;
                 end
             end
             audit_cmo_sta0(record);
             writeback_history_q.push_back(record);
+            if (record.source_kind == RM_WB_SOURCE_LDA && record.rob_valid && record.rob_flag_valid)
+                load_history_by_rob[{record.rob_flag,record.rob_value}].push_back(record);
             if (record.source_kind == RM_WB_SOURCE_STA && record.lane == 0 &&
                 record.rob_valid && record.rob_flag_valid)
                 sta0_history_by_rob[{record.rob_flag, record.rob_value}].push_back(record);
@@ -502,28 +509,45 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         return match_count==1;
     endfunction
 
-    function bit read_latest_load_by_rob(
-        input memblock_rob_key_t rob_key,
-        output writeback_record_t record
-    );
-        int index;
-        record = '{default:'0};
-        for (index = int'(writeback_history_q.size()) - 1; index >= 0; index--) begin
-            if (writeback_history_q[index].valid &&
-                writeback_history_q[index].source_kind == RM_WB_SOURCE_LDA &&
-                writeback_history_q[index].rob_valid &&
-                writeback_history_q[index].rob_flag_valid &&
-                writeback_history_q[index].rob_flag === rob_key.flag &&
-                writeback_history_q[index].rob_value === rob_key.value &&
-                writeback_history_q[index].replay_inst_valid &&
-                writeback_history_q[index].replay_inst === 1'b0 &&
-                writeback_history_q[index].flush_pipe_valid &&
-                writeback_history_q[index].flush_pipe === 1'b0) begin
-                record = writeback_history_q[index];
-                return 1'b1;
+    // 抽象职责：按ROB局部历史返回当前执行实例的最终Load写回，隔离旧代和重发。
+    function bit read_load_instance(input memblock_uid_t uid, input memblock_rob_key_t rob_key,
+        input int unsigned dynamic_epoch, input int unsigned issue_epoch,
+        input bit flush_epoch_valid, input int unsigned flush_epoch,
+        input longint unsigned minimum_sample, output writeback_record_t record);
+        bit [MEMBLOCK_ROB_VALUE_W:0] key;
+        record = '0;
+        key = {rob_key.flag,rob_key.value};
+        if (!load_history_by_rob.exists(key)) return 0;
+        for (int index=int'(load_history_by_rob[key].size())-1;index>=0;index--) begin
+            writeback_record_t candidate;
+            candidate=load_history_by_rob[key][index];
+            if (candidate.owner_valid && candidate.owner_uid==uid &&
+                candidate.owner_dynamic_epoch==dynamic_epoch && candidate.owner_issue_epoch==issue_epoch &&
+                (!flush_epoch_valid || candidate.sample_flush_epoch>=flush_epoch) &&
+                candidate.sample_seq>=minimum_sample && candidate.replay_inst_valid &&
+                candidate.replay_inst===1'b0 && candidate.flush_pipe_valid && candidate.flush_pipe===1'b0) begin
+                record=candidate;
+                return 1;
             end
         end
-        return 1'b0;
+        return 0;
+    endfunction:read_load_instance
+
+    // 抽象职责：保留非标量旧consumer的查询合同，扫描仅限同ROB局部历史。
+    function bit read_latest_load_by_rob(input memblock_rob_key_t rob_key,
+        output writeback_record_t record);
+        bit [MEMBLOCK_ROB_VALUE_W:0] key;
+        record='0;key={rob_key.flag,rob_key.value};
+        if (!load_history_by_rob.exists(key)) return 0;
+        for (int index=int'(load_history_by_rob[key].size())-1;index>=0;index--) begin
+            if (load_history_by_rob[key][index].replay_inst_valid &&
+                load_history_by_rob[key][index].replay_inst===1'b0 &&
+                load_history_by_rob[key][index].flush_pipe_valid &&
+                load_history_by_rob[key][index].flush_pipe===1'b0) begin
+                record=load_history_by_rob[key][index]; return 1;
+            end
+        end
+        return 0;
     endfunction:read_latest_load_by_rob
 
     function bit read_atomic_loads_by_rob(

@@ -31,6 +31,10 @@ mode 从对应 sample 的 CSR history 获得。
 | `GPA / stage` | S1输出的中间物理地址及翻译阶段。 | S1/S2 raw/resolved字段 | allStage只限制最终S2 PA路由。 |
 | `intent` | 上游在主表ready前固定的物理页和合法页内偏移约束。 | `routed_ppn_intent_by_vpn` | UART128B与外部部分页。 |
 
+| `masked reference / token bucket` | issue时保存的独立掩码映射输入、一个原token关联的后页句柄组。 | `pmm_arch_reference`、`later_split_owners_by_token` | 参考槽不算第三实际页，桶最多Load/Store各一个。 |
+| `RM access snapshot / obligation` | 最终实例固定两页参考输入、独立待比较责任。 | `rm_access_snapshot_by_uid`、RM地址队列 | fence删live后，旧UID比较仍使用旧页。 |
+| `split / frm_mabuf` | 非对齐分段及来自MisalignBuffer的真实请求。 | Load/Store后页旁路 | STU0后页请求不等同原STA issue。 |
+
 
 | 函数/task | 抽象功能描述 |
 |---|---|
@@ -324,3 +328,148 @@ B08地址洞：request → 普通候选PA落APLIC洞 → select_ppn拒绝route
 端到端文字伪代码：新条目才进入物理页策略，CSR FIFO由公共回放owner按成熟边界消费；属性版本固定后，
 builder选择完整可路由形状并在发布前过滤reuse。已有命中沿原映射回复。UART等窄目标由上游主表保障offset，
 DTLB接口不携带也不新增offset字段，真实访问证据仍需外部A.fire及原RM结束状态。
+
+
+## 2026-11-17：标量虚拟化与RM两页参考衔接
+
+本节只更新测试框架调用链；不改变本flow原DTLB上游responder/唯一owner合同，不更新V2 RTL知识库。新增源码与校验状态见[RM实现评审](../plan/rm_review_doc/undo/memblock_v2_virtualization_rm_implementation_review_20261117.md)。
+
+```mermaid
+flowchart TD
+ A[driver immutable sample] --> B[observe_later_split_tlb_sample: Load]
+ A --> C[observe_later_split_store_tlb_sample: Store]
+ B --> D[真实split和分段TLB请求绑定UID]
+ C --> D
+ D --> E{边界前已有completed response}
+ E -->|有| F[capture_later_split_issue_hit: 深复制]
+ E -->|无或随后真实PTW| G[原WAIT_L2_TOKEN与pending token]
+ G --> H[complete_driving_response]
+ H --> I[首页及后页payload/token/sample]
+ F --> J[终态前freeze_access_reference_for_rm]
+ I --> J
+ J --> K[readonly固定两页/身份/来源检查]
+ K --> L[RM权限/PMM/数据及独立地址责任]
+```
+
+整体文字伪代码：driver在原采样边界把Load/Store分段身份放入同一个运输结构；owner完成reset、样本锚定和同拍lifecycle门禁后才调用common观察器。真实split找到active ROB owner并仅对后页建record；真实分段TLB请求确认该owner后尝试取得边界前已完成的hit。真实PTW出现则用原token链完成，不伪造请求。原response完成保存首页及后页来源；提交或fault恢复前复制为两页终态参考。RM随后只读历史计算expected，既有ready、token、失效仍只由原owner管理。
+
+### `capture_later_split_issue_hit()`与Store后页观察
+
+抽象功能描述：这些common函数在真实分段请求边界保留已有翻译服务输入，补齐后页无新L2请求的hit及Store来源；它们不驱动响应或生成新映射。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`。源码摘要：
+
+```systemverilog
+record.request_lookup_key=first.csr_snapshot.make_lookup_key(record.split_vpn,record.s2xlate);
+record.payload.copy_from(entry);
+record.issue_hit=1;
+```
+
+中文伪代码：本段负责后页归属。split fire通过active ROB索引找到UID；非后页不建立第二页。Load沿原LU1请求链，Store从StoreMisalignBuffer fire与STU0有效frm_mabuf请求取ROB和地址，记录真实请求sample；Load/Store各保存单buffer UID游标供各自PTW常数时间反查。取得issue CSR后构造该页key，只查当前边界前的completed response，成功深复制payload与原token/sample/generation，记录hit；失败保持等待。后来真实PTW到达则清hit标记并进入原WAIT_L2_TOKEN，由既有`bind_later_split_l2_request_token`绑定每次fire；completion再保存实际最终来源。completed首页GPF出现真实补响应时更新原sector，不从DUT GPA构造参考。
+
+`find_completed_tlb_response_for_issue`负责按请求key及既有range索引查已完成输入，返回值仅决定是否有hit候选；`copy_from`不携带live索引所有权。Store observer只读单buffer游标，不为每笔PTW扫描历史。新增被动信号没有驱动DUT的方向。
+
+### 终态冻结与端到端行为总结
+
+抽象功能描述：`freeze_access_reference_for_rm()`由正常/fault提交边界调用，把恢复前的参考输入保存到UID历史，供RM延后消费。
+
+源码位置：同一common文件与`seq/base_seq_help/lsq_commit_handler.sv`。源码摘要：
+
+```systemverilog
+data.freeze_access_reference_for_rm(uid);
+status.rob_commit = 1;
+```
+
+中文伪代码：本段负责把活跃记录转成最终比较输入。先限定普通标量及HLV/HLVX/HSV，同实例冻结幂等；复制完整issue CSR与原始地址、真实50位请求、两页可用来源；Bare/预异常可以没有PTE。只有冻结完成才沿原路径设置rob_commit、fault quiesce与恢复。readonly核对reset/ROB/dynamic/issue/replay、页面source/sample/generation，缺旧页不查future current。fence不删该UID历史，也不删RM物理数据；run表重置删除副本。
+
+端到端文字伪代码：后页hit在真实请求时复制已有完成输入，终态freeze后RM可晚于fence比较；后页miss由真实PTW、原token和response完成后freeze；首段停止无真实后页时不造第二页，RM按独立首段规则停止。fault先freeze再cancel，因此旧hit和补GPA原sector不会因恢复消失。reset后readonly拒绝旧代，不能通过current重建它。
+
+
+## 2026-11-17：同token后页并发及独立masked输入
+
+```mermaid
+flowchart TD
+ A[真实Load/Store后页split] --> B[各自active UID游标]
+ B --> C[各自PTW旁路]
+ C --> D[bind_later_split_l2_request_token]
+ D --> E[later_split_owners_by_token: 最多两个handle]
+ E --> F[complete_later_split_l2_response]
+ F --> G[complete_one_later_split_l2_response逐实例校验]
+ E --> H[cancel_later_split_l2_token]
+ I[plan_uid_tlb_record_context] --> J[capture_pmm_arch_reference_on_issue]
+ J --> K[已有canonical masked映射深复制]
+ K --> L[freeze_access_reference_for_rm]
+ L --> M[read_pmm_arch_reference_for_rm]
+ M --> N[observer_check_pmm_arch_reference]
+```
+
+函数调用Flow图整体文字伪代码：
+```text
+真实后页Load/Store分别保存自己的active游标；各PTW只查当前buffer实例。
+原responder接受request后调用bind，固定核对两个游标和冻结CSR完整key，允许同VPN两实例入同token桶。
+原response采样完成时调用complete，将同源payload经原逐实例校验发布给桶内记录；取消时按桶取消全部WAIT_RESPONSE，二者结束均删桶。
+真实issue计划另外调用capture_pmm_arch_reference_on_issue，只保存已预定义的masked canonical输入。
+终态恢复前freeze把该独立输入与CSR深复制；RM只读取得旧值并独立比较masked架构结果，不晚查当前表。
+```
+
+### 后页token归属函数
+
+抽象功能描述：bind、complete和cancel函数在原responder生命周期中维护后页输入的归属关系，不拥有请求调度、ready或第二次token计数。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`。真实逻辑摘要：
+```systemverilog
+later_split_owners_by_token[request_token].push_back(record);
+complete_one_later_split_l2_response(/* 原逐owner校验输入 */);
+later_split_owners_by_token.delete(request_token);
+```
+
+中文文字伪代码：本段让同VPN的后页Load/Store均获得真实response。bind只读两个active游标，核对active/dynamic、WAIT_L2_TOKEN、VPN/stage和冻结CSR key，保存token/sample并转WAIT_RESPONSE。返回首handle使pending_req接口保持原状。complete要求token桶首项与原pending handle相同，逐项调用原逐owner helper核对实例、key、generation和replay后保存payload/sample；结束删除桶。cancel只读该token桶，取消所有WAIT_RESPONSE记录；只有handle仍是当前UID canonical记录时才清其游标，避免旧token影响新attempt。reset清桶和两个游标，正常完成历史保留供终态freeze，不进入每PTW全历史扫描。
+
+### issue时独立masked参考
+
+抽象功能描述：`capture_pmm_arch_reference_on_issue()`在真实issue计划阶段保存公共映射服务已有的架构参考输入；readonly最终只导出该旧值，不创建TLB条目。
+
+源码位置：同common文件及`seq/base_seq_help/memblock_rm_readonly_api.sv`。真实逻辑摘要：
+```systemverilog
+masked_vpn=record.vpn[37:0];masked_vpn[37:36]=0;
+record.pmm_arch_reference[slot].copy_from(entry);
+snapshot.pmm_arch_reference[slot].copy_from(first.pmm_arch_reference[slot]);
+```
+
+中文文字伪代码：本段补only-S2、Sv48x4、PMM16使有效VPN高位改变时单payload范围不足的输入。issue记录已经冻结CSR后，对s2xlate=2/hgatp=9且VPN高两位非零的请求清bit37:36，只查existing canonical精确/range映射；不存在则保持缺输入，不构造映射。存在且generation非零则深复制到UID record；终态freeze再复制到snapshot。readonly共用reset/ROB/dynamic/issue/replay核对，按同一CSR和保存payload解析masked PPN。RM保留原实际请求结果，再独立判断架构PA、G权限、PBMT和PMA；相同结果MATCH，不同MISMATCH，缺参考报框架输入错误。测试必须在issue前预定义所需masked映射。
+
+端到端行为总结：Load/Store同VPN后页→固定两个游标→一个真实token的两个归属handle→一次response完成、两个独立记录→freeze后逐UID比较；PMM独立输入→issue深复制→终态冻结→readonly→架构结果子检查。全程保留原唯一L2TLB owner与ready/失效合同。
+
+
+### 最终跨页修正：固定两份masked参考
+
+抽象功能描述：issue参考生产按完整标量范围冻结最多两页独立masked输入；RM在每个masked页入口读取相应旧值，不让首页范围及权限代替后页。
+
+源码位置：`common_data_transaction::capture_pmm_arch_reference_on_issue()`、`memblock_rm_readonly_api::read_pmm_arch_reference_for_rm()`、`memblock_rm::observer_check_pmm_arch_reference()`。
+
+```systemverilog
+request_end=request_start+50'(size_bytes-1);
+record.pmm_arch_reference[slot].copy_from(entry);
+if(snapshot.pmm_arch_vpn[slot]!=masked_request_vpn) continue;
+```
+
+中文文字伪代码：本段修复only-S2/PMM16跨两张4K页时只留首页的缺口。issue使用公共标量分类及原size编码计算首末页，slot0保存首页，跨页时slot1保存末页；两项各自查已有canonical并深复制，不生成映射。reset/init清两项，record提交和终态freeze逐项复制。readonly新增masked_request_vpn输入，只在固定两槽按VPN选对应entry。checker在页入口重取该页输入并独立判G权限/PBMT/PMA，首fault即停止；首页D错误只核对已消费PA前缀。成功跨页必须取得两个需要的输入，缺后页仍报框架输入错误；无需后页的停止场景不强求后页。
+
+端到端文字伪代码：预定义两张masked 4K输入→真实issue分别冻结→实际两页来源按原链完成→恢复前freeze→RM逐页选择独立参考→各页结果汇合；首fault/首段停止→仅消费前缀→不读取未执行后页。独立参考槽固定两项，不成为新TLB缓存或第三实际访问页。
+
+
+### 最终B1/B2/B3合同与验证边界
+
+抽象功能描述：独立masked参考仍由issue时的固定两槽提供，checker逐页解释其可观察结果；本节补充最终边界，不改变唯一L2TLB服务和token/ready生命周期。
+
+源码位置：common的`capture_pmm_arch_reference_on_issue()`及RM的`observer_check_pmm_arch_reference()`。
+
+```systemverilog
+request_start={2'b0,record.vpn[35:0],main_tr.vaddr[11:0]};
+request_end=request_start+50'(size_bytes-1);
+pma_fault |= byte_access_fault;
+```
+
+中文文字伪代码：issue先mask首地址再按50位加末字节，固定两槽保存masked首末VPN，保留bit48新进位。RM每个可信PA字节立即累计PMA/PMP AF，完整size查询再OR，不能因首fault跳过完整查询而丢AF。换masked后页时，非对齐Load的NC位独立优先转bit4；IO的mmio受翻译fault门控，不能覆盖IO+GPF。翻译fault不查无效PA的PMA；成功后页PMA-MMIO必须由只读模型证明且无AF才走bit4。首fault与首页D错误停止只消费前缀，缺实际需要的后页参考仍明确报错。
+
+端到端文字伪代码：issue masked首末范围→两份existing canonical深复制→终态freeze→readonly按VPN选择→逐页权限/PBMT→可信PA的PMA累计→独立cause/PA/路径比较。rm5 seed6111801自测95场景184检查通过，最终真实PMM/Guest矩阵及全部basicTest回归仍待结果；IO+GPF本轮仅静态核对，不声称独立动态覆盖。

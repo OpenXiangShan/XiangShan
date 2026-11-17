@@ -766,6 +766,7 @@ class lsq_commit_handler extends uvm_object;
                       UVM_LOW)
             return 1'b0;
         end
+        data.freeze_access_reference_for_rm(uid);
         status.rob_commit       = 1'b1;
         status.last_event_cycle = $time;
         if (!status.active_lq_mapped && !status.active_sq_mapped) begin
@@ -952,6 +953,7 @@ class lsq_commit_handler extends uvm_object;
         end
         fault_is_store_exception = fault_uid_is_store_exception(uid);
         status = data.get_status(uid);
+        data.freeze_access_reference_for_rm(uid);
         status.rob_commit = 1'b1;
         status.last_event_cycle = $time;
         // fault commit 固化 RM 对比时机，但不是 DUT STD IQ 的 redirect flush
@@ -1142,6 +1144,7 @@ class lsq_commit_handler extends uvm_object;
             memblock_uid_t uid;
             uid = frame.commit_uids[idx];
             status = data.get_status(uid);
+            data.freeze_access_reference_for_rm(uid);
             status.rob_commit = 1;
             status.last_event_cycle = $time;
             if (!status.active_lq_mapped && !status.active_sq_mapped) status.lsq_deq = 1;
@@ -1168,7 +1171,8 @@ class lsq_commit_handler extends uvm_object;
         end
         if (frame.has_fault) begin
             status = data.get_status(frame.uid);
-            // 第三项RM方案在此rob_commit写入前接入值型参考快照；本项只保留实际身份。
+            // 中文注释：先冻结参考输入，再进行fault记账和cancel；实际地址单独归属。
+            data.freeze_access_reference_for_rm(frame.uid);
             data.backend_fault_address_by_uid[frame.uid] = frame;
             if (frame.address_required) data.backend_address_wait_q.push_back(frame.uid);
             status.rob_commit = 1;
