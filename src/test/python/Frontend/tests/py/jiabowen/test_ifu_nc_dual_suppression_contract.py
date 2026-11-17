@@ -25,9 +25,10 @@ def test_nc_loop_trace_is_independent_and_matches_program():
 
 
 def test_nc_canary_signal_paths_do_not_invent_defaults():
-    assert _candidate_paths(("top.mainPipe.foo",)) == (
-        "top.mainPipe.foo", "top.mainPipe.__Vtogcov__foo")
-    assert _candidate_paths(("top.__Vtogcov__foo",)) == ("top.__Vtogcov__foo", "top.foo")
+    assert _candidate_paths(("top.mainPipe.foo",)) == ("top.mainPipe.foo",)
+    assert _candidate_paths(("top.__Vtogcov__foo",)) == ("top.foo",)
+    assert _candidate_paths(("Frontend_top.Frontend.inner_icache.mainPipe.foo",)) == (
+        "Frontend_top.Frontend.inner_icache.mainPipe.foo", "inner_icache.mainPipe.foo")
     assert _candidate_paths(()) == ()
 
 

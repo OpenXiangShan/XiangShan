@@ -6,7 +6,9 @@ from collections import Counter
 import pytest
 
 from env.core.transactions import ProgramImage
-from env.funcov.py.ifu.cacheable_pipeline_funcov import _UPSTREAM_SIGNALS, _SIGNALS, _req_signal_names
+from env.funcov.py.ifu.cacheable_pipeline_funcov import (
+    _UPSTREAM_SIGNALS, _SIGNALS, _native_signal_names, _req_signal_names,
+)
 from env.funcov.py.ftq.two_fetch_funcov import _TWO_FETCH_SIGNALS
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.sequences import LoadProgramSequence
@@ -28,13 +30,7 @@ def _nc_loop_trace(laps=16):
 
 
 def _candidate_paths(paths):
-    expanded = list(paths)
-    for path in paths:
-        if ".__Vtogcov__" in path:
-            expanded.append(path.replace(".__Vtogcov__", "."))
-        elif ".mainPipe." in path:
-            expanded.append(path.replace(".mainPipe.", ".mainPipe.__Vtogcov__"))
-    return tuple(dict.fromkeys(expanded))
+    return _native_signal_names(paths)
 
 
 def _dual_nc_candidate(snapshot):
