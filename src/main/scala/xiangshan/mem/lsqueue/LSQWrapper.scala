@@ -107,6 +107,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
+    val lrqAlloc = Vec(LoadPipelineWidth, Flipped(Valid(new LrqAlloc)))
+    val lrqAllocIndex = Output(Vec(LoadPipelineWidth, UInt(log2Ceil(LoadQueueReplaySize).W)))
+    val lrqCreditUpdate = Output(new LrqCreditUpdate)
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
     val sbuffer = new SbufferWriteIO
     val forward = Flipped(Vec(LoadPipelineWidth, new SQForward))
@@ -235,6 +238,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.rob.pendingPtr      := io.rob.pendingPtr
   loadQueue.io.rob.pendingPtrNext  := io.rob.pendingPtrNext
+  loadQueue.io.rob.headIsLoad      := io.rob.headIsLoad
+  loadQueue.io.lrqAlloc            <> io.lrqAlloc
+  io.lrqAllocIndex                := loadQueue.io.lrqAllocIndex
+  io.lrqCreditUpdate              := loadQueue.io.lrqCreditUpdate
   loadQueue.io.rob.lcommit         := io.rob.lcommit
   loadQueue.io.rob.scommit         := io.rob.scommit
   loadQueue.io.rob.commit          := io.rob.commit

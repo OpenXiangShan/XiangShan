@@ -193,6 +193,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val physicalUpperSqIdx = Input(new SqPtr)
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
+    val lrqAlloc = Vec(LoadPipelineWidth, Flipped(Valid(new LrqAlloc)))
+    val lrqAllocIndex = Output(Vec(LoadPipelineWidth, UInt(log2Ceil(LoadQueueReplaySize).W)))
+    val lrqCreditUpdate = Output(new LrqCreditUpdate)
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
     val loadWakeup  = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
     val release = Flipped(Valid(new Release))
@@ -290,7 +293,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueReplay
    */
   loadQueueReplay.io.redirect         <> io.redirect
-  loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtrNext
+  loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtr
+  loadQueueReplay.io.robHeadIsLoad    := io.rob.headIsLoad
+  loadQueueReplay.io.alloc           <> io.lrqAlloc
+  io.lrqAllocIndex                   := loadQueueReplay.io.allocIndex
+  io.lrqCreditUpdate                 := loadQueueReplay.io.creditUpdate
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup

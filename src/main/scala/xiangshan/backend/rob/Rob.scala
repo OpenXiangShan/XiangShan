@@ -324,6 +324,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(VecInit(Seq.fill(2)(false.B))))
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
+  val slotIsLoad = Reg(Vec(RobSize, Vec(2, Bool())))
   val enqHalfWritten = RegInit(VecInit(Seq.fill(RobSize)(VecInit(Seq.fill(2)(false.B)))))
 
   private def slotIndex(ptr: RobPtr): UInt = (!ptr.isFormer).asUInt
@@ -506,6 +507,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
         slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
         slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
+        slotIsLoad(enqIndex)(subIndex) := enqUop.commitType === CommitType.LOAD &&
+          !LSUOpType.isVecMemOp(enqUop.fuOpType)
         debug_microOp(enqIndex)(subIndex) := enqUop
         debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
           debug.perfDebugInfo.dispatchTime := timer
@@ -1189,6 +1192,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // a stale latter state survive either a whole-entry flush or a redirect that
   // removes only the latter half of the head entry.
   out.lsq.pendingPtr := Mux(resetsPendingSlot, deqPtr.asFormer, pendingPtrReg)
+
+  val pendingIsLoad = pendingEntry.valid && slotIsLoad(deqPtr.value)(!pendingPtrInput.isFormer)
+  val pendingIsLoadReg = RegNext(pendingIsLoad, false.B)
+  out.lsq.headIsLoad := Mux(resetsPendingSlot,
+    pendingEntry.valid && slotIsLoad(deqPtr.value)(0), pendingIsLoadReg) &&
+    !out.lsq.pendingPtr.needFlush(in.redirect)
 
   out.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
   out.lsq.scommit := RegNext(
@@ -2773,6 +2782,7 @@ object Rob {
     // Ordered replay boundary.
     val pendingPtr = Output(new RobPtr)
     val pendingPtrNext = Output(new RobPtr)
+    val headIsLoad = Output(Bool())
 
     // MMIO serialization.
     val mmioBusy = Input(Bool())

@@ -57,6 +57,8 @@ class LoadUnitS0(param: ExeUnitParams)(
     // TODO: canAcceptHigh/LowConfPrefetch
     val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
     val ldin = Flipped(DecoupledIO(new ExuInput(param)))
+    val lrqAlloc = ValidIO(new LrqAlloc)
+    val lrqAllocIndex = Input(UInt(log2Ceil(LoadQueueReplaySize).W))
 
     // Tlb request
     val tlbReq = DecoupledIO(new TlbReq)
@@ -207,7 +209,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.DontCarePAddr()
   scalarIssue.bits.noQuery.get := ldin.fuOpType === LSUOpType.prefetch_i // swInstr
   scalarIssue.bits.DontCareUnalign() // assign later in sink
-  scalarIssue.bits.DontCareReplayFromLRQFields()
+  scalarIssue.bits.DontCareReplayFromLRQFields(Some(io.lrqAllocIndex))
   scalarIssue.bits.DontCareVectorFields()
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
@@ -400,6 +402,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.fastReplay.ready := fastReplay.ready
   io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready)
   io.ldin.ready := scalarIssue.ready
+  io.lrqAlloc.valid := scalarIssue.fire && !LSUOpType.isPrefetch(ldin.fuOpType)
+  io.lrqAlloc.bits.robIdx := ldin.robIdx
+  io.lrqAlloc.bits.lqIdx := ldin.lqIdx.get
 
   io.tlbReq.valid := tlbReqValid
   io.tlbReq.bits.vaddr := tlbVAddr
@@ -506,7 +511,7 @@ class LoadUnitS1(param: ExeUnitParams)(
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
     val specialMode = Input(Bool())
-    val robHeadPtr = Input(new RobPtr)
+    val lqHeadPtr = Input(new LqPtr)
 
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp(2))) // TODO: parameterize 2
@@ -605,7 +610,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val noQuery = in.noQuery.get
   val tlbHit = tlbResp.valid && !tlbResp.bits.miss && !noQuery
   val tlbMiss = tlbResp.valid && tlbResp.bits.miss
-  val specialRequest = io.specialMode && robIdx =/= io.robHeadPtr
+  val specialModeReplay = io.specialMode && uop.lqIdx =/= io.lqHeadPtr
   val paddrEffective = tlbHit || noQuery // hit or noQuery
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
   val noQueryPAddr = Mux(io.uncacheBypassResp.valid, io.uncacheBypassResp.bits.paddr, in.paddr.get)
@@ -619,7 +624,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val gpf = tlbHit && tlbResp.bits.excp.head.gpf.ld
   val tlbException = pf || af || gpf
 
-  val killDCache = kill || tlbMiss || tlbException || specialRequest
+  val killDCache = kill || tlbMiss || tlbException || specialModeReplay
 
   assert(!(pipeIn.valid && !tlbResp.valid && !noQuery))
 
@@ -698,7 +703,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val exception = tlbException || bp
   val stageInfo = Wire(chiselTypeOf(pipeOut.bits))
   connectSamePort(stageInfo, in)
-  stageInfo.specialModeRequest := specialRequest
+  stageInfo.specialModeReplay := specialModeReplay
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := bp
   stageInfo.uop.exceptionVec(loadPageFault) := pf
@@ -741,7 +746,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
   io.tlbResp.ready := true.B
-  io.tlbReqKill := kill || specialRequest
+  io.tlbReqKill := kill || specialModeReplay
   io.tlbPAddr := noQueryPAddr
 
   io.dcachePAddr := paddrDCache
@@ -811,7 +816,6 @@ class LoadUnitS2(param: ExeUnitParams)(
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
     val specialMode = Input(Bool())
-    val robHeadPtr = Input(new RobPtr)
     val unalignTailValid = Output(Bool())
 
     // PMP result
@@ -1006,7 +1010,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
   val needDCacheAccess = !fullForward && !isUncache && !isUncacheReplay
-  val specialRequest = in.specialModeRequest
+  val specialModeReplay = in.specialModeReplay
 
   // Uncache bypass
   afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.nderr
@@ -1078,7 +1082,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val fastReplayNuke = cause(C_NK) &&  // TODO: use C_RAR or C_NK?
     !hasHigherPriorityCauses(VecInit(cause.patch(C_MA, Seq(cause(C_MA) && !fastReplayNukeFirst), 1)), C_RAR)
   val fastReplayEligible = !LoadEntrance.isFastReplay(entrance) &&
-    !isUnalign && !tlbMiss && !specialRequest
+    !isUnalign && !tlbMiss && !specialModeReplay
   val fastReplay = fastReplayEligible && // 1.3.1, 1.3.3
     (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke || fastReplayForwardFail) // 1.3.2
 
@@ -1116,7 +1120,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     isUncache
   )
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
-  cause(C_TM) := (troubleMaker && tlbMiss || specialRequest)
+  cause(C_TM) := (troubleMaker && tlbMiss || specialModeReplay)
   cause(C_FF) := troubleMaker && sqDataInvalid
   cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
@@ -1198,7 +1202,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.shouldWriteback.get := shouldWriteback
   stageInfo.sqSbufferForwarded.get := sqSbufferForwarded
   stageInfo.sqSbufferFullForwarded.get := sqSbufferFullForwarded
-  stageInfo.specialModeRequest := specialRequest
+  stageInfo.specialModeReplay := specialModeReplay
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -1212,7 +1216,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.unalignTailValid := pipeIn.valid && isUnalignTail
 
   io.dcacheKill := kill || exception || isUncache || isUncacheReplay ||
-    specialRequest
+    specialModeReplay
   io.dcacheResp.ready := true.B
 
   io.rarNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
@@ -1413,6 +1417,11 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadMshrId    = s4Head.mshrId.get
   val s4HeadHandledByMSHR = s4Head.handledByMSHR.get
 
+  XSError(pipeIn.valid && isUnalignTail && s4HeadValid && !kill && (
+    !uop.robIdx.isSameSlot(s4Head.uop.robIdx) || uop.lqIdx =/= s4Head.uop.lqIdx ||
+      in.replayQueueIdx.get =/= s4Head.replayQueueIdx.get),
+    "LRQ unaligned head/tail owner or index mismatch")
+
   val perfOutcomeUop = Mux(s4HeadValid, s4Head.uop, uop)
   val perfOutcomeHasROBEntry = Mux(s4HeadValid, s4Head.hasROBEntry, in.hasROBEntry)
   val perfOutcomeKill = io.kill || perfOutcomeUop.robIdx.needFlush(redirect)
@@ -1582,13 +1591,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
   lqWrite.isHyper := in.tlbException.get.isHyper
   lqWrite.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
-  // An S4 request carrying a TLB/cache replay cause can start special-mode counting.
-  lqWrite.specialModeRequest := Mux(useS4HeadReplay, s4Head.specialModeRequest, in.specialModeRequest)
-  lqWrite.specialModeEligible := s4HeadValid && (
-    lqWriteCause(LoadReplayCauses.C_TM) ||
-    lqWriteCause(LoadReplayCauses.C_DR) ||
-    lqWriteCause(LoadReplayCauses.C_DM)
-  )
+  lqWrite.specialModeRequest := Mux(useS4HeadReplay, s4Head.specialModeReplay, in.specialModeReplay)
   lqWrite.isvec := isVector
   lqWrite.isLastElem := DontCare // TODO: remove this
   lqWrite.is128bit := MemorySize.sizeIs(_.Q)(in.size)
@@ -1605,7 +1608,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.handledByMSHR := lqWriteHandledByMSHR
   lqWrite.replacementUpdated := DontCare // TODO: remove this
   lqWrite.missDbUpdated := DontCare // TODO: remove this
-  lqWrite.schedIndex := in.replayQueueIdx.get
+  lqWrite.schedIndex := Mux(s4HeadValid, s4Head.replayQueueIdx.get, in.replayQueueIdx.get)
   lqWrite.updateAddrValid := ldoutValid || vldoutValid
   lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
@@ -2002,9 +2005,11 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   private val numMemChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.numMemChannels
   val redirect = Flipped(ValidIO(new Redirect))
   val specialMode = Input(Bool())
-  val robHeadPtr = Input(new RobPtr)
+  val lqHeadPtr = Input(new LqPtr)
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param)))
+  val lrqAlloc = ValidIO(new LrqAlloc)
+  val lrqAllocIndex = Input(UInt(log2Ceil(LoadQueueReplaySize).W))
   val replay = Flipped(DecoupledIO(new LoadReplayIO))
   val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
   // Writeback to Backend / LQ / VLMergeBuffer
@@ -2098,6 +2103,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s0.io.replay <> io.replay
   s0.io.prefetchReq <> io.prefetchReq
   s0.io.ldin <> io.ldin
+  s0.io.lrqAllocIndex := io.lrqAllocIndex
+  io.lrqAlloc := s0.io.lrqAlloc
   io.tlb.req <> s0.io.tlbReq
   io.dcache.req <> s0.io.dcacheReq
   io.dcache.is128Req := s0.io.is128Req
@@ -2114,7 +2121,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // S1
   s1.io.redirect := io.redirect
   s1.io.specialMode := io.specialMode
-  s1.io.robHeadPtr := io.robHeadPtr
+  s1.io.lqHeadPtr := io.lqHeadPtr
   s1.io.tlbResp <> io.tlb.resp
   io.tlb.req_kill := s1.io.tlbReqKill
   io.tlb.req.bits.pmp_addr := s1.io.tlbPAddr // TODO
@@ -2143,7 +2150,6 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // S2
   s2.io.redirect := io.redirect
   s2.io.specialMode := io.specialMode
-  s2.io.robHeadPtr := io.robHeadPtr
   s2.io.pmp := io.pmp
   s2.io.tlbHint := io.tlbHint
   io.dcache.s2_kill := s2.io.dcacheKill

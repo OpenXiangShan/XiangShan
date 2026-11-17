@@ -535,6 +535,14 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       Array.fill[Seq[(Bool, UInt)]](backendParams.getFpRfWriteSize)(Seq.empty)
     val firstMemExu = bypassNetwork.io.toExus.int.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
     println(s"[Regin_int] firstMemExu = $firstMemExu")
+    val loadInputs = bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasLoadFu)
+    val lrqCreditManager = Module(new LrqCreditManager)
+    lrqCreditManager.io.update := io.lrqCreditUpdate.get
+    lrqCreditManager.io.redirect := flushCopyRegVec.last.valid
+    val heldLoadCredit = Wire(Vec(LoadPipelineWidth, Bool()))
+    val canceledHeldCredit = Wire(Vec(LoadPipelineWidth, Bool()))
+    lrqCreditManager.io.heldCount := PopCount(heldLoadCredit)
+    lrqCreditManager.io.canceledHeldCount := PopCount(canceledHeldCredit)
     for (i <- toMem.indices) {
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.int(firstMemExu + i)(j)
@@ -551,12 +559,24 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         if (toMem(i)(j).bits.params.hasLoadFu){
-          val toMemValidReg = RegInit(Bool(), false.B)
-          toMemExuInput.ready := toMem(i)(j).ready || !toMemValidReg
-          toMemValidReg := toMemValidAfterCancel && (!toMemValidReg || toMem(i)(j).fire) ||
-                           toMemValidReg && !toMem(i)(j).fire && !toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last)
+          val loadIdx = loadInputs.indexOf(toMemExuInput)
+          val toMemValidReg = RegInit(false.B)
+          val accepted = toMemExuInput.fire && toMemValidAfterCancel
+          val holdBits = RegEnable(toMemExuInput.bits, accepted)
+          val holdCancel = toMemValidReg && holdBits.robIdx.needFlush(flushCopyRegVec.last)
+          heldLoadCredit(loadIdx) := toMemValidReg && !LSUOpType.isPrefetch(holdBits.ctrl.fuOpType)
+          canceledHeldCredit(loadIdx) := heldLoadCredit(loadIdx) && holdCancel && !toMem(i)(j).fire
+          val holdAvailable = !toMemValidReg || toMem(i)(j).fire
+          val isPrefetch = LSUOpType.isPrefetch(toMemExuInput.bits.ctrl.fuOpType)
+          val isOldest = toMemExuInput.bits.robIdx.isSameSlot(io.robHeadPtr.get)
+          val admitted = isPrefetch || isOldest || lrqCreditManager.io.permit(loadIdx)
+          toMemExuInput.ready := holdAvailable && admitted
+          lrqCreditManager.io.accepted(loadIdx) := accepted && !isPrefetch
+          toMemValidReg := accepted || toMemValidReg && !toMem(i)(j).fire && !holdCancel
           toMem(i)(j).valid := toMemValidReg
-          toMem(i)(j).bits := RegEnable(toMemExuInput.bits, toMemValidAfterCancel && (!toMem(i)(j).valid || toMem(i)(j).fire))
+          toMem(i)(j).bits := holdBits
+          XSError(accepted && toMemValidReg && !toMem(i)(j).fire,
+            p"LRQ hold overwritten: load=$loadIdx\n")
         }
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
@@ -974,6 +994,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
     vecSchdParam.issueBlockParams.filter(_.VStdCnt > 0).map(x => Vec(x.numEnq, Decoupled(new RegionInUop(x))))
   ))
 
+  val lrqCreditUpdate = Option.when(params.isIntSchd)(Input(new xiangshan.mem.Bundles.LrqCreditUpdate))
+  val robHeadPtr = Option.when(params.isIntSchd)(Input(new RobPtr))
   val hartId = Input(UInt(8.W))
   val flush = Flipped(ValidIO(new Redirect))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))

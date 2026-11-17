@@ -286,6 +286,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   intRegion.io.hartId := io.fromTop.hartId
   intRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
+  intRegion.io.lrqCreditUpdate.get := io.mem.lrqCreditUpdate
+  intRegion.io.robHeadPtr.get := io.mem.robLsqIO.pendingPtr
   intRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.intUops).map { case (sink, source) => {
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
@@ -808,6 +810,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val wfi = new WfiReqBundle
 
+  val lrqCreditUpdate = Input(new xiangshan.mem.Bundles.LrqCreditUpdate)
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle(DecoupledIO(_), _.hasMemFu)
   val wakeupToLRQ = Vec(params.StaCnt + params.StdCnt, ValidIO(new IssueQueueLRQWakeUpBundle))
   val wakeupToLRQCancel = Vec(params.StaCnt + params.StdCnt, new IssueQueueLRQWakeUpCancelBundle)

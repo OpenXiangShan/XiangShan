@@ -33,6 +33,17 @@ import utils.OptionWrapper
 
 object Bundles {
 
+  class LrqAlloc(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val lqIdx = new LqPtr
+  }
+
+  class LrqCreditUpdate(implicit p: Parameters) extends XSBundle {
+    val returned = UInt(log2Ceil(LoadPipelineWidth + 1).W)
+    val snapshot = Valid(UInt(log2Ceil(LoadQueueReplaySize + 1).W))
+    val borrowAllowed = Bool()
+  }
+
   object StLdNukeMatchType {
     def Normal      = "b00".U
     def CacheLine   = "b10".U
@@ -63,7 +74,6 @@ object Bundles {
     val memBackTypeMM = Bool()
     val isHyper = Bool()
     val isForVSnonLeafPTE = Bool()
-    val specialModeEligible = Bool()
     val specialModeRequest = Bool()
     val isvec = Bool()
     val isLastElem = Bool()

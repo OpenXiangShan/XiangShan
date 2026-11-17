@@ -189,6 +189,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
+    val headIsLoad = Input(Bool())
   }
 
   val isStoreException = Input(Bool())
@@ -208,6 +209,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
+  val lrqCreditUpdate = Output(new Bundles.LrqCreditUpdate)
   val topToBackendBypass = new TopToBackendBundle
 
   // used by VLSU issue queue, the vector store would wait all store before it, and the vector load would wait all load
@@ -587,6 +589,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   val lsq     = Module(new LsqWrapper)
+  io.mem_to_ooo.lrqCreditUpdate := lsq.io.lrqCreditUpdate
   val sbuffer = Module(new Sbuffer)
 
   // Violation rollback: same-ROB redirects that flush themselves take priority.
@@ -852,14 +855,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
   }
 
-  l1_pf_req.ready := dcache.io.prefetch_req.ready
+  l1_pf_req.ready := dcache.io.prefetch_req.ready && !lsq.io.specialMode
   newLoadUnits.zipWithIndex.foreach { case(u, i) => {
     u.io.prefetchReq.valid <> false.B
     u.io.prefetchReq.bits <> DontCare
   }}
 
   // move hw prefetch to mainpipe
-  dcache.io.prefetch_req.valid <> l1_pf_req.valid
+  dcache.io.prefetch_req.valid := l1_pf_req.valid && !lsq.io.specialMode
   dcache.io.prefetch_req.bits <> l1_pf_req.bits
 
   /** l1 pf fuzzer interface */
@@ -929,7 +932,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // Perf-only head/full qualifiers for MDP counters.
     newLoadUnits(i).io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
-    newLoadUnits(i).io.robHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
+    newLoadUnits(i).io.lqHeadPtr := lsq.io.lqDeqPtr
+    lsq.io.lrqAlloc(i) := newLoadUnits(i).io.lrqAlloc
+    newLoadUnits(i).io.lrqAllocIndex := lsq.io.lrqAllocIndex(i)
+    XSError(newLoadUnits(i).io.lrqAlloc.valid =/=
+      (issueLda(i).fire && !LSUOpType.isPrefetch(issueLda(i).bits.fuOpType)),
+      p"LRQ S0 transfer/allocation mismatch: load=$i\n")
     newLoadUnits(i).io.perfLqHeadPtr := lsq.io.lqDeqPtr
     newLoadUnits(i).io.perfLqFull := lsq.io.lqFull
     newLoadUnits(i).io.specialMode := lsq.io.specialMode
@@ -1067,6 +1075,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+  lsq.io.rob.headIsLoad          := io.ooo_to_mem.lsqio.headIsLoad
 
   //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
