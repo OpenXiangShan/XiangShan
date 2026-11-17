@@ -7,6 +7,9 @@
 ##=========================================================
 
 #include ../../../../scr/verif/project_cfg.mk
+# RTL 源码根目录可由本地环境覆盖；未设置时沿用当前测试框架 worktree 的 RTL。
+MEMBLOCK_RTL_HOME ?= $(MEMBLOCK_XS_HOME)
+export MEMBLOCK_RTL_HOME
 EFFECTIVE_PLUSARGS = $(strip \
 	$(if $(strip $(plus_file)), \
 		$(shell awk -v plus_arg='$(plus_arg)' 'BEGIN { split(plus_arg, raw, /[ \t]+/); for (i in raw) { if (raw[i] ~ /^\+[A-Za-z0-9_]+=/) { key=raw[i]; sub(/=.*/, "", key); override[key]=1 } } ORS=" " } /^[ \t]*\+[A-Za-z0-9_]+=/ { arg=$$1; key=arg; sub(/=.*/, "", key); if (!(key in override)) print arg }' "$(plus_file)/$(cfg).cfg")) \

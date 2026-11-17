@@ -250,6 +250,8 @@ reg [1:0] io_ooo_to_mem_tlbCsr_priv_dmode;
 reg io_ooo_to_mem_tlbCsr_priv_debug;
 reg io_ooo_to_mem_tlbCsr_mPBMTE;
 reg io_ooo_to_mem_tlbCsr_hPBMTE;
+// PF 表示 Page Fault；页故障表项刷新按 CSR 的 PF_REFRESH_ENABLE 复位值默认开启。
+reg io_ooo_to_mem_tlbCsr_pfRefresh_enable;
 reg [1:0] io_ooo_to_mem_tlbCsr_pmm_mseccfg;
 reg [1:0] io_ooo_to_mem_tlbCsr_pmm_menvcfg;
 reg [1:0] io_ooo_to_mem_tlbCsr_pmm_henvcfg;
@@ -284,6 +286,8 @@ reg io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable;
 reg [21:0] io_ooo_to_mem_csrCtrl_sbuffer_timeout;
 reg io_ooo_to_mem_csrCtrl_ldld_vio_check_enable;
 reg io_ooo_to_mem_csrCtrl_cache_error_enable;
+// TSO 访存排序模式按 CSR 的 TSO_ENABLE 复位值默认关闭。
+reg io_ooo_to_mem_csrCtrl_tso_enable;
 reg io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable;
 reg io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
 reg io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable;
@@ -1084,7 +1088,7 @@ reg io_l2_tlb_req_req_valid;
 reg [49:0] io_l2_tlb_req_req_bits_vaddr;
 reg [2:0] io_l2_tlb_req_req_bits_cmd;
 reg io_l2_tlb_req_req_bits_kill;
-reg io_l2_tlb_req_req_bits_isPrefetch;
+reg io_l2_tlb_req_req_bits_fromHwPrefetch;
 reg io_l2_tlb_req_req_bits_no_translate;
 wire io_l2_tlb_req_resp_valid;
 wire [47:0] io_l2_tlb_req_resp_bits_paddr_0;
@@ -1482,6 +1486,7 @@ initial begin
     io_ooo_to_mem_tlbCsr_priv_debug = '0;
     io_ooo_to_mem_tlbCsr_mPBMTE = '0;
     io_ooo_to_mem_tlbCsr_hPBMTE = '0;
+    io_ooo_to_mem_tlbCsr_pfRefresh_enable = 1'b1;
     io_ooo_to_mem_tlbCsr_pmm_mseccfg = '0;
     io_ooo_to_mem_tlbCsr_pmm_menvcfg = '0;
     io_ooo_to_mem_tlbCsr_pmm_henvcfg = '0;
@@ -1516,6 +1521,7 @@ initial begin
     io_ooo_to_mem_csrCtrl_sbuffer_timeout = '0;
     io_ooo_to_mem_csrCtrl_ldld_vio_check_enable = '0;
     io_ooo_to_mem_csrCtrl_cache_error_enable = '0;
+    io_ooo_to_mem_csrCtrl_tso_enable = 1'b0;
     io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable = '0;
     io_ooo_to_mem_csrCtrl_hd_misalign_st_enable = '0;
     io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable = '0;
@@ -1977,7 +1983,7 @@ initial begin
     io_l2_tlb_req_req_bits_vaddr = '0;
     io_l2_tlb_req_req_bits_cmd = '0;
     io_l2_tlb_req_req_bits_kill = '0;
-    io_l2_tlb_req_req_bits_isPrefetch = '0;
+    io_l2_tlb_req_req_bits_fromHwPrefetch = '0;
     io_l2_tlb_req_req_bits_no_translate = '0;
     io_l2_flush_done = '0;
     io_fromTopToBackend_msiInfo_valid = '0;
@@ -2338,6 +2344,7 @@ MemBlock U_MEMBLOCK (
     .io_ooo_to_mem_tlbCsr_priv_debug ( io_ooo_to_mem_tlbCsr_priv_debug ),
     .io_ooo_to_mem_tlbCsr_mPBMTE ( io_ooo_to_mem_tlbCsr_mPBMTE ),
     .io_ooo_to_mem_tlbCsr_hPBMTE ( io_ooo_to_mem_tlbCsr_hPBMTE ),
+    .io_ooo_to_mem_tlbCsr_pfRefresh_enable ( io_ooo_to_mem_tlbCsr_pfRefresh_enable ),
     .io_ooo_to_mem_tlbCsr_pmm_mseccfg ( io_ooo_to_mem_tlbCsr_pmm_mseccfg ),
     .io_ooo_to_mem_tlbCsr_pmm_menvcfg ( io_ooo_to_mem_tlbCsr_pmm_menvcfg ),
     .io_ooo_to_mem_tlbCsr_pmm_henvcfg ( io_ooo_to_mem_tlbCsr_pmm_henvcfg ),
@@ -2372,6 +2379,7 @@ MemBlock U_MEMBLOCK (
     .io_ooo_to_mem_csrCtrl_sbuffer_timeout ( io_ooo_to_mem_csrCtrl_sbuffer_timeout ),
     .io_ooo_to_mem_csrCtrl_ldld_vio_check_enable ( io_ooo_to_mem_csrCtrl_ldld_vio_check_enable ),
     .io_ooo_to_mem_csrCtrl_cache_error_enable ( io_ooo_to_mem_csrCtrl_cache_error_enable ),
+    .io_ooo_to_mem_csrCtrl_tso_enable ( io_ooo_to_mem_csrCtrl_tso_enable ),
     .io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable ( io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable ),
     .io_ooo_to_mem_csrCtrl_hd_misalign_st_enable ( io_ooo_to_mem_csrCtrl_hd_misalign_st_enable ),
     .io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable ( io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable ),
@@ -3172,7 +3180,7 @@ MemBlock U_MEMBLOCK (
     .io_l2_tlb_req_req_bits_vaddr ( io_l2_tlb_req_req_bits_vaddr ),
     .io_l2_tlb_req_req_bits_cmd ( io_l2_tlb_req_req_bits_cmd ),
     .io_l2_tlb_req_req_bits_kill ( io_l2_tlb_req_req_bits_kill ),
-    .io_l2_tlb_req_req_bits_isPrefetch ( io_l2_tlb_req_req_bits_isPrefetch ),
+    .io_l2_tlb_req_req_bits_fromHwPrefetch ( io_l2_tlb_req_req_bits_fromHwPrefetch ),
     .io_l2_tlb_req_req_bits_no_translate ( io_l2_tlb_req_req_bits_no_translate ),
     .io_l2_tlb_req_resp_valid ( io_l2_tlb_req_resp_valid ),
     .io_l2_tlb_req_resp_bits_paddr_0 ( io_l2_tlb_req_resp_bits_paddr_0 ),

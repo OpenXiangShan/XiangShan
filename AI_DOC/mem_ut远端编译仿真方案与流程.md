@@ -151,20 +151,39 @@ vcs: command not found
 - `synopsys/vcs/Q-2020.03-SP2` 是否仍可用
 - `synopsys/verdi/R-2020.12-SP1` 是否仍可用
 
-## 7. MEMBLOCK_XS_HOME / MEMBLOCK_PROJECT 规则
+## 7. 测试框架与 RTL 路径配置
 
-`rtl.f` 中依赖如下路径：
+`MEMBLOCK_XS_HOME` 指向当前测试框架所在的 XiangShan worktree，`MEMBLOCK_PROJECT`
+保留为它的上一级目录。独立的 `MEMBLOCK_RTL_HOME` 指向生成 RTL 的 XiangShan 仓库根目录；
+`cfg/rtl.f` 使用 `$MEMBLOCK_RTL_HOME/build/rtl/filelist.f`，公共验证源码仍从
+`MEMBLOCK_XS_HOME/mem_ut` 读取。
 
-```text
-$MEMBLOCK_XS_HOME/build/rtl/filelist.f
+未设置 `MEMBLOCK_RTL_HOME` 时，默认沿用 `MEMBLOCK_XS_HOME`。设置后，Makefile 导出该变量，
+`remote_eda_make.sh` 将其显式传给 eda01，避免 SSH 环境丢失导致使用其他 RTL。
+
+当前用户本地 V2 配置为：
+
+```bash
+export MEMBLOCK_RTL_HOME=/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/RTL/XiangShan
 ```
 
-因此：
+该赋值保存在仓库外的 `~/.config/memblock/v2_env.sh`，由 `~/.bashrc`、`~/.zshrc`
+和 V2 项目上一级 `.envrc` 加载。新终端自动生效；已经打开的终端执行：
 
-- `MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。
-- `MEMBLOCK_PROJECT` 保留为当前 XiangShan worktree 的上一级目录，兼容旧脚本。
+```bash
+source ~/.config/memblock/v2_env.sh
+```
 
-当前该规则已经在 `mem_ut/ver/ut/memblock/scripts/eda01_entry.sh` 中通过脚本相对路径自动处理，避免 V2/V3 多 worktree 共存时误读其他 worktree 的 RTL。
+检查路径和产物：
+
+```bash
+printf '%s\n' "$MEMBLOCK_RTL_HOME"
+test -r "$MEMBLOCK_RTL_HOME/build/rtl/filelist.f"
+```
+
+本次最新 V2 顶层适配的两个固定 CSR 输入按硬件复位值配置：`TSO_ENABLE=0`、
+`PF_REFRESH_ENABLE=1`。PF 表示页故障；这两个输入目前由 `tb/dut_inst.sv` 初始化，
+尚未加入 CSR agent 的动态随机控制。
 
 ## 8. 当前已验证结论
 

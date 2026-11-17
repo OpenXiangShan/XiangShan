@@ -71,6 +71,7 @@ FORWARD_VARS=(
     gui_on
     SIM_TOOLS
     MEMBLOCK_XS_HOME
+    MEMBLOCK_RTL_HOME
     MEMBLOCK_PROJECT
 )
 
@@ -79,7 +80,7 @@ build_make_assignments() {
     local name value
     for name in "${FORWARD_VARS[@]}"; do
         value="${!name-}"
-        if [[ ("$name" == "MEMBLOCK_XS_HOME" || "$name" == "MEMBLOCK_PROJECT") && -z "$value" ]]; then
+        if [[ ("$name" == "MEMBLOCK_XS_HOME" || "$name" == "MEMBLOCK_RTL_HOME" || "$name" == "MEMBLOCK_PROJECT") && -z "$value" ]]; then
             continue
         fi
         # remote_entry_cmd() quotes each complete assignment exactly once.  Do
