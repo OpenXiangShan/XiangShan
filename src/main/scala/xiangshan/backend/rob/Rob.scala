@@ -164,6 +164,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
+  /**
+   * Retirement row buffers
+   */
   val commitOffsetWidth = log2Ceil(CommitWidth)
   val robBanksRaddrThisLine = RegInit(deqBanking.firstRowSelect)
   val robBanksRaddrNextLine = Wire(chiselTypeOf(robBanksRaddrThisLine))
@@ -235,7 +238,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, in.snpt.snptDeq, in.redirect.valid, in.snpt.flushVec)
 
   /**
-   * states of Rob
+   * Control state
    */
   val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
@@ -247,7 +250,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.robDeqPtr := deqPtr
 
   /**
-   * connection of [[rab]]
+   * Rename buffer interface
    */
   rab.in.redirect := in.redirect.valid
 
@@ -283,7 +286,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.vlCommits := RegNext(vtypeBuffer.out.commits)
 
   /**
-   * connection of [[vtypeBuffer]]
+   * VType buffer interface
    */
 
   vtypeBuffer.in.redirect := in.redirect.valid
@@ -303,6 +306,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.toDecode.commitVType := vtypeBuffer.out.toDecode.commitVType
   out.toDecode.walkVType := vtypeBuffer.out.toDecode.walkVType
 
+  /**
+   * Dispatch serialization and WFI
+   */
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   // TODO: How about a lot of fence instr and XSTrap instr
@@ -367,7 +373,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   when(!in.wfiEnable) {
     hasWFI := false.B
   }
-  // sel vsetvl's flush position
+  /**
+   * Vector flush tracking
+   */
   val vs_idle :: vs_waitVinstr :: vs_waitFlush :: Nil = Enum(3)
   val vsetvlState = RegInit(vs_idle)
 
@@ -671,7 +679,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   require(RenameWidth <= CommitWidth)
 
-  // wiring to csr
+  /**
+   * CSR flag tracking
+   */
   // update when enq
   val enqFlagTracker = Module(new RobSetFlagTracker(
     2,
@@ -764,6 +774,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
   out.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
 
+  /**
+   * Retirement eligibility
+   */
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
@@ -834,7 +847,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.csr.dirtyVs := GatedValidRegNext(dirtyVs)
   out.csr.vxsat    := RegNext(writebackFlagTracker.out.commitSetMask(fflagsWidth), false.B)
 
-  // commit load/store to lsq
+  /**
+   * LSQ retirement and pending slot
+   */
   val ldCommitVec = VecInit((0 until CommitWidth).flatMap { i =>
     (0 until 2).map { j =>
       val slotValid = out.commits.commitValid(i) && (j == 0).B ||
@@ -906,7 +921,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       pendingEntry.latterUopNum =/= 0.U, 1.U, 0.U))
 
   /**
-   * state changes
+   * Control state transitions
    * (1) redirect: switch to s_walk
    * (2) walk: when walking comes to the end, switch to s_idle
    */
@@ -924,7 +939,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   state := state_next
 
   /**
-   * pointers and counters
+   * Pointer updates and capacity
    */
   val deqPtrGenModule = Module(new RobDeqPtrWrapper)
   deqPtrGenModule.in.state := state
@@ -1003,11 +1018,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
 
   /**
-   * States
-   * We put all the stage bits changes here.
-   *
-   * All events: (1) enqueue (dispatch); (2) writeback; (3) cancel; (4) dequeue (commit);
-   * All states: (1) valid; (2) writebacked; (3) flagBkup
+   * ROB entry state updates
    */
 
   val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
@@ -1316,7 +1327,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // end update robBanksRdata
 
   /**
-   * read and write of data modules
+   * Exception generator interface
    */
   val commitReadAddr_next = Mux(state_next === s_idle,
     VecInit(deqPtrVec_next.map(_.value)),
@@ -1426,6 +1437,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := in.debugHeadLsIssue
 
+  // Enqueue slot metadata.
   val timer = GTimer()
   for (i <- 0 until RenameWidth) {
     // we don't check whether in.redirect is valid here since redirect has higher priority
@@ -1495,8 +1507,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  // Apply LSQ debug updates before writeback so completion metadata retains priority.
-  // lqEnq
+  // LSQ allocation precedes writeback so completion metadata retains priority.
   in.debugEnqLsq.needAlloc.map(_(0)).zip(in.debugEnqLsq.req).foreach { case (alloc, req) =>
     when(in.debugEnqLsq.canAccept && alloc && req.valid) {
       val ptr = req.bits.uop.robIdx
@@ -1508,11 +1519,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  // lsIssue
+  // Head load/store issue.
   when(in.debugHeadLsIssue) {
     debug_lsIssued(deqPtr.value) := true.B
   }
 
+  // Writeback metadata.
   for (wb <- exuWBs) {
     val wbIdx = wb.bits.robIdx.value
     val subIdx = slotIndex(wb.bits.robIdx)
@@ -1565,7 +1577,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val writebackNum = PopCount(exuWBs.map(_.valid))
   XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
 
-  // debug_inst update
+  // Load/store pipeline observations.
   for (i <- 0 until (LduCnt + StaCnt)) {
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(in.debug_ls.debugLsInfo(i))
     debug_lsInfo(in.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(in.debug_ls.debugLsInfo(i))
@@ -1581,6 +1593,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
   out.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)
 
+  // Retirement diagnostics.
   for (i <- 0 until CommitWidth) {
     XSInfo(out.commits.isCommit && out.commits.commitValid(i),
       "retired pc %x wen %d ldest %d pdest %x data %x\n",
