@@ -96,15 +96,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     else
       csrCtrl
 
-  // Experiment: disable the ahead predictors even when CSR/Constantin requests them.
-  private val enableAbtbUtage = false
-  private val abtbEnabled     = enableAbtbUtage.B && ctrl.abtbEnable
+  // Experiment: use ABTB's own direction counters while keeping micro-TAGE disabled.
+  private val enableUtage = false
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := abtbEnabled
+  utage.io.enable       := enableUtage.B && ctrl.abtbEnable
   uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
   ubtb.io.enable        := ctrl.ubtbEnable
-  abtb.io.enable        := abtbEnabled
+  abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable && ctrl.mbtbEnable
   sc.io.enable          := ctrl.scEnable && ctrl.mbtbEnable
@@ -293,8 +292,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     s1_abtbPrediction(i) := abtb.io.result.entries(i).bits
   }
 
-  private val s1_abtbPosition   = VecInit(s1_abtbPrediction.map(_.cfiPosition))
-  private val s1_utageHitMask   = utage.io.prediction.hitVec
+  private val s1_abtbPosition = VecInit(s1_abtbPrediction.map(_.cfiPosition))
+  private val s1_utageHitMask =
+    if (enableUtage) utage.io.prediction.hitVec else VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
   private val s1_utageTakenMask = utage.io.prediction.takenVec
 
   private val s1_abtbTakenMask = VecInit(abtb.io.result.entries.zipWithIndex.map { case (pred, i) =>
@@ -344,7 +344,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // Check the selected S1 prediction so an unused BTB return cannot claim the target.
   private val debug_s1UseUras = s1_taken && s1_prediction.attribute.isReturn && uras.io.specOut.isCanUse
 
-  s1_utageMeta := utage.io.meta.bits
+  s1_utageMeta := (if (enableUtage) utage.io.meta.bits else 0.U.asTypeOf(new MicroTageMeta))
 
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
 
