@@ -91,6 +91,10 @@ class TranslationScenarioChecker:
             (outcome for outcome in page_outcomes if not bool(outcome.get("ok", False))),
             page_outcomes[0],
         )
+        first_fault_page = next(
+            (page for page, outcome in zip(selected_pages, page_outcomes) if not bool(outcome.get("ok", False))),
+            None,
+        )
         expected_fault = self._expected_fault(state, fault_outcome)
         s2xlate = int(state.expected_ptw_request["s2xlate"])
         response_covers_selected_pages = (
@@ -140,6 +144,16 @@ class TranslationScenarioChecker:
                 }
                 for page in guest_fault_pages
             )
+        required_ptw_vpns = {
+            self.env.page_table.normalize_ptw_vpn((int(state.scenario.va) >> 12) + page)
+            for page in selected_pages
+            if first_fault_page is None or page <= first_fault_page
+        }
+        required_ptw_request_keys = [
+            (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+            for request in expected_ptw_requests
+            if int(request["vpn"]) in required_ptw_vpns
+        ]
         expected_fetches = []
         allowed_out_of_scope_fetches = []
         expected_gpaddr_writes = []
@@ -191,6 +205,7 @@ class TranslationScenarioChecker:
             "payload_size": len(state.scenario.payload),
             "expected_ptw_request": dict(state.expected_ptw_request),
             "expected_ptw_requests": expected_ptw_requests,
+            "required_ptw_request_keys": required_ptw_request_keys,
             "expected_outcome": dict(page_outcomes[0]),
             "selected_pages": list(selected_pages),
             "expected_page_outcomes": page_outcomes,
@@ -201,6 +216,7 @@ class TranslationScenarioChecker:
             "allowed_out_of_scope_fetches": allowed_out_of_scope_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
             "expected_fault": expected_fault,
+            "first_fault_page": first_fault_page,
             "expected_permission_probes": [
                 dict(probe) for probe in getattr(state, "expected_permission_probes", ())
             ],
@@ -706,10 +722,7 @@ class TranslationScenarioChecker:
         if self.active is None:
             raise AssertionError("translation checker has no armed scenario")
         missing = []
-        expected_ptw_request_keys = {
-            (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-            for request in self.active["expected_ptw_requests"]
-        }
+        expected_ptw_request_keys = set(self.active["required_ptw_request_keys"])
         if not expected_ptw_request_keys.issubset(self.active["requested_ptw_request_keys"]):
             missing.append("ptw_request")
         if not expected_ptw_request_keys.issubset(self.active["responded_ptw_request_keys"]):
@@ -726,7 +739,11 @@ class TranslationScenarioChecker:
             if missing_fetches:
                 missing.append(f"fetch_block_{missing_fetches}")
         observed_gpaddrs = {int(item["gpaddr"]) for item in self.active["observed_gpaddr_writes"]}
+        # Later pages may be translated speculatively but cannot commit a fault after the first fault.
+        first_fault_page = self.active["first_fault_page"]
         for expected in self.active["expected_gpaddr_writes"]:
+            if first_fault_page is not None and int(expected["page"]) != first_fault_page:
+                continue
             if int(expected["gpaddr"]) not in observed_gpaddrs:
                 missing.append(f"gpaddr_write_page_{expected['page']}")
         if missing:

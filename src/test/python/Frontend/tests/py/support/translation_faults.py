@@ -10,7 +10,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, scenario_rng
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
 CACHEABLE_CROSS_PAGE_VA = 0x8020_0000
@@ -115,9 +115,10 @@ def _assert_fault_ftq_identity(
 
 
 def cacheable_cross_page_fault_scenario(
-    *, s2xlate: int, response_field: str, expected_result: str
+    *, s2xlate: int, response_field: str, expected_result: str,
+    va: int = CACHEABLE_CROSS_PAGE_VA, pa: int = CACHEABLE_CROSS_PAGE_PA,
 ) -> TranslationScenario:
-    first_page_pa = CACHEABLE_CROSS_PAGE_PA & ~0xFFF
+    first_page_pa = pa & ~0xFFF
     translation = {
         "mode": "bare" if s2xlate == 2 else "sv39",
         "s2xlate": s2xlate,
@@ -135,13 +136,13 @@ def cacheable_cross_page_fault_scenario(
         )
     return TranslationScenario(
         scenario_id=f"cacheable-cross-page-second-s2xlate-{s2xlate}-{response_field}",
-        va=CACHEABLE_CROSS_PAGE_VA,
-        pa=CACHEABLE_CROSS_PAGE_PA,
+        va=va,
+        pa=pa,
         payload=_CACHEABLE_CROSS_PAGE_PAYLOAD,
         page_count=2,
         ptw_response_overrides=(
             TranslationPtwResponseOverride(
-                vpn=(CACHEABLE_CROSS_PAGE_VA >> 12) + 1,
+                vpn=(va >> 12) + 1,
                 s2xlate=s2xlate,
                 patch=((response_field, 1),),
             ),
@@ -171,16 +172,25 @@ def cacheable_cross_page_fault_scenario(
 def run_cacheable_cross_page_second_page_fault(
     env, s2xlate: int, response_field: str, expected_result: str, expected_fault: str
 ) -> None:
+    scenario_id = f"cacheable-cross-page-second-s2xlate-{s2xlate}-{response_field}"
+    scenario_key = f"zhaoxinran/translation/fault/{scenario_id}"
+    addresses = {}
+    if s2xlate == 2 and response_field == "s2_gpf":
+        _, _, rng = scenario_rng(scenario_key)
+        addresses = {
+            "va": rng.randrange(0x8020_0000, 0x8028_0000, 0x2000),
+            "pa": rng.randrange(0x8040_0000, 0x8048_0000, 0x2000),
+        }
+    scenario = cacheable_cross_page_fault_scenario(
+        s2xlate=s2xlate, response_field=response_field, expected_result=expected_result, **addresses
+    )
     initialize_frontend(
         env,
-        FrontendInitConfig(reset_vector=CACHEABLE_CROSS_PAGE_VA, bare_mode=False, reset_cycles=20),
-    )
-    scenario = cacheable_cross_page_fault_scenario(
-        s2xlate=s2xlate, response_field=response_field, expected_result=expected_result
+        FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20),
     )
     scenario = _randomize_ptw_response_timing(
         env, scenario,
-        scenario_key=f"zhaoxinran/translation/fault/{scenario.scenario_id}",
+        scenario_key=scenario_key,
         parameters={
             "page_count": scenario.page_count,
             "expected_path": "fault",
@@ -188,13 +198,16 @@ def run_cacheable_cross_page_second_page_fault(
         },
     )
     state = TranslationScenarioBuilder(env).build(scenario)
+    if s2xlate == 2 and response_field == "s2_gpf":
+        assert state.expected_page_outcomes[0]["ok"]
+        assert state.expected_page_outcomes[1]["outcome"] == expected_fault
     gpaddr_writes = _capture_gpaddr_writes(env)
     cfvec_deliveries = _capture_cfvec_deliveries(env)
     env.monitor.clear()
-    env.monitor.set_expected_pc(CACHEABLE_CROSS_PAGE_VA)
+    env.monitor.set_expected_pc(scenario.va)
     env.arm_translation_scenario(state)
     env.translation_oracle.set_fetch_observation_ready(ready=False)
-    env.backend_model.inject_redirect(CACHEABLE_CROSS_PAGE_VA, "ctrl_redirect", delay_cycles=0)
+    env.backend_model.inject_redirect(scenario.va, "ctrl_redirect", delay_cycles=0)
 
     for _ in range(12000):
         active = env.translation_oracle.get_active()
@@ -209,7 +222,7 @@ def run_cacheable_cross_page_second_page_fault(
         "ptw": env.ptw_agent.get_stats(), "icache": env.icache_agent.get_stats(),
         "uncache": env.uncache_agent.get_stats(),
     }
-    second_page_vpn = (CACHEABLE_CROSS_PAGE_VA >> 12) + 1
+    second_page_vpn = (scenario.va >> 12) + 1
     assert any(
         int(request["vpn"]) == second_page_vpn and int(request["s2xlate"]) == s2xlate
         for request in active["expected_ptw_requests"]
@@ -220,22 +233,30 @@ def run_cacheable_cross_page_second_page_fault(
         if record["kind"] == "cfvec_exception"
     ]
     assert any(
-        int(record["pc"]) == CACHEABLE_CROSS_PAGE_RVI_PC
+        int(record["pc"]) == scenario.va + 0x1000 - 2
         and record["fault"] == expected_fault and bool(record["cross_page"])
         for record in exception_records
     ), exception_records
-    first_line_pa = CACHEABLE_CROSS_PAGE_PA & ~0x3F
+    first_line_pa = scenario.pa & ~0x3F
     icache_records = env.icache_agent.get_stats().get("request_records", [])
     assert any(int(record["address"]) == first_line_pa for record in icache_records), icache_records
+    if s2xlate == 2 and response_field == "s2_gpf":
+        assert any(
+            scenario.va <= int(record["pc"]) < scenario.va + 0x1000 - 2
+            and not record["exception_bits"]
+            for record in cfvec_deliveries
+        ), cfvec_deliveries[-64:]
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == 0
     assert env.monitor.exception_mark_count > 0
     _, ftq_value = _assert_fault_ftq_identity(
-        cfvec_deliveries, pc=CACHEABLE_CROSS_PAGE_RVI_PC,
+        cfvec_deliveries, pc=scenario.va + 0x1000 - 2,
         expected_fault=expected_fault, cross_page=True,
     )
     if expected_fault == "instruction_guest_page_fault":
         assert gpaddr_writes, {"expected_fault": expected_fault}
         assert all(record["waddr"] == ftq_value for record in gpaddr_writes), gpaddr_writes
+        if s2xlate == 2 and response_field == "s2_gpf":
+            assert any(record["gpaddr"] == (scenario.va & ~0xFFF) + 0x1000 for record in gpaddr_writes), gpaddr_writes
     else:
         assert not gpaddr_writes, {"expected_fault": expected_fault, "gpaddr_writes": gpaddr_writes}
     assert env.assert_translation_scenario()["error_count"] == 0

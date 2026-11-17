@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from env.checkers.translation_scenario_checker import TranslationScenarioChecker
@@ -13,6 +15,7 @@ from env.sequences import (
     TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
+    TranslationScenarioRandomizer,
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
@@ -84,6 +87,80 @@ def test_gpaddr_write_missing_or_wrong_ftq_is_reported_at_completion() -> None:
     env.translation_oracle.observe_cfvec(21, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
     with pytest.raises(AssertionError, match="gpaddr_write_ftq_mismatch"):
         env.assert_translation_scenario()
+
+
+@pytest.mark.parametrize("respond_later", (False, True))
+def test_first_fault_page_requires_gpaddr_write_but_later_speculative_page_does_not(respond_later) -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenarioRandomizer(0x5A390001).next(2).scenario
+    state = TranslationScenarioBuilder(env).build(scenario)
+    active = env.arm_translation_scenario(state)
+
+    assert [item["page"] for item in active["expected_gpaddr_writes"]] == [0, 1]
+    assert len(active["required_ptw_request_keys"]) == 1
+    for cycle, request in enumerate(active["expected_ptw_requests"], start=10):
+        if cycle > 10 and not respond_later:
+            continue
+        keys = {key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}
+        env.translation_oracle.observe_ptw_request(cycle * 2, **keys)
+        env.translation_oracle.observe_ptw_response(
+            cycle * 2 + 1, **keys, response=env.page_table.build_ptw_resp(**keys)
+        )
+    env.translation_oracle.observe_gpaddr_write(
+        30, wen=1, waddr=7, gpaddr=active["expected_gpaddr_writes"][0]["gpaddr"], nonleaf=0,
+    )
+    env.translation_oracle.observe_cfvec(31, pc=scenario.va, exception_bits={20: 1}, ftq_value=7)
+
+    assert env.assert_translation_scenario()["error_count"] == 0
+
+
+@pytest.mark.parametrize("seed", (17, 23))
+@pytest.mark.parametrize("write_second", (False, True))
+def test_second_page_guest_fault_requires_second_page_gpaddr_write(seed, write_second) -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    rng = random.Random(seed)
+    va = rng.randrange(0x8020_0000, 0x8028_0000, 0x2000) + 0xFF8
+    pa = rng.randrange(0x8040_0000, 0x8048_0000, 0x2000) + 0xFF8
+    second_page_va = (va & ~0xFFF) + 0x1000
+    scenario = TranslationScenario(
+        scenario_id="oracle-second-page-gpf",
+        va=va,
+        pa=pa,
+        payload=b"\x13\x00\x00\x00" * 256,
+        page_count=2,
+        mode="bare",
+        s2xlate=2,
+        priv_virt=1,
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(
+                vpn=second_page_va >> 12, s2xlate=2, patch=(("s2_gpf", 1),),
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    active = env.arm_translation_scenario(state)
+    assert state.expected_page_outcomes[0]["ok"]
+    assert state.expected_page_outcomes[1]["outcome"] == "instruction_guest_page_fault"
+    assert len(active["required_ptw_request_keys"]) == 2
+    assert active["first_fault_page"] == 1
+    assert active["expected_gpaddr_writes"][0]["gpaddr"] == second_page_va
+    for cycle, request in enumerate(active["expected_ptw_requests"], start=10):
+        keys = {key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}
+        env.translation_oracle.observe_ptw_request(cycle * 2, **keys)
+        env.translation_oracle.observe_ptw_response(
+            cycle * 2 + 1, **keys, response=env.page_table.build_ptw_resp(**keys)
+        )
+    env.translation_oracle.observe_cfvec(
+        30, pc=second_page_va, exception_bits={20: 1}, ftq_value=7,
+    )
+    if write_second:
+        env.translation_oracle.observe_gpaddr_write(
+            31, wen=1, waddr=7, gpaddr=second_page_va, nonleaf=0,
+        )
+        assert env.assert_translation_scenario()["error_count"] == 0
+    else:
+        with pytest.raises(AssertionError, match="gpaddr_write_page_1"):
+            env.assert_translation_scenario()
 
 
 def test_non_gpf_scenario_rejects_gpaddr_write() -> None:

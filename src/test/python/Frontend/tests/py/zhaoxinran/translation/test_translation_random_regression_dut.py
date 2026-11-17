@@ -59,14 +59,22 @@ def _translation_complete(env) -> bool:
     active = env.translation_oracle.get_active()
     if active is None:
         return False
-    expected_ptw_requests = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
+    expected_ptw_requests = set(active["required_ptw_request_keys"])
     if active["expected_path"] == "fault":
+        required_gpaddr = next(
+            (
+                int(item["gpaddr"])
+                for item in active["expected_gpaddr_writes"]
+                if int(item["page"]) == active["first_fault_page"]
+            ),
+            None,
+        )
         return bool(
             active["fault_seen"]
             and expected_ptw_requests.issubset(active["responded_ptw_request_keys"])
+            and (required_gpaddr is None or any(
+                int(write["gpaddr"]) == required_gpaddr for write in active["observed_gpaddr_writes"]
+            ))
         )
     expected_cfvec_pages = {
         int(page)
