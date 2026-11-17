@@ -57,9 +57,18 @@ def test_first_block_valid_uses_current_semantic_object_not_absent_port():
     assert "io_fromICache_req_bits_info_1_valid" in ifu
 
 
+def test_current_ftq_prefetch_uses_direct_connection():
+    root = Path(__file__).resolve().parents[7]
+    icache = (root / "src/main/scala/xiangshan/frontend/icache/ICacheImp.scala").read_text()
+    assert "prefetcher.io.fromFtq <> io.fromFtq.toPrefetch" in icache
+    assert "softPrefetchValid" not in icache
+
+
 def test_software_prefetch_legally_stalls_ftq_ingress():
     root = Path(__file__).resolve().parents[7]
     icache = (root / "src/main/scala/xiangshan/frontend/icache/ICacheImp.scala").read_text()
+    if "softPrefetchValid" not in icache:
+        pytest.skip("current ICache has no software-prefetch arbitration")
     assert "io.fromFtq.toPrefetch.ready       := prefetcher.io.fromFtq.ready && !softPrefetchValid" in icache
     assert "Mux(softPrefetchValid, softPrefetch, io.fromFtq.toPrefetch.bits.req(0))" in icache
 
