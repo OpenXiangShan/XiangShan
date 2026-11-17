@@ -153,7 +153,7 @@ def tag_segments(rows, end):
     return coalesce([(a, b, r) for a, b, r in spans if a < b], 'entry', TAG_FIELDS)
 
 
-def partition_wait(begin, end, tag, tag_end, owners, line):
+def partition_wait(begin, end, tag, tag_end, owners, line, owner_starts=None):
     """Bind once at episode start; retain missing/reused-owner tails as unknown."""
     counts = Counter({name: 0 for name in PARTS})
     binding = dict(begin=begin, end=end, unknown_reason=None)
@@ -162,7 +162,8 @@ def partition_wait(begin, end, tag, tag_end, owners, line):
         binding['unknown_reason'] = 'no_qualified_tag'
         return dict(counts), binding
     records = owners.get(tag['mshr_id'], [])
-    index = bisect_right([r['begin'] for r in records], begin) - 1
+    starts = owner_starts.get(tag['mshr_id'], []) if owner_starts is not None else [r['begin'] for r in records]
+    index = bisect_right(starts, begin) - 1
     owner = records[index] if index >= 0 and begin < records[index]['end'] else None
     if owner is None or not owner['allocation_observed'] or owner['line'] != line:
         counts['unknown'] = end - begin
@@ -211,18 +212,25 @@ def analyze(folder, receipt, identities=()):
     assert boundaries(rows) == boundaries(tags) == boundaries(joint), 'New trace boundary mismatch'
     end = max(p['end_core_inclusive'] for p in output['phases']) + 1
     owners, states, grants = generations(rows, end)
+    owner_starts = {slot: [r['begin'] for r in records] for slot, records in owners.items()}
     tag_spans = tag_segments(tags, end)
     lrq_spans = coalesce(replay_segments(lrq, end), 'entry', FIELDS)
     by_entry = defaultdict(list)
     for begin, finish, row in tag_spans:
         by_entry[row['entry']].append((begin, finish, row))
+    tag_starts = {entry: [a for a, _, _ in records] for entry, records in by_entry.items()}
     # Prove both traces cover the same DM members, beyond merely matching hashes.
     coverage = Counter()
     for begin, finish, row in lrq_spans:
         if row['is_vector'] or row['cause'] != 64:
             continue
         matched = 0
-        for a, b, tag in by_entry[row['entry']]:
+        records = by_entry[row['entry']]
+        first_tag = max(0, bisect_right(tag_starts.get(row['entry'], []), begin) - 1)
+        for index in range(first_tag, len(records)):
+            a, b, tag = records[index]
+            if a >= finish:
+                break
             overlap = min(finish, b) - max(begin, a)
             if overlap <= 0:
                 continue
@@ -264,11 +272,11 @@ def analyze(folder, receipt, identities=()):
                     continue
                 # Bind at the original episode start, before clipping to WB/ROI.
                 tag, tag_end = None, finish
-                for x, y, candidate in by_entry[row['entry']]:
-                    if x <= a < y:
-                        tag, tag_end = candidate, y
-                        break
-                result, binding = partition_wait(a, finish, tag, tag_end, owners, wb['physical_address'] & ~63)
+                records = by_entry[row['entry']]
+                index = bisect_right(tag_starts.get(row['entry'], []), a) - 1
+                if index >= 0 and a < records[index][1]:
+                    _, tag_end, tag = records[index]
+                result, binding = partition_wait(a, finish, tag, tag_end, owners, wb['physical_address'] & ~63, owner_starts)
                 assert begin == a
                 counts.update(result)
                 bindings.append(binding)
