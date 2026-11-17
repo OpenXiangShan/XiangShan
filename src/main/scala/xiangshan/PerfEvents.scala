@@ -28,7 +28,9 @@ object PerfEvent {
   val ST_L1  = 6
   val ST_TLB = 7
 
-  val width = ST_TLB + 1
+  val ST_LLC = 8
+
+  val width = ST_LLC + 1
 
   def bit(idx: Int): UInt = {
     require(idx >= 0 && idx < width, s"Performance event index $idx out of range [0, $width)")

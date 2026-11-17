@@ -6,7 +6,7 @@ rename, dispatch, and commit decisions unchanged.
 
 ## Event metadata
 
-`PerfEvent` defines an eight-bit performance signature vector (PSV). The bit
+`PerfEvent` defines a nine-bit performance signature vector (PSV). The bit
 positions are shared with the profiler trace formats:
 
 | Bit | Event | Observation |
@@ -19,6 +19,7 @@ positions are shared with the profiler trace formats:
 | 5 | `FL_MO` | Memory-order redirect |
 | 6 | `ST_L1` | Data-cache miss |
 | 7 | `ST_TLB` | Data-TLB miss |
+| 8 | `ST_LLC` | Demand-load transaction missed an LLC, set by the consuming profiler |
 
 The shared frontend produces the first two bits. The remaining bits retain their
 encoding for consumers that accumulate execution or recovery events. A signature
