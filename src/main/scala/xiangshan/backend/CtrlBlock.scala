@@ -835,11 +835,11 @@ class CtrlBlockImp(
   dispatch.io.fromLsqEnqCtrl.sqStall.foreach(_ := lsqEnqCtrl.io.sqStall.get)
   io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
 
-  dispatch.io.debugBlockBackward.foreach(_ := rob.out.debugBlockBackward.get)
-  dispatch.io.debugWaitForward.foreach(_ := rob.out.debugWaitForward.get)
+  dispatch.io.debugBlockBackward.foreach(_ := rob.out.simBlockBackward.get)
+  dispatch.io.debugWaitForward.foreach(_ := rob.out.simWaitForward.get)
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
   dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
-  dispatch.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
+  dispatch.io.debugRobHeadStall.foreach(_ := rob.out.simRobHeadStall.get)
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -908,17 +908,17 @@ class CtrlBlockImp(
 
   io.diff_vl_rat .foreach(_ := rename.io.diff_vl_rat.get)
 
-  rob.in.debug_ls := io.robio.debug_ls
-  rob.in.debugHeadLsIssue := io.robio.robHeadLsIssue
+  rob.in.sim_ls := io.robio.debug_ls
+  rob.in.simHeadLsIssue := io.robio.robHeadLsIssue
   rob.in.lsTopdownInfo := io.robio.lsTopdownInfo
   rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
-  rob.in.debugEnqLsq := io.debugEnqLsq
-  rob.in.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
+  rob.in.simEnqLsq := io.debugEnqLsq
+  rob.in.simInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.in.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
   io.robio.robDeqPtr := rob.out.robDeqPtr
 
-  io.robio.storeDebugInfo <> rob.in.storeDebugInfo
+  io.robio.storeDebugInfo <> rob.in.storeSimInfo
 
   // rob to backend
   io.robio.commitVType := rob.out.toDecode.commitVType
@@ -933,11 +933,11 @@ class CtrlBlockImp(
   io.toVecExcpMod.excpInfo       := rob.out.toVecExcpMod.excpInfo
   io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
-  io.debugTopDown.fromRob := rob.out.debugTopDown.toCore
-  rob.in.debugTopDown.fromCore := io.debugTopDown.fromCore
-  io.debugRolling := rob.out.debugRolling
-  dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.debugTopDown.toDispatch.robTrueCommit)
-  rename.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
+  io.debugTopDown.fromRob := rob.out.simTopDown.toCore
+  rob.in.simTopDown.fromCore := io.debugTopDown.fromCore
+  io.debugRolling := rob.out.simRolling
+  dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.simTopDown.toDispatch.robTrueCommit)
+  rename.io.debugRobHeadStall.foreach(_ := rob.out.simRobHeadStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.out.robFull)
   io.perfInfo.ctrlInfo.intdqFull := false.B

@@ -98,22 +98,22 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val slotNeedFlushMask = UInt(2.W)
 
   // Entry-level fields continue to describe the former slot. Rob.scala keeps
-  // a second current-API debug copy for exact latter-slot selection.
-  val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-  val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
-  val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
-  val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
-  val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
-  val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
-  val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr)
-  val debug_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr)
-  val debug_rfWen      = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum())
-  val debug_sim_trig   = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType())
+  // a second simulation copy for exact latter-slot selection.
+  val sim_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val sim_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
+  val basicSim       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val sim_fuType     = OptionWrapper(backendParams.debugEn, FuType())
+  val sim_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
+  val sim_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
+  val perfSimInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
+  val sim_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr)
+  val sim_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr)
+  val sim_rfWen      = OptionWrapper(backendParams.debugEn, Bool())
+  val sim_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum())
+  val sim_trigger   = OptionWrapper(backendParams.debugEn, Bool())
+  val sim_vecWen     = OptionWrapper(backendParams.debugEn, Bool())
+  val sim_v0Wen      = OptionWrapper(backendParams.debugEn, Bool())
+  val sim_commitType = OptionWrapper(backendParams.debugEn, CommitType())
   val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
   val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
   val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
@@ -198,20 +198,20 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     // trace
     this.traceBlockInPipe := robEnq.traceBlockInPipe
     this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
-    this.basicDebug.foreach(_.connectBasicDebug(robEnq))
-    this.debug_fuType.foreach(_ := robEnq.fuType)
-    this.debug_fuOpType.foreach(_ := robEnq.fuOpType)
-    this.debug_rfWen.foreach(_ := robEnq.rfWen)
-    this.debug_vecWen.foreach(_ := robEnq.vecWen)
-    this.debug_v0Wen.foreach(_ := robEnq.v0Wen)
-    this.debug_commitType.foreach(_ := robEnq.commitType)
-    robEnq.debug.foreach { debug =>
-      this.debug_pc.foreach(_ := debug.pc)
-      this.debug_seqNum.foreach(_ := debug.debug_seqNum)
-      this.debug_instr.foreach(_ := debug.instr)
-      this.debug_fusionNum.foreach(_ := debug.fusionNum)
-      this.perfDebugInfo.foreach(_ := debug.perfDebugInfo)
-      this.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
+    this.basicSim.foreach(_.connectBasicDebug(robEnq))
+    this.sim_fuType.foreach(_ := robEnq.fuType)
+    this.sim_fuOpType.foreach(_ := robEnq.fuOpType)
+    this.sim_rfWen.foreach(_ := robEnq.rfWen)
+    this.sim_vecWen.foreach(_ := robEnq.vecWen)
+    this.sim_v0Wen.foreach(_ := robEnq.v0Wen)
+    this.sim_commitType.foreach(_ := robEnq.commitType)
+    robEnq.debug.foreach { sim =>
+      this.sim_pc.foreach(_ := sim.pc)
+      this.sim_seqNum.foreach(_ := sim.debug_seqNum)
+      this.sim_instr.foreach(_ := sim.instr)
+      this.sim_fusionNum.foreach(_ := sim.fusionNum)
+      this.perfSimInfo.foreach(_ := sim.perfDebugInfo)
+      this.sim_trigger.foreach(_ := sim.debug_sim_trig)
     }
     this.topdownIssued.foreach(_ := false.B)
     this.topdownCanceled.foreach(_ := false.B)
@@ -250,14 +250,14 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
   // trace
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
   val formerTraceIretire = UInt(IretireWidthEncoded.W)
-  // debug_begin
-  val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-  val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-  val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
-  val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
-  val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
-  val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  // debug_end
+  // Simulation metadata.
+  val sim_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val sim_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
+  val basicSim = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val sim_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
+  val sim_fuType = OptionWrapper(backendParams.debugEn, FuType())
+  val sim_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
+  // End of simulation metadata.
 
   def connectCommitEntry(
     robEntry: RobEntryBundle,
@@ -283,11 +283,11 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.slotNeedFlushMask := robEntry.slotNeedFlushMask
     this.traceBlockInPipe := robEntry.traceBlockInPipe
     this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
-    this.debug_pc.foreach(_ := robEntry.debug_pc.get)
-    this.debug_instr.foreach(_ := robEntry.debug_instr.get)
-    this.basicDebug.foreach(_ := robEntry.basicDebug.get)
-    this.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
-    this.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
+    this.sim_pc.foreach(_ := robEntry.sim_pc.get)
+    this.sim_instr.foreach(_ := robEntry.sim_instr.get)
+    this.basicSim.foreach(_ := robEntry.basicSim.get)
+    this.sim_fuType.foreach(_ := robEntry.sim_fuType.get)
+    this.sim_fusionNum.foreach(_ := robEntry.sim_fusionNum.get)
   }
 }
 
