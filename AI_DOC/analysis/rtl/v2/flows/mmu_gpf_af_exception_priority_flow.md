@@ -8,7 +8,8 @@
 | 分支 | `mem_ut_uvm_v2` |
 | 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
 | 权威源码 | `src/main/scala/xiangshan/cache/mmu/{MMUBundle.scala,MMUConst.scala,PageTableCache.scala,PageTableWalker.scala,L2TLB.scala,TLB.scala}`；`src/main/scala/xiangshan/mem/pipeline/{LoadUnit.scala,StoreUnit.scala,HybridUnit.scala}`；`src/main/scala/xiangshan/frontend/FrontendBundle.scala`；`src/main/scala/xiangshan/backend/fu/CSR.scala` |
-| 最后核验日期 | `2026-08-04` |
+| PMM补充核验commit | `264d54012bd97d0bc09f2cbdef4a4a2722d95864`；本次仅补核PMM、高位预异常及相关地址输出，既有walker结论保留原核验记录 |
+| 最后核验日期 | `2026-11-17`（PMM补充） |
 
 ## Flow 范围
 
@@ -77,31 +78,34 @@
 
 ```mermaid
 flowchart TD
-    A[TLB request] --> B{地址高位预检查}
-    B -->|translation enabled| C[prepf 或 pregpf]
-    B -->|translation disabled| D[preaf]
-    C --> Q[PtwCache L3/L2/L1/L0/SP并行查询]
-    Q --> E[PTW/HPTW从剩余level继续page walk]
-    D --> K[TLB prefault response]
-    E --> F[HPTW 计算 pageFault/accessFault]
-    F --> G[L2TLB 形成 PtwRespS2]
-    G --> H[TLB.perm_check]
-    H --> I{af?}
-    I -->|是| J[只保留 AF]
-    I -->|否且 S1 fault? | L[只保留 S1 PF]
-    I -->|否且无 S1 fault| M[允许 GPF]
-    J --> N[TlbResp.excp]
+    A["TLB request"] --> PM["按CSR与身份选择PMM并得到EffectiveVa"]
+    PM --> B{"首末字节高位检查是否出错？"}
+    B -->|是| K["预异常响应：prePF / preGPF / preAF"]
+    B -->|否| T["正常TLB查询与权限路径"]
+    T -->|miss，进入遍历| Q["PtwCache并行查询"]
+    Q --> E["PTW/HPTW从剩余level继续page walk"]
+    E --> F["HPTW计算pageFault与accessFault"]
+    F --> G["L2TLB形成PtwRespS2"]
+    G --> H["TLB.perm_check正常分支"]
+    T -->|hit| H
+    H --> I{"翻译AF？"}
+    I -->|是| J["保留翻译AF"]
+    I -->|否且S1 fault| L["保留S1 PF"]
+    I -->|否且无S1 fault| M["允许GPF"]
+    J --> N["TlbResp.excp"]
     L --> N
     M --> N
-    N --> O[LSU/前端后续 PMP/PMA 合并]
-    O --> P[ROB/CSR 按 ExceptionNO.priorities 选一个 trap cause]
+    K --> N
+    N --> O["LSU/前端后续异常合并"]
+    O --> P["ROB/CSR选择单一trap cause"]
 ```
 
 ## 主流程文字伪代码
 
 ```text
-1. 请求先在 TLB.scala 做高位合法性检查：翻译开启时只能得到 prepf 或 pregpf，翻译关闭时才得到
-   preaf；这些信号在同一个 request 上互斥。
+1. 请求先按操作、有效身份与本地可见CSR选择PMM，对fullva做适用的符号/零扩展；随后对首、末字节做高位合法性检查。
+   有效翻译环境下生成prepf或pregpf，无有效翻译时生成preaf；同一请求互斥。预异常覆盖普通翻译异常响应，
+   不能把原图中的prepf/pregpf理解为必然继续walk；正常查表与高位检查在RTL可以并行。
 2. 若进入页表遍历，PtwCache 先并行查询 L3/L2/L1/L0/SP。L3 命中返回缓存的 level-3 非叶 PTE
    PPN，PTW/HPTW 据此从 level=2 继续；未命中才从当前 mode 的根层开始。非叶 PTE 使 level 向 0
    递减。随后 HPTW 区分 G-stage PTE pageFault、PMP/PMA accessFault 和 PPN/bitmap access fault，
@@ -445,8 +449,24 @@ PTE 的 `g` 应由硬件忽略。直接 HPTW response 的 `HptwResp.apply()` 会
 只会作为 aggregate payload 被传递或被 difftest/raw debug 观察，当前 V2 的本地翻译、权限和 fence 行为
 不会因其为 0 或 1 改变。
 
-高位预检查分支 `TLB.scala:144-229` 也采用互斥结构：翻译开启时写 `prepf/pregpf`，否则写
-`preaf`；不会把高位 GPF 与高位 AF 合成同一响应。
+高位预检查分支现位于`TLB.scala:162–258`，采用互斥结构：有效翻译环境下写`prepf/pregpf`，否则写`preaf`；不会把高位GPF与高位AF合成同一TLB响应。完整地址先经过PMM，不应直接对原始高位检查后就结束推导。
+
+#### 3.2 PMM后的首末预异常优先于普通翻译异常结果
+
+此子流程负责在完整地址高位不合法时提供正确的TLB异常和故障地址；它不生成新的页表映射。入口是当前DTLB请求及本地可见CSR，正常分支才消费原TLB/PTE结果。
+
+```text
+先按PMM变换fullva，保留请求vaddr的原查表来源；
+仅valid且checkfullva时检查变换后的首、末字节；
+按有效Host S1、VS S1、only-S2或无翻译选择prePF、preGPF或preAF；
+仅末字节错误时选择末字节所在页页首，其余保持有效首地址；
+下一响应拍perm_check的预异常分支覆盖普通翻译结果；
+fullva与gpaddr使用该故障位置，vaNeedExt=false，isForVSnonLeafPTE=false，miss=false。
+```
+
+按上述顺序，首地址先经过掩码才能判断高位是否合法，不能先截断成VPN而漏掉错误。只有末字节越出合法范围时报告该末字节所在页首，triggerVa则保留有效首地址。预GPF不表示访问VS页表时的隐式GPF；普通分支的AF/S1 PF/GPF收敛规则也不能反过来覆盖这个预异常分支。LSU后续raw vector是否合入独立AF仍按第5节区分。
+
+这里的miss覆盖只描述响应；内部并行missVec可能仍参与PTW请求控制，不据此断言完全没有内部查表。CSR来源、选择优先级、地址扩展、only-S2高两位和HFENCE边界见[PMM专题](memory_pointer_masking_flow.md)。
 
 ### 4. 前端 instruction path：异常被编码成单一 `ExceptionType`
 
@@ -619,6 +639,8 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 
 ## 关联 Agent 和 Flow
 
+- [PMM指针掩码](memory_pointer_masking_flow.md)：架构原理、CSR选择、首末地址预检查、faultVa与triggerVa及GPA高两位边界。
+
 - [DTLB-L2TLB 多请求与 Response 次序 Flow](dtlb_l2tlb_request_response_ordering_flow.md)：请求、
   response 多 outstanding 与 S1/S2 payload 来源。
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：local DTLB 对 S1 `PTE.G` 的 SFENCE/HFENCE
@@ -634,6 +656,8 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 独立确认，不能复制本文的互斥/优先级结论。
 
 ## 源码证据
+
+- `src/main/scala/xiangshan/cache/mmu/TLB.scala:167–258、510–528`：PMM选择、完整首末地址检查、预异常覆盖及故障地址。
 
 - `src/main/scala/xiangshan/cache/mmu/PageTableWalker.scala:1249-1275`：HPTW 的 pageFault/accessFault
   判定和 `gpf/gaf` AF 优先编码。
@@ -703,6 +727,7 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
+| 2026-11-17 | `264d54012bd97d0bc09f2cbdef4a4a2722d95864` | 高位检查未说明PMM及首末端点，主图易被读成prePF/GPF后必然walk | 补齐先掩码再预检查、仅末错误页首地址、预异常响应覆盖和trigger地址分工，链接PMM独立地址flow | 用户要求结合架构手册整理PMM | V2 DTLB完整地址与预异常；既有walker/raw异常边界保持原结论 |
 | 2026-07-23 | `7c25383b9a9a661d8aed7912a757736cef99d597` | 首次建立，无旧结论修订 | 明确 HPTW/L1 TLB 同一请求的 GPF/AF 互斥、AF 优先，以及 LSU raw exception vector 可能因独立 PMP OR 路径出现双 bit 的边界 | 用户要求结合 V2 Scala MMU 源码分析 GPF/AF 同时触发条件 | V2 HPTW/PTW/L2TLB/L1 TLB/LSU/ROB |
 | 2026-07-23 | `bace94b6ef730d098fd44406ca3957fa24eb7cda` | 旧文档未解释 `level=3/0` 的方向，也未区分 reset 初值、运行时 mode 和 page-table cache hit | 明确 level 数值越大越靠近根页表；Sv48 无命中从 3、Sv39 无命中从 2 开始，L0 固定为最低层，并补充 HPTW cache bypass 与 PTW/LLPTW 分工 | 用户追问 Scala MMU 中 `level=3` 与 `level=0` 哪个代表第一次翻译 | V2 PTW/HPTW/LLPTW page walk level 语义 |
 | 2026-07-23 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 旧文档只说明 L3 hit 会降低 walker 起点，没有说明 L3 的物理结构、entry 字段和生命周期 | 明确 PtwCache L3 是仅 Sv48 生成的 16-entry 全相联非叶 PTE RegVec，补充上下文匹配、PLRU、回填、SFENCE/HFENCE 和 SP 边界 | 用户追问 Scala MMU 中 PtwCache L3 的结构 | V2 PtwCache L3/PTW/HPTW |

@@ -1,12 +1,14 @@
 # MemBlock V2 虚拟化指令公共测试框架支持方案
 
 - 创建日期：2026-11-09。
-- 更新说明：按用户确认补齐五类 fence 类型权重；失效范围改为主表字段，自动建表固定全地址、全 ID，手工建表覆盖。
+- 更新日期：2026-11-17。
+- 更新说明：保留已确认的五类 fence 权重及主表失效范围；异常地址记录改为接入统一后端周期帧，补齐 Guest 执行上下文、CSR 切换屏障、精确采样、来源边界和取消收尾。
 - 适用分支：`mem_ut_uvm_v2`。
 - 状态：初步方案，未实施；本次只将已讨论方案写入文档，尚未整理或评审为正式可 coding plan。
 - 范围：公共测试框架的激励生成、CSR 配置、调度、驱动、响应建模、事件记录和异常恢复。
 - 不包含：定向 testcase/vseq、专用场景 preset、RM/checker/scoreboard 算法、功能覆盖率模型、RTL 修改。
-- 授权边界：本文件不是代码修改授权。后续执行前须按项目规则取得明确 coding 授权并完成正式方案整理。
+- 授权边界：本轮只修改本方案文档。本文件不是代码修改授权；后续执行前须按项目规则取得明确 coding 授权并完成正式方案整理。
+- 公共控制依赖：[MemBlock V2 后端周期快照同步驱动与异常地址采样方案](memblock_v2_fault_redirect_isstore_same_cycle_drive_plan_20261116.md)。该方案负责双 agent 同边沿发布、实际输入采样和恢复门槛，本方案负责特殊访存属性及 Guest 上下文接入。
 
 ## 1. 专有名词与抽象功能说明
 
@@ -20,7 +22,15 @@
 | ROB、LQ、SQ、LSQ | 重排序队列、Load 队列、Store 队列及访存队列总称；框架由 allocator/commit handler 模拟后端输入 | HSV 分配 SQ，发射 STA 和 STD |
 | STA、STD、WB | Store 地址、Store 数据、真实写回事件 | 地址和数据独立发射并等待各自真实完成 |
 | `dynamic_epoch`、reset epoch | 同一 UID 的动态执行代次、复位代次；用于旧事件过滤 | redirect 后旧代次 WB 不绑定新实例 |
-| `sample_seq` | 公共 monitor 采样序号 | 将一次接口事件与同拍上下文关联 |
+| `sample_seq`、S、S+2 | 公共 monitor 采样编号；S 为实际输入锚点，S+2 为普通 LSQ 路径在边沿前采样约定下的目标地址样本 | driver 返回时刻不能当作 S |
+| backend cycle frame、周期帧、`frame_id` | 公共同步方案保存的一次 MemBlock 输入周期控制及其运输身份 | HSV fault 帧同时发布类别、零正常提交和异常 redirect |
+| prepared、ready、sampled-applied | 准备资格、框架内部 driver 准备确认、实际采样后完成单次业务记账 | ready 不表示 DUT 有 redirect ready 端口 |
+| reservation、recovery eligible | 发布前的轻量预占、允许原恢复扫描的门槛；沿用公共同步方案 | 未应用本帧 fault 状态时不能开始恢复扫描 |
+| raw sample、anchor、history、readonly | monitor 原始样本、关联锚点、有界历史及只读记录接口 | adapter 晚处理仍取指定 sample，不能取 latest |
+| AF、PF、GPF、exceptionVec | 访问错误、页错误、Guest 页错误及真实 WB 异常向量 | 以真实 exceptionVec 确认异常，不能用主表预期配置代替 |
+| address source、`address_record_required` | 地址输出的实际来源及本轮是否要求记录，属于运行期状态 | 非对齐覆盖来源不默认套普通 LSQ S+2 |
+| rollback、terminal、cancel record | 访存违例回滚重发、逻辑指令终态及原恢复 owner 的取消记录 | rollback 不生成 fault 地址记录 |
+| AMO、segment、misalign overwrite | 原子操作、向量 segment、非对齐缓冲异常地址覆盖来源 | 独立来源无合同则明确标记本轮未记录 |
 | CSR、snapshot | 控制状态及某采样边界实际观察到的状态副本；运行时权威为 `mmu_csr_runtime_state` | UID 保存 issue 时的 SPVP |
 | Host/Guest、HS/VS/VU | 管理虚拟机的一侧/虚拟机一侧；Host 内核/Guest 内核/Guest 用户 | HS 执行 HLV 访问 Guest |
 | SPVP、dmode、dvirt | 特殊访存使用的 U/S 身份、普通访存有效特权级、普通访存有效虚拟化属性 | MemBlock 的 `priv.virt` 是上游提供的有效 dvirt |
@@ -35,7 +45,7 @@
 | `sfence_scope` | 主表中一笔 fence 的失效范围枚举，不参与后续随机 | 自动建表固定全地址、全 ID，手工建表可指定地址和 ID |
 | payload、profile、preset | 运输字段集合、配置/生成策略、运行配置文件 | fence payload 包含地址、ID、hv/hg、flushPipe |
 | monitor、adapter、handler | 采样、事件适配、状态处理组件 | monitor 记录原始事件，adapter 关联 UID |
-| replay、redirect、fault head | 访存重试、冲刷重执行、位于模拟提交前沿的异常指令 | fault head 采样异常地址后进入恢复 |
+| replay、redirect、fault head | 访存重试、冲刷控制、位于模拟提交前沿的异常指令 | fault head 采样记账后放行恢复，地址记录独立完成 |
 | C−2、C0/C4 | 既有 V2 请求 CSR 历史对齐；顶层控制事件采样/四拍后 filter 生效边界 | responder 不以 latest 替代请求所需历史 |
 | map、queue、cursor、prefix | 关联索引、待处理队列、顺序游标、连续完成前缀 | `terminal_done_uid` 用于正常结束 |
 | RM/checker/scoreboard、covergroup | 独立结果判断和覆盖率组件；不属于本方案实现 | 后续通过 readonly 接口消费记录 |
@@ -61,6 +71,8 @@
 
 L2TLB agent 模拟下一级翻译服务返回给真实 DTLB 的结果，不模拟 PTW 到 L2Cache/memory 的真实页表遍历。真实 PTW/HPTW 集成属于后续独立方案。
 
+本方案通过公共后端周期帧处理 HLV/HLVX/HSV 的异常控制发布，不另外建立异常 owner、redirect 年龄仲裁或地址采样时钟。普通 LSQ 地址记录以第 10 章的来源前提为准；特殊来源未记录时必须显式标记，不能据此宣称全来源异常地址已支持。
+
 本方案不新增定向用例、具体测试子场景或场景 CSV 行；后续实际新增用例时另按 CSV 管理规则登记。公共参数默认配置同步属于实现范围，不等同于新增专用用例 preset。
 
 ## 3. 当前实现基础与缺口
@@ -79,7 +91,7 @@ L2TLB agent 模拟下一级翻译服务返回给真实 DTLB 的结果，不模�
 | `common_data_transaction.sv` | UID 上下文、翻译表、请求关联 | fuType 联合识别、特殊访存有效 PMP 身份 |
 | `memblock_l2tlb_base_sequence.sv` | 两阶段、多 outstanding、C−2 历史、reset/flush | 复用并补齐上下文衔接 |
 | `memblock_sfence_control_base_sequence.sv` | flushSb、fence 发送和完成确认 | 完整可控 payload、HINVAL |
-| ctrl monitor、adapter、commit handler | 已接异常地址、fault head 和 redirect | 异常地址采样归属、存储、恢复衔接 |
+| ctrl monitor、adapter、commit handler | 已接异常地址、fault head 和 redirect，地址 raw 闭环尚缺 | 接入统一后端帧；冻结 Guest 身份、实际 S、指定地址样本和独立收尾 |
 
 关键源码事实：
 
@@ -100,14 +112,37 @@ flowchart TD
     E -- 访存 --> F["真实 issue：冻结 UID 上下文"]
     F --> G["DUT 执行；既有 L2TLB responder 响应"]
     G --> H["WB/feedback 事件归属"]
-    H --> I{"正常还是异常"}
+    H --> I{"正常、fault 还是访存违例"}
     I -- 正常 --> J["既有提交和资源回收"]
-    I -- 异常 --> K["fault head 地址采样；既有 redirect 恢复"]
+    I -- fault --> K["fault head：冻结身份，仲裁并准备统一异常帧"]
+    I -- 访存违例 --> V["原 rollback 帧与资源恢复；按原规则重新 admission/issue"]
+    V --> D
+    K --> K1["双 driver 同边沿发布；monitor 确认实际 S"]
+    K1 --> K2["本帧异常记账；放行原恢复扫描"]
+    K2 --> K3["原 redirect/cancel/deq 恢复"]
+    K2 --> K4["按来源记录 S+2 整组地址，或明确本轮未记录"]
     E -- 控制 --> L["CSR/fence barrier：驱动、观察、生效、提交"]
     J --> M["推进 terminal_done_uid"]
-    K --> M
+    K3 --> K5["恢复与所需地址记录均收口"]
+    K4 --> K5
+    K5 --> M
     L --> M
     M --> N["主表完成并排空；worker 自然退出"]
+```
+
+**函数调用 Flow 图整体文字伪代码：**
+
+```text
+1. 公共生成器冻结参数、构建主表，初始配置经 monitor 确认后进入 admission。
+2. 访存真实 issue 时保存访问上下文；DUT 执行并由既有 responder 提供响应。
+3. WB/feedback 经原 adapter/status 逻辑归属执行实例：
+   正常完成则走原提交；访存违例走原 rollback 范围及重发流程。
+4. 真实 fault 等到故障队首并满足资格后，准备及仲裁统一异常帧。
+   公共 scheduler 协调两个 driver 发布，monitor 确认实际 S 后单次应用异常记账。
+5. 记账后放行原恢复；地址记录同时按来源决定是否读取指定 S+2 样本。
+   原恢复和所需记录都结束后清理故障上下文，推进对应终态。
+6. 控制操作持有原 barrier，等待旧访问/地址目标，再驱动并观察 CSR/fence 生效。
+7. 主表终态前缀完成且运输、原恢复和记录均排空后，各公共 worker 自然退出。
 ```
 
 现有主表、状态表、真实握手和 monitor 事件继续作为权威。不得以发射成功替代真实 WB，也不得以合法异常为由判定激励非法。
@@ -230,6 +265,8 @@ apply_to_transaction：把选择结果赋到已有 priv_spvp 字段
 ```text
 等待控制操作到现有提交前沿，绑定既有 owner
 保留后续发射 barrier
+在任何 CSR/PMP/fence 副作用前，按第 7.4 节等待旧访问及异常地址上下文排空
+等待期间继续运行 WB、周期帧发布、monitor、原异常恢复及独立 flushSb 服务
 复制 committed，生成 target
 依据旧/新翻译配置构造有界维护步骤
 按步骤驱动 CSR、PMP/PMA 和 fence
@@ -240,7 +277,7 @@ stage candidate，交由现有 service 比对观察事实后提交
 reset/owner 失效或 watchdog：保留失败，不伪造完成
 ```
 
-**中文文字伪代码：** 控制服务先证明该操作已位于原有提交前沿，再由唯一 owner 运输候选配置。配置生成只修改候选对象。维护步骤使用旧、新配置决定，运输后分别等待 monitor 事实与生效边界。现有完整 payload、PMP/PMA 写回放及 candidate 提交机制继续承担完成确认，driver 返回不视为配置已生效。失败走原有生命周期处置，不借用新 reset epoch 使旧 action 复活。
+**中文文字伪代码：** 控制服务先证明该操作已位于原有提交前沿，再按第 7.4 节确认旧访问和待记录异常已经收口，由唯一 owner 运输候选配置。等待这项条件时不能停掉使旧访问完成的公共服务。配置生成只修改候选对象。维护步骤使用旧、新配置决定，运输后分别等待 monitor 事实与生效边界。现有完整 payload、PMP/PMA 写回放及 candidate 提交机制继续承担完成确认，driver 返回不视为配置已生效。失败走原有生命周期处置，不借用新 reset epoch 使旧 action 复活。
 
 ### 7.3 Guest 映射维护的第一版保守协议
 
@@ -263,6 +300,28 @@ VVMA 使用各自事件采样时的 VMID；GVMA 清理 G-stage 上下文。上�
 
 只有协议和完成条件具备后，才移除动态 CSR 的 `virt=1` 拒绝条件。具体步骤分类、状态字段及各函数源码级展开留待正式可 coding plan 整理，本稿不宣称已完成独立评审。
 
+### 7.4 异常地址捕获与 CSR 切换屏障
+
+**抽象功能描述：** 动态 CSR action 在开始配置或映射副作用前，确认旧执行环境中的访存和异常地址记录已完成必要消费，保证后续切换不会影响仍在使用的异常地址上下文。本节扩展既有控制 barrier 的放行条件，不新增并行 CSR owner。
+
+**输入与副作用：** 输入既有控制 owner/reset、旧上下文的活动访问计数和第 10 章地址记录状态；条件不足时保留当前配置并等待，满足后允许进入原配置流程。运行期采用现有 active map、未完成计数和有界事件队列，不每拍扫描全部主表。
+
+**源码级伪代码：**
+
+```text
+已取得原控制操作资格和后续发射 barrier。
+每次准备发出 CSR/PMP/fence 副作用前检查 owner/reset。
+若 owner/reset 失效，按原控制取消流程退出，不提交 target。
+若旧上下文仍有较老的在途访存、prepared/已发布未应用的 fault，
+  或 address_record_required 且尚未记录/合法取消的异常事件：
+    保持实际 CSR 和映射环境，暂不开始配置或 fence 副作用。
+    继续等待公共服务推进 WB、异常帧、记录和原资源恢复；不占住这些服务的锁。
+否则：按第 7.2 节进入配置、映射维护、实际观察和传播确认。
+若旧事件已报缺样本等框架错误，转原失败/global-stop流程，不能按成功排空放行。
+```
+
+**中文文字伪代码：** 本屏障保护实际硬件仍要使用的旧上下文。issue 快照用于追溯原访问身份，但不能替代地址输出逻辑正在使用的实际 CSR。控制 action 到提交前沿后，先读取已有未完成状态；存在旧访问或需要捕获的异常时，保持旧配置，继续让相关 WB、frame 发布、monitor 和恢复自然完成。普通 LSQ 的目标地址样本已保存或该事件合法取消后，地址捕获才不再阻塞切换；原控制前沿、资源恢复等其它门槛仍须满足。这里不修改 L2TLB 的既有请求/响应历史对齐，也不因为 snapshot 序号变化而清表。
+
 ## 8. 发射、PMP 上下文与翻译响应
 
 ### 8.1 UID 访问上下文
@@ -276,12 +335,14 @@ VVMA 使用各自事件采样时的 VMID；GVMA 清理 G-stage 上下文。上�
 通过公共 fuType/opcode 分类得到特殊访存属性
 取得已同步的 CSR snapshot
 effective_mode = 特殊访存 ? U/S 编码的 SPVP : dmode
+use_guest = snapshot.priv_virt || 特殊访存
+保存实际 opcode/fuType、特殊访存/HLVX 属性、有效身份及已有 CSR snapshot 身份
 调用已有 UID TLB 登记入口，保存该快照和请求上下文
 调用既有 PMP/PMA context plan/commit 入口，以 effective_mode 冻结身份
 首次翻译请求关联/补登记同样使用该 UID 的操作属性和该请求快照
 ```
 
-**中文文字伪代码：** 只有真实握手才建立执行实例的有效记录。公共分类先分隔编码空间，再确定特殊属性；同一份 CSR 快照既用于翻译登记，也用于访问身份。PMP/PMA 现有 plan/commit 接口继续拥有表代数和提交职责，调用者只把正确有效特权级传入。所有 issue、首次 request 关联和补登记入口都同步修改，避免 hit 无 request 与 miss 路径使用不同身份。
+**中文文字伪代码：** 只有真实握手才建立执行实例的有效记录。公共分类先分隔编码空间，再确定特殊属性；同一份 CSR 快照既用于翻译登记，也用于访问身份。PMP/PMA 现有 plan/commit 接口继续拥有表代数和提交职责，调用者只把正确有效特权级传入。所有 issue、首次 request 关联和补登记入口都同步修改，避免 hit 无 request 与 miss 路径使用不同身份。异常事件引用与该动态实例匹配的既有 issue 上下文；重放/重发按现有 issue epoch、replay sequence 和 dynamic epoch 关联，不能在 fault head 阶段用最新 CSR 替换原快照。保存的是实际访问环境，不从 exceptionVec 反推 SPVP 或 hyperinst。
 
 ### 8.2 L2TLB responder 生命周期
 
@@ -418,42 +479,139 @@ monitor 记录实际事件和上下文
 
 ## 10. 异常地址采样、记录与恢复
 
-### 10.1 公共记录
+本章依赖[后端周期快照同步驱动与异常地址采样方案](memblock_v2_fault_redirect_isstore_same_cycle_drive_plan_20261116.md)的公共发布合同。正常提交、control、AF/PF/GPF fault 和访存违例各自保留原语义；本方案只补特殊访存与 Guest 上下文，不复制 scheduler、redirect owner 或 LSQ allocator。
 
-扩展已有 status/raw 事件和 readonly 运输链，至少保存 UID、执行代次、ROB key、异常类型、VA、GPA、`isForVSnonLeafPTE`、驱动锚点、sample 和 reset epoch。尽量扩展既有 fault token，不新建平行异常 owner。
+### 10.1 公共事件记录与字段责任
 
-### 10.2 fault head 流程
+扩展既有 fault token、status/raw 和 readonly 运输链。以下是计划字段职责，实际成员名在正式整理时与公共 types 统一，不表示这些字段已经实现。
 
-**抽象功能描述：** commit handler 与 ctrl monitor 在异常恢复阶段保留 fault head 身份，将异常地址输出按明确采样合同归属到该实例，再交还既有 redirect/终态流程。
+| 字段组 | 权威来源和用途 |
+|---|---|
+| UID、完整 ROB key、`dynamic_epoch`、reset epoch | 来自已确认故障动态实例；区分重发、ROB key 复用和复位。reset 复用当前 redirect 生命周期采用的 `get_l2tlb_current_reset_epoch()`，不与独立 control topology 的 reset 编号混比 |
+| 实际 fuType/opcode、特殊访存/HLVX 属性 | 通过公共操作分类冻结，区分 HLV/HLVX/HSV 和普通访存，不由异常类型反推 |
+| issue CSR 上下文引用 | 引用该执行实例已有的 snapshot 身份及内容，保留 SPVP、dmode/dvirt、有效 U/S 身份、Guest 属性、相关 satp/vsatp/hgatp、ASID/VMID 和权限控制；不建立另一份可独立更新的 latest 镜像 |
+| 真实 exceptionVec、WB 目标和身份 | 沿用真实 WB/status 记录；已有 issue epoch/replay sequence 继续用于过滤迟到反馈，主表预期 AF/PF/GPF 配置不作为异常已发生的证据 |
+| intent、frame ID、目标驱动边沿、实际输入 S | 来自统一发布流程；区分准备、实际驱动、实际采样，不以 sequence 返回替代输入采样 |
+| 地址来源与记录状态 | `address_source`、`address_record_required`、指定输出 sample 和完成/取消/未支持/错误状态，属于运行期事件状态，不新增 plus/cfg 开关 |
+| 原始地址输出 | 同一样本的 `vaddr/gpaddr/isForVSnonLeafPTE`；保留原始位宽和值，记录状态单列 |
+| 恢复与最终收尾状态 | 引用原 cancel owner 和资源恢复状态；独立保存 sampled-applied 与记录完成，mapping 回收后仍保留不可变事件上下文 |
+
+`frame_id` 管理运输身份，UID/动态代次管理业务身份，两者均需保存。`pendingPtr` 只表达后端队首控制，不是按 ROB key 查询异常地址的端口。地址 raw 不含 UID，也无独立响应 valid；任何数值，包括零和与上一拍相同的地址，都不能作为记录存在或属于某 UID 的判据。
+
+### 10.2 fault head 与统一发布流程
+
+涉及既有 `lsq_commit_handler`、`exception_redirect_replay_handler`，以及公共同步方案计划增加的 scheduler 和 `apply_sampled_backend_cycle()`。这些入口的详细运输实现只在公共同步方案中维护。
+
+**抽象功能描述：** 异常处理在真实 WB 确认和队首资格成立后，保存该次 Guest 访问身份并接入统一异常帧；实际输入采样后完成业务记账，再允许原恢复流程推进。地址记录与恢复分别完成，最终共同收尾。
+
+**输入与副作用：** 输入真实 WB/status、原提交前沿、issue 上下文及仲裁结果；输出统一异常帧、实际 S、地址记录请求和恢复资格。准备不代表正常提交，不提前推进 cursor，不建立第二个异常 owner。
 
 **源码级伪代码：**
 
 ```text
-WB/状态处理保存 fault 及其 UID/执行代次
-既有提交选择器将该 UID 选为 fault head
-真实发布 pendingPtr、isStoreException，保存发送 sample
-以该 fault token 预约异常地址 sample
-monitor 在规定 sample 采集 VA/GPA/isForVSnonLeafPTE
-adapter 核对 UID/ROB/代次/reset 归属，写入异常记录
-记录完成后提交既有 redirect intent
-由原 redirect owner 驱动、回收资源并进入异常终态
-reset/旧代次记录丢弃；不绑定后续实例
+真实 WB/status 保存异常及 UID/ROB key/动态代次，关联原 issue 上下文。
+原提交选择器选到合法 fault head，核对该执行实例和 reset。
+HLV/HLVX 复用 Load 资格；HSV 复用 Store STA/STD 双真实 WB 资格。
+  尚缺另一侧 dispatch/WB 时继续原 pending/head 和缺侧服务，不提前冻结。
+准备 fault context，提交原 redirect intent 并按原年龄规则仲裁。
+  PREPARING 只预占；同 UID/ROB key/代次的 prepared Store fault 可放行，
+  不等待本帧尚未发生的 LSQ finish_item 或实际发布记账。
+scheduler 冻结统一 fault 帧：故障 head、正确类别、零正常 scommit/对应 pending、
+  对应异常 redirect；HLV/HLVX 类别为 Load，HSV 为 Store。
+两侧 ready 后最终复核身份，一次激活原 redirect owner，按共同边沿发布。
+monitor 确认两侧属于同一个实际输入 sample S。
+apply_sampled_backend_cycle 按冻结身份完成一次 fault 发布记账。
+  该状态沿用框架 fault rob_commit 语义，不向 DUT 增加正常 scommit。
+  本帧 sampled-applied 成立后，才允许原 redirect/cancel/deq 恢复扫描。
+若已确认 address_record_required，预约目标地址 sample=S+2；
+  其余来源按第 10.4 节明确标记本轮未记录，不创建普通 LSQ 等待。
+原恢复与指定地址记录独立推进；两者满足各自结束条件后才清理 fault context。
 ```
 
-**中文文字伪代码：** 异常指令先按现有顺序到达 fault head，框架真实发布后端选择输入后才建立地址采样锚点。monitor 不在任意 WB 时刻抓地址，也不用地址是否变化判断完成。adapter 只记录真实信号及归属，不推导预期正确值；记录完成前不能提前放开 fault head 或改变选择上下文。恢复继续通过原有 redirect intent 和 owner，避免并行恢复打乱资源生命周期。
+**中文文字伪代码：** 首先由真实 WB 确认异常，复用已有 key/代次解析定位执行实例并引用其原 CSR 上下文。提交选择器到达该 fault head 后检查原完成门槛，HSV 不能绕过双真实 WB，也不能在缺侧尚未入队时阻塞它。随后准备和仲裁 redirect，由公共 scheduler 将两组输入一起发布；准备阶段不假装接口已经生效。实际 sample S 确认后，公共记账入口先设置本次 fault 状态，恢复扫描才可识别并保留故障队首。地址记录另按指定窗口取得原始输出；不用等地址记录完成才申请 redirect，也不等 S+2 才设置恢复所需 fault 状态。最终上下文清理由第 10.5 节约束。
 
-顶层异常地址没有独立 valid/ID，正式整理必须从 `LSQWrapper` 的选择寄存级、`MemBlock` 输出寄存级、非对齐 override 和实际 clocking block 采样区域推导精确 sample，并固定到公共合同后才可 coding；本稿不把未经验证的固定拍数写成事实。当前实现中的“异常地址在 flush 后数拍使用”与异常缓冲保留机制也须一并核对。
+访存违例沿用公共同步方案的 rollback 分支，包括 R/R+1 来源级数和预装尾拍，不建立本章 fault 地址请求、不把违例 UID 记为异常终态。被更老 redirect 覆盖的 fault 使用原覆盖收尾，不再伪造一次自己的异常帧。
+
+### 10.3 monitor 与 adapter 的精确样本关联
+
+**抽象功能描述：** ctrl monitor 连续记录实际输出事实；adapter 将已采样 fault 帧的冻结身份与指定地址样本配对，形成只读异常事件。二者不计算期望 VA/GPA，也不通过地址值推断异常是否发生。
+
+**输入与副作用：** 输入共同 sample anchor、当前 reset、原始地址和已确认的 fault 帧；输出有界 raw 历史、指定样本记录及其完成或错误状态。输入和输出 monitor 共用现有 `sample_seq`，不另建私有拍号。
+
+**源码级伪代码：**
+
+```text
+ctrl monitor 每个有效采样周期记录 reset/sample_seq 和整组 VA/GPA/VS 标记。
+保留有界原始历史；在未产生 fault 请求之前也持续采样，不在 WB 后临时抓一拍。
+adapter 先等待同 sample 两侧输入 producer 的完成事实，确认统一帧实际 S。
+  第一侧 raw 先到时继续有界等待，不以 callback 先后判缺失。
+仅对明确普通 LSQ 来源建立 target_sample=S+2 的待记录事件。
+按 reset/target_sample 查询历史，命中后一次复制整组原始输出，
+  附加该事件的 frame/UID/ROB key/动态代次及 issue CSR 上下文引用。
+处理合法 reset/覆盖取消时保留取消原因，不移绑到后续 UID 或新代次。
+目标输出 sample 的 ctrl producer 已完成、或其后采样水位确认越界，
+  但该目标样本仍缺失时报告框架记录错误；不能因输入 S 已完成就判 S+2 缺失，
+  不改取邻拍/latest，不无限等待，不将缺失标为成功。
+按最早未完成目标及有界运输延迟回收历史，全部依赖释放后删除临时记录。
+```
+
+**中文文字伪代码：** monitor 先持续提供没有 UID 的客观样本，避免 adapter 得到异常身份时目标样本已经丢失。adapter 获得统一输入 S 后，依据公共流水合同确定唯一目标编号，再用该编号读取历史。只有该次 fault context 提供 UID，raw 数值本身不参与身份反查。相邻 fault、连续同值地址和服务迟到都按帧与 sample 分开保存；样本不存在时报告运输/记录错误，不能伪造响应 valid。状态查询使用当前活动事件的 map/queue，历史长度受未完成窗口及有界延迟约束，不保留主表全历史。
+
+当前 V2 普通裸 LSQ 路径，在输入和输出均按边沿前 `mon_cb` 采样的约定下，采用 S+2：S 后类别选择寄存更新，下一边沿后顶层地址寄存更新，S+2 边沿前样本看到对应输出。该合同来自公共同步方案的静态分析，实际 coding 后仍须以当前 clocking 偏移及波形确认；不能把 driver 输出边沿、DUT 输入采样 S 和寄存器边沿后值混成一个时间编号。
+
+### 10.4 地址来源和 Guest 字段的解释边界
+
+| 来源/情况 | 本方案记录合同 |
+|---|---|
+| 已确认普通标量 LSQ，且无高优先来源覆盖 | HLV/HLVX/HSV 和普通 Guest Load/Store 共用 S+2；设置 `address_record_required=1` |
+| misalign overwrite、AMO、segment | 控制和原恢复继续；本轮无独立来源采样合同时设 required=0，标记 `NOT_CAPTURED_BY_THIS_PLAN` 及具体来源 |
+| 来源无法确认 | 标记 UNKNOWN 与本轮未记录，不默认当作普通 LSQ，不创建无限地址等待 |
+| 普通 AF/PF | 保存整组 raw；不能无条件把 gpaddr 和 VS 标记当成有效 Guest-page-fault 信息 |
+| GPF | 原始 GPA 和 VS 标记与真实 exceptionVec、Guest 访问属性一起记录，供后续独立解释 |
+
+来源必须取既有操作路由和可确认的来源事实；只有“标量指令”或“HLV/HSV”标签不足以排除非对齐覆盖。来源字段和记录状态不作为新的 DUT 信号，也不作为新增 runtime 参数。特殊来源未记录不表示故障指令不可执行，只表示本轮未完成该来源的地址观测支持。
+
+`gpaddr` 保存 MemBlock 原始值，不在框架中预先右移两位当作 htval；stval/htval/htinst 等最终 trap CSR 写入仍属于后端/CSR或整核验证边界。`isForVSnonLeafPTE` 按原样保存，不能脱离真实异常类型就认定某次 GPA 一定是最终数据访问地址或一定是隐式 VS 页表访问地址。不以 GPA 是否为零决定是否有效，也不从 VA/GPA 反推异常原因。
+
+### 10.5 取消、恢复与最终清理
+
+**抽象功能描述：** 公共 fault 收尾在原恢复 owner 完成资源处理后，结合地址记录生命周期释放事件身份；正常恢复、合法取消、未支持记录和记录错误分别留有明确结果。该收尾不重复驱动 redirect 或取消资源。
+
+**输入与副作用：** 输入 frame 采样记账状态、原恢复进度、地址记录状态和 reset/覆盖事实；输出最终可清理条件及取消/错误原因。资源 mapping 与不可变异常记录分别维护，mapping 回收不自动删除后者。
+
+**源码级伪代码：**
+
+```text
+若 PREPARING 阶段被 reset 或更老请求取消：
+  取消整帧准备和预约，完成两侧运输取消，不建立本帧地址采样成功记录。
+若已实际采样：
+  先完成 sampled-applied，再允许原 cancel/deq 和恢复扫描。
+  地址记录使用冻结上下文继续存活，原 owner 可以按既有规则回收 mapping。
+若 reset 使地址目标不可消费：标记 CANCELLED_RESET 并隔离旧 reset 样本。
+若原覆盖仲裁证明本次 fault 没有独立消费：标记 CANCELLED_COVERED。
+  不能因为 owner 已删除、sample 迟到或数值未变化就当作合法覆盖取消。
+若来源本轮未支持：保持 NOT_CAPTURED_BY_THIS_PLAN，不预约普通 LSQ 等待。
+若指定样本缺失：标记 ERROR_MISSING_SAMPLE，报告错误并走统一失败停止流程，
+  不将其当作正常成功记录，也不作为正常CSR切换放行依据。
+原恢复完成，且所需记录已 CAPTURED 或具有明确合法取消后：
+  按原 helper 解除资源/故障 token，推进对应终态；只清理一次。
+required=0 的明确未支持记录不阻塞原恢复终态，但保留未记录标签。
+```
+
+**中文文字伪代码：** 准备帧还未发布就失效时，只撤销准备与预约，不制造输出事件。实际发布后先完成框架异常记账，再走原资源恢复；此时地址事件已经持有稳定身份，不能因 active map 被清除而改绑或丢弃。reset 与确无独立消费的覆盖分别记录原因；其它缺样本情况作为错误退出，不伪装成取消。最终清理等待原恢复和需要的记录都结束；特殊来源不需要本轮记录时仍允许原异常终态收口，同时对外说明观测未支持。
+
+第 7.4 节 CSR 切换屏障至少覆盖仍在使用旧环境的访问及未完成地址目标，不能仅凭 issue 快照已经保存就修改实际配置。这里保护的是捕获前的实际环境；记录完成后 readonly consumer 可以晚读取，不必为其读取时间继续冻结硬件配置。
 
 ## 11. 公共启动、状态生命周期与性能约束
 
 不新增定向 testcase/vseq。现有顶层 vseq 继续通过 `p_sequencer` 统一启动已有 issue、LSQ、CSR、fence、L2TLB 和 memory responder；参数和公共配置决定是否生成特殊操作。不得把 agent phase default_sequence 作为新增功能启动入口。
 
-- UID 状态由现有 activate、issue、WB、commit/terminal、reset/redirect 维护；新增字段在相同入口初始化和清除。
+- UID 状态由现有 activate、issue、WB、commit/terminal、reset/redirect 维护；新增字段在相同入口初始化和清除。异常事件的不可变上下文独立于 active mapping 存活，直到第 10.5 节收口，不能在资源回收时提前删除。
 - CSR monitor 继续唯一维护逐拍 baseline、runtime latest；sequence 不直接把期望配置写成 runtime 真值。
 - 参数读取和操作识别为常数时间；事件通过 UID/key map 定位。
 - 请求 token 数量受现有 compile 上界约束；不建立同义 runtime 物理宽度。
 - fence 仅在事件生效时扫描当前 live entry，不每拍扫描完整主表。
-- 高频路径使用既有 queue/cursor/prefix；正常结束为主表终态前缀完成并排空。
+- 高频路径使用既有 queue/cursor/prefix；正常结束为主表终态前缀完成，并排空统一帧、prepared 运输、回执、原恢复及所需地址记录。旧上下文未完成数量用活动记录/计数维护，不每拍遍历全部 UID。
 - watchdog/no-progress 只用于失败诊断；不增加固定 max_cycles 作为正常结束条件。
 - 二次防御检查遵守 `MEMBLOCK_MAIN_PERMISSION_DEBUG_CHECK_EN`；基础协议和归属合法性检查仍属必要检查。
 
@@ -464,9 +622,22 @@ reset/旧代次记录丢弃；不绑定后续实例
 | 1 | 常量、权重、分类、宽度、地址规范化 | 13 个特殊访存可经公共生成器合法构造和路由；FP/MOU 无误分类 |
 | 2 | SPVP 生成、保持、变化条件和比较 | 单字段变化不丢失，默认行为保持，合法无解明确报告 |
 | 3 | UID/PMP 上下文和请求关联 | hit、miss、重放及补登记有明确访问身份和快照来源 |
-| 4 | Guest 动态 CSR 与维护协议 | 观察、生效、candidate 提交和失败处置具有唯一 owner |
+| 4 | Guest 动态 CSR 与维护协议 | 观察、生效、candidate 提交和失败处置具有唯一 owner；旧访问和所需异常地址捕获前不切换相关实际环境 |
 | 5 | 五类类型权重、主表四值范围、完整 fence payload 与 HINVAL | 单非零类型固定、多非零按权重选择；自动范围全地址/全 ID、手工范围不被 worker 改写；运输和恢复完整 |
-| 6 | 异常地址记录和恢复 | fault token 到异常 sample 归属明确，无旧代次误绑定 |
+| 6 | 统一异常帧、地址记录和恢复 | HLV/HLVX/HSV 复用公共 fault 流程；实际 S、来源和 S+2 目标明确，采样记账先于恢复扫描；无旧代次误绑定 |
+
+异常路径还须验证以下框架合同：
+
+| 验证点 | 框架侧应满足的行为 |
+|---|---|
+| HLV/HLVX/HSV 真实异常及交替类别 | 以真实 WB 为依据，冻结原 issue CSR；正常提交清零的 fault 帧与异常 redirect 属于同一实际 sample |
+| HSV 缺侧 dispatch/WB | 不提前建立阻塞缺侧的 fault 准备，继续原 pending/head 服务与双真实 WB 门槛 |
+| 同 UID 重发、ROB key 复用、reset | 以动态代次/既有 issue 身份和 reset 隔离旧 WB/raw，不移绑新实例 |
+| 连续同值或零地址、adapter 延迟 | 整组字段取指定历史 sample，不用数值变化、非零值或 latest 判断完成 |
+| fault 与更老 redirect 竞争 | 保留原最老仲裁和覆盖收尾；访存违例不建立 fault 地址请求 |
+| 地址捕获期间动态 CSR action | 开始配置/fence 副作用前等待旧访问及目标捕获；等待不阻塞 WB、frame、恢复和独立 flushSb |
+| 特殊来源、UNKNOWN、缺样本 | 未支持来源明确不记录；缺样本报错误，不能正常放行或伪装为成功 |
+| 最终退出 | fault 恢复和所需记录均收口，运输/样本等待无遗留；不重复释放资源 |
 
 完成标准区分“可生成、可驱动、可记录、可回收”和“DUT 行为正确”。前者为本方案目标，后者依赖独立 RM/checker/覆盖率工作，不能把发射或仿真结束当作正确性通过。
 
@@ -478,7 +649,8 @@ reset/旧代次记录丢弃；不绑定后续实例
 - `main_control_transaction.sv`、`memblock_op_behavior_util.sv`、`memblock_dispatch_base_sequence.sv`、`issue_field_assigner.sv`。
 - `memblock_csr_randomizer.sv`、`memblock_csr_config_state.sv`、`seq_csr_common.sv`、`common_data_transaction.sv`。
 - `seq/base_seq/memblock_csr_initial_config_sequence.sv`、`memblock_dynamic_csr_change_sequence.sv`、`memblock_sfence_control_base_sequence.sv`。
-- ctrl monitor、同步包、adapter、status、commit handler 和 readonly 接口的必要字段链。
+- ctrl monitor、同步包、adapter、status、commit handler 和 readonly 接口的必要字段链；异常帧/运输/恢复门槛复用关联公共同步方案的修改清单，不另建 scheduler。
+- 原动态 CSR/control barrier 完成条件接入旧上下文排空和地址记录状态；仍由既有 owner 维护配置生命周期。
 - `env/plus.sv`、公共 `default.cfg` 及既有 preset 的兼容检查。
 
 上述简写文件按原有目录管理；新增文件才调整 `seq_pkg.sv/seq.f`。参数文档、sequence/L2TLB 规则及既有相关 plan 的同步清单按各公共规则执行；本次落盘不修改这些源码或规则。
@@ -489,20 +661,20 @@ reset/旧代次记录丢弃；不绑定后续实例
 
 1. 固定新增函数、payload 和参数的实际名称，逐个给出抽象职责、源码级伪代码及中文控制流。
 2. 将 Guest CSR 维护步骤映射到现有 owner/观察槽，明确各分支、候选提交和恢复顺序。
-3. 推导并确认 CSR 传播放行、异常地址采样的实际 sample 合同。
+3. 按第 7.4、10 章及关联公共同步方案固定 CSR 传播放行、旧上下文排空、实际 S、普通 LSQ S+2、来源标签与状态的成员名；实现后用当前 clocking/波形确认静态合同，不能用 driver 返回或最新 CSR 代替。
 4. 列出全部 PMP 身份登记调用点及地址模板/fallback consumer，保证链路完整。
 5. 五个 fence 类型权重及主表 `sfence_scope` 四值语义按第 9 章执行；正式固定主表控制 payload 成员名、类型相关校验和全部复制链，明确 HINVAL 运输与失效完成合同，不再新增范围随机参数。
 6. 依项目正式 plan 规则完成独立 review-modify 循环及最终自查，不能将本文档格式检查视为功能方案评审。
 
 ## 14. RM 协同支持
 
-本 plan 不实现 RM/checker/scoreboard。后续独立 RM 方案可通过 readonly API 消费实际操作码、冻结 CSR/PMP 身份、翻译 entry/响应来源、UID/执行代次、WB 和异常地址记录。
+本 plan 不实现 RM/checker/scoreboard。后续独立 RM 方案可通过 readonly API 消费实际操作码、冻结 CSR/PMP 身份、翻译 entry/响应来源、UID/执行代次、WB 和异常地址记录，以及 frame/实际 S/目标 sample、地址来源、CAPTURED/取消/未支持/错误标签。这里只提供原始值和归属，不从 DUT 输出回填 expected，也不把记录完成当作结果正确。
 
 RM 的 SPVP 权限解释、VS/G 两级 MXR、HLVX 执行权限、PMP R/X、结果扩展和异常优先级属于后续 RM 方案；本稿不在框架主路径推导期望值，也不关闭现有 RM 检查以冒充功能支持。
 
 ## 15. 功能覆盖率协同支持
 
-本 plan 不实现 coveragent/covergroup。后续可使用操作类型、SPVP、有效身份、翻译阶段、ASID/VMID、fence payload、请求 token 生命周期和异常地址来源作为采样或交叉维度。字段存在不等于覆盖已完成。
+本 plan 不实现 coveragent/covergroup。后续可使用操作类型、SPVP、有效身份、翻译阶段、ASID/VMID、fence payload、请求 token 生命周期、异常地址来源及记录状态、实际采样和 CSR 切换等待作为采样或交叉维度。字段存在不等于覆盖已完成。
 
 ## 16. 与已讨论方案的关系
 
@@ -513,7 +685,13 @@ RM 的 SPVP 权限解释、VS/G 两级 MXR、HLVX 执行权限、PMP R/X、结�
 - 原来执行阶段“随机地址/ID 或随机通配”的候选方向不进入方案；worker 只转换并运输主表目标，不能随机替换。
 - 具体类型仍在首次 action payload 构造时按权重冻结，类型随机与范围固定分开处理；CSR 映射维护的显式类型不受随机权重影响。
 
-方案仍是初步版本。尚未固定的函数名、主表控制 payload 成员名和异常地址 sample 等项继续作为正式整理工作，不表述为已实施或已通过独立评审。
+2026-11-17 本轮补齐异常归属与恢复接入：
+
+- 第 10.2 节采用“统一发布 → 实际采样记账 → 恢复与地址记录独立推进”，公共 scheduler 和 owner 只保留一套。
+- 第 8.1、10.1 节保存 Guest 访问身份及原 issue CSR 引用，第 7.4 节增加旧上下文和地址捕获的实际配置切换屏障。
+- 第 10.3 节按普通 LSQ 的静态 S+2 合同取指定 raw 历史，整组输出同 sample 关联；第 10.4、10.5 节区分独立来源、合法取消、未支持与缺样本错误。
+
+方案仍是初步版本。新增成员名、主表控制 payload 和公共接入点须在正式整理时与源码统一；普通 LSQ S+2 已记录静态合同，实际实现仍需 clocking/波形确认。本次文档修改不表述为已实施或本虚拟化方案已通过独立评审。
 
 ## 17. 参考规则与源码入口
 

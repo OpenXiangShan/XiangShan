@@ -9,7 +9,8 @@
 | 核验 commit | 初始核验 `bd813bc3ed5b39581be966c6518788852890ff6f`；本轮补充核验 `c52d5f98029eb549b2c2a93367d56171ded619bb` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 V2 `memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-09-04` |
+| PMM地址补充核验commit | `264d54012bd97d0bc09f2cbdef4a4a2722d95864`；本次仅补核trigger地址来源 |
+| 最后核验日期 | `2026-11-17`（PMM地址补充） |
 
 ## Flow 范围
 
@@ -78,7 +79,7 @@ flowchart TD
 
 ```text
 1. CSR 模块把 memory trigger 的 tdata、enable、debugMode 和 triggerCanRaiseBpExp 分发到 MemBlock。
-2. LoadUnit/StoreUnit 在 S1 使用当前访问虚拟地址调用 MemTrigger：
+2. LoadUnit/StoreUnit在S1调用MemTrigger：普通非MAB来源使用DTLB响应的triggerVa，MAB来源使用其分段vaddr；
    Load 只检查 load-enabled trigger，并排除 prefetch；
    Store 只检查 store-enabled trigger；CBO 按 cache line 地址比较。
 3. 每个 trigger entry 还必须满足 select==0、当前不在 debug mode、地址 match、chain/timing 合法。
@@ -91,6 +92,8 @@ flowchart TD
 ```
 
 ## 1. CSR 配置与地址匹配
+
+地址来源补充：普通非MAB Load/Store在S1取`io.tlb.resp.bits.triggerVa`，该值由DTLB对当前请求fullva执行适用PMM后产生。MAB分支显式选择自身分段vaddr，不能将其混为原始整数指针。若完整地址预检查只有末字节错误，异常fullva可变为后页页首，而triggerVa仍是有效首地址。该来源选择只改变送入MemTrigger的地址，不改变本文后续hit、chain和action优先级。见[PMM专题](memory_pointer_masking_flow.md)。
 
 `MemTrigger.getTriggerHitVec()` 对每个 entry 检查：
 
@@ -165,6 +168,8 @@ exceptionVec.asUInt.orR || singleStep || TriggerAction.isDmode(trigger)
 
 ## 关联文档
 
+- [PMM指针掩码](memory_pointer_masking_flow.md)：说明triggerVa如何由fullva产生及其与异常地址的区别。
+
 - [memory flush pipe flow](memory_flush_pipe_flow.md)：trigger 异常与 `flushPipe` 在 ROB 的不同处理方式。
 - [StoreMisalignBuffer 跨 16B Store Trigger 元数据传播缺陷](store_misalign_trigger_metadata_propagation.md)：普通 scalar 非对齐 MAB admission 错误复制计算前 `s1_in.uop.trigger`，使最终 STA0 输出 `0 + !breakpoint`；该项是 V2 DUT metadata 缺陷，不能作为一般 STA0 合法编码放宽 checker。
 - [Int writeback agent 接口知识](../../../interface/v2/agents/int_writeback_agent.md)：LDA/STA/STD 顶层 trigger capability 和 lane 差异。
@@ -196,6 +201,7 @@ exceptionVec.asUInt.orR || singleStep || TriggerAction.isDmode(trigger)
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
+| 2026-11-17 | `264d54012bd97d0bc09f2cbdef4a4a2722d95864` | S1地址概述未区分原始指针、triggerVa与预异常fullva | 普通非MAB来源使用PMM后的triggerVa，MAB使用分段vaddr；仅末端高位错误不改变trigger的有效首地址 | PMM专题追踪实际LoadUnit/StoreUnit地址连接 | V2 DTLB、Load/Store trigger地址输入 |
 | 2026-07-11 | `5b35ddd8d774b5f11d61333dfbe7638a3f362fad` | 首次建立，无同版本长期 flow 旧结论 | 建立 action 编码、地址匹配、写回和 ROB 消费关系 | 用户要求将本轮源码分析沉淀为 V2 知识 | V2 CSR/MemBlock/Load/Store/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 trigger 编码和 Load/Store 生成，未区分 split writeback capability，也未说明 0 与 None 的边界 | 明确 LDA/STA 有 trigger、STD 无 trigger；`None=15`；补充 STA0 StoreQueue 非规范 0 值及必须联合 exceptionVec 判断的限制 | 结合 V2 Scala、生成 RTL 和 split writeback 端口追踪 plan 中 metadata guard | V2 MemBlock writeback/Trigger/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 文档未明确“置高”不能用于判断 trigger 动作，且未区分 Trace 编码与当前实现 | 补充 0/1/2/3/4/15 全部编码，明确当前 memory generator 只产生 0/1/15，以及 DebugMode/Breakpoint 的数值语义 | 用户追问 `trigger` 什么场景下被置高 | V2 MemTrigger/LoadUnit/StoreUnit/ROB |
