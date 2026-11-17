@@ -146,10 +146,10 @@ def main():
     args = parser.parse_args()
     with sqlite3.connect(f'file:{args.database.resolve()}?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
-        table = f'Dip_{args.hart}'
+        table = f'perf_dip_{args.hart}'
         columns = [row[1] for row in db.execute(f'PRAGMA table_info({table})')]
         width = sum(column.endswith('_STATE') and column.startswith('SLOTS_') for column in columns)
-        final_table = f'DipDelayedFinal_{args.hart}'
+        final_table = f'perf_dip_delayed_final_{args.hart}'
         if not width or not db.execute('SELECT 1 FROM sqlite_master WHERE name=?', (final_table,)).fetchone():
             raise ValueError(f'record both {table} and {final_table} with WITH_DIP=1')
         profile, summary = analyze(

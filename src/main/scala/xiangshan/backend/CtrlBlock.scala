@@ -838,9 +838,9 @@ class CtrlBlockImp(
       dip.io.dispatch.uops(lane).pc := rob.in.debugInstrAddrTransType.extend(
         dispatch.io.dip.get.uops(lane).pc(VAddrBits - 1, 0), XLEN)
     }
-    val table = ChiselDB.createTable(s"Dip_$hartId", new DipEntry, basicDB = true)
+    val table = ChiselDB.createTable(s"perf_dip_$hartId", new DipEntry, basicDB = true)
     table.log(dip.io.trace, "", clock, reset)
-    val finalTable = ChiselDB.createTable(s"DipDelayedFinal_$hartId", new DipDelayedFinal, basicDB = true)
+    val finalTable = ChiselDB.createTable(s"perf_dip_delayed_final_$hartId", new DipDelayedFinal, basicDB = true)
     dip.io.finals.zipWithIndex.foreach { case (event, lane) =>
       finalTable.log(event, s"event$lane", clock, reset)
     }

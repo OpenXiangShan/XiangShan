@@ -66,8 +66,8 @@ For hart 0, collect both tables:
 
 | Table | Content |
 | --- | --- |
-| `Dip_0` | Sample cycle, preceding cumulative retirement count, current retirement count, and dispatch slots |
-| `DipDelayedFinal_0` | Selected commits, relevant flushes, successor binding, and stability watermarks |
+| `perf_dip_0` | Sample cycle, preceding cumulative retirement count, current retirement count, and dispatch slots |
+| `perf_dip_delayed_final_0` | Selected commits, relevant flushes, successor binding, and stability watermarks |
 
 Non-sampled cycles do not provide a complete retirement prefix. The analyzer's
 `sampled_span_*` fields describe only the interval between the first and last
@@ -99,7 +99,7 @@ sampling enable is separate from elaboration.
 ```bash
 build/emu -i ready-to-run/coremark-2-iteration.bin \
   --diff ready-to-run/riscv64-nemu-interpreter-so --max-instr 5000 \
-  --cst-file build/dip.cst --dump-select-db 'Dip_0 DipDelayedFinal_0' \
+  --cst-file build/dip.cst --dump-select-db 'perf_dip_0 perf_dip_delayed_final_0' \
   --db-path build/dip.db
 python3 scripts/dip_analyze.py build/dip.db --output build/dip-profile
 ```
