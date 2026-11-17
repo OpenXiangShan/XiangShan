@@ -38,7 +38,9 @@ class basicTest extends tcnt_test_base ;
       // 中文注释：只有这些专项 VSEQ 可以成为 active control topology 的显式
       // worker/main sequence owner；普通 VSEQ 不能因为 plus=1/3 被隐式扩展为控制场景。
       function bit vseq_supports_control_worker_topology(input string vseq_name);
-          return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+          return vseq_name == "memblock_virtualization_framework_selftest_vseq" ||
+                 vseq_name == "memblock_csr_mapping_transport_negative_vseq" ||
+                 vseq_name == "memblock_dispatch_real_smoke_vseq" ||
                  vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
                  vseq_name == "memblock_dispatch_real_cbo_fault_cold_vseq" ||
                  vseq_name == "memblock_dispatch_real_cbo_fault_cold_isolated_vseq" ||

@@ -73,76 +73,94 @@ task memblock_sfence_control_base_sequence::wait_for_sfence_work_or_shutdown();
     disable fork;
 endtask:wait_for_sfence_work_or_shutdown
 
-// 抽象职责：构造一笔 control SFENCE payload。valid、flushPipe、rs1、rs2
-// 固定为 1；addr/id 和合法 hv/hg 类型每笔随机一次。随机结果立即复制到
-// expected_fence，保证 C0 matcher 使用与实际传输完全相同的原始字段。
+// 抽象职责：主表决定范围和原始目标；worker仅首次按五权重选择类型，重试复用冻结payload。
 task memblock_sfence_control_base_sequence::configure_sfence_control_xaction(
     ref memblock_sfence_control_action_t action,
     output fence_agent_agent_xaction tr
 );
-    bit [49:0] random_addr;
-    bit [15:0] random_id;
-    bit [1:0]  random_kind; // {hv,hg}: 00、10、01；11 由当前 decoder 拒绝
+    longint unsigned total_weight, pick, accumulated;
+    int unsigned selected_kind;
+    bit selected;
     memblock_sync_pkg::dispatch_raw_csr_t csr_snapshot;
     memblock_sync_pkg::memblock_control_csr_runtime_baseline_t csr_baseline;
     int unsigned csr_snapshot_seq;
 
-    if (!action.owner.valid) begin
+    if (!action.owner.valid)
         `uvm_fatal(get_type_name(), "SFence action has invalid owner")
-    end
+    if (!memblock_sync_pkg::get_control_csr_runtime_baseline(csr_baseline) ||
+        !memblock_sync_pkg::get_latest_runtime_csr_snapshot(csr_snapshot, csr_snapshot_seq) ||
+        !csr_snapshot.valid || csr_snapshot_seq < csr_baseline.first_snapshot_seq)
+        `uvm_fatal(get_type_name(), "SFence requires current runtime CSR baseline")
 
-    // control service 正常派发前应已发布当前 epoch 的 CSR baseline；这里只
-    // 验证前置条件，不伪造 CSR 或跨 epoch 的运行时上下文。
-    if (!memblock_sync_pkg::get_control_csr_runtime_baseline(csr_baseline)) begin
-        `uvm_fatal(get_type_name(), "SFence requires current control CSR baseline")
+    if (!action.type_frozen) begin
+        total_weight = 0;
+        for (int unsigned kind = 0; kind < 5; kind++)
+            total_weight += 64'(seq_csr_common::get_sfence_type_weight(kind));
+        if (total_weight == 0)
+            `uvm_fatal(get_type_name(), "SFence has no positive type weight")
+        // 中文注释：直接求解64位区间，避免urandom_range将总权重截为32位。
+        if (!std::randomize(pick) with { pick < total_weight; })
+            `uvm_fatal(get_type_name(), "SFence weighted type selection failed")
+        accumulated = 0;
+        selected = 0;
+        selected_kind = 0;
+        for (int unsigned kind = 0; kind < 5; kind++) begin
+            accumulated += 64'(seq_csr_common::get_sfence_type_weight(kind));
+            if (!selected && pick < accumulated) begin
+                selected_kind = kind;
+                selected = 1;
+            end
+        end
+        if (!selected) `uvm_fatal(get_type_name(), "SFence selection missed cumulative range")
+        action.expected_fence = '{default:'0};
+        action.expected_fence.valid = 1;
+        action.expected_fence.addr = action.addr;
+        action.expected_fence.id = action.id;
+        case (action.scope)
+            MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ALL_ID: begin
+                action.expected_fence.ignore_addr = 1; action.expected_fence.ignore_id = 1;
+            end
+            MEMBLOCK_SFENCE_SCOPE_ADDR_ALL_ID: begin
+                action.expected_fence.ignore_addr = 0; action.expected_fence.ignore_id = 1;
+            end
+            MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ID: begin
+                action.expected_fence.ignore_addr = 1; action.expected_fence.ignore_id = 0;
+            end
+            MEMBLOCK_SFENCE_SCOPE_ADDR_ID: begin
+                action.expected_fence.ignore_addr = 0; action.expected_fence.ignore_id = 0;
+            end
+            default: `uvm_fatal(get_type_name(), "SFence action has invalid main-table scope")
+        endcase
+        action.expected_fence.hv = selected_kind inside {1, 3};
+        action.expected_fence.hg = selected_kind inside {2, 4};
+        action.expected_fence.flushPipe = selected_kind < 3;
+        if (action.expected_fence.hg) begin
+            action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_G_S2;
+            if (!action.expected_fence.ignore_id && action.id[15:14] != 0)
+                `uvm_fatal(get_type_name(), "GVMA specified VMID exceeds the V2 14-bit contract")
+        end else if (action.expected_fence.hv || csr_snapshot.priv_virt)
+            action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_VS_S1;
+        else action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
+        action.type_frozen = 1;
     end
-    if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(csr_snapshot,
-                                                             csr_snapshot_seq) ||
-        !csr_snapshot.valid ||
-        csr_snapshot_seq < csr_baseline.first_snapshot_seq) begin
-        `uvm_fatal(get_type_name(), "SFence requires current runtime CSR snapshot")
-    end
-
-    if (!std::randomize(random_addr, random_id, random_kind) with {
-        random_kind dist {2'b00 := 1, 2'b10 := 1, 2'b01 := 1};
-    }) begin
-        `uvm_fatal(get_type_name(), "SFence payload randomization failed")
-    end
-
     tr = fence_agent_agent_xaction::type_id::create(
-        $sformatf("sfence_control_uid_%0d_gen_%0d", action.owner.uid,
-                  action.owner.action_generation));
-    if (tr == null) begin
-        `uvm_fatal(get_type_name(), "failed to create SFence xaction")
-    end
+        $sformatf("sfence_control_uid_%0d_gen_%0d", action.owner.uid, action.owner.action_generation));
+    if (tr == null) `uvm_fatal(get_type_name(), "failed to create SFence xaction")
     tr.pre_pkt_gap = 0;
     tr.post_pkt_gap = 0;
-    tr.io_ooo_to_mem_sfence_valid = 1'b1;
-    tr.io_ooo_to_mem_sfence_bits_rs1 = 1'b1;
-    tr.io_ooo_to_mem_sfence_bits_rs2 = 1'b1;
-    tr.io_ooo_to_mem_sfence_bits_addr = random_addr;
-    tr.io_ooo_to_mem_sfence_bits_id = random_id;
-    tr.io_ooo_to_mem_sfence_bits_hv = random_kind[1];
-    tr.io_ooo_to_mem_sfence_bits_hg = random_kind[0];
-    tr.io_ooo_to_mem_sfence_bits_flushPipe = 1'b1;
-
-    action.expected_fence = '{default:'0};
-    action.expected_fence.valid = tr.io_ooo_to_mem_sfence_valid;
-    action.expected_fence.ignore_addr = tr.io_ooo_to_mem_sfence_bits_rs1;
-    action.expected_fence.ignore_id = tr.io_ooo_to_mem_sfence_bits_rs2;
-    action.expected_fence.addr = tr.io_ooo_to_mem_sfence_bits_addr;
-    action.expected_fence.id = tr.io_ooo_to_mem_sfence_bits_id;
-    action.expected_fence.hv = tr.io_ooo_to_mem_sfence_bits_hv;
-    action.expected_fence.hg = tr.io_ooo_to_mem_sfence_bits_hg;
-    if (tr.io_ooo_to_mem_sfence_bits_hg) begin
-        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_G_S2;
-    end
-    else if (tr.io_ooo_to_mem_sfence_bits_hv || csr_snapshot.priv_virt) begin
-        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_VS_S1;
-    end
-    else begin
-        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
-    end
+    tr.io_ooo_to_mem_sfence_valid = action.expected_fence.valid;
+    tr.io_ooo_to_mem_sfence_bits_rs1 = action.expected_fence.ignore_addr;
+    tr.io_ooo_to_mem_sfence_bits_rs2 = action.expected_fence.ignore_id;
+    tr.io_ooo_to_mem_sfence_bits_addr = action.expected_fence.addr;
+    tr.io_ooo_to_mem_sfence_bits_id = action.expected_fence.id;
+    tr.io_ooo_to_mem_sfence_bits_hv = action.expected_fence.hv;
+    tr.io_ooo_to_mem_sfence_bits_hg = action.expected_fence.hg;
+    tr.io_ooo_to_mem_sfence_bits_flushPipe = action.expected_fence.flushPipe;
+    `uvm_info("SFENCE_CONTROL_PAYLOAD",
+              $sformatf("uid=%0d scope=%s addr=0x%0h id=0x%0h hv=%0b hg=%0b flushPipe=%0b",
+                        action.owner.uid, action.scope.name(), action.expected_fence.addr,
+                        action.expected_fence.id, action.expected_fence.hv,
+                        action.expected_fence.hg, action.expected_fence.flushPipe), UVM_LOW)
 endtask:configure_sfence_control_xaction
 
 // 抽象职责：在 start_item 前冻结 L2TLB event/reset baseline 并 arm C0，随后交付

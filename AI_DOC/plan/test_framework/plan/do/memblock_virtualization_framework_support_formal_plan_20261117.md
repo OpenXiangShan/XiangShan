@@ -4,10 +4,10 @@
 - 更新日期：2026-11-17。
 - 更新说明：保留已确认的五类 fence 权重及主表失效范围；异常地址记录改为接入统一后端周期帧，补齐 Guest 执行上下文、CSR 切换屏障、精确采样、来源边界和取消收尾。
 - 适用分支：`mem_ut_uvm_v2`。
-- 状态：正式可 coding 方案；2026-11-17 独立复审及主代理最终自查通过，无必须修改项。尚未实施。以本文件及两份关联正式方案作为后续 coding 依据。
+- 状态：2026-11-17已完成本项源码、文档、独立review和专项验证。执行中调整见文末IMPLEMENTATION_DELTA，不能当作原始方案。
 - 范围：公共测试框架的激励生成、CSR 配置、调度、驱动、响应建模、事件记录和异常恢复。
 - 不包含：定向 testcase/vseq、专用场景 preset、RM/checker/scoreboard 算法、功能覆盖率模型、RTL 修改。
-- 授权边界：本轮仅完善方案与评审；后续源码修改仍须明确 coding 授权。
+- 授权边界：用户已明确授权顺序执行三项plan及对应本地提交；本项不扩展到RTL或独立RM算法。
 - 公共控制依赖：[MemBlock V2 后端周期快照同步驱动与异常地址采样方案](../do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md)。该方案负责双 agent 同边沿发布、实际输入采样和恢复门槛，本方案负责特殊访存属性及 Guest 上下文接入。
 
 - 评审记录：[独立评审闭环记录](../../review_doc/undo/memblock_v2_virtualization_backend_formal_plan_review_20261117.md)。
@@ -896,3 +896,36 @@ RM 的 SPVP 权限解释、VS/G 两级 MXR、HLVX 执行权限、PMP R/X、结�
 修改 `complete_hs_mapping_fence()` 前：固定构造HS全范围payload，预约、发送、等待C4后返回。修改后：`complete_mapping_fence()` 接收合法全范围stage payload，复用同一预约/运输/C4/清槽，返回成功后才执行下一步；抽象职责仍是在原CSR owner下完成一次维护。
 
 修改 `differs_from()/make_runtime_payload()` 前：比较/导出旧字段，可能遗漏SPVP-only与PMM-only。修改后：加入SPVP及五组PMM，向原观察链输出完整目标；不新建配置真源。其余权重、scope默认、原提交/重发和L2生命周期均保留。
+
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA，2026-11-17）
+
+以下为coding和独立review后确认的调整，不属于执行前原始plan。
+
+### DELTA-1：五PMM原始／运行时字段前置
+
+[IMPLEMENTATION_DELTA] 原plan将raw/runtime/readonly完整字段扩展交后续RM列项；第二项的完整target、PMM-only变化识别、legacy保留与传播确认已经需要这五值。实现先补`dispatch_raw_csr_t`、monitor、runtime state的reset/update/copy和`make_runtime_payload()`，作为CSR运输依赖；不在此阶段实现RM权限或PMM算法。后续RM复用这些字段，不重复建真源。
+
+### DELTA-2：legacy完整动态item保持
+
+[IMPLEMENTATION_DELTA] 原driver仅special保存clean hold，legacy四changed item在idle会被默认值覆盖，无法保证四拍传播。实现将完整四changed item作为额外hold触发条件；capture消毒所有协议位，idle优先L2 hold再CSR hold，reset清除。普通未触发hold的idle保持原行为，不给legacy引入special candidate/profile。
+
+### DELTA-3：旧运输负例适配职责拆分
+
+[IMPLEMENTATION_DELTA] 原`complete_hs_mapping_fence()`同时等待传播和HS fence；现拆为`wait_target_propagation()`及`complete_mapping_fence()`。15类原运输负例按传播／写入／fence分别调用对应helper，沿用原owner/reset/noack检查。场景8/9等待driver真实completed_item_count递增后再取消，避免固定5ns仍在运输阶段命中错误职责。未以修改日志匹配冒充成功。
+
+### DELTA-4：公共类别切换helper补齐规范化
+
+[IMPLEMENTATION_DELTA] 全仓当前未调用`set_transaction_ls_kind()`，但它能选中特殊opcode。实现保存切换前target VA，切换类别后调用normalize，防止未来子类把旧非零imm带入Guest操作；不增加新状态，不改变当前生产候选分布。
+
+### DELTA-5：inactive HS维护在返回Host时完成
+
+[IMPLEMENTATION_DELTA] 原第13.4固定在目标后执行HS维护，未考虑target.dvirt=1时无hv/hg的普通SFENCE实际解释为VS。独立review证明预期HS与真实VS的C0无法匹配。实现仅在target.dvirt=0时发HS：Host→Host按原SATP mode/root条件；Guest→Host且新旧任一SATP非Bare时无条件补全地址全ASID维护。target.dvirt=1期间普通访问及HLV/HSV均不使用HS映射，HS暂不可达；原条目可保留，返回Host的C4完成前屏障不开放年轻访问，覆盖Guest期间任意多次SATP变更。无需dirty状态、临时CSR上下文或伪造matcher。Guest旧VVMA→目标传播→新VVMA→GVMA顺序保持；PMM16/Sv48x4的GVMA继续合并。
+
+### 当前验证记录
+
+主代理报告完整编译通过；专项仿真进行中，最终日志、结果与回归由主代理在归档提交前补充。本文档仍留在undo，不以静态review代替实际验证。
+
+## 本项实现验收记录
+
+2026-11-17，源码、配置和flow同步完成，独立review发现的HS维护问题已修复并复查。virt4完整编译、六组框架helper专项、15个隔离CSR负例、默认基础/真实dispatch/动态CSR/legacy均通过；真实HINVAL两类控制链已在virt3通过。详细日志与范围限制见同名implementation review末章。本项可独立提交；第三项RM/check仍待实施，全部basicTest回归在三项完成后统一执行。

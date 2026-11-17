@@ -22,6 +22,12 @@ class mmu_csr_runtime_state extends uvm_object;
 
     bit            priv_virt;
     bit            priv_spvp;
+    bit [1:0]      pmm_mseccfg;
+    bit [1:0]      pmm_menvcfg;
+    bit [1:0]      pmm_henvcfg;
+    bit [1:0]      pmm_hstatus;
+    bit [1:0]      pmm_senvcfg;
+
     bit [1:0]      priv_imode;
     bit [1:0]      priv_dmode;
     bit            priv_mxr;
@@ -55,6 +61,12 @@ class mmu_csr_runtime_state extends uvm_object;
         hgatp_ppn  = '0;
         priv_virt  = 1'b0;
         priv_spvp  = 1'b0;
+        pmm_mseccfg = '0;
+        pmm_menvcfg = '0;
+        pmm_henvcfg = '0;
+        pmm_hstatus = '0;
+        pmm_senvcfg = '0;
+
         priv_imode = 2'd3;
         priv_dmode = 2'd3;
         priv_mxr   = 1'b0;
@@ -88,6 +100,12 @@ class mmu_csr_runtime_state extends uvm_object;
             hgatp_ppn  != csr_tr.io_ooo_to_mem_tlbCsr_hgatp_ppn  ||
             priv_virt  != csr_tr.io_ooo_to_mem_tlbCsr_priv_virt  ||
             priv_spvp  != csr_tr.io_ooo_to_mem_tlbCsr_priv_spvp  ||
+            pmm_mseccfg != csr_tr.io_ooo_to_mem_tlbCsr_pmm_mseccfg ||
+            pmm_menvcfg != csr_tr.io_ooo_to_mem_tlbCsr_pmm_menvcfg ||
+            pmm_henvcfg != csr_tr.io_ooo_to_mem_tlbCsr_pmm_henvcfg ||
+            pmm_hstatus != csr_tr.io_ooo_to_mem_tlbCsr_pmm_hstatus ||
+            pmm_senvcfg != csr_tr.io_ooo_to_mem_tlbCsr_pmm_senvcfg ||
+
             priv_imode != csr_tr.io_ooo_to_mem_tlbCsr_priv_imode ||
             priv_dmode != csr_tr.io_ooo_to_mem_tlbCsr_priv_dmode ||
             priv_mxr   != csr_tr.io_ooo_to_mem_tlbCsr_priv_mxr   ||
@@ -112,6 +130,12 @@ class mmu_csr_runtime_state extends uvm_object;
         hgatp_ppn  = csr_tr.io_ooo_to_mem_tlbCsr_hgatp_ppn;
         priv_virt  = csr_tr.io_ooo_to_mem_tlbCsr_priv_virt;
         priv_spvp  = csr_tr.io_ooo_to_mem_tlbCsr_priv_spvp;
+        pmm_mseccfg = csr_tr.io_ooo_to_mem_tlbCsr_pmm_mseccfg;
+        pmm_menvcfg = csr_tr.io_ooo_to_mem_tlbCsr_pmm_menvcfg;
+        pmm_henvcfg = csr_tr.io_ooo_to_mem_tlbCsr_pmm_henvcfg;
+        pmm_hstatus = csr_tr.io_ooo_to_mem_tlbCsr_pmm_hstatus;
+        pmm_senvcfg = csr_tr.io_ooo_to_mem_tlbCsr_pmm_senvcfg;
+
         priv_imode = csr_tr.io_ooo_to_mem_tlbCsr_priv_imode;
         priv_dmode = csr_tr.io_ooo_to_mem_tlbCsr_priv_dmode;
         priv_mxr   = csr_tr.io_ooo_to_mem_tlbCsr_priv_mxr;
@@ -147,6 +171,12 @@ class mmu_csr_runtime_state extends uvm_object;
             hgatp_ppn  != raw.hgatp_ppn         ||
             priv_virt  != raw.priv_virt         ||
             priv_spvp  != raw.priv_spvp         ||
+            pmm_mseccfg != raw.pmm_mseccfg ||
+            pmm_menvcfg != raw.pmm_menvcfg ||
+            pmm_henvcfg != raw.pmm_henvcfg ||
+            pmm_hstatus != raw.pmm_hstatus ||
+            pmm_senvcfg != raw.pmm_senvcfg ||
+
             priv_imode != raw.priv_imode        ||
             priv_dmode != raw.priv_dmode        ||
             priv_mxr   != raw.priv_mxr          ||
@@ -171,6 +201,12 @@ class mmu_csr_runtime_state extends uvm_object;
         hgatp_ppn  = raw.hgatp_ppn;
         priv_virt  = raw.priv_virt;
         priv_spvp  = raw.priv_spvp;
+        pmm_mseccfg = raw.pmm_mseccfg;
+        pmm_menvcfg = raw.pmm_menvcfg;
+        pmm_henvcfg = raw.pmm_henvcfg;
+        pmm_hstatus = raw.pmm_hstatus;
+        pmm_senvcfg = raw.pmm_senvcfg;
+
         priv_imode = raw.priv_imode;
         priv_dmode = raw.priv_dmode;
         priv_mxr   = raw.priv_mxr;
@@ -320,6 +356,12 @@ class mmu_csr_runtime_state extends uvm_object;
         hgatp_ppn  = rhs.hgatp_ppn;
         priv_virt  = rhs.priv_virt;
         priv_spvp  = rhs.priv_spvp;
+        pmm_mseccfg = rhs.pmm_mseccfg;
+        pmm_menvcfg = rhs.pmm_menvcfg;
+        pmm_henvcfg = rhs.pmm_henvcfg;
+        pmm_hstatus = rhs.pmm_hstatus;
+        pmm_senvcfg = rhs.pmm_senvcfg;
+
         priv_imode = rhs.priv_imode;
         priv_dmode = rhs.priv_dmode;
         priv_mxr   = rhs.priv_mxr;

@@ -10,7 +10,11 @@ class memblock_csr_randomizer extends uvm_object;
 
     bit [3:0] cur_satp_mode, cur_vsatp_mode, cur_hgatp_mode;
     bit [15:0] cur_satp_asid, cur_vsatp_asid, cur_hgatp_vmid;
+    // 中文注释：动态非根表变化保留committed完整root，不把手工目标改回固定测试root。
+    bit [43:0] cur_satp_ppn, cur_vsatp_ppn, cur_hgatp_ppn;
     bit cur_mxr, cur_sum, cur_vmxr, cur_vsum;
+    // 中文注释：动态求解冻结committed的SPVP；关闭修改时必须保持，避免身份静默改变。
+    bit cur_priv_spvp;
     bit cur_priv_virt;
     bit [1:0] cur_priv_imode, cur_priv_dmode;
     bit cur_l1d_pf, cur_l1d_agt, cur_l1d_pht, cur_l1d_stride;
@@ -21,6 +25,8 @@ class memblock_csr_randomizer extends uvm_object;
     rand bit [3:0] satp_mode, vsatp_mode, hgatp_mode;
     rand bit [15:0] satp_asid, vsatp_asid, hgatp_vmid;
     rand bit mxr, sum, vmxr, vsum;
+    // 中文注释：特殊访存的U/S身份选择，初始按INIT权重，动态仅CHANGE_SPVP_EN允许改变。
+    rand bit priv_spvp;
     rand bit priv_virt;
     rand bit [1:0] priv_imode, priv_dmode;
     rand bit l1d_pf, l1d_agt, l1d_pht, l1d_stride;
@@ -104,6 +110,14 @@ class memblock_csr_randomizer extends uvm_object;
         }
     }
 
+    constraint c_spvp {
+        if (!dynamic_mode)
+            priv_spvp dist {0 := cfg.init_spvp_0_wt, 1 := cfg.init_spvp_1_wt};
+        else if (cfg.change_spvp_enable)
+            priv_spvp dist {0 := cfg.change_spvp_0_wt, 1 := cfg.change_spvp_1_wt};
+        else priv_spvp == cur_priv_spvp;
+    }
+
     constraint c_priv_context {
         if (!dynamic_mode) {
             priv_virt dist {0 := cfg.init_priv_virt_0_wt, 1 := cfg.init_priv_virt_1_wt};
@@ -181,7 +195,7 @@ class memblock_csr_randomizer extends uvm_object;
         if (dynamic_mode) {
             cfg.change_satp_enable || cfg.change_vsatp_enable || cfg.change_hgatp_enable ||
             cfg.change_permission_enable || cfg.change_priv_context_enable ||
-            cfg.change_pmp_pma_enable;
+            cfg.change_pmp_pma_enable || cfg.change_spvp_enable;
             (cfg.change_satp_enable &&
                 (satp_mode != cur_satp_mode || satp_asid != cur_satp_asid)) ||
             (cfg.change_vsatp_enable &&
@@ -193,6 +207,7 @@ class memblock_csr_randomizer extends uvm_object;
             (cfg.change_priv_context_enable &&
                 (priv_virt != cur_priv_virt || priv_imode != cur_priv_imode ||
                  priv_dmode != cur_priv_dmode)) ||
+            (cfg.change_spvp_enable && priv_spvp != cur_priv_spvp) ||
             (cfg.change_pmp_pma_enable &&
                 (pmp_r != cur_region.pmp_r || pmp_w != cur_region.pmp_w ||
                  pmp_x != cur_region.pmp_x || pma_c != cur_region.pma_c ||
@@ -216,6 +231,9 @@ class memblock_csr_randomizer extends uvm_object;
         if (dynamic_mode && current == null)
             `uvm_fatal(get_type_name(), "dynamic CSR randomizer requires committed state")
         if (current == null) return;
+        cur_satp_ppn = current.io_ooo_to_mem_tlbCsr_satp_ppn;
+        cur_vsatp_ppn = current.io_ooo_to_mem_tlbCsr_vsatp_ppn;
+        cur_hgatp_ppn = current.io_ooo_to_mem_tlbCsr_hgatp_ppn;
         cur_satp_mode = current.io_ooo_to_mem_tlbCsr_satp_mode;
         cur_satp_asid = current.io_ooo_to_mem_tlbCsr_satp_asid;
         cur_vsatp_mode = current.io_ooo_to_mem_tlbCsr_vsatp_mode;
@@ -226,6 +244,7 @@ class memblock_csr_randomizer extends uvm_object;
         cur_sum = current.io_ooo_to_mem_tlbCsr_priv_sum;
         cur_vmxr = current.io_ooo_to_mem_tlbCsr_priv_vmxr;
         cur_vsum = current.io_ooo_to_mem_tlbCsr_priv_vsum;
+        cur_priv_spvp = current.io_ooo_to_mem_tlbCsr_priv_spvp;
         cur_priv_virt = current.io_ooo_to_mem_tlbCsr_priv_virt;
         cur_priv_imode = current.io_ooo_to_mem_tlbCsr_priv_imode;
         cur_priv_dmode = current.io_ooo_to_mem_tlbCsr_priv_dmode;
@@ -256,6 +275,7 @@ class memblock_csr_randomizer extends uvm_object;
         tr.io_ooo_to_mem_tlbCsr_priv_sum = sum;
         tr.io_ooo_to_mem_tlbCsr_priv_vmxr = vmxr;
         tr.io_ooo_to_mem_tlbCsr_priv_vsum = vsum;
+        tr.io_ooo_to_mem_tlbCsr_priv_spvp = priv_spvp;
         tr.io_ooo_to_mem_tlbCsr_priv_virt = priv_virt;
         tr.io_ooo_to_mem_tlbCsr_priv_imode = priv_imode;
         tr.io_ooo_to_mem_tlbCsr_priv_dmode = priv_dmode;
@@ -273,6 +293,11 @@ class memblock_csr_randomizer extends uvm_object;
         tr.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable = misalign_ld;
         tr.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable = misalign_st;
         memblock_csr_config_state::apply_fixed_roots(tr);
+        if (dynamic_mode) begin
+            if (satp_mode == cur_satp_mode) tr.io_ooo_to_mem_tlbCsr_satp_ppn = cur_satp_ppn;
+            if (vsatp_mode == cur_vsatp_mode) tr.io_ooo_to_mem_tlbCsr_vsatp_ppn = cur_vsatp_ppn;
+            if (hgatp_mode == cur_hgatp_mode) tr.io_ooo_to_mem_tlbCsr_hgatp_ppn = cur_hgatp_ppn;
+        end
     endfunction:apply_to_transaction
 
     function memblock_csr_pmp_pma_profile_t make_region_profile(
@@ -416,6 +441,11 @@ class memblock_csr_randomizer extends uvm_object;
                             cfg.pma_exception_c_0_wt, cfg.pma_exception_c_1_wt,
                             cfg.pma_exception_atomic_0_wt, cfg.pma_exception_atomic_1_wt), UVM_LOW)
 
+        `uvm_info("MEMBLOCK_CSR_SPVP_AUDIT",
+            $sformatf("phase=%s spvp=%0b init_wt=%0d/%0d change_en=%0b change_wt=%0d/%0d",
+                phase_name, tr.io_ooo_to_mem_tlbCsr_priv_spvp,
+                cfg.init_spvp_0_wt, cfg.init_spvp_1_wt, cfg.change_spvp_enable,
+                cfg.change_spvp_0_wt, cfg.change_spvp_1_wt), UVM_LOW)
         if (!log_enable_fields) return;
         log_enable_field("pf_ctrl_l1I_pf_enable", tr.io_ooo_to_mem_csrCtrl_pf_ctrl_l1I_pf_enable,
                          "unused", 1'b0, !tr.io_ooo_to_mem_csrCtrl_pf_ctrl_l1I_pf_enable,

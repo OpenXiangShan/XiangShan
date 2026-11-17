@@ -56,6 +56,25 @@ class seq_csr_common;
     static int unsigned op_class_prefetch_wt = 1;
     static int unsigned op_class_amo_wt = 0;
     static int unsigned op_class_cbo_wt = 0;
+    // 中文注释：从plus冻结的特殊访存与fence生成权重；0不进入自动候选。
+    static int unsigned load_fuop_hlvb_wt = 0;
+    static int unsigned load_fuop_hlvbu_wt = 0;
+    static int unsigned load_fuop_hlvh_wt = 0;
+    static int unsigned load_fuop_hlvhu_wt = 0;
+    static int unsigned load_fuop_hlvw_wt = 0;
+    static int unsigned load_fuop_hlvwu_wt = 0;
+    static int unsigned load_fuop_hlvd_wt = 0;
+    static int unsigned load_fuop_hlvxhu_wt = 0;
+    static int unsigned load_fuop_hlvxwu_wt = 0;
+    static int unsigned store_fuop_hsvb_wt = 0;
+    static int unsigned store_fuop_hsvh_wt = 0;
+    static int unsigned store_fuop_hsvw_wt = 0;
+    static int unsigned store_fuop_hsvd_wt = 0;
+    static int unsigned sfence_vma_wt = 1;
+    static int unsigned hfence_vvma_wt = 1;
+    static int unsigned hfence_gvma_wt = 1;
+    static int unsigned hinval_vvma_wt = 0;
+    static int unsigned hinval_gvma_wt = 0;
     static int unsigned load_fuop_lb_wt = 1;
     static int unsigned load_fuop_lh_wt = 1;
     static int unsigned load_fuop_lw_wt = 1;
@@ -331,6 +350,11 @@ class seq_csr_common;
         mmu_sv39_h_pbmte_en          = plus::MEMBLOCK_MMU_SV39_H_PBMTE_EN;
         csr_sequence_cfg = '{
             default: '0,
+            init_spvp_0_wt: plus::MEMBLOCK_CSR_INIT_SPVP_0_WT,
+            init_spvp_1_wt: plus::MEMBLOCK_CSR_INIT_SPVP_1_WT,
+            change_spvp_enable: plus::MEMBLOCK_CSR_CHANGE_SPVP_EN,
+            change_spvp_0_wt: plus::MEMBLOCK_CSR_CHANGE_SPVP_0_WT,
+            change_spvp_1_wt: plus::MEMBLOCK_CSR_CHANGE_SPVP_1_WT,
             init_satp_bare_wt: plus::MEMBLOCK_CSR_INIT_SATP_BARE_WT,
             init_satp_sv39_wt: plus::MEMBLOCK_CSR_INIT_SATP_SV39_WT,
             init_satp_sv48_wt: plus::MEMBLOCK_CSR_INIT_SATP_SV48_WT,
@@ -462,6 +486,24 @@ class seq_csr_common;
         op_class_prefetch_wt        = get_non_negative_int("MEMBLOCK_OP_CLASS_PREFETCH_WT", plus::MEMBLOCK_OP_CLASS_PREFETCH_WT);
         op_class_amo_wt             = get_non_negative_int("MEMBLOCK_OP_CLASS_AMO_WT", plus::MEMBLOCK_OP_CLASS_AMO_WT);
         op_class_cbo_wt             = get_non_negative_int("MEMBLOCK_OP_CLASS_CBO_WT", plus::MEMBLOCK_OP_CLASS_CBO_WT);
+        load_fuop_hlvb_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVB_WT", plus::MEMBLOCK_LOAD_FUOP_HLVB_WT);
+        load_fuop_hlvbu_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVBU_WT", plus::MEMBLOCK_LOAD_FUOP_HLVBU_WT);
+        load_fuop_hlvh_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVH_WT", plus::MEMBLOCK_LOAD_FUOP_HLVH_WT);
+        load_fuop_hlvhu_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVHU_WT", plus::MEMBLOCK_LOAD_FUOP_HLVHU_WT);
+        load_fuop_hlvw_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVW_WT", plus::MEMBLOCK_LOAD_FUOP_HLVW_WT);
+        load_fuop_hlvwu_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVWU_WT", plus::MEMBLOCK_LOAD_FUOP_HLVWU_WT);
+        load_fuop_hlvd_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVD_WT", plus::MEMBLOCK_LOAD_FUOP_HLVD_WT);
+        load_fuop_hlvxhu_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVXHU_WT", plus::MEMBLOCK_LOAD_FUOP_HLVXHU_WT);
+        load_fuop_hlvxwu_wt = get_non_negative_int("MEMBLOCK_LOAD_FUOP_HLVXWU_WT", plus::MEMBLOCK_LOAD_FUOP_HLVXWU_WT);
+        store_fuop_hsvb_wt = get_non_negative_int("MEMBLOCK_STORE_FUOP_HSVB_WT", plus::MEMBLOCK_STORE_FUOP_HSVB_WT);
+        store_fuop_hsvh_wt = get_non_negative_int("MEMBLOCK_STORE_FUOP_HSVH_WT", plus::MEMBLOCK_STORE_FUOP_HSVH_WT);
+        store_fuop_hsvw_wt = get_non_negative_int("MEMBLOCK_STORE_FUOP_HSVW_WT", plus::MEMBLOCK_STORE_FUOP_HSVW_WT);
+        store_fuop_hsvd_wt = get_non_negative_int("MEMBLOCK_STORE_FUOP_HSVD_WT", plus::MEMBLOCK_STORE_FUOP_HSVD_WT);
+        sfence_vma_wt = get_non_negative_int("MEMBLOCK_SFENCE_VMA_WT", plus::MEMBLOCK_SFENCE_VMA_WT);
+        hfence_vvma_wt = get_non_negative_int("MEMBLOCK_HFENCE_VVMA_WT", plus::MEMBLOCK_HFENCE_VVMA_WT);
+        hfence_gvma_wt = get_non_negative_int("MEMBLOCK_HFENCE_GVMA_WT", plus::MEMBLOCK_HFENCE_GVMA_WT);
+        hinval_vvma_wt = get_non_negative_int("MEMBLOCK_HINVAL_VVMA_WT", plus::MEMBLOCK_HINVAL_VVMA_WT);
+        hinval_gvma_wt = get_non_negative_int("MEMBLOCK_HINVAL_GVMA_WT", plus::MEMBLOCK_HINVAL_GVMA_WT);
         load_fuop_lb_wt             = get_non_negative_int("MEMBLOCK_LOAD_FUOP_LB_WT", plus::MEMBLOCK_LOAD_FUOP_LB_WT);
         load_fuop_lh_wt             = get_non_negative_int("MEMBLOCK_LOAD_FUOP_LH_WT", plus::MEMBLOCK_LOAD_FUOP_LH_WT);
         load_fuop_lw_wt             = get_non_negative_int("MEMBLOCK_LOAD_FUOP_LW_WT", plus::MEMBLOCK_LOAD_FUOP_LW_WT);
@@ -958,16 +1000,8 @@ class seq_csr_common;
                            op_class_prefetch_wt,
                            op_class_amo_wt,
                            op_class_cbo_wt);
+        check_virtualization_weight_cfg();
         if (!boundary_profile_gen_en) begin
-            if ((op_class_int_load_wt != 0 || op_class_fp_load_wt != 0) &&
-                (load_fuop_lb_wt + load_fuop_lh_wt + load_fuop_lw_wt + load_fuop_ld_wt +
-                 load_fuop_lbu_wt + load_fuop_lhu_wt + load_fuop_lwu_wt) == 0) begin
-                `uvm_fatal("SEQ_CSR_CFG", "load fuOpType weights must not be all zero when LOAD op_class weight is non-zero")
-            end
-            if (op_class_store_wt != 0 &&
-                (store_fuop_sb_wt + store_fuop_sh_wt + store_fuop_sw_wt + store_fuop_sd_wt) == 0) begin
-                `uvm_fatal("SEQ_CSR_CFG", "store fuOpType weights must not be all zero when STORE op_class weight is non-zero")
-            end
             if (op_class_prefetch_wt != 0 &&
                 (prefetch_fuop_i_wt + prefetch_fuop_r_wt + prefetch_fuop_w_wt) == 0) begin
                 `uvm_fatal("SEQ_CSR_CFG", "prefetch fuOpType weights must not be all zero when PREFETCH op_class weight is non-zero")
@@ -1009,6 +1043,8 @@ class seq_csr_common;
     static function void check_csr_sequence_cfg();
         memblock_csr_sequence_cfg_t cfg;
         cfg = csr_sequence_cfg;
+        check_csr_weight_pair("INIT_SPVP", cfg.init_spvp_0_wt, cfg.init_spvp_1_wt, 1'b1);
+        check_csr_weight_pair("CHANGE_SPVP", cfg.change_spvp_0_wt, cfg.change_spvp_1_wt, cfg.change_spvp_enable);
         check_csr_weight_pair("INIT_MXR", cfg.init_mxr_0_wt, cfg.init_mxr_1_wt, 1'b1);
         check_csr_weight_pair("INIT_SUM", cfg.init_sum_0_wt, cfg.init_sum_1_wt, 1'b1);
         check_csr_weight_pair("INIT_VMXR", cfg.init_vmxr_0_wt, cfg.init_vmxr_1_wt, 1'b1);
@@ -1625,9 +1661,108 @@ class seq_csr_common;
         return op_class_cbo_wt;
     endfunction:get_op_class_cbo_wt
 
+    // 抽象职责：只校验冻结候选分布；INT/FP分别求和，防止HLV掩盖空FP组。
+    static function void check_virtualization_weight_cfg();
+        longint unsigned ordinary_load_total, guest_load_total, store_total, fence_total;
+        ordinary_load_total = 64'(load_fuop_lb_wt) +
+            64'(load_fuop_lh_wt) +
+            64'(load_fuop_lw_wt) +
+            64'(load_fuop_ld_wt) +
+            64'(load_fuop_lbu_wt) +
+            64'(load_fuop_lhu_wt) +
+            64'(load_fuop_lwu_wt);
+        guest_load_total = 64'(load_fuop_hlvb_wt) +
+            64'(load_fuop_hlvbu_wt) +
+            64'(load_fuop_hlvh_wt) +
+            64'(load_fuop_hlvhu_wt) +
+            64'(load_fuop_hlvw_wt) +
+            64'(load_fuop_hlvwu_wt) +
+            64'(load_fuop_hlvd_wt) +
+            64'(load_fuop_hlvxhu_wt) +
+            64'(load_fuop_hlvxwu_wt);
+        store_total = 64'(store_fuop_sb_wt) +
+            64'(store_fuop_sh_wt) +
+            64'(store_fuop_sw_wt) +
+            64'(store_fuop_sd_wt) +
+            64'(store_fuop_hsvb_wt) +
+            64'(store_fuop_hsvh_wt) +
+            64'(store_fuop_hsvw_wt) +
+            64'(store_fuop_hsvd_wt);
+        fence_total = 64'(sfence_vma_wt) +
+            64'(hfence_vvma_wt) +
+            64'(hfence_gvma_wt) +
+            64'(hinval_vvma_wt) +
+            64'(hinval_gvma_wt);
+        if (op_class_int_load_wt != 0 && ordinary_load_total + guest_load_total == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "INT_LOAD has no positive opcode weight")
+        if (op_class_fp_load_wt != 0 && ordinary_load_total == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "FP_LOAD has no positive ordinary load weight; HLV is integer-only")
+        if (op_class_store_wt != 0 && store_total == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "STORE has no positive opcode weight")
+        if (sfence_control_enable && fence_total == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "automatic SFENCE has no positive type weight")
+    endfunction:check_virtualization_weight_cfg
+
+    // 抽象职责：按固定0..4类型顺序提供已校验权重，调用者用64位累计及采样。
+    static function int unsigned get_sfence_type_weight(input int unsigned kind);
+        check_initialized("get_sfence_type_weight");
+        case (kind)
+            0: return sfence_vma_wt;
+            1: return hfence_vvma_wt;
+            2: return hfence_gvma_wt;
+            3: return hinval_vvma_wt;
+            4: return hinval_gvma_wt;
+            default: `uvm_fatal("SEQ_CSR_CFG", "invalid fence type index")
+        endcase
+        return 0;
+    endfunction:get_sfence_type_weight
+
+    static function int unsigned get_sfence_vma_wt();
+        return get_sfence_type_weight(0);
+    endfunction:get_sfence_vma_wt
+
+    static function int unsigned get_hfence_vvma_wt();
+        return get_sfence_type_weight(1);
+    endfunction:get_hfence_vvma_wt
+
+    static function int unsigned get_hfence_gvma_wt();
+        return get_sfence_type_weight(2);
+    endfunction:get_hfence_gvma_wt
+
+    static function int unsigned get_hinval_vvma_wt();
+        return get_sfence_type_weight(3);
+    endfunction:get_hinval_vvma_wt
+
+    static function int unsigned get_hinval_gvma_wt();
+        return get_sfence_type_weight(4);
+    endfunction:get_hinval_gvma_wt
+
     static function int unsigned get_fuop_weight(input memblock_op_class_e op_class,
                                                  input bit [8:0] fuOpType);
         check_initialized("get_fuop_weight");
+        if (op_class == MEMBLOCK_OP_CLASS_INT_LOAD) begin
+            case (fuOpType)
+                MEMBLOCK_LSUOP_HLVB: return load_fuop_hlvb_wt;
+                MEMBLOCK_LSUOP_HLVBU: return load_fuop_hlvbu_wt;
+                MEMBLOCK_LSUOP_HLVH: return load_fuop_hlvh_wt;
+                MEMBLOCK_LSUOP_HLVHU: return load_fuop_hlvhu_wt;
+                MEMBLOCK_LSUOP_HLVW: return load_fuop_hlvw_wt;
+                MEMBLOCK_LSUOP_HLVWU: return load_fuop_hlvwu_wt;
+                MEMBLOCK_LSUOP_HLVD: return load_fuop_hlvd_wt;
+                MEMBLOCK_LSUOP_HLVXHU: return load_fuop_hlvxhu_wt;
+                MEMBLOCK_LSUOP_HLVXWU: return load_fuop_hlvxwu_wt;
+                default: begin end
+            endcase
+        end
+        if (op_class == MEMBLOCK_OP_CLASS_STORE) begin
+            case (fuOpType)
+                MEMBLOCK_LSUOP_HSVB: return store_fuop_hsvb_wt;
+                MEMBLOCK_LSUOP_HSVH: return store_fuop_hsvh_wt;
+                MEMBLOCK_LSUOP_HSVW: return store_fuop_hsvw_wt;
+                MEMBLOCK_LSUOP_HSVD: return store_fuop_hsvd_wt;
+                default: begin end
+            endcase
+        end
         case (op_class)
             MEMBLOCK_OP_CLASS_INT_LOAD,
             MEMBLOCK_OP_CLASS_FP_LOAD: begin

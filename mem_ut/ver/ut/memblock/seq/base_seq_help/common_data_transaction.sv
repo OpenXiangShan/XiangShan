@@ -1082,6 +1082,7 @@ class common_data_transaction extends uvm_object;
         end
         tr.uid = uid;
         memblock_op_behavior_util::freeze_atomic_std_operands(tr);
+        memblock_op_behavior_util::freeze_guest_std_operand(tr);
         if (!memblock_op_behavior_util::validate_frozen_atomic_std_operands(tr)) begin
             `uvm_fatal("ATOMIC_OPERAND",
                        $sformatf("uid=%0d reached Main table without complete frozen STD operands",
@@ -6172,6 +6173,19 @@ class common_data_transaction extends uvm_object;
                    memblock_backend_cycle_frame_t::CANCELLED_COVERED};
     endfunction
 
+    // 抽象职责：CSR副作用前确认旧访存和后端控制已排空；只读活动索引及有界队列。
+    function bit csr_old_context_drained(input memblock_control_owner_t owner);
+        if (!owner.valid || !active_control_barrier_valid ||
+            active_control_barrier_uid != owner.uid) return 1'b0;
+        return uid_by_active_rob.num() == 1 && uid_by_active_rob.exists(rob_order_util::rob_to_map_key(get_main_transaction(owner.uid).get_rob_key())) &&
+               uid_by_lq.num() == 0 && uid_by_sq.num() == 0 &&
+               load_issue_q.size() == 0 && sta_issue_q.size() == 0 && std_issue_q.size() == 0 &&
+               backend_frame == null && !backend_redirect_reserved && !backend_fault_prepared &&
+               backend_lsq_transport_q.size() == 0 && backend_redirect_transport_q.size() == 0 &&
+               !backend_fault_address_pending() && !active_redirect.valid && !flush_in_progress &&
+               !cancel_reconcile_pending() && !has_pending_redirect_drive();
+    endfunction:csr_old_context_drained
+
     function bit backend_fault_address_pending();
         return backend_address_wait_q.size() != 0;
     endfunction
@@ -9469,6 +9483,7 @@ class common_data_transaction extends uvm_object;
         payload.id          = raw.id;
         payload.hv          = raw.hv;
         payload.hg          = raw.hg;
+        payload.flushPipe   = raw.flushPipe;
         payload.priv_virt_at_sample = raw.priv_virt_at_sample;
         payload.hgatp_vmid_at_sample = raw.hgatp_vmid_at_sample;
         payload.satp_mode_at_sample = raw.satp_mode_at_sample;
@@ -9666,6 +9681,7 @@ class common_data_transaction extends uvm_object;
                expected.ignore_id == observed.ignore_id &&
                expected.addr == observed.addr && expected.id == observed.id &&
                expected.hv == observed.hv && expected.hg == observed.hg &&
+               expected.flushPipe == observed.flushPipe &&
                expected.target_stage == observed.target_stage;
     endfunction:control_sfence_payload_matches
 
@@ -9687,7 +9703,10 @@ class common_data_transaction extends uvm_object;
             !status.control_action_enqueued || status.control_sfence_c0_armed ||
             control_sfence_c0_observation.valid || control_sfence_effective_observation.valid ||
             !payload.valid || !payload.ignore_addr || !payload.ignore_id ||
-            payload.hv || payload.hg || payload.target_stage != MEMBLOCK_SFENCE_TARGET_HS_S1 ||
+            !payload.flushPipe || (payload.hv && payload.hg) ||
+            !((payload.target_stage == MEMBLOCK_SFENCE_TARGET_HS_S1 && !payload.hv && !payload.hg) ||
+              (payload.target_stage == MEMBLOCK_SFENCE_TARGET_VS_S1 && payload.hv && !payload.hg) ||
+              (payload.target_stage == MEMBLOCK_SFENCE_TARGET_G_S2 && !payload.hv && payload.hg)) ||
             memblock_sync_pkg::l2tlb_reset_active()) begin
             `uvm_fatal("CSR_MAPPING_FENCE", "mapping fence arm owner/state/payload mismatch")
             return 1'b0;
@@ -10192,10 +10211,14 @@ class common_data_transaction extends uvm_object;
         if (main_tr == null) begin
             `uvm_fatal("COMMON_DATA", "is_hypervisor_tlb_inst got null transaction")
         end
-        return main_tr.fuOpType[4] &&
-               !main_tr.fuOpType[5] &&
-               (main_tr.fuOpType[8:7] == 2'b00);
+        return memblock_op_behavior_util::is_guest_memory(main_tr.fuType,main_tr.fuOpType);
     endfunction:is_hypervisor_tlb_inst
+
+    // 抽象职责：使用真实issue上下文，按Guest特殊操作选择有效U/S身份。
+    function bit [1:0] effective_data_privilege(input main_control_transaction tr,
+                                               input mmu_csr_runtime_state snapshot);
+        return is_hypervisor_tlb_inst(tr) ? (snapshot.priv_spvp ? 2'd1 : 2'd0) : snapshot.priv_dmode;
+    endfunction
 
     function memblock_uid_tlb_wait_shape_key_t make_uid_tlb_wait_shape_key(
         input bit [51:0] vpn,
@@ -10471,7 +10494,7 @@ class common_data_transaction extends uvm_object;
                 !pma_pmp_model.plan_uid_context_capture(
                     uid,
                     status.dynamic_epoch,
-                    snapshot.priv_dmode,
+                    effective_data_privilege(main_tr,snapshot),
                     snapshot.priv_debug,
                     1'b0,
                     1'b0,
@@ -10489,7 +10512,7 @@ class common_data_transaction extends uvm_object;
             // rebuild the plan after the replay and before any commit.
             if (!pma_pmp_model.plan_uid_context_capture(
                     uid, status.dynamic_epoch,
-                    snapshot.priv_dmode, snapshot.priv_debug,
+                    effective_data_privilege(main_tr,snapshot), snapshot.priv_debug,
                     1'b0, 1'b0, '0, snapshot.update_seq,
                     current_sample, context_plan)) begin
                 `uvm_fatal("COMMON_DATA",
@@ -10980,7 +11003,7 @@ class common_data_transaction extends uvm_object;
                     if (status_by_uid[uid] == null || pma_pmp_model == null ||
                         !pma_pmp_model.plan_uid_context_capture_at_seq(
                             uid, status_by_uid[uid].dynamic_epoch,
-                            request_csr_snapshot.priv_dmode,
+                            effective_data_privilege(main_table_by_uid[uid],request_csr_snapshot),
                             request_csr_snapshot.priv_debug,
                             1'b0, 1'b0, '0,
                             request_csr_snapshot.update_seq, sample_seq,
@@ -11139,7 +11162,7 @@ class common_data_transaction extends uvm_object;
             record.uid_tlb_first_request_fire_sample_seq != 0 ||
             !pma_pmp_model.plan_uid_context_capture(
                 resolved_uid, status.dynamic_epoch,
-                request_csr_snapshot.priv_dmode,
+                effective_data_privilege(main_tr,request_csr_snapshot),
                 request_csr_snapshot.priv_debug,
                 1'b0, 1'b0, '0,
                 request_csr_snapshot.update_seq, sample_seq,

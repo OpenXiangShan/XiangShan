@@ -168,7 +168,18 @@ class memblock_csr_config_state extends uvm_object;
         input csr_ctrl_agent_agent_xaction rhs
     );
         if (lhs == null || rhs == null) return 1'b0;
-        return lhs.io_ooo_to_mem_tlbCsr_satp_mode != rhs.io_ooo_to_mem_tlbCsr_satp_mode ||
+        return lhs.io_ooo_to_mem_tlbCsr_satp_ppn != rhs.io_ooo_to_mem_tlbCsr_satp_ppn ||
+               lhs.io_ooo_to_mem_tlbCsr_vsatp_ppn != rhs.io_ooo_to_mem_tlbCsr_vsatp_ppn ||
+               lhs.io_ooo_to_mem_tlbCsr_hgatp_ppn != rhs.io_ooo_to_mem_tlbCsr_hgatp_ppn ||
+               lhs.io_ooo_to_mem_tlbCsr_priv_spvp != rhs.io_ooo_to_mem_tlbCsr_priv_spvp ||
+               lhs.io_ooo_to_mem_tlbCsr_mPBMTE != rhs.io_ooo_to_mem_tlbCsr_mPBMTE ||
+               lhs.io_ooo_to_mem_tlbCsr_hPBMTE != rhs.io_ooo_to_mem_tlbCsr_hPBMTE ||
+               lhs.io_ooo_to_mem_tlbCsr_pmm_mseccfg != rhs.io_ooo_to_mem_tlbCsr_pmm_mseccfg ||
+               lhs.io_ooo_to_mem_tlbCsr_pmm_menvcfg != rhs.io_ooo_to_mem_tlbCsr_pmm_menvcfg ||
+               lhs.io_ooo_to_mem_tlbCsr_pmm_henvcfg != rhs.io_ooo_to_mem_tlbCsr_pmm_henvcfg ||
+               lhs.io_ooo_to_mem_tlbCsr_pmm_hstatus != rhs.io_ooo_to_mem_tlbCsr_pmm_hstatus ||
+               lhs.io_ooo_to_mem_tlbCsr_pmm_senvcfg != rhs.io_ooo_to_mem_tlbCsr_pmm_senvcfg ||
+               lhs.io_ooo_to_mem_tlbCsr_satp_mode != rhs.io_ooo_to_mem_tlbCsr_satp_mode ||
                lhs.io_ooo_to_mem_tlbCsr_satp_asid != rhs.io_ooo_to_mem_tlbCsr_satp_asid ||
                lhs.io_ooo_to_mem_tlbCsr_vsatp_mode != rhs.io_ooo_to_mem_tlbCsr_vsatp_mode ||
                lhs.io_ooo_to_mem_tlbCsr_vsatp_asid != rhs.io_ooo_to_mem_tlbCsr_vsatp_asid ||
@@ -184,6 +195,25 @@ class memblock_csr_config_state extends uvm_object;
                lhs.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable != rhs.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable ||
                lhs.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable != rhs.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
     endfunction:differs_from
+
+    // 中文注释：手工hook和随机候选共用输入校验；保留合法0值，不修复保留编码。
+    static function void check_target(input csr_ctrl_agent_agent_xaction tr);
+        if (tr == null) `uvm_fatal("CSR_CONFIG", "CSR target is null")
+        if (!(tr.io_ooo_to_mem_tlbCsr_satp_mode inside {4'd0,4'd8,4'd9}) ||
+            !(tr.io_ooo_to_mem_tlbCsr_vsatp_mode inside {4'd0,4'd8,4'd9}) ||
+            !(tr.io_ooo_to_mem_tlbCsr_hgatp_mode inside {4'd0,4'd8,4'd9}) ||
+            !(tr.io_ooo_to_mem_tlbCsr_priv_imode inside {2'd0,2'd1,2'd3}) ||
+            !(tr.io_ooo_to_mem_tlbCsr_priv_dmode inside {2'd0,2'd1,2'd3}) ||
+            tr.io_ooo_to_mem_tlbCsr_hgatp_vmid[15:14] != 0 ||
+            tr.io_ooo_to_mem_tlbCsr_hgatp_ppn[1:0] != 0)
+            `uvm_fatal("CSR_CONFIG", "CSR target mode, privilege or HGATP alignment is invalid")
+        if (tr.io_ooo_to_mem_tlbCsr_pmm_mseccfg == 2'b01 ||
+            tr.io_ooo_to_mem_tlbCsr_pmm_menvcfg == 2'b01 ||
+            tr.io_ooo_to_mem_tlbCsr_pmm_henvcfg == 2'b01 ||
+            tr.io_ooo_to_mem_tlbCsr_pmm_hstatus == 2'b01 ||
+            tr.io_ooo_to_mem_tlbCsr_pmm_senvcfg == 2'b01)
+            `uvm_fatal("CSR_CONFIG", "CSR PMM target uses reserved encoding 01")
+    endfunction:check_target
 
     static function bit [memblock_sync_pkg::MEMBLOCK_CSR_FULL_PAYLOAD_BITS-1:0]
         pack_full_payload(input csr_ctrl_agent_agent_xaction tr);
@@ -317,6 +347,11 @@ class memblock_csr_config_state extends uvm_object;
         raw.priv_debug = tr.io_ooo_to_mem_tlbCsr_priv_debug;
         raw.m_pbmt_en = tr.io_ooo_to_mem_tlbCsr_mPBMTE;
         raw.h_pbmt_en = tr.io_ooo_to_mem_tlbCsr_hPBMTE;
+        raw.pmm_mseccfg = tr.io_ooo_to_mem_tlbCsr_pmm_mseccfg;
+        raw.pmm_menvcfg = tr.io_ooo_to_mem_tlbCsr_pmm_menvcfg;
+        raw.pmm_henvcfg = tr.io_ooo_to_mem_tlbCsr_pmm_henvcfg;
+        raw.pmm_hstatus = tr.io_ooo_to_mem_tlbCsr_pmm_hstatus;
+        raw.pmm_senvcfg = tr.io_ooo_to_mem_tlbCsr_pmm_senvcfg;
         return raw;
     endfunction:make_runtime_payload
 endclass:memblock_csr_config_state

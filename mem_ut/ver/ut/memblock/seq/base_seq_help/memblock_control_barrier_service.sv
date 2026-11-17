@@ -188,7 +188,9 @@ function void memblock_control_barrier_service::service_active_control_barrier()
 
     case (status.control_state)
         MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT: begin
-            if (data.active_redirect.valid) begin
+            if (data.active_redirect.valid || data.backend_frame != null ||
+                data.backend_redirect_reserved || data.backend_fault_prepared ||
+                data.backend_fault_address_pending()) begin
                 return;
             end
             if (commit_handler.commit_cursor_uid != uid) begin
@@ -501,12 +503,16 @@ function void memblock_control_barrier_service::enqueue_sfence_action(
             action_generation: 0,
             kind: MEMBLOCK_CONTROL_KIND_NONE
         },
+        scope: MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ALL_ID,
         expected_fence: '{
             default: '0,
             target_stage: MEMBLOCK_SFENCE_TARGET_HS_S1
         }
     };
     action.owner = status.control_owner;
+    action.scope = data.get_main_transaction(status.control_owner.uid).sfence_scope;
+    action.addr = data.get_main_transaction(status.control_owner.uid).sfence_addr;
+    action.id = data.get_main_transaction(status.control_owner.uid).sfence_id;
     data.enqueue_sfence_control_action(action);
 endfunction:enqueue_sfence_action
 

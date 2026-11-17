@@ -21,6 +21,36 @@ class memblock_op_behavior_util;
                fuType == MEMBLOCK_FUTYPE_VSEGSTU;
     endfunction:is_vector_ls_futype
 
+    // 中文注释：必须联合fuType解释复用编码；MOU上的同值AMO不是Guest访存。
+    static function bit is_guest_read(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
+                                      input bit [8:0] fuOpType);
+        return fuType == MEMBLOCK_FUTYPE_LDU && fuOpType inside {
+            MEMBLOCK_LSUOP_HLVB, MEMBLOCK_LSUOP_HLVH, MEMBLOCK_LSUOP_HLVW,
+            MEMBLOCK_LSUOP_HLVD, MEMBLOCK_LSUOP_HLVBU, MEMBLOCK_LSUOP_HLVHU,
+            MEMBLOCK_LSUOP_HLVWU, MEMBLOCK_LSUOP_HLVXHU, MEMBLOCK_LSUOP_HLVXWU};
+    endfunction
+    static function bit is_guest_write(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
+                                       input bit [8:0] fuOpType);
+        return fuType == MEMBLOCK_FUTYPE_STU && fuOpType inside {
+            MEMBLOCK_LSUOP_HSVB, MEMBLOCK_LSUOP_HSVH, MEMBLOCK_LSUOP_HSVW, MEMBLOCK_LSUOP_HSVD};
+    endfunction
+    static function bit is_guest_memory(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
+                                        input bit [8:0] fuOpType);
+        return is_guest_read(fuType,fuOpType) || is_guest_write(fuType,fuOpType);
+    endfunction
+    static function bit is_hlvx(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
+                                input bit [8:0] fuOpType);
+        return fuType == MEMBLOCK_FUTYPE_LDU && fuOpType inside {MEMBLOCK_LSUOP_HLVXHU,MEMBLOCK_LSUOP_HLVXWU};
+    endfunction
+    // 抽象职责：特殊写入在最终主表接纳时冻结既有STD入口，重试读取相同数据。
+    static function void freeze_guest_std_operand(input main_control_transaction tr);
+        if (tr == null || !is_guest_write(tr.fuType,tr.fuOpType)) return;
+        if (!tr.std_data_override_valid[0]) begin
+            tr.std_data_override_valid[0] = 1;
+            tr.std_data_override[0] = tr.src_0;
+        end
+    endfunction
+
     static function bit is_load_fuoptype(input bit [8:0] fuOpType);
         return fuOpType == MEMBLOCK_LSUOP_LB  ||
                fuOpType == MEMBLOCK_LSUOP_LH  ||
@@ -28,7 +58,8 @@ class memblock_op_behavior_util;
                fuOpType == MEMBLOCK_LSUOP_LD  ||
                fuOpType == MEMBLOCK_LSUOP_LBU ||
                fuOpType == MEMBLOCK_LSUOP_LHU ||
-               fuOpType == MEMBLOCK_LSUOP_LWU;
+               fuOpType == MEMBLOCK_LSUOP_LWU ||
+               is_guest_read(MEMBLOCK_FUTYPE_LDU,fuOpType);
     endfunction:is_load_fuoptype
 
     static function bit is_prefetch_fuoptype(input bit [8:0] fuOpType);
@@ -41,7 +72,8 @@ class memblock_op_behavior_util;
         return fuOpType == MEMBLOCK_LSUOP_SB ||
                fuOpType == MEMBLOCK_LSUOP_SH ||
                fuOpType == MEMBLOCK_LSUOP_SW ||
-               fuOpType == MEMBLOCK_LSUOP_SD;
+               fuOpType == MEMBLOCK_LSUOP_SD ||
+               is_guest_write(MEMBLOCK_FUTYPE_STU,fuOpType);
     endfunction:is_store_fuoptype
 
     static function bit is_cbo_fuoptype(input bit [8:0] fuOpType);

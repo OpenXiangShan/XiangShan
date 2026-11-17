@@ -11,20 +11,37 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
         super.new(name);
     endfunction:new
 
+    // 中文注释：派生sequence只调整候选，不直接驱动或修改monitor真值。
+    virtual function void customize_target(input csr_ctrl_agent_agent_xaction target);
+    endfunction:customize_target
+
+    // 中文注释：完整clean level连续四个不同、相邻DUT样本相等才证明传播完成；
+    // 重读latest不会累加稳定拍，采样跳号或payload不同会重新开始计数。
     task wait_for_full_snapshot(input csr_ctrl_agent_agent_xaction expected,
                                 input longint unsigned after_sample);
         memblock_sync_pkg::memblock_csr_full_snapshot_t observed;
         bit [memblock_sync_pkg::MEMBLOCK_CSR_FULL_PAYLOAD_BITS-1:0] payload;
-        int unsigned wait_count;
+        longint unsigned last_sample, progress_sample;
+        int unsigned stable_count;
         payload = memblock_csr_config_state::pack_full_payload(expected);
-        wait_count = 0;
+        last_sample = 0;
+        progress_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+        stable_count = 0;
         forever begin
+            if (memblock_sync_pkg::l2tlb_reset_active())
+                `uvm_fatal(get_type_name(), "reset while waiting for initial CSR propagation")
             if (memblock_sync_pkg::get_latest_csr_full_snapshot(observed) &&
-                observed.sample_seq > after_sample && observed.payload == payload) return;
-            #1;
-            wait_count++;
-            if (wait_count > seq_csr_common::get_active_seq_no_progress_warn_cycles())
-                `uvm_fatal(get_type_name(), "timed out waiting for complete initial CSR observation")
+                observed.sample_seq > after_sample && observed.sample_seq != last_sample) begin
+                if (observed.payload == payload)
+                    stable_count = observed.sample_seq == last_sample + 1 ? stable_count + 1 : 1;
+                else stable_count = 0;
+                last_sample = observed.sample_seq;
+                if (stable_count >= 4) return;
+            end
+            if (memblock_sync_pkg::peek_current_dut_global_sample() - progress_sample >
+                    seq_csr_common::get_active_seq_no_progress_warn_cycles())
+                `uvm_fatal(get_type_name(), "timed out waiting for four clean initial CSR samples")
+            #1ns;
         end
     endtask:wait_for_full_snapshot
 
@@ -98,6 +115,8 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
         if (!randomizer.randomize())
             `uvm_fatal(get_type_name(), "initial CSR configuration has no legal weighted solution")
         randomizer.apply_to_transaction(tr);
+        customize_target(tr);
+        memblock_csr_config_state::check_target(tr);
         memblock_csr_config_state::clear_protocol_metadata(tr);
         profile = randomizer.make_region_profile(seq_csr_common::get_paddr_base(),
                                                  seq_csr_common::get_paddr_range());
@@ -106,8 +125,8 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
         baseline_sample = memblock_sync_pkg::peek_current_dut_global_sample();
         start_item(tr);
         finish_item(tr);
-        wait_for_full_snapshot(tr, baseline_sample);
         drive_write_plan(data, tr, profile);
+        wait_for_full_snapshot(tr, baseline_sample);
         data.publish_csr_committed_state(tr);
         data.publish_csr_pmp_pma_profile(profile);
         data.mark_csr_initial_config_done();

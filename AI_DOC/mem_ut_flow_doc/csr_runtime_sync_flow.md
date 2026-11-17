@@ -2,7 +2,7 @@
 
 本文档说明 mem_ut 测试框架中 MMU CSR runtime mirror 与专项 CSR 配置的真实同步链路。普通 CSR runtime 是 latest snapshot，不是 FIFO 事件：monitor 每拍采样 CSR interface，只有 payload 变化或软件 reset 要求 re-arm 时更新 `memblock_sync_pkg::latest_raw_csr`；service loop 或 L2TLB responder 通过 `drain_csr_events()` 把最新 snapshot 同步到 `common_data_transaction.mmu_csr_state`。V2 的 `hd_misalign_ld_enable`、`hd_misalign_st_enable` 和 `priv_debug` 也沿该链保存，但它们当前是 snapshot-only 字段，不进入 TLB key、主表、异常生成或 pass/fault/terminal。
 
-专项 `memblock_csr_random_config_vseq` 另外启用一条完整 observation 链：monitor 每个有效 sample 发布 92 个 DUT CSR 输入组成的 587-bit full snapshot，并把 distributed CSR write 写入 PMP/PMA raw FIFO。启动期 sequence 只有在 full snapshot 与 PMP/PMA model 都匹配后才提交初始配置；运行期动态 child 先登记 candidate，control service 再按 owner、drive sample、full snapshot 和 PMP/PMA model 四项条件提升为 committed state。该链不替换普通 runtime mirror，也不会在非专项 VSEQ 中启用 driver CSR level hold。
+专项 `memblock_csr_random_config_vseq` 另外启用一条完整 observation 链：monitor 每个有效 sample 发布 92 个 DUT CSR 输入组成的 587-bit full snapshot，并把 distributed CSR write 写入 PMP/PMA raw FIFO。启动期 sequence 只有在 full snapshot 与 PMP/PMA model 都匹配后才提交初始配置；运行期动态 child 先登记 candidate，control service 再按 owner、drive sample、full snapshot 和 PMP/PMA model 四项条件提升为 committed state。该链不替换普通 runtime mirror。完整四路 changed 的 legacy 动态 item 同样触发 driver 净化 level hold；两种配置路径都在 monitor 观察四个相邻 clean sample 后才完成传播确认。
 
 ## 1. 函数调用 Flow 图
 
@@ -23,8 +23,13 @@
 | `committed state` | 已经通过 monitor 与 PMP/PMA model 确认、可作为下一次动态随机基线的净化 CSR level | `common_data_transaction::csr_committed_state` | dynamic action 从 committed 复制，关闭组保持原值 |
 | `candidate` | 已发送但尚未获得完整 observation 的动态目标，不能提前成为下一次随机基线 | `csr_dynamic_candidate_state` 及其 owner/sample/profile | full snapshot 尚未跨过 drive sample 时继续等待 |
 | `action owner` | 唯一绑定一次控制动作的 UID、动态代际、动作代际和类型组合 | `memblock_control_owner_t` | UID 8 的 generation 1 只能提交自己登记的 candidate |
-| `CSR level hold` | 专项 driver 在 item 间保持已净化完整 CSR 电平的私有副本 | `csr_level_hold_tr` | 动态 `changed=111` 后下一拍保持同值并清为 `000` |
+| `CSR level hold` | driver 在专项或完整四 changed 动态 item 后保持已净化完整 CSR 电平的私有副本 | `csr_level_hold_tr` | 动态四`changed=1111`后下一拍保持同值并清为`0000` |
 | `write plan` | 把 normal/exception region 编码成有序 PMP/PMA CSR RMW 写拍 | `memblock_csr_pmp_pma_write_plan::beats` | OFF lower、TOR top，逐拍写完后由 model 回放确认 |
+| `SPVP` | 特殊访存有效U/S身份选择，不等同当前执行身份 | `priv_spvp` | HLV按SPVP选择PMP身份，普通Load仍用dmode |
+| `PMM` | 指针掩码模式的五组配置；本链只运输和冻结 | `pmm_mseccfg/menvcfg/henvcfg/hstatus/senvcfg` | PMM-only目标也需要四拍稳定 |
+| `maintenance step` | 同一CSR owner串行执行的目标写或实际fence | `maintenance_steps` | 旧VVMA→目标写→新VVMA→GVMA |
+| `C0/C4` | fence同拍monitor观察／原有失效生效边界 | `control_sfence_*_observation` | 以同event号完成再复用观察槽 |
+| `dvirt` | CSR输出的有效数据访问虚拟化状态 | `priv_virt` | dvirt=1时普通SFENCE解释为VS维护 |
 
 ### 1.2 重点函数的抽象功能
 
@@ -40,7 +45,7 @@
 | `memblock_csr_control_base_sequence::body()` | 保留 action queue、L2 flush 和 shutdown 所有权；普通 CSR token 只 factory 创建并同步启动动态 child。 |
 | `memblock_dynamic_csr_change_sequence::body()` | 从 committed state 单次求解动态 target，发送 level/write plan 并登记 candidate，不直接提交。 |
 | `common_data_transaction::commit_csr_dynamic_candidate_if_observed()` | 由 control service 调用，同时核对 owner、full snapshot sample/payload 与 PMP/PMA model，成功后提升 committed state。 |
-| `csr_ctrl_agent_agent_driver::send_pkt()` | 专项状态下捕获净化 level，并在动态三路 changed 同拍为 1 后等待下一驱动边界清零；非专项路径保持原行为。 |
+| `csr_ctrl_agent_agent_driver::send_pkt()` | 在专项或完整四changed item上捕获净化level；动态pulse下一边界清零，idle保持该level。 |
 
 ```mermaid
 flowchart TD
@@ -69,70 +74,52 @@ flowchart TD
     U --> N
 ```
 
-### 1.4 专项初始与动态 CSR 配置 Flow
+### 1.4 初始与动态 CSR 配置 Flow
 
 ```mermaid
 flowchart TD
-    A[memblock_csr_random_config_vseq::start_core_dispatch_flow] --> B[先启动 AUTO main sequence]
-    B --> C{main_table_ready 且 control runtime ready}
-    C --> D[memblock_csr_initial_config_sequence::body]
-    D --> E[memblock_csr_randomizer 单次求解]
-    E --> F[发送完整静态 CSR level changed=000]
-    F --> G[monitor publish_csr_full_snapshot]
-    G --> H[发送 PMP/PMA write plan]
-    H --> I[PMP/PMA raw FIFO -> model 回放]
-    I --> J[发布 initial committed state]
-    J --> K[启动 CSR worker 与全部流量 producer]
-    K --> L[主表 CSR marker]
-    L --> M[enqueue_csr_action -> csr_control_action_q/event]
-    M --> N[memblock_csr_control_base_sequence 弹出 token]
-    N --> O[memblock_dynamic_csr_change_sequence::body]
-    O --> P[从 committed 单次求解并发送 target changed=111]
-    P --> Q[driver 下一边界保持 target 并清 changed=000]
-    Q --> R[可选 PMP/PMA write plan]
-    R --> R1{nonvirtual SATP mode/root改变且至少一侧paged}
-    R1 -->|否| S[stage_csr_dynamic_candidate + sendover]
-    R1 -->|是| R2[等待真实full92 clean target]
-    R2 --> R3[原CSR owner预约并发送真实HS全SFENCE]
-    R3 --> R4[等待同owner/event/reset的C0与C4]
-    R4 --> R5[consume与清预约 保持CSR屏障]
-    R5 --> S
-    S --> T[complete_csr_runtime_snapshot]
-    T --> U{runtime/full snapshot 与 model 均匹配}
-    U -->|否| T
-    U -->|是| V[commit candidate 并进入 CONTROL_COMMIT_READY]
+    A[memblock_csr_random_config_vseq] --> B[main建表及control bootstrap]
+    B --> C[initial body: randomizer及customize_target]
+    C --> D[完整CSR与PMP/PMA写入]
+    D --> E[model观察及四个相邻clean sample]
+    E --> F[initial committed及启动producer]
+    F --> G[CSR marker与enqueue_csr_action]
+    G --> H[CSR worker同步启动dynamic child]
+    H --> I[复制committed并随机或手工构造target]
+    I --> J[csr_old_context_drained]
+    J --> K[build_mapping_maintenance_steps]
+    K --> L{步骤类型}
+    L -->|WRITE_TARGET| M[完整target四changed及可选PMP写]
+    M --> N[wait_target_propagation]
+    L -->|FENCE| O[complete_mapping_fence]
+    O --> P[arm C0并等同event C4清槽]
+    N --> Q{还有步骤}
+    P --> Q
+    Q -->|是| L
+    Q -->|否| R[stage candidate及sendover]
+    R --> S[service核对runtime/full/model]
+    S --> T[committed及CONTROL_COMMIT_READY]
 ```
 
 #### 函数调用 Flow 图整体文字伪代码
 
 ```text
-专项 CSR 配置主流程：
-
-1. 启动阶段：
-   memblock_csr_random_config_vseq 先启动 AUTO main sequence，使主表构建、control bootstrap 和 monitor service 可运行。
-   initial CSR sequence 等待 main_table_ready 与当前 control reset epoch ready；此时 LSQ、issue、commit 和 L2TLB producer 尚未启动。
-   randomizer 校验冻结的 plus 快照并只求解一次，把 ATP、权限、priv context、13 个静态 enable 和 region 属性写入完整 level。
-   initial sequence 发送 changed=000 的完整 CSR，再按 OFF lower/TOR top 顺序发送 PMP/PMA write plan。
-   full snapshot 与 PMP/PMA model 都匹配后，公共数据对象发布初始 committed state 并置 csr_initial_config_done。
-   其余 producer 看到 done 后才启动；CSR base worker 随后成为 csr_ctrl_sqr 的唯一长期 producer。
-
-2. 动态阶段：
-   主表 CSR marker 经 control service 绑定 action owner，写入 csr_control_action_q 并触发 csr_control_action_available_ev。
-   memblock_csr_control_base_sequence 醒来后重新检查队列，弹出 token，并同步启动 memblock_dynamic_csr_change_sequence；base 自身不求解 CSR。
-   dynamic child 从 committed state 复制完整基线；关闭动态组保持旧值，开启组参与一次约束求解，并要求至少一项实际变化。
-   child 先发送三路 ATP changed=111 的完整 level；专项 driver 在下一驱动边界保持净化 level 并清成 000。
-   PMP_PMA 组开启时，child 继续发送 distributed write plan。special非虚拟SATP mode/root改变且至少一侧分页时，
-   首次发送前必须核对原action/status control epoch并冻结L2 epoch，target/PMP阻塞由有界owner/reset监督覆盖。
-   随后等待真实monitor完整clean target，再以原CSR owner/kind预约并发送HS全地址全ASID SFENCE，包含global。
-   adapter现有C0/C4失效完成后，child消费观测并清预约，才登记candidate并报告sendover；其间不释放年轻UID屏障。
-   纯ASID/permission不强制fence；special虚拟路径在副作用前拒绝。失败不重采epoch、不继续beat或stage/sendover。
-   control service 先匹配窄 runtime snapshot，再调用 commit_csr_dynamic_candidate_if_observed 检查完整 92 字段 snapshot 是否跨过 drive sample、payload 是否一致、PMP/PMA model 是否一致。
-   任一 observation 未到时保持 WAIT_CSR_RUNTIME_SNAPSHOT；全部匹配后才清 candidate、更新 committed state，并进入 CONTROL_COMMIT_READY。
-
-3. 兼容和异常分支：
-   非专项 VSEQ 不设置 csr_special_sequence_active，dynamic child 走既有 SATP ASID 加一策略，driver 不建立 CSR level hold。
-   无 owner、无 committed state、非法权重/范围、无非当前合法解、candidate owner 不匹配或重复 candidate 均在提交或首包激励前 fatal。
-   L2 flush ASSERT/RELEASE 与 worker shutdown 继续由 base worker 原分支处理，不进入 dynamic child。
+initial：主表和control runtime ready后求解完整配置，调用手工hook及输入校验；
+  发送clean完整level及PMP/PMA beats，等model观察和四个相邻clean sample；
+  发布初始committed，随后开放普通producer。
+dynamic：worker弹出owner action，同步启动child；
+  special从committed复制，随机模式要求允许组至少一项变化，manual跳过随机并调用hook；
+  等旧active访问、LSQ、frame、redirect及必需异常地址收口，主service仍推进WB/deq/恢复；
+  Guest映射变化先旧VMID VVMA，再写目标；目标写始终包含完整level及四changed；
+  可选PMP写完成并观察后，确认新changed事件及四相邻clean；
+  target dvirt=0且HS root变化，或从Guest返回非Bare Host时，执行全HS维护；
+  target dvirt=1时HS不可达，维护延后到返回Host，不发送会被解释成VS的伪HS事件；
+  Guest变化继续目标VMID VVMA与全VMID GVMA；PMM16/Sv48x4变化补一次GVMA；
+  每笔fence以同owner/event/reset等C0/C4并清槽，全部完成才stage candidate/sendover；
+  service最终核对runtime、full snapshot及PMP模型，提交配置后才开放control commit。
+legacy：保留旧ASID加一策略和baseline的SPVP/PMM/PBMTE；
+  四changed完整item启用clean hold及四拍传播，不创建special candidate/profile。
+owner/reset失效：原动作失败，不继续beat、stage或sendover，不重绑新的epoch。
 ```
 
 ### 1.3 函数调用 Flow 图整体文字伪代码
@@ -142,7 +129,7 @@ CSR runtime sync 主流程：
 
 1. CSR monitor 采样阶段：
    csr_ctrl_agent_agent_monitor::run_phase 调用 mon_data。
-   mon_data 每拍从 csr_ctrl interface 采样 satp/vsatp/hgatp/priv/pbmt，以及 misalign enable/priv_debug；
+   mon_data每拍从csr_ctrl interface采样satp/vsatp/hgatp/priv/五PMM/pbmt，以及 misalign enable/priv_debug；
    X/Z 诊断只由 xz_sw、rst_n 和 reset_backend_done 控制，不依赖 capture 开关。
    如果 raw_csr_rearm_epoch 变化：
      清空本地 has_last_raw_csr 和 last_raw_csr，强制下一份完整 snapshot 发布。
@@ -275,6 +262,12 @@ function bit raw_csr_payload_changed(input dispatch_raw_csr_t prev,
         prev.hgatp_mode        != cur.hgatp_mode        ||
         prev.hgatp_vmid        != cur.hgatp_vmid        ||
         prev.priv_virt         != cur.priv_virt         ||
+        prev.priv_spvp != cur.priv_spvp ||
+        prev.pmm_mseccfg != cur.pmm_mseccfg ||
+        prev.pmm_menvcfg != cur.pmm_menvcfg ||
+        prev.pmm_henvcfg != cur.pmm_henvcfg ||
+        prev.pmm_hstatus != cur.pmm_hstatus ||
+        prev.pmm_senvcfg != cur.pmm_senvcfg ||
         prev.priv_dmode        != cur.priv_dmode        ||
         prev.hd_misalign_ld_enable != cur.hd_misalign_ld_enable ||
         prev.hd_misalign_st_enable != cur.hd_misalign_st_enable ||
@@ -293,7 +286,7 @@ endfunction:raw_csr_payload_changed
 ```text
 比较上一份和当前 CSR snapshot：
   依次比较 satp/vsatp/hgatp 的 mode、asid/vmid、ppn 等稳定字段。
-  再比较 priv、PBMT 和 snapshot-only 的 misalign enable/priv_debug 字段。
+  再比较priv、SPVP、五PMM、PBMT和snapshot-only 的 misalign enable/priv_debug 字段。
   再检查 satp/vsatp/hgatp/priv_virt changed pulse 是否从 0 上升为 1。
   任一条件成立就返回 true，要求 monitor 发布新的 latest snapshot。
   所有条件均不成立则返回 false，保留现有 latest snapshot 和序号。
@@ -476,6 +469,12 @@ changed =
     hgatp_mode != raw.hgatp_mode        ||
     hgatp_vmid != raw.hgatp_vmid        ||
     priv_virt  != raw.priv_virt         ||
+    priv_spvp != raw.priv_spvp ||
+    pmm_mseccfg != raw.pmm_mseccfg ||
+    pmm_menvcfg != raw.pmm_menvcfg ||
+    pmm_henvcfg != raw.pmm_henvcfg ||
+    pmm_hstatus != raw.pmm_hstatus ||
+    pmm_senvcfg != raw.pmm_senvcfg ||
     raw.satp_changed                    ||
     raw.vsatp_changed                   ||
     raw.hgatp_changed                   ||
@@ -488,6 +487,12 @@ vsatp_asid = raw.vsatp_asid;
 hgatp_mode = raw.hgatp_mode;
 hgatp_vmid = raw.hgatp_vmid;
 priv_virt  = raw.priv_virt;
+priv_spvp = raw.priv_spvp;
+pmm_mseccfg = raw.pmm_mseccfg;
+pmm_menvcfg = raw.pmm_menvcfg;
+pmm_henvcfg = raw.pmm_henvcfg;
+pmm_hstatus = raw.pmm_hstatus;
+pmm_senvcfg = raw.pmm_senvcfg;
 hd_misalign_ld_enable = raw.hd_misalign_ld_enable;
 hd_misalign_st_enable = raw.hd_misalign_st_enable;
 priv_debug = raw.priv_debug;
@@ -623,12 +628,15 @@ randomizer.configure(cfg, 1'b0, null, empty_region);
 if (!randomizer.randomize())
     `uvm_fatal(get_type_name(), "initial CSR configuration has no legal weighted solution")
 randomizer.apply_to_transaction(tr);
+customize_target(tr);
+memblock_csr_config_state::check_target(tr);
+memblock_csr_config_state::clear_protocol_metadata(tr);
 profile = randomizer.make_region_profile(seq_csr_common::get_paddr_base(),
                                          seq_csr_common::get_paddr_range());
 start_item(tr);
 finish_item(tr);
-wait_for_full_snapshot(tr, baseline_sample);
 drive_write_plan(data, tr, profile);
+wait_for_full_snapshot(tr, baseline_sample);
 data.publish_csr_committed_state(tr);
 data.publish_csr_pmp_pma_profile(profile);
 data.mark_csr_initial_config_done();
@@ -641,7 +649,7 @@ data.mark_csr_initial_config_done();
 先等待主表与当前 control reset epoch 就绪；超出统一保护周期则 fatal，不允许在未知 baseline 上发包。
 读取 seq_csr_common 已冻结和校验的 CSR 参数，显式写完静态字段，再调用 randomizer 完成一次联合求解；无合法组合时在 start_item 前 fatal。
 根据公共 PADDR window 建立 normal/exception region 并记录审计日志。
-记录 drive 前 sample，发送完整静态 level，并调用 wait_for_full_snapshot 等待 92 字段 payload 匹配。
+调用 customize_target 保留手工目标并检查合法PMM编码；记录drive前sample，先发送完整静态level和PMP/PMA write plan，再调用wait_for_full_snapshot等待92字段四个不同且相邻sample均匹配。
 调用 drive_write_plan 按顺序发送 PMP/PMA CSR write，并让 model 消费 monitor raw FIFO 直到 region 匹配。
 最后发布净化 committed level/profile，置 csr_initial_config_done 并触发等待 producer；本 task 不消费动态 action queue。
 ```
@@ -695,87 +703,82 @@ L2 flush action 继续调用原 ASSERT 构造和发送 helper，保存 hold owne
 未知 completion profile 直接 fatal；worker shutdown 和 RELEASE 分支仍由同一 base 主循环处理。
 ```
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_dynamic_csr_change_sequence.sv`，task：`body()`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_dynamic_csr_change_sequence.sv`，task：`body()`。
 
-抽象功能描述：动态 child 从已确认 committed state 构造单个新 target，完成接口发送和 candidate 登记。它不推进 control status，也不直接把 target 提交为下一次基线。
-
-真实逻辑摘要：
+抽象功能描述：child在唯一控制屏障内构造并完成新配置的实际维护，所有观察确认后才登记candidate；committed仍由service提交。legacy使用原ASID加一配置链，不依赖special配置对象。
 
 ```systemverilog
-if (!memblock_sync_pkg::csr_special_sequence_active) begin
-    run_legacy(data);
+target.copy(committed);
+target_region = current_region;
+if (!use_manual_target()) begin
+    randomizer.configure(cfg,1'b1,committed,current_region);
+    if (!randomizer.randomize())
+        `uvm_fatal(get_type_name(), "dynamic CSR configuration has no non-current legal solution")
+    randomizer.apply_to_transaction(target);
+end
+customize_target(committed,target);
+memblock_csr_config_state::check_target(target);
+build_mapping_maintenance_steps(committed,target);
+while (!data.csr_old_context_drained(action.owner)) begin
+    // 原owner/reset及watchdog检查
+    #1ns;
+end
+```
+
+中文文字伪代码：先复制已确认level及region。随机模式按允许变化组求解；手工模式跳过随机约束并保留region，统一由hook修改target。拒绝保留PMM编码、非法模式、无实际变化目标。构造有界维护列表后等旧访问收口；等待期间公共主service继续处理WB、frame、deq和恢复，不扫描完整主表。
+
+#### `build_mapping_maintenance_steps()`：维护分类
+
+抽象功能描述：该纯构造函数依据旧新配置确定串行副作用列表，既不驱动CSR，也不直接删除映射。最多五步，使用同一owner及观察槽。
+
+```systemverilog
+if (guest_changed) maintenance_steps.push_back(FENCE_VS);
+maintenance_steps.push_back(WRITE_TARGET);
+if (!target.io_ooo_to_mem_tlbCsr_priv_virt &&
+    (hs_mapping_fence_required(old_level,target) ||
+     (old_level.io_ooo_to_mem_tlbCsr_priv_virt &&
+      (old_level.io_ooo_to_mem_tlbCsr_satp_mode != 0 ||
+       target.io_ooo_to_mem_tlbCsr_satp_mode != 0))))
+    maintenance_steps.push_back(FENCE_HS);
+if (guest_changed) maintenance_steps.push_back(FENCE_VS);
+if (guest_changed || pmm_width) maintenance_steps.push_back(FENCE_G);
+```
+
+中文文字伪代码：Guest映射字段变化且至少一侧有Guest翻译时，先清旧VMID的VS映射。插入唯一目标写。目标dvirt=0时，若HS根变化或本次从Guest返回且任一SATP非Bare，插入HS全范围维护；目标dvirt=1期间HS不可达，不发普通SFENCE冒充HS，之后每次返回Host补维护。Guest变化再清新VS及全G；henvcfg PMM进入／离开11且任一HGATP=Sv48x4也要求GVMA，与已有GVMA合并。
+
+#### `wait_target_propagation()`：实际传播确认
+
+抽象功能描述：在目标及可选PMP写入后，独立确认monitor的新changed事件和四个相邻clean样本；不以driver返回宣布配置生效。
+
+```systemverilog
+if (observed.payload == memblock_csr_config_state::pack_full_payload(clean))
+    stable_count = observed.sample_seq == last_sample + 1 ? stable_count + 1 : 1;
+else stable_count = 0;
+last_sample = observed.sample_seq;
+if (changed_observed && stable_count >= 4) begin
+    completed_ok = 1;
     return;
 end
-if (!data.get_csr_committed_state(committed) ||
-    !data.get_csr_pmp_pma_profile(current_region))
-    `uvm_fatal(get_type_name(), "dynamic CSR action has no committed startup state")
-target.copy(committed);
-randomizer.configure(cfg, 1'b1, committed, current_region);
-if (!randomizer.randomize())
-    `uvm_fatal(get_type_name(), "dynamic CSR configuration has no non-current legal solution")
-randomizer.apply_to_transaction(target);
-target.io_ooo_to_mem_tlbCsr_satp_changed = 1'b1;
-target.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b1;
-target.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b1;
-start_item(target);
-finish_item(target);
-if (cfg.change_pmp_pma_enable)
-    drive_write_plan(data, target, target_region);
-clean.copy(target);
-memblock_csr_config_state::clear_protocol_metadata(clean);
-data.stage_csr_dynamic_candidate(action.owner, clean, target_region,
-                                 baseline_sample, cfg.change_pmp_pma_enable);
-data.mark_csr_control_sendover(action);
 ```
 
-中文伪代码：
+中文文字伪代码：先验证原owner及两reset域；读取runtime时要求序号跨过drive前基线、四changed齐全且target字段匹配，锁存事件观察。读取full时只处理drive后的新sample，同sample重读不计数，跳号从1重计，不匹配清零。事件已确认且四个相邻clean到达才成功；owner/reset变化或无推进超时失败，不stage/sendover。
 
-```text
-该逻辑负责一次 owner 化动态 CSR 更新。
-若专项生命周期未开启，调用 run_legacy 保留旧 SATP ASID 加一策略并立即返回；不会建立 full candidate 或 driver level hold。
-专项路径读取 committed level/profile，缺失任一项就 fatal；然后复制完整 level，使关闭的动态组和 30 个 enable 自动保持。
-调用 randomizer 做一次联合求解；约束要求至少一个已开启组不同于 committed，无非当前合法组合时在发送前 fatal。
-把三路 ATP changed 全置 1，记录审计与 drive sample，发送完整 target；PMP_PMA 组开启时再发送有序 write plan。
-复制 target 并清除 changed/write/trigger/action pulse，调用 stage_csr_dynamic_candidate 保存净化 candidate、owner、profile 和 observation 下界。
-最后调用 mark_csr_control_sendover；control service 后续决定是否提交，child 自己不修改 control commit 状态。
-```
+#### `complete_mapping_fence()`：共用真实fence运输
 
-#### 2026-10-29 映射切换失效门禁补充
-
-上段源码展示的是非mapping发送/原candidate合同。当前special mapping分支在candidate前增加以下职责，
-不改变legacy和纯ASID更新的发送路径；所有函数均位于`memblock_dynamic_csr_change_sequence.sv`，
-预约/观测由`common_data_transaction.sv`持有。
-
-| 函数/对象 | 职责、输入与副作用 |
-|---|---|
-| `hs_mapping_fence_required(old,target)` | 只读比较SATP mode/root，至少一侧paged才需全fence。 |
-| `mapping_action_current(data,frozen_l2)` | 比较原action/status owner、CSR pending/enqueued、barrier、control ready及两reset域；不重绑身份。 |
-| `drive_mapping_csr_item()` | 对special mapping的每笔target/PMP正常UVM握手加有界监督；失败返回false、停止后续发送。 |
-| `complete_hs_mapping_fence()` | 等新full92 clean，调用arm、发送真实fence，等C0/C4并consume；只有全成功才返回true。 |
-| `arm_csr_mapping_fence()` | 同CSR owner预约既有expected/armed及event/reset下界；不伪装SFENCE marker，不改audit。 |
-| `record_control_sfence_c0_observation()` | adapter schedule边界允许已预约的CSR pending owner，冻结实际C0。 |
-| `apply_due_sfence_invalidate()` | 现有C4统一删除canonical/range/parent/completed并发布生效观测，不由child直接删模型。 |
-| `finish_csr_mapping_fence()` | 同owner/event/reset消费两观测槽并清全部预约字段；重复或未到C4返回false。 |
-| `mark_csr_control_sendover()` | 若仍armed/expected则拒绝；成功sendover仍需既有snapshot/PMA/retire才释放屏障。 |
-
-抽象功能描述：以下分支让真实缓存失效完成成为CSR映射切换的必要条件，不用固定延时或模型删除代替DUT事件。
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_dynamic_csr_change_sequence.sv`，`body()`的candidate前置分支。
-函数功能简析：输入已写完并净化的target、原sample及冻结L2 epoch；失败直接返回，禁止stage/sendover。
+抽象功能描述：每个确定维护步骤在同一CSR owner下预约原观察槽并驱动fence，等待同event的C0/C4后释放槽；不生成随机类型，不提交candidate。
 
 ```systemverilog
-if (needs_mapping_fence) begin
-    complete_hs_mapping_fence(data, clean, baseline_sample,
-                              action_l2_reset_epoch, mapping_fence_completed);
-    if (!mapping_fence_completed) return;
-end
+if (!data.arm_csr_mapping_fence(action.owner, payload)) return;
+fence_tr.io_ooo_to_mem_sfence_bits_hv = payload.hv;
+fence_tr.io_ooo_to_mem_sfence_bits_hg = payload.hg;
+fence_tr.io_ooo_to_mem_sfence_bits_flushPipe = 1'b1;
+// 有监督运输后继续等待真实观察
+if (data.get_control_sfence_c0_observation(action.owner, c0) &&
+    data.finish_csr_mapping_fence(action.owner, c0.lifecycle_event_seq,
+                                 reset_epoch, effective)) break;
 ```
 
-中文伪代码：
-
-该分支负责把映射切换的真实失效完成接到既有candidate流程之前。
-先判断本次是否改变SATP映射；若需要，调用完成任务，任务复核原owner/reset、等clean观测、真实运输与C0/C4，
-并在成功后消费观测和清预约；若成功输出仍为否，立即结束本action，不登记candidate、不sendover。
-仅全成功才继续既有完整snapshot/PMA模型检查；child不递增SFENCE audit，也不自行解除CSR admission屏障。
+中文文字伪代码：首先检查owner、显式sequencer和合法全范围payload。预约旧event/reset下界，再通过原fence sequencer发送HS、VVMA或GVMA。driver完成只证明交付，仍等原adapter解码同拍上下文、记录C0并在C4完成live-entry失效。finish消费并清两观察槽和arm字段后才能执行下一步。任一身份变化或阻塞超时返回失败，禁止后续candidate提交。
 
 ### 7.4 完整 snapshot 与 candidate 提交
 
@@ -849,67 +852,33 @@ return 1'b1;
 全部条件满足后发布净化 CSR level 和 region profile，清除 pending candidate 并返回 true；control service 据此进入 CONTROL_COMMIT_READY。
 ```
 
-### 7.5 专项 driver CSR level hold
+### 7.5 driver完整CSR level保持
 
-源码位置：`mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_driver.sv`，task：`send_pkt()`、`drive_idle()`
+源码位置：`mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_driver.sv`。
 
-抽象功能描述：driver 仅在专项生命周期中维持最近一次完整净化 CSR level，并把动态 changed pulse 限制为一拍。L2 flush hold 优先级仍最高，非专项 idle 行为不变。
-
-真实逻辑摘要：
+抽象功能描述：`send_pkt()`在special或完整四changed动态item上保存净化level，限制脉冲只持续一拍；`drive_idle()`延续最近完整level。两者保持原L2 flush owner优先级，不创建新的配置真源。
 
 ```systemverilog
-if (!tr.control_l2_flush_metadata_valid) begin
-    if (memblock_sync_pkg::csr_special_sequence_active)
-        capture_csr_level_hold(tr);
-    drive_pkt_fields(tr);
-    if (memblock_sync_pkg::csr_special_sequence_active &&
-        tr.io_ooo_to_mem_tlbCsr_satp_changed &&
-        tr.io_ooo_to_mem_tlbCsr_vsatp_changed &&
-        tr.io_ooo_to_mem_tlbCsr_hgatp_changed) begin
-        @this.vif.drv_mp.drv_cb;
-        drive_csr_level_hold();
-    end
-    return;
-end
+if (memblock_sync_pkg::csr_special_sequence_active ||
+    (tr.io_ooo_to_mem_tlbCsr_satp_changed && tr.io_ooo_to_mem_tlbCsr_vsatp_changed &&
+     tr.io_ooo_to_mem_tlbCsr_hgatp_changed && tr.io_ooo_to_mem_tlbCsr_priv_virt_changed))
+    capture_csr_level_hold(tr);
 ```
 
-中文伪代码：
-
-```text
-该普通 CSR item 分支负责专项 level 捕获和 changed 单拍化。
-如果没有 L2 flush metadata，先确认不存在 active L2 flush hold；专项状态下调用 capture_csr_level_hold 复制 item，并清除 changed、write valid/data、trigger valid、BCLEAR、power-down 和 flush 等一次性字段。
-随后驱动原 item，使动态 target 的 changed=111 对 DUT 有效一拍。
-若专项状态且三路 changed 都为 1，等待下一个 driver clocking-block 边界，再驱动净化 hold，使 changed 变成 000 后才允许 finish_item 返回。
-非专项状态跳过捕获与额外边界，沿用原 drive_pkt_fields 行为。
-```
-
-真实逻辑摘要：
+中文文字伪代码：普通CSR item必须没有active L2 flush hold。special item或legacy完整四changed item先复制完整level；capture清changed、distributed write valid/data、trigger valid、BCLEAR、power-down和flush等一次性字段。随后驱动原item，下一clock边界驱动净化hold，避免changed持续为1。
 
 ```systemverilog
 if (l2_flush_level_hold_valid) begin
     drive_l2_flush_level_hold();
     return;
 end
-if (memblock_sync_pkg::csr_special_sequence_active && csr_level_hold_valid) begin
+if (csr_level_hold_valid) begin
     drive_csr_level_hold();
     return;
 end
-if (drv_mode == tcnt_dec_base::DRV_0) begin
-    vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable <= '0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable <= '0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= 1'b1;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= 1'b1;
-end
 ```
 
-中文伪代码：
-
-```text
-该 idle 分支负责没有新 item 时选择唯一 level 来源。
-先检查 L2 flush high hold；存在时继续驱动该 owner 的 flush level 并返回，它的优先级最高。
-否则只有专项生命周期有效且已有 CSR hold 时才驱动完整净化 CSR level并返回。
-两类 hold 都不存在时进入既有 drv_mode idle 赋值；因此普通 testcase 的接口默认值和时序不受专项功能影响。
-```
+中文文字伪代码：idle优先保持L2 flush专属level；其次保持完整clean CSR；都不存在才执行原idle赋值。reset/control reset清两类hold。legacy动态四拍传播因此不会被idle归零破坏；没有完整changed动态item的普通配置保持原idle行为。
 
 ## 8. `make_lookup_key()` / `expected_s2xlate()`
 
@@ -990,7 +959,7 @@ make_lookup_key：
 - `raw_pma_pmp_csr_write_q`：CSR monitor 写入的 distributed CSR write FIFO；公共 PMP/PMA model 按 sample 边界消费，sequence 不直接改 model。
 - `csr_committed_state` / `csr_committed_pmp_pma_profile`：最近一次已经完成 full snapshot 与 model 确认的净化基线；动态随机只从这里复制。
 - `csr_dynamic_candidate_*`：当前唯一尚未提交的 owner 化动态目标、profile 和 drive sample；重复登记或 owner 不匹配直接 fatal。
-- `csr_special_sequence_active`：只由 `memblock_csr_random_config_vseq` 生命周期设置；它控制完整 CSR level hold 和严格 candidate 提交，不改变普通 testcase 的 runtime mirror。
+- `csr_special_sequence_active`：只由 `memblock_csr_random_config_vseq` 生命周期设置；它控制special配置及严格candidate提交；driver另外支持完整四changed legacy item的level保持。
 
 ## 10. 分支优先级
 
@@ -1044,15 +1013,15 @@ make_lookup_key：
 场景 F：专项启动期配置
   -> AUTO main sequence 建表/bootstrap
   -> initial sequence 单次随机完整静态 CSR
-  -> full snapshot 匹配
   -> PMP/PMA write FIFO/model 匹配
+  -> 四个相邻clean full snapshot匹配
   -> 发布 committed state
   -> 放开其它 producer
 
 场景 G：主表 CSR marker 触发动态配置
   -> control service 入 action queue 并触发 event
   -> base worker 弹 token并同步启动 dynamic child
-  -> target changed=111，driver 下一拍保持 clean level changed=000
+  -> target四changed=1111，driver下一拍保持clean=0000并等四相邻样本与维护C4
   -> stage candidate/sendover
   -> runtime + full snapshot + PMP/PMA model 确认
   -> committed state 更新并允许 control ROB commit
@@ -1098,7 +1067,11 @@ make_lookup_key：
 场景 G：
   control service 为 CSR marker 创建 owner token并触发 action event。
   base worker 从持久 queue 弹出 token后同步调用 dynamic child；动态 child 从 committed state 复制并只改变启用组。
-  driver 把 changed=111 限制为一拍，再保持同一净化 level 的 changed=000；monitor 分别产生 runtime/full observation和 write facts。
-  child 只登记 candidate 和 sendover；control service 若发现 sample、payload 或 model 尚未匹配就继续等待。
+  driver把四changed=1111限制为一拍，再保持同一净化level的0000；monitor 分别产生 runtime/full observation和 write facts。
+  child完成四拍传播及确定维护C4后才登记candidate和sendover；control service 若发现 sample、payload 或 model 尚未匹配就继续等待。
   三类 observation 全部匹配后才更新 committed state并进入 CONTROL_COMMIT_READY，保证下一 marker 不会基于未确认 target 随机。
 ```
+
+### 2026-11-17 本轮验证记录
+
+虚拟化框架扩展已通过virt4完整编译、六组权重helper专项、15项隔离CSR负例、默认基础与真实dispatch smoke、动态CSR和legacy控制链，均UVM_ERROR/FATAL为0。真实HINVAL.VVMA/GVMA已在virt3完成驱动、raw匹配和C4专项。详见 `AI_DOC/plan/test_framework/review_doc/undo/memblock_virtualization_framework_implementation_review_20261117.md` 末章和 `AI_DOC/seq/virtualization_framework_*_testcases_20261117.csv`。Guest指令数据/权限/PMM端到端检查与完整basicTest回归在第三项收口。

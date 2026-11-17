@@ -31,6 +31,10 @@ typedef struct {
     int init_priv_virt_0_wt, init_priv_virt_1_wt;
     int init_priv_imode_u_wt, init_priv_imode_s_wt, init_priv_imode_m_wt;
     int init_priv_dmode_u_wt, init_priv_dmode_s_wt, init_priv_dmode_m_wt;
+    // 中文注释：初始SPVP分布及动态独立使能；关闭动态修改时保持committed值。
+    int init_spvp_0_wt, init_spvp_1_wt;
+    bit change_spvp_enable;
+    int change_spvp_0_wt, change_spvp_1_wt;
     int enable_l1d_pf_0_wt, enable_l1d_pf_1_wt;
     int enable_l1d_pf_agt_0_wt, enable_l1d_pf_agt_1_wt;
     int enable_l1d_pf_pht_0_wt, enable_l1d_pf_pht_1_wt;
@@ -249,6 +253,21 @@ fit_directed_rob_value_or_fatal(input int unsigned value,
 endfunction:fit_directed_rob_value_or_fatal
 
 // LSUOpType constants from src/main/scala/xiangshan/package.scala.
+// 中文注释：特殊访存opcode与MOU部分编码重叠，consumer必须先匹配LDU/STU。
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVB         = 9'd16;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVH         = 9'd17;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVW         = 9'd18;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVD         = 9'd19;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVBU        = 9'd20;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVHU        = 9'd21;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVWU        = 9'd22;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVXHU       = 9'd29;
+localparam bit [8:0] MEMBLOCK_LSUOP_HLVXWU       = 9'd30;
+localparam bit [8:0] MEMBLOCK_LSUOP_HSVB         = 9'd16;
+localparam bit [8:0] MEMBLOCK_LSUOP_HSVH         = 9'd17;
+localparam bit [8:0] MEMBLOCK_LSUOP_HSVW         = 9'd18;
+localparam bit [8:0] MEMBLOCK_LSUOP_HSVD         = 9'd19;
+
 localparam bit [8:0] MEMBLOCK_LSUOP_LB          = 9'd0;
 localparam bit [8:0] MEMBLOCK_LSUOP_LH          = 9'd1;
 localparam bit [8:0] MEMBLOCK_LSUOP_LW          = 9'd2;
@@ -542,10 +561,21 @@ typedef enum int unsigned {
     MEMBLOCK_SFENCE_TARGET_G_S2  = 2
 } memblock_sfence_target_stage_e;
 
+// 中文注释：由主表选择通配范围；自动默认全地址/全ID，手工零地址和零ID仍合法。
+// worker只按枚举转换rs1/rs2，不再次随机或依据数值零推导通配。
+typedef enum int unsigned {
+    MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ALL_ID = 0, // 全地址、全ID；rs1/rs2=11
+    MEMBLOCK_SFENCE_SCOPE_ADDR_ALL_ID = 1,     // 指定地址、全ID；rs1/rs2=01
+    MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ID = 2,     // 全地址、指定ID；rs1/rs2=10
+    MEMBLOCK_SFENCE_SCOPE_ADDR_ID = 3          // 指定地址、指定ID；rs1/rs2=00
+} memblock_sfence_scope_e;
+
 typedef struct {
     bit               valid;
     bit               ignore_addr;
     bit               ignore_id;
+    // 中文注释：HFENCE/SFENCE为1，HINVAL为0；保持失效语义，仅描述流水冲刷属性。
+    bit               flushPipe;
     bit [49:0]        addr;
     bit [15:0]        id;
     bit               hv;
@@ -655,6 +685,11 @@ typedef struct {
 
 typedef struct {
     memblock_control_owner_t                owner;
+    // 中文注释：service复制主表目标，worker首次构造后冻结类型；运输重试不重新选择。
+    memblock_sfence_scope_e                  scope;
+    bit [49:0]                              addr;
+    bit [15:0]                              id;
+    bit                                     type_frozen;
     memblock_sfence_payload_t               expected_fence;
     longint unsigned                        pre_drive_event_seq;
     longint unsigned                        l2tlb_reset_epoch_at_arm;

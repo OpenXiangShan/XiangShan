@@ -11,6 +11,11 @@
 class main_control_transaction extends uvm_object;
 
     memblock_uid_t uid;
+    // 中文注释：SFENCE_CONTROL主表原始目标；自动构造全范围，手工配置保留到owner结束。
+    // 通配只由scope决定；addr/id为0仍可作为合法指定目标，GVMA的addr已是GPA>>2。
+    memblock_sfence_scope_e sfence_scope;
+    bit [49:0] sfence_addr;
+    bit [15:0] sfence_id;
 
     rand memblock_op_class_e op_class;
     memblock_boundary_profile_e boundary_profile;
@@ -63,6 +68,9 @@ class main_control_transaction extends uvm_object;
     function new(string name = "main_control_transaction");
         super.new(name);
         uid          = 0;
+        sfence_scope = MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ALL_ID;
+        sfence_addr = '0;
+        sfence_id = '0;
         op_class     = MEMBLOCK_OP_CLASS_UNKNOWN;
         boundary_profile = MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN;
         boundary_size_bytes = 0;
@@ -97,6 +105,61 @@ class main_control_transaction extends uvm_object;
         send_pri_std = 0;
     endfunction:new
 
+    // 抽象职责：复制已冻结主表输入，特别保留手工失效范围和STD操作数；不重新生成字段。
+    virtual function void do_copy(uvm_object rhs);
+        main_control_transaction source;
+        super.do_copy(rhs);
+        if (!$cast(source, rhs)) begin
+            `uvm_fatal("MAIN_TR", "main transaction copy requires matching type")
+            return;
+        end
+        uid = source.uid;
+        sfence_scope = source.sfence_scope;
+        sfence_addr = source.sfence_addr;
+        sfence_id = source.sfence_id;
+        op_class = source.op_class;
+        boundary_profile = source.boundary_profile;
+        boundary_size_bytes = source.boundary_size_bytes;
+        lsq_flow = source.lsq_flow;
+        fuType = source.fuType;
+        fuOpType = source.fuOpType;
+        src_0 = source.src_0;
+        imm = source.imm;
+        vaddr = source.vaddr;
+        amo_expect_misaligned = source.amo_expect_misaligned;
+        amo_alignment_bytes = source.amo_alignment_bytes;
+        robIdx_flag = source.robIdx_flag;
+        robIdx_value = source.robIdx_value;
+        lqIdx_flag = source.lqIdx_flag;
+        lqIdx_value = source.lqIdx_value;
+        sqIdx_flag = source.sqIdx_flag;
+        sqIdx_value = source.sqIdx_value;
+        numLsElem = source.numLsElem;
+        tlbAF = source.tlbAF;
+        tlbPF = source.tlbPF;
+        tlbGPF = source.tlbGPF;
+        PBMT = source.PBMT;
+        pmaAF = source.pmaAF;
+        corrupt = source.corrupt;
+        denied = source.denied;
+        delay = source.delay;
+        send_pri = source.send_pri;
+        send_pri_std = source.send_pri_std;
+        foreach (std_data_override_valid[i]) begin
+            std_data_override_valid[i] = source.std_data_override_valid[i];
+            std_data_override[i] = source.std_data_override[i];
+        end
+    endfunction:do_copy
+
+    // 抽象职责：打印手工/自动控制范围的真实原始输入，不依据addr/id推导通配。
+    virtual function void do_print(uvm_printer printer);
+        super.do_print(printer);
+        printer.print_field_int("uid", uid, $bits(uid), UVM_DEC);
+        printer.print_string("sfence_scope", sfence_scope.name());
+        printer.print_field_int("sfence_addr", sfence_addr, 50, UVM_HEX);
+        printer.print_field_int("sfence_id", sfence_id, 16, UVM_HEX);
+    endfunction:do_print
+
     function void pre_randomize();
         seq_csr_common::check_initialized("main_control_transaction::pre_randomize");
     endfunction:pre_randomize
@@ -123,6 +186,11 @@ class main_control_transaction extends uvm_object;
 
     function bit validate_main_transaction();
         bit any_override;
+        if (op_class == MEMBLOCK_OP_CLASS_SFENCE_CONTROL &&
+            !(sfence_scope inside {MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ALL_ID,
+                                   MEMBLOCK_SFENCE_SCOPE_ADDR_ALL_ID,
+                                   MEMBLOCK_SFENCE_SCOPE_ALL_ADDR_ID,
+                                   MEMBLOCK_SFENCE_SCOPE_ADDR_ID})) return 1'b0;
         any_override = 1'b0;
         foreach (std_data_override_valid[i]) any_override |= std_data_override_valid[i];
         if (any_override) begin

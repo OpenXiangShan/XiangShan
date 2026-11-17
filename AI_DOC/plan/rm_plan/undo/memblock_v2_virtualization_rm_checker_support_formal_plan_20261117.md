@@ -7,7 +7,7 @@
 - 授权边界：本轮仅更新本 RM plan，不修改 RM、测试框架、配置或 RTL。
 - 目标：HLV/HLVX/HSV 及普通 Guest 访存复用当前翻译服务和内存模型，补齐访问身份、权限、数据、异常和异常地址检查；普通 Host 与 Guest 标量访存共同接入 PMM 地址参考语义，HLVX按RTL禁用掩码。
 - 主要约束：不重复建模两阶段页表遍历或 L2TLB；不建立第二套 HFENCE/HINVAL 失效 owner；翻译失效不清除已提交的物理内存期望。
-- 激励方案：[虚拟化指令公共测试框架支持方案](../../test_framework/plan/undo/memblock_virtualization_framework_support_formal_plan_20261117.md)。
+- 激励方案：[虚拟化指令公共测试框架支持方案](../../test_framework/plan/do/memblock_virtualization_framework_support_formal_plan_20261117.md)。
 - 公共时序依赖：[后端周期快照同步驱动与异常地址采样方案](../../test_framework/plan/do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md)。
 
 - 评审记录：[独立评审闭环记录](../../rm_review_doc/undo/memblock_v2_virtualization_rm_formal_plan_review_20261117.md)。

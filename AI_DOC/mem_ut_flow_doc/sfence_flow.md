@@ -1,6 +1,6 @@
-# V2 SFENCE/HFENCE Live Entry 失效 Flow
+# V2 SFENCE/HFENCE/HINVAL失效流程
 
-本文描述当前 V2 `mem_ut` 中 `SFENCE.VMA`、`HFENCE.VVMA` 与 `HFENCE.GVMA` 从 DUT interface 被采样，到 C4 删除
+本文描述当前 V2 `mem_ut` 中 `SFENCE.VMA`、`HFENCE.VVMA/GVMA`与`HINVAL.VVMA/GVMA` 从 DUT interface 被采样，到 C4 删除
 `tlb_entry_by_key` 中 logical live entry 的真实测试框架流程。`L2TLB_agent` 仍是 DTLB 的上游 responder；本 flow
 不建模 L2Cache、PTW 或 memory 下游访问，也不取消 responder token、UID waiting record 或已冻结 response snapshot。
 
@@ -20,6 +20,9 @@ source-equivalent cache entry。因此默认使用 architecture matcher；V2 本
 | `frozen provenance` | entry build 时保存的 stage-active、mode、level、generation。 | `memblock_tlb_entry::*_at_build` | 当前 CSR 切换后，旧 entry 仍按自身 Sv39/Sv48 mode 匹配。 |
 | `architecture matcher` | 只按目标 stage、自身范围与 ASID/VMID 进行精确失效的 logical model。 | `sfence_match_entry()` | allStage 的 S1 fence 与 G-stage fence 分别读不同字段。 |
 | `no-dispatch` | testcase 不运行 dispatch service 的固定拓扑。 | `dispatch_l2tlb_lookup_active=0` | raw fence 不进入 FIFO，live entry 表必须为空。 |
+| `scope` | 主表固定的全地址／全ID组合 | `sfence_scope/addr/id` | 指定GVA与ASID由主表给定，worker不随机 |
+| `flushPipe` | 区分HFENCE与HINVAL的实际运输位 | raw与expected fence payload | HFENCE为1、HINVAL为0 |
+| `frozen type` | action首次选择后不再重选的指令类型 | `type_frozen` | 重试保持同一hv/hg/flushPipe |
 
 | 函数/task | 抽象功能描述 |
 |---|---|
@@ -57,7 +60,7 @@ flowchart TD
 
 ```text
 1. CSR monitor 在每个 post-reset sample 建立唯一 global sample，发布 history 和同拍 fence context。
-2. fence monitor 取得同一个 sample，只有 sfence.valid 明确为 1 时才建立 raw fence；它保留 rs1/rs2/addr/id/hv/hg，
+2. fence monitor 取得同一个 sample，只有 sfence.valid 明确为 1 时才建立 raw fence；它保留rs1/rs2/addr/id/hv/hg/flushPipe，
    并记录 sample/reset/event provenance。
 3. dispatch-active 时 raw 进入 FIFO；no-dispatch 时 raw 直接丢弃且不得拥有 response event sequence。
 4. dispatch service 在一个 sample 仅调用一次 adapter service。adapter 先从 FIFO 队首读取，不提前 pop。
@@ -65,6 +68,69 @@ flowchart TD
 6. C0 到 C3 不删除 logical live entry；C4 到期后只扫描 live table，按分阶段 matcher 收集命中 key，再统一删除。
 7. responder token/UID 的 C0/C4 barrier 由 L2TLB lifecycle flow 独立处理；两侧共享 due sample，但不互相改队列。
 ```
+
+## 公共主表到真实fence运输
+
+源码位置：`seq/base_seq_help/main_control_transaction.sv`、`memblock_control_barrier_service.sv`及`seq/base_seq/memblock_sfence_control_base_sequence.sv`（均位于`mem_ut/ver/ut/memblock`）。
+
+抽象功能描述：控制主表保存失效范围与原始目标，barrier把它们交给唯一action；worker只选择一次指令类型，沿原flushSb、C0/C4完成流程发送。不在等待或重试阶段重新随机范围。
+
+```systemverilog
+action.scope = data.get_main_transaction(status.control_owner.uid).sfence_scope;
+action.addr = data.get_main_transaction(status.control_owner.uid).sfence_addr;
+action.id = data.get_main_transaction(status.control_owner.uid).sfence_id;
+```
+
+中文文字伪代码：自动主表默认`ALL_ADDR_ALL_ID`、addr/id为零；手工主表可设置四种scope，`post_manual_config`保留设置，校验只拒绝非法枚举。barrier构造action时复制三字段，`do_copy()`同时复制这些字段与STD等主表数据。0是合法指定地址或ID。
+
+```mermaid
+flowchart TD
+    A[主表sfence_scope/addr/id] --> B[enqueue_sfence_action]
+    B --> C[sfence_control_action_q]
+    C --> D[try_pop_sfence_control_action]
+    D --> E[configure_sfence_control_xaction]
+    E --> F{type_frozen}
+    F -->|否| G[五权重64位选类型并冻结]
+    F -->|是| H[复用expected_fence]
+    G --> H
+    H --> I[arm_sfence_control_c0_match]
+    I --> J[真实fence driver与monitor]
+    J --> K[同拍CSR解码及C0匹配]
+    K --> L[C4失效与control完成]
+```
+
+函数调用Flow图整体文字伪代码：
+
+```text
+barrier完成原flushSb观察后把主表scope/addr/id复制入action并入持久队列；
+worker出队，首次以五个公共权重选择类型，并把scope确定映射为rs1/rs2；
+重试已有type_frozen时复用payload，不重选类型或目标；
+预约event/reset下界后发送，monitor采样完整payload和同拍CSR；
+adapter解码、匹配C0，C4完成后control service开放提交。
+```
+
+抽象功能描述：`configure_sfence_control_xaction()`消费已冻结公共权重和主表范围，生成唯一运输payload；既不修改CSR，也不判断DUT内部缓存失效正确性。
+
+```systemverilog
+if (!std::randomize(pick) with { pick < total_weight; })
+    `uvm_fatal(get_type_name(), "SFence weighted type selection failed")
+action.expected_fence.hv = selected_kind inside {1,3};
+action.expected_fence.hg = selected_kind inside {2,4};
+action.expected_fence.flushPipe = selected_kind < 3;
+```
+
+中文文字伪代码：把五个单项权重先扩为64位再累计，用64位pick在总区间求解；0权重无区间，单非零固定类型。类型顺序为SFENCE.VMA、HFENCE.VVMA、HFENCE.GVMA、HINVAL.VVMA、HINVAL.GVMA，默认权重1/1/1/0/0。scope分别映射全全=11、指定地址全ID=01、全地址指定ID=10、双指定=00；addr/id按原值运输，GVMA addr已是GPA>>2，指定VMID高两位非零直接拒绝。类型和payload冻结后重试不再抽样。
+
+| scope | rs1/rs2（1表示忽略） | VVMA | GVMA |
+|---|---|---|---|
+| 全地址全ID | 1/1 | 当前VMID下所有ASID | 所有VMID |
+| 指定地址全ID | 0/1 | 当前VMID的该GVA，忽略ASID | 该GPA，忽略VMID |
+| 全地址指定ID | 1/0 | 当前VMID的指定ASID | 指定VMID |
+| 指定地址指定ID | 0/0 | 当前VMID、指定ASID和GVA | 指定VMID和GPA |
+
+抽象功能描述：CSR配置维护使用`complete_mapping_fence()`构造的确定全范围payload，复用同一真实运输和C0/C4观察；它不消费上述五权重，也不产生另一个marker owner。
+
+中文文字伪代码：Guest映射改变先旧VVMA，目标传播后新VVMA及GVMA；PMM16/Sv48x4变化追加一次GVMA。目标dvirt=1期间HS维护不可表达为普通SFENCE，所以延后到每次Guest返回非Bare Host时执行全HS维护。每笔完成清观察槽后才开始下一笔，配置candidate在全部维护后登记。详见`csr_runtime_sync_flow.md`。
 
 ## Raw Fence 与 Context
 
@@ -94,7 +160,7 @@ memblock_sync_pkg::publish_l2tlb_sfence_csr_context(
 源码位置：`mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_monitor.sv`，task：`mon_data()`。
 
 抽象功能描述：fence monitor 只将 interface 事实转成 raw event，并向 responder lifecycle 发布同拍 FENCE reason。
-它不读取 mutable runtime CSR 来决定 HS/VS/G-stage。
+它不读取mutable runtime CSR决定stage，同时保存flushPipe供后续匹配。
 
 ```systemverilog
 memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
@@ -265,12 +331,14 @@ delete：只删除 canonical live entry。本 flow 不修改 main table、status
 - release drain proof 同时要求 raw FIFO 与公共 `sfence_invalidate_pending_q` 为空。队列瞬时为空不能代替 producer close。
 - C0-C3 已冻结的 response snapshot 保持可完成；是否 cancel token/UID 由 L2TLB lifecycle plan 决定。adapter 的 C4
   delete 不会回写或重随机该 snapshot。
-- `sfence_bits_flushPipe` 是 ROB 写回 sideband，不进入本 flow 的 raw、matcher 或 token cancel。standalone mem_ut 不因它
-  暂停 LSQ driver 或伪造 redirect。
+- `sfence_bits_flushPipe`现在进入raw、canonical payload及控制matcher，用于区分HFENCE/SFENCE与HINVAL；它不单独改变既有token cancel或live-entry失效范围，也不驱动LSQ暂停或伪造redirect。
 - V2 `TLBStorage`/`PageTableCache` 的局部 over-fence 不在本 flow 支持范围；后续若需 source-equivalent 语义，必须按
   具体缓存新建专项，不能放宽本 architecture matcher。
 
 ## 验证状态
+
+2026-11-17虚拟化框架扩展已由主代理完成编译；专项仿真进行中，最终结果由主代理补充。本节以下记录为此前验证历史，不能作为本次新增HINVAL/scope路径通过的证据。
+
 
 本次实现已通过：
 
@@ -283,3 +351,7 @@ make eda_compile tc=basicTest ts=virtual_base_sequence mode=base_fun
 `make eda_run tc=basicTest ts=virtual_base_sequence mode=base_fun` 在 VCS KDB/NFS two-step design resolution 阶段
 触发工具 `SIGSEGV`，仿真没有启动；该环境错误不构成 runtime smoke 通过。后续应在修复远端 KDB 工作目录后运行
 HS/VS/GVMA、VMID delayed-drain、C4 删除与 reset stale-work 的 directed 场景。
+
+### 2026-11-17 本轮验证记录
+
+虚拟化框架扩展已通过virt4完整编译、六组权重helper专项、15项隔离CSR负例、默认基础与真实dispatch smoke、动态CSR和legacy控制链，均UVM_ERROR/FATAL为0。真实HINVAL.VVMA/GVMA已在virt3完成驱动、raw匹配和C4专项。详见 `AI_DOC/plan/test_framework/review_doc/undo/memblock_virtualization_framework_implementation_review_20261117.md` 末章和 `AI_DOC/seq/virtualization_framework_*_testcases_20261117.csv`。Guest指令数据/权限/PMM端到端检查与完整basicTest回归在第三项收口。

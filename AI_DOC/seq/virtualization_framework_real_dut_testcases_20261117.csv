@@ -1,0 +1,7 @@
+test_type,testcase_name,entry,cfg,purpose,expected_result,status
+real_dut,virt_base,basicTest / virtual_base_sequence,default,默认静态环境和原有访存流程,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt4_base.log；2026-11-17）
+real_dut,virt_dispatch_smoke,basicTest / memblock_dispatch_real_smoke_vseq,tc_dispatch_real_smoke,真实dispatch及原RM检查,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt4_smoke.log；2026-11-17）
+real_dut,virt_dynamic_csr,basicTest / memblock_csr_random_config_vseq,tc_memblock_csr_random_config,动态完整CSR传播及原owner维护/提交,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt4_csr.log；2026-11-17）
+real_dut,virt_legacy_control,basicTest / memblock_dispatch_manual_control_vseq,csr_sfence_check_store_manual_control,legacy四changed及四clean传播后控制链完成,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt4_legacy.log；2026-11-17）
+real_dut,virt_hinval_vvma,basicTest / memblock_dispatch_manual_control_vseq,csr_sfence_check_store_manual_control；五fence权重0/0/0/1/0,真实HINVAL.VVMA flushPipe=0驱动、C0与C4匹配,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt_hinval_vvma.log；2026-11-17）
+real_dut,virt_hinval_gvma,basicTest / memblock_dispatch_manual_control_vseq,csr_sfence_check_store_manual_control；五fence权重0/0/0/0/1,真实HINVAL.GVMA flushPipe=0驱动、C0与C4匹配,TEST_PASS且UVM_ERROR/FATAL均为0,通过（run_virt_hinval_gvma.log；2026-11-17）

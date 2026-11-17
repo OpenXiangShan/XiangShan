@@ -9,6 +9,8 @@ class memblock_csr_mapping_negative_fence_driver extends fence_agent_agent_drive
     static bit abandon_held_item;
     static bit holding_item;
     static bit quiesced;
+    // 中文注释：仅隔离负例记录真实sequencer item_done，供C4取消场景等待运输先完成。
+    static int unsigned completed_item_count;
     function new(string name, uvm_component parent);
         super.new(name, parent);
     endfunction:new
@@ -25,6 +27,7 @@ class memblock_csr_mapping_negative_fence_driver extends fence_agent_agent_drive
                 wait(1'b0);
             end
             seq_item_port.item_done();
+            completed_item_count++;
             #1ns;
         end
     endtask:main_phase
@@ -151,8 +154,10 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
         memblock_uncache_owner_expected_fatal_catcher catcher;
         csr_ctrl_agent_agent_xaction clean;
         csr_ctrl_agent_agent_xaction expected;
+        csr_ctrl_agent_agent_xaction expected_clean;
         memblock_sfence_payload_t payload;
         memblock_control_sfence_observation_t c0;
+        memblock_sync_pkg::dispatch_raw_csr_t runtime_baseline;
         longint unsigned reset_epoch;
         longint unsigned baseline_sample;
         bit completed_ok;
@@ -173,9 +178,12 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
 
         // 0..5为稳定/缺C0C4/身份；6..9为fence等待身份；10..12为CSR写等待；13/14为两类noack。
         for (int scenario = 0; scenario < 15; scenario++) begin
+            bit propagation_case;
             bit write_case;
             bit fence_lock_case;
             bit write_lock_case;
+            int unsigned fence_done_before;
+            propagation_case = scenario inside {0,4,5};
             write_case = scenario inside {10,11,12,14};
             fence_lock_case = scenario inside {1,6,7};
             write_lock_case = scenario inside {10,11,12};
@@ -196,6 +204,8 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
             action.owner = status.control_owner;
             action.control_reset_epoch = status.control_reset_epoch;
             action.completion_profile = MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT;
+            require_true(memblock_sync_pkg::get_latest_runtime_csr_snapshot(runtime_baseline,
+                action.runtime_snapshot_seq_before_drive), "negative scenario lost real runtime baseline");
             child = memblock_dynamic_csr_change_sequence::type_id::create($sformatf("negative_child_%0d", scenario));
             child.set_action(action);
             child.set_sequencer(p_sequencer.csr_ctrl_sqr);
@@ -211,8 +221,20 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
             require_true(!child.mapping_action_current(local_data, reset_epoch+1), "wrong frozen L2 reset accepted");
             expected = csr_ctrl_agent_agent_xaction::type_id::create("negative_expected");
             expected.copy(clean);
-            if (scenario == 0 || scenario == 4 || scenario == 5)
+            // 中文注释：传播负例不发送target，真实monitor持续观察clean；不存在新的changed事件，
+            // 且expected的MXR不匹配真实clean。0检验watchdog，4/5检验owner/reset取消优先退出。
+            if (propagation_case) begin
                 expected.io_ooo_to_mem_tlbCsr_priv_mxr = !clean.io_ooo_to_mem_tlbCsr_priv_mxr;
+                expected.io_ooo_to_mem_tlbCsr_satp_changed = 1'b1;
+                expected.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b1;
+                expected.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b1;
+                expected.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b1;
+            end
+            expected_clean = csr_ctrl_agent_agent_xaction::type_id::create("negative_expected_clean");
+            expected_clean.copy(expected);
+            memblock_csr_config_state::clear_protocol_metadata(expected_clean);
+            // 中文注释：fence负例只使用确定的全范围HS维护payload，不依赖随机范围或旧helper建表。
+            payload = child.make_mapping_fence_payload(memblock_dynamic_csr_change_sequence::FENCE_HS);
             if (fence_lock_case) begin
                 blocker = new("negative_independent_lock");
                 fork
@@ -238,8 +260,8 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
             memblock_csr_mapping_negative_fence_driver::hold_item_done = scenario == 13;
             memblock_csr_mapping_negative_csr_driver::hold_item_done = scenario == 14;
             catcher = new($sformatf("negative_catcher_%0d", scenario),
-                scenario == 0 ? "stable target observation watchdog expired" :
-                scenario == 4 || scenario == 5 ? "owner/reset changed while waiting for stable target" :
+                scenario == 0 ? "changed event or four clean samples missing" :
+                scenario == 4 || scenario == 5 ? "owner/reset invalid during CSR propagation" :
                 write_case ? "mapping CSR write owner/reset/watchdog failure" :
                 scenario inside {1,6,7,13} ? "mapping fence transport owner/reset/watchdog failure" :
                 scenario inside {8,9} ? "owner/reset changed while waiting for fence C4" :
@@ -247,13 +269,16 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
             uvm_report_cb::add(null, catcher);
             task_returned = 1'b0;
             completed_ok = 1'b1;
+            fence_done_before = memblock_csr_mapping_negative_fence_driver::completed_item_count;
             fork : negative_case
                 begin
-                    if (write_case)
+                    if (propagation_case)
+                        child.wait_target_propagation(local_data, expected, expected_clean,
+                            baseline_sample, reset_epoch, completed_ok);
+                    else if (write_case)
                         child.drive_mapping_csr_item(local_data, clean, reset_epoch, completed_ok);
                     else
-                        child.complete_hs_mapping_fence(local_data, expected, baseline_sample,
-                                                        reset_epoch, completed_ok);
+                        child.complete_mapping_fence(local_data, payload, reset_epoch, completed_ok);
                     task_returned = 1'b1;
                 end
                 begin
@@ -266,10 +291,16 @@ class memblock_csr_mapping_transport_negative_vseq extends memblock_csr_random_c
                         payload.lifecycle_event_seq = memblock_sync_pkg::last_allocated_l2tlb_event_seq;
                         require_true(local_data.schedule_sfence_invalidate(payload, payload.sample_seq,
                             reset_epoch, payload.lifecycle_event_seq), "negative C0 schedule failed");
-                    end else if (scenario inside {4,6,8,11}) begin
+                    end else if (scenario inside {8,9}) begin
+                        // 中文注释：C4取消必须先跨过真实item_done；固定5ns可能仍在transport阶段。
+                        wait(memblock_csr_mapping_negative_fence_driver::completed_item_count > fence_done_before);
+                        #2ns;
+                        if (scenario == 8) status.control_owner.action_generation++;
+                        else memblock_sync_pkg::request_control_runtime_reset("negative C4 owner reset rejection");
+                    end else if (scenario inside {4,6,11}) begin
                         #5ns;
                         status.control_owner.action_generation++;
-                    end else if (scenario inside {5,7,9,12}) begin
+                    end else if (scenario inside {5,7,12}) begin
                         #5ns;
                         memblock_sync_pkg::request_control_runtime_reset("negative old action reset rejection");
                     end

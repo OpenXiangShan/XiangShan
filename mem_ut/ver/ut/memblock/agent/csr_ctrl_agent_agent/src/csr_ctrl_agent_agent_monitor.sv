@@ -391,6 +391,12 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             raw_csr.priv_virt         = io_ooo_to_mem_tlbCsr_priv_virt;
             raw_csr.priv_virt_changed = io_ooo_to_mem_tlbCsr_priv_virt_changed;
             raw_csr.priv_spvp         = io_ooo_to_mem_tlbCsr_priv_spvp;
+            raw_csr.pmm_mseccfg = io_ooo_to_mem_tlbCsr_pmm_mseccfg;
+            raw_csr.pmm_menvcfg = io_ooo_to_mem_tlbCsr_pmm_menvcfg;
+            raw_csr.pmm_henvcfg = io_ooo_to_mem_tlbCsr_pmm_henvcfg;
+            raw_csr.pmm_hstatus = io_ooo_to_mem_tlbCsr_pmm_hstatus;
+            raw_csr.pmm_senvcfg = io_ooo_to_mem_tlbCsr_pmm_senvcfg;
+
             raw_csr.priv_imode        = io_ooo_to_mem_tlbCsr_priv_imode;
             raw_csr.priv_dmode        = io_ooo_to_mem_tlbCsr_priv_dmode;
             raw_csr.hd_misalign_ld_enable = io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable;

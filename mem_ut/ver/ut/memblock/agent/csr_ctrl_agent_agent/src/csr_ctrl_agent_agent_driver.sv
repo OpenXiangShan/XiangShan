@@ -228,7 +228,7 @@ endtask:drive_l2_flush_level_hold
 function void csr_ctrl_agent_agent_driver::capture_csr_level_hold(
     input csr_ctrl_agent_agent_xaction tr
 );
-    if (!memblock_sync_pkg::csr_special_sequence_active || tr == null ||
+    if (tr == null ||
         tr.control_l2_flush_metadata_valid) begin
         `uvm_fatal(get_type_name(), "invalid CSR level hold capture")
     end
@@ -261,8 +261,7 @@ endfunction:clear_csr_level_hold
 // 中文注释：专项场景没有新 item 时复用已消毒的完整 CSR level；protocol pulse、
 // generic write valid 和 flush 请求均已在 capture 阶段清零。
 task csr_ctrl_agent_agent_driver::drive_csr_level_hold();
-    if (!csr_level_hold_valid || csr_level_hold_tr == null ||
-        !memblock_sync_pkg::csr_special_sequence_active) begin
+    if (!csr_level_hold_valid || csr_level_hold_tr == null) begin
         `uvm_fatal(get_type_name(), "invalid dedicated CSR level hold")
     end
     drive_pkt_fields(csr_level_hold_tr);
@@ -292,7 +291,9 @@ task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
         if (l2_flush_level_hold_valid) begin
             `uvm_fatal(get_type_name(), "ordinary CSR item arrived while L2 flush hold is active")
         end
-        if (memblock_sync_pkg::csr_special_sequence_active) begin
+        if (memblock_sync_pkg::csr_special_sequence_active ||
+            (tr.io_ooo_to_mem_tlbCsr_satp_changed && tr.io_ooo_to_mem_tlbCsr_vsatp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_hgatp_changed && tr.io_ooo_to_mem_tlbCsr_priv_virt_changed)) begin
             capture_csr_level_hold(tr);
         end
         drive_pkt_fields(tr);
@@ -307,7 +308,7 @@ task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
              tr.io_ooo_to_mem_tlbCsr_hgatp_changed &&
              tr.io_ooo_to_mem_tlbCsr_priv_virt_changed)) begin
             @this.vif.drv_mp.drv_cb;
-            if (memblock_sync_pkg::csr_special_sequence_active)
+            if (csr_level_hold_valid)
                 drive_csr_level_hold();
             else
                 clear_csr_change_pulses();
@@ -444,7 +445,7 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
         return;
     end
 
-    if (memblock_sync_pkg::csr_special_sequence_active && csr_level_hold_valid) begin
+    if (csr_level_hold_valid) begin
         drive_csr_level_hold();
         return;
     end

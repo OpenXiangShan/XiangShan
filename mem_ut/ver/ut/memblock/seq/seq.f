@@ -5,6 +5,7 @@
 +incdir+./base_seq/soft_test
 +incdir+./virtual_sequence
 +incdir+./virtual_sequence/store_unit/0102_20261104
++incdir+./virtual_sequence/soft_test
 +incdir+./virtual_sequence/dtlb_0101
 +incdir+./virtual_sequence/dtlb_0102
 +incdir+./virtual_sequence/dtlb_0103_0105

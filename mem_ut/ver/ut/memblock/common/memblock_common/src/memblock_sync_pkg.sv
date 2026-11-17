@@ -1289,6 +1289,12 @@ package memblock_sync_pkg;
         bit               priv_virt;
         bit               priv_virt_changed;
         bit               priv_spvp;
+        bit [1:0]         pmm_mseccfg;
+        bit [1:0]         pmm_menvcfg;
+        bit [1:0]         pmm_henvcfg;
+        bit [1:0]         pmm_hstatus;
+        bit [1:0]         pmm_senvcfg;
+
         bit [1:0]         priv_imode;
         bit [1:0]         priv_dmode;
         bit               hd_misalign_ld_enable;
@@ -1329,6 +1335,7 @@ package memblock_sync_pkg;
         bit [15:0]        id;
         bit               hv;
         bit               hg;
+        bit               flushPipe;
         longint unsigned  sample_seq;
         time              sample_time;
         // 中文注释：raw fence 必须绑定产生它的 runtime reset epoch 与 CSR context。
@@ -1713,6 +1720,12 @@ package memblock_sync_pkg;
         item.priv_virt         = 1'b0;
         item.priv_virt_changed = 1'b0;
         item.priv_spvp         = 1'b0;
+        item.pmm_mseccfg = '0;
+        item.pmm_menvcfg = '0;
+        item.pmm_henvcfg = '0;
+        item.pmm_hstatus = '0;
+        item.pmm_senvcfg = '0;
+
         item.priv_imode        = '0;
         item.priv_dmode        = '0;
         item.hd_misalign_ld_enable = 1'b1;
@@ -1796,6 +1809,7 @@ package memblock_sync_pkg;
         item.id    = '0;
         item.hv    = 1'b0;
         item.hg    = 1'b0;
+        item.flushPipe = 1'b0;
         item.sample_seq = 0;
         item.sample_time = 0;
         item.reset_epoch = 0;
@@ -1846,6 +1860,12 @@ package memblock_sync_pkg;
             prev.priv_vsum         != cur.priv_vsum         ||
             prev.priv_virt         != cur.priv_virt         ||
             prev.priv_spvp         != cur.priv_spvp         ||
+            prev.pmm_mseccfg != cur.pmm_mseccfg ||
+            prev.pmm_menvcfg != cur.pmm_menvcfg ||
+            prev.pmm_henvcfg != cur.pmm_henvcfg ||
+            prev.pmm_hstatus != cur.pmm_hstatus ||
+            prev.pmm_senvcfg != cur.pmm_senvcfg ||
+
             prev.priv_imode        != cur.priv_imode        ||
             prev.priv_dmode        != cur.priv_dmode        ||
             prev.hd_misalign_ld_enable != cur.hd_misalign_ld_enable ||

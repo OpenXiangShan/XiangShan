@@ -2033,6 +2033,11 @@ class dispatch_monitor_event_adapter extends uvm_object;
                                      raw_sfence.context_reset_epoch))
             end
             payload = data.decode_raw_sfence(raw_sfence);
+            `uvm_info("DISP_RAW_SFENCE",
+                      $sformatf("sample=%0d event=%0d hv=%0b hg=%0b flushPipe=%0b ignore_addr=%0b ignore_id=%0b addr=0x%0h id=0x%0h",
+                                payload.sample_seq, payload.lifecycle_event_seq,
+                                payload.hv, payload.hg, payload.flushPipe,
+                                payload.ignore_addr, payload.ignore_id, payload.addr, payload.id), UVM_HIGH)
             if (!data.schedule_sfence_invalidate(payload,
                                                   raw_sfence.sample_seq,
                                                   raw_sfence.reset_epoch,

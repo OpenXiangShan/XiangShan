@@ -215,6 +215,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function string boundary_profile_name(input memblock_boundary_profile_e profile);
     extern virtual function string op_class_name(input memblock_op_class_e op_class);
     extern virtual function bit [8:0] random_load_fuoptype();
+    extern virtual function void normalize_guest_memory_address(input main_control_transaction tr, input bit [63:0] target_va);
     extern virtual function bit [8:0] random_store_fuoptype();
     extern virtual function bit [8:0] random_prefetch_fuoptype();
     extern virtual function bit [8:0] random_cbo_fuoptype();
@@ -1461,7 +1462,7 @@ function void memblock_dispatch_base_sequence::apply_minimal_op_template(input m
         MEMBLOCK_OP_CLASS_FP_LOAD: begin
             tr.fuType   = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_LOAD;
-            tr.fuOpType = random_load_fuoptype();
+            tr.fuOpType = pick_fuop_by_weight(tr.op_class,"load_template");
             tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_STORE: begin
@@ -1493,6 +1494,16 @@ function void memblock_dispatch_base_sequence::apply_minimal_op_template(input m
         end
     endcase
 endfunction:apply_minimal_op_template
+
+// 抽象职责：在自动地址模板确定目标VA后，统一满足Guest操作的零立即数合同。
+function void memblock_dispatch_base_sequence::normalize_guest_memory_address(
+    input main_control_transaction tr, input bit [63:0] target_va);
+    if (memblock_op_behavior_util::is_guest_memory(tr.fuType,tr.fuOpType)) begin
+        tr.src_0 = target_va;
+        tr.imm = 0;
+    end
+    tr.update_vaddr();
+endfunction
 
 function void memblock_dispatch_base_sequence::apply_legal_addr_template(input main_control_transaction tr);
     bit [63:0] base;
@@ -1556,7 +1567,7 @@ function void memblock_dispatch_base_sequence::apply_legal_addr_template(input m
 
     tr.src_0 = selected_vaddr;
     tr.imm   = 64'h0;
-    tr.update_vaddr();
+    normalize_guest_memory_address(tr, tr.src_0);
     if (tr.vaddr != selected_vaddr) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("main vaddr update mismatch uid=%0d expected=0x%0h actual=0x%0h",
@@ -1897,7 +1908,7 @@ function void memblock_dispatch_base_sequence::apply_boundary_addr_template(inpu
 
     tr.src_0 = src_0;
     tr.imm   = imm12;
-    tr.update_vaddr();
+    normalize_guest_memory_address(tr, final_vaddr);
 
     if (tr.vaddr != final_vaddr) begin
         `uvm_fatal(get_type_name(),
@@ -2242,12 +2253,28 @@ function void memblock_dispatch_base_sequence::enumerate_fuoptypes(input membloc
             fuops.push_back(MEMBLOCK_LSUOP_LBU);
             fuops.push_back(MEMBLOCK_LSUOP_LHU);
             fuops.push_back(MEMBLOCK_LSUOP_LWU);
+            if (op_class == MEMBLOCK_OP_CLASS_INT_LOAD) begin
+                fuops.push_back(MEMBLOCK_LSUOP_HLVB);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVH);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVW);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVD);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVBU);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVHU);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVWU);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVXHU);
+                fuops.push_back(MEMBLOCK_LSUOP_HLVXWU);
+            end
         end
         MEMBLOCK_OP_CLASS_STORE: begin
             fuops.push_back(MEMBLOCK_LSUOP_SB);
             fuops.push_back(MEMBLOCK_LSUOP_SH);
             fuops.push_back(MEMBLOCK_LSUOP_SW);
             fuops.push_back(MEMBLOCK_LSUOP_SD);
+            fuops.push_back(MEMBLOCK_LSUOP_HSVB);
+            fuops.push_back(MEMBLOCK_LSUOP_HSVH);
+            fuops.push_back(MEMBLOCK_LSUOP_HSVW);
+            fuops.push_back(MEMBLOCK_LSUOP_HSVD);
+
         end
         MEMBLOCK_OP_CLASS_PREFETCH: begin
             fuops.push_back(MEMBLOCK_LSUOP_PREFETCH_I);
@@ -2480,6 +2507,12 @@ endfunction:choose_fuop_by_op_class_and_size
 
 function int unsigned memblock_dispatch_base_sequence::derive_size_bytes(input memblock_op_class_e op_class,
                                                                          input bit [8:0] fuOpType);
+    if (op_class == MEMBLOCK_OP_CLASS_INT_LOAD &&
+        memblock_op_behavior_util::is_guest_read(MEMBLOCK_FUTYPE_LDU,fuOpType))
+        return 1 << fuOpType[1:0];
+    if (op_class == MEMBLOCK_OP_CLASS_STORE &&
+        memblock_op_behavior_util::is_guest_write(MEMBLOCK_FUTYPE_STU,fuOpType))
+        return 1 << fuOpType[1:0];
     case (op_class)
         MEMBLOCK_OP_CLASS_INT_LOAD,
         MEMBLOCK_OP_CLASS_FP_LOAD: begin
@@ -2523,9 +2556,10 @@ function int unsigned memblock_dispatch_base_sequence::derive_size_bytes(input m
 endfunction:derive_size_bytes
 
 function int memblock_dispatch_base_sequence::weighted_pick_index(input int unsigned weights[$]);
-    int unsigned total;
-    int unsigned pick;
-    int unsigned acc;
+    longint unsigned total;
+    longint unsigned pick;
+    longint unsigned threshold;
+    longint unsigned acc;
 
     total = 0;
     foreach (weights[i]) begin
@@ -2534,7 +2568,9 @@ function int memblock_dispatch_base_sequence::weighted_pick_index(input int unsi
     if (total == 0) begin
         `uvm_fatal(get_type_name(), "weighted_pick_index got total weight zero")
     end
-    pick = $urandom_range(total - 1, 0);
+    threshold = (64'd0-total) % total;
+    do pick = {$urandom(),$urandom()}; while (pick < threshold);
+    pick = pick % total;
     acc = 0;
     foreach (weights[i]) begin
         acc += weights[i];
@@ -2822,17 +2858,20 @@ endfunction:random_pick_recent_uid
 
 function void memblock_dispatch_base_sequence::set_transaction_ls_kind(input main_control_transaction tr,
                                                                        input bit make_load);
+    bit [63:0] target_va;
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "set_transaction_ls_kind got null transaction")
     end
 
+    tr.update_vaddr();
+    target_va = tr.vaddr;
     if (make_load) begin
         tr.op_class = MEMBLOCK_OP_CLASS_INT_LOAD;
     end else begin
         tr.op_class = MEMBLOCK_OP_CLASS_STORE;
     end
     apply_minimal_op_template(tr);
-    tr.update_vaddr();
+    normalize_guest_memory_address(tr, target_va);
 endfunction:set_transaction_ls_kind
 
 function void memblock_dispatch_base_sequence::ensure_reused_addr_span(input main_control_transaction tr,
@@ -2983,6 +3022,8 @@ function void memblock_dispatch_base_sequence::fixup_after_addr_reuse(input main
         end
         tr.src_0 = ref_tr.src_0;
         tr.imm   = ref_tr.imm;
+        ref_tr.update_vaddr();
+        normalize_guest_memory_address(tr, ref_tr.vaddr);
     end
     tr.update_vaddr();
     if (copy_addr) begin
@@ -3439,6 +3480,10 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
     end
     if (is_vector_ls_main_tr(tr)) begin
         `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d vector LS is not supported in Task5", caller, tr.uid))
+    end
+    if (memblock_op_behavior_util::is_guest_memory(tr.fuType,tr.fuOpType) &&
+        (tr.imm != 0 || tr.op_class == MEMBLOCK_OP_CLASS_FP_LOAD)) begin
+        `uvm_fatal(get_type_name(), "Guest memory requires integer route and imm=0")
     end
     behavior = derive_op_behavior(tr);
     if (tr.numLsElem != behavior.num_ls_elem) begin

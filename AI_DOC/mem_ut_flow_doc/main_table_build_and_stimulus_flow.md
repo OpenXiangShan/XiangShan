@@ -32,7 +32,22 @@
   不得继续把全局 uid 低位写入 instruction-local `uopIdx`。
 - 带 accept/response 的其它版本继续走 capability 隔离的原确认路径；不得把两种确认语义混在同一隐式默认分支中。
 
-## 1. 函数调用 Flow 图
+## 1. 术语与抽象功能说明及函数调用图
+
+| 术语 | 当前含义 | 代码落点 | 示例 |
+|---|---|---|---|
+| UID／active map | 一条主表指令身份／当前在途资源到UID索引 | main/status及ROB/LQ/SQ map | ROB写回经map找到UID |
+| admission／reservation | 进入后端模型／LSQ位置预占 | allocator及pending sample | launch占位置、下一采样后开放issue |
+| epoch／cursor | 当前执行代次／按序推进位置 | dynamic_epoch及commit_cursor_uid | redirect后的旧事件不落到新实例 |
+| Guest memory | HLV/HLVX/HSV联合fuType/opcode分类 | op_behavior_util | AMO同值opcode仍属于MOU |
+| target VA／normalize | 自动生成的最终地址／转换为该opcode可表达的源操作数 | normalize_guest_memory_address | 特殊操作src_0=VA、imm=0 |
+| STD override | 与地址独立的冻结Store数据入口 | std_data_override[0] | HSV的目标数据显式存slot0 |
+| scope／frozen type | 主表失效范围／action一次选定的fence类型 | sfence_scope及type_frozen | 主表全地址全ID默认不随机 |
+| barrier／owner | 控制UID阻止年轻操作进入／该次控制归属 | active_control_barrier及control_owner | CSR切换先等旧访问收口 |
+| prefix／queue／pool | 连续完成前沿／待处理队列／有界引用候选 | terminal_done_uid及issue/recent队列 | 不逐拍扫描全主表 |
+
+### 函数调用Flow图
+
 
 ```mermaid
 flowchart TD
@@ -56,9 +71,9 @@ flowchart TD
     L5 --> M["prune_recent_uid_q"]
     M --> N["apply_addr_reuse_window"]
     N --> N1{"reuse enabled and recent ref exists?"}
-    N1 -->|yes| N2["set_transaction_ls_kind + copy ref src_0/imm"]
+    N1 -->|yes| N2["apply_minimal_op_template及fixup_after_addr_reuse"]
     N2 --> N2A["normal: ensure final access span;必要时收敛到 ref size"]
-    N1 -->|fallback/no| N3["normal:按最终类型重新选合法地址；boundary保留原地址"]
+    N1 -->|fallback/no| N3["按最终类型重新运行legal或boundary模板"]
     N2A --> O["data.set_main_transaction"]
     N3 --> O
     O --> P["push_recent_uid"]
@@ -423,6 +438,8 @@ uid = next_uid;
 next_uid++;
 ...
 tr.uid = uid;
+memblock_op_behavior_util::freeze_atomic_std_operands(tr);
+memblock_op_behavior_util::freeze_guest_std_operand(tr);
 main_table_by_uid[uid] = tr;
 ```
 
@@ -454,6 +471,7 @@ set_main_transaction:
   检查 uid 合法、tr 非空；
   如果对应 status 已 active，则 fatal，避免覆盖运行中动态实例；
   tr.uid = uid；
+  冻结原AMO数据及HSV的slot0；已有override不改，无override沿既有src_0默认值冻结；
   main_table_by_uid[uid] = tr。
 ```
 
@@ -528,6 +546,9 @@ validate_main_table_entry：检查字段组合合法。
 
 ## 8. `apply_minimal_op_template() / validate_main_table_entry()`
 
+抽象功能描述：构建期模板按真实op_class选定合法操作及LSQ路由；最终校验统一拒绝不自洽输入，不用自动地址修复掩盖手工错误。INT_LOAD包含9条特殊读取，STORE包含4条HSV；FP_LOAD保持原普通候选，HLV/HLVX使用整数写回。
+
+
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
 真实逻辑摘要：
@@ -538,7 +559,7 @@ case (tr.op_class)
     MEMBLOCK_OP_CLASS_FP_LOAD: begin
         tr.fuType   = MEMBLOCK_FUTYPE_LDU;
         tr.lsq_flow = MEMBLOCK_LSQ_FLOW_LOAD;
-        tr.fuOpType = random_load_fuoptype();
+        tr.fuOpType = pick_fuop_by_weight(tr.op_class,"load_template");
         tr.numLsElem = memblock_num_ls_elem_t'(1);
     end
     MEMBLOCK_OP_CLASS_STORE: begin
@@ -574,7 +595,7 @@ end
 
 ```text
 如果 op_class 是 INT/FP LOAD：
-  设置 LDU + LOAD flow + load fuOpType；
+  设置LDU及LOAD flow，按各自op_class候选抽样；只有INT允许HLV/HLVX；
 如果 op_class 是 STORE：
   设置 STU + STORE flow + store fuOpType；
 如果 op_class 是 PREFETCH：
@@ -585,13 +606,14 @@ validate_main_table_entry:
   检查 vaddr 等于 src_0 + sign_extend(imm12)；
   检查 ROB value 未超 MEMBLOCK_ROB_SIZE；
   拒绝 vector LS；
-  derive_op_behavior 并检查 numLsElem 匹配；
+  特殊访存非零imm或FP类别立即fatal；
+  derive_op_behavior并检查numLsElem匹配，HLV/HLVX与HSV保持普通LOAD/STORE行为；
   按 op_class 检查 fuType/lsq_flow/fuOpType 合法。
 ```
 
 内部子调用：
 
-- `random_load_fuoptype()`、`random_store_fuoptype()`、`random_prefetch_fuoptype()`、`random_amo_fuoptype()`：选择具体 LSU op。
+- `pick_fuop_by_weight(op_class,...)`按实际类别枚举并以64位累计抽取；STORE/PREFETCH/AMO的原helper复用它。
 - `derive_op_behavior()`：调用 `lsq_ctrl_model::derive_op_behavior()`。
 
 ## 9. `choose_rob_start_key()`
@@ -648,8 +670,8 @@ ROB flag 固定从 0 开始；
 真实逻辑摘要：
 
 ```systemverilog
-base       = seq_csr_common::get_paddr_base();
-range      = seq_csr_common::get_paddr_range();
+base       = seq_csr_common::get_main_vaddr_base();
+range      = seq_csr_common::get_main_vaddr_range();
 upper      = base + range - 1;
 align_mask = 64'd63;
 aligned_base = (base + align_mask) & ~align_mask;
@@ -706,8 +728,8 @@ apply_addr_reuse_window:
   未启用则保留 apply_legal_addr_template 生成的地址；
   启用后按四类 reuse kind 选择；
   如果引用队列有历史 uid：
-    取 ref_tr，必要时 set_transaction_ls_kind，把当前改成 load 或 store；
-    copy ref_tr.src_0/ref_tr.imm，并 update_vaddr；
+    取ref_tr，按target类别选择操作；
+    fixup复制参考操作数后，以ref.vaddr调用normalize，特殊操作转换为src_0=目标VA、imm=0；
     normal 路径检查最终访问跨度；如果随机新尺寸越过 MAIN_VADDR 窗口，保留复制地址并选择与 ref size 相同的合法 opcode；
   如果引用队列为空：
     走 fallback；normal 路径在最终类型确定后重新调用 legal address template；boundary 路径按最终
@@ -719,10 +741,43 @@ apply_addr_reuse_window:
 
 - `prune_recent_uid_q()`：删除 `cur_uid - old_uid > addr_ref_window` 的历史 uid。
 - `random_pick_recent_uid()`：从历史队列随机选引用 uid，部分模式会删除被引用 uid。
-- `set_transaction_ls_kind()`：把当前 transaction 切成 load 或 store 模板。
+- `set_transaction_ls_kind()`是无当前生产调用者的公共helper；它已补齐切换类型前保存目标VA、切换后normalize的合同，生产复用由apply_minimal_op_template/fixup实现。
 - `fixup_after_addr_reuse()`：复制参考地址、调用最终跨度收口并做合法性检查。
 - `ensure_reused_addr_span()`：自动主表复制地址后收敛越界访问大小；boundary 同时检查窗口与 canonical，
   不改变地址复用关系。
+
+### 10.1 `normalize_guest_memory_address()`及宽度收口
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`。
+
+抽象功能描述：自动生成入口把已确定target VA转换成所选操作可表达的src_0/imm。它不挑选成功地址，不改手工输入，也不拥有STD数据。
+
+```systemverilog
+if (memblock_op_behavior_util::is_guest_memory(tr.fuType,tr.fuOpType)) begin
+    tr.src_0 = target_va;
+    tr.imm = 0;
+end
+tr.update_vaddr();
+```
+
+中文文字伪代码：先联合fuType和opcode确定是否特殊访存；特殊操作把完整目标放src_0并清imm，普通操作沿既有分解；统一重算vaddr。合法模板、边界模板和参考复制出口均调用此函数。边界普通负imm分解不会留到特殊操作，复制参考普通地址时也保持最终VA。若跨度不兼容，原ensure_reused_addr_span收敛为参考宽度的普通默认opcode并保持VA。手工post_manual_config不走normalize，而由最终校验拒绝非法imm或类别。
+
+抽象功能描述：`freeze_guest_std_operand()`在最终主表接纳时保存可重用数据，后续STA、STD重发都消费同一份主表，不从地址反推用户期望数据。
+
+```systemverilog
+if (!tr.std_data_override_valid[0]) begin
+    tr.std_data_override_valid[0] = 1;
+    tr.std_data_override[0] = tr.src_0;
+end
+```
+
+中文文字伪代码：仅对联合分类为HSV的transaction执行。slot0已有数据就原样保留；未提供时把原普通Store的src_0默认数据冻结至独立slot0。issue_field_assigner优先读取override，因此之后地址处理不改变预期数据，replay不重新随机。4个额外slot或部分AMO数据仍由原主表校验拒绝。
+
+### 10.2 参数及控制主表
+
+13个特殊opcode权重默认均0；开启后与原普通候选按权重混合。公共getter按op_class分隔编码；FP空候选不能借HLV权重通过校验。累计及随机区间为64位。特殊有效PMP身份在真实issue及request补登记四入口按冻结CSR的SPVP选择U/S，普通访问继续使用dmode。
+
+自动fence marker的`sfence_scope`固定全地址全ID，addr/id默认0；手工可在四值scope中选择并给出50位原始地址和16位ID，最终校验和copy保留。worker仅按五权重冻结类型，不随机范围。详细运输及C0/C4流程见`sfence_flow.md`。
 
 ## 11. `randomize_send_pri_value()`
 
@@ -1405,8 +1460,8 @@ redirect/flush 覆盖 LSQ admission：
   -> prune_recent_store_uid_q
   -> apply_addr_reuse_window selects LOAD_AFTER_STORE
   -> pick recent store uid
-  -> set_transaction_ls_kind(load)
-  -> copy ref_tr src_0/imm
+  -> apply_minimal_op_template(INT_LOAD)
+  -> fixup_after_addr_reuse复制参考并规范最终VA
   -> validate_main_table_entry
   -> later LSQ admission and LOAD route
 ```
@@ -1443,3 +1498,7 @@ redirect/flush 边界：
   若 ref 不存在，fallback 不复制地址，但仍保持 transaction 合法；
   最终统一通过 validate_main_table_entry。
 ```
+
+### 2026-11-17 本轮验证记录
+
+虚拟化框架扩展已通过virt4完整编译、六组权重helper专项、15项隔离CSR负例、默认基础与真实dispatch smoke、动态CSR和legacy控制链，均UVM_ERROR/FATAL为0。真实HINVAL.VVMA/GVMA已在virt3完成驱动、raw匹配和C4专项。详见 `AI_DOC/plan/test_framework/review_doc/undo/memblock_virtualization_framework_implementation_review_20261117.md` 末章和 `AI_DOC/seq/virtualization_framework_*_testcases_20261117.csv`。Guest指令数据/权限/PMM端到端检查与完整basicTest回归在第三项收口。

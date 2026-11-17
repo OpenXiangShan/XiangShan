@@ -123,6 +123,8 @@ task fence_agent_agent_monitor::mon_data();
                 raw_sfence.id    = io_ooo_to_mem_sfence_bits_id;
                 raw_sfence.hv    = io_ooo_to_mem_sfence_bits_hv;
                 raw_sfence.hg    = io_ooo_to_mem_sfence_bits_hg;
+                // 中文注释：记录HINVAL的flushPipe=0，失效event仍正常发布。
+                raw_sfence.flushPipe = io_ooo_to_mem_sfence_bits_flushPipe;
                 raw_sfence.lifecycle_event_seq = event_seq;
                 raw_sfence.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
                 // 同步包按固定 topology 决定 dispatch-active 入 FIFO 或
