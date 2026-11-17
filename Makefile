@@ -247,6 +247,15 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+# TEA sampling enables cycle summaries by default.
+WITH_TEA_STATS ?= $(WITH_TEA)
+ifeq ($(WITH_TEA),1)
+override SIM_ARGS += --enable-tea
+endif
+ifeq ($(WITH_TEA_STATS),1)
+override SIM_ARGS += --enable-tea-stats
+endif
+
 # run with sim frontend(ideal frontend)
 ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend

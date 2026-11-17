@@ -702,6 +702,23 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
+  val drSqPsv = WireDefault(VecInit.fill(RenameWidth)(0.U(PerfEvent.width.W)))
+  if (backendParams.teaTrackerEn) {
+    // The oldest valid lane has no older instruction in this dispatch group to block it.
+    val headIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
+    val head = fromRename(headIdx)
+    val sqHasRoom = head.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+    val sqBlock = io.enqRob.isEmpty && head.valid && FuType.isStore(head.bits.fuType) && !sqHasRoom
+    val pending = RegInit(false.B)
+    when(io.redirect.valid || head.fire) {
+      pending := false.B
+    }.elsewhen(sqBlock) {
+      pending := true.B
+    }
+    for (i <- 0 until RenameWidth) {
+      drSqPsv(i) := Mux(pending && headIdx === i.U && isStoreVec(i), PerfEvent.bit(PerfEvent.DR_SQ), 0.U)
+    }
+  }
 
   /*
   * how to allow dispatch lsu uop:
@@ -789,6 +806,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
+    if (backendParams.teaTrackerEn) {
+      updatedUop(i).perfPsv := fromRename(i).bits.perfPsv | drSqPsv(i)
+    }
     XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
@@ -920,6 +940,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     if (i == 0 || !backendParams.debugEn) false.B
     else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
   }
+
 
   // Topdown collect start
 

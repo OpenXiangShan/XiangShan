@@ -167,6 +167,7 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
+  val teaMemberRank = UInt((if (backendParams.teaTrackerEn) log2Ceil(RenameWidth) else 0).W)
   // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)
