@@ -240,18 +240,27 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
     )
 
 
+def _set_ifu_address_boundary_output(dut, entries, **kwargs):
+    """Provide the complete valid-block/accepted-mask contract for BIN-900."""
+    _set_ifu_output(dut, entries, **kwargs)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 0)
+    dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", kwargs.get("exception_type", 0))
+    dut.set(_PREFIX + "s2_icacheMeta_1_exception_value", 0)
+
+
 def test_ifu_owner_address_boundary_requires_low_and_high_in_one_run(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     low_pc = 0x1000
     high_pc = (1 << 50) - 0x2000
     entry = lambda pc: [(0, pc, 0x00000013, 0, 1, 0, 1, 0)]
 
-    _set_ifu_output(dut, entry(low_pc), s2_fetch_block_start_pc=low_pc)
+    _set_ifu_address_boundary_output(dut, entry(low_pc), s2_fetch_block_start_pc=low_pc)
     sample_cfvec_coverage(recorder, env, 1)
     assert set(recorder._ifu_owner_address_boundary_witnesses) == {"low"}
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
 
-    _set_ifu_output(dut, entry(high_pc), s2_fetch_block_start_pc=high_pc)
+    _set_ifu_address_boundary_output(dut, entry(high_pc), s2_fetch_block_start_pc=high_pc)
     sample_cfvec_coverage(recorder, env, 2)
     assert set(recorder._ifu_owner_address_boundary_witnesses) == {"low", "high"}
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
@@ -270,7 +279,7 @@ def test_ifu_owner_address_boundary_unguards_high_fetch_block_start(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     high_pc = (1 << 50) - 0x2000
     guarded_pc = (1 << 51) - 0x2000
-    _set_ifu_output(
+    _set_ifu_address_boundary_output(
         dut,
         [(0, high_pc, 0x00000013, 0, 1, 0, 1, 0)],
         s2_fetch_block_start_pc=guarded_pc,
@@ -286,7 +295,7 @@ def test_ifu_owner_address_boundary_unguards_high_fetch_block_start(tmp_path):
 def test_ifu_owner_address_boundary_single_region_does_not_hit(tmp_path, region):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     pc = 0x1000 if region == "low" else (1 << 50) - 0x2000
-    _set_ifu_output(
+    _set_ifu_address_boundary_output(
         dut,
         [(0, pc, 0x00000013, 0, 1, 0, 1, 0)],
         s2_fetch_block_start_pc=pc,
@@ -306,7 +315,7 @@ def test_ifu_owner_address_boundary_rejects_unchecked_delivery(tmp_path, failure
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     pc = 0x1000
     delivered_pc = 0x4000 if failure == "pc_outside_region" else pc
-    _set_ifu_output(
+    _set_ifu_address_boundary_output(
         dut,
         [(0, delivered_pc, 0x00000013, 0, 1, 0, 1, 0)],
         exception_type=1 if failure == "exception" else 0,

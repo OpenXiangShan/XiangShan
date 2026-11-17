@@ -50,6 +50,9 @@ class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for IFU cfVec/compact."""
 
     def __init__(self, runtime, *, sink=None) -> None:
+        # Boundary witnesses belong to this test run, not to a hardware reset.
+        if not hasattr(runtime, "_ifu_owner_address_boundary_witnesses"):
+            runtime._ifu_owner_address_boundary_witnesses = {}
         super().__init__(
             runtime,
             keys=CFVEC_SAMPLER_BIN_KEYS,

@@ -7,7 +7,9 @@ import os
 import pytest
 
 from env.core.transactions import ProgramImage
-from env.funcov.py.ifu.compact_funcov import _read_ifu_internal_with_path
+from env.agents.backend_agent import BackendAgent
+from env.support.pc_utils import fold_pc
+from env.funcov.py.ifu.compact_funcov import _decode_pruned_pc, _read_ifu_internal_with_path
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.sequences import LoadProgramSequence
 from env.support import PmpPmaConfig
@@ -15,25 +17,31 @@ from tests.py.support import uncache_scenarios as uncache
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-_ADDRESS_BITS = 50
+_ADDRESS_BITS = BackendAgent._PC_BITS
 _BOUNDARY_BYTES = 0x2000
 _LOW_BASE = 0x1000
-_HIGH_BASE = (1 << _ADDRESS_BITS) - _BOUNDARY_BYTES
+# Keep the PC representations explicit. The DUT GuardedPc carries the
+# Sv39 sign guard; its PrunedAddr.addr omits bit0. The checked witness uses Pc.
+_HIGH_ARCH_PC = (1 << 64) - _BOUNDARY_BYTES
+_HIGH_GUARDED_PC = BackendAgent._encode_guarded_pc(_HIGH_ARCH_PC)
+_HIGH_PRUNED_ADDR = BackendAgent._encode_backend_addr(_HIGH_GUARDED_PC)
+_HIGH_BASE = _decode_pruned_pc(_HIGH_PRUNED_ADDR)
+assert _HIGH_BASE is not None
 _LOW_PHYS_BASE = 0x80200000
 _HIGH_PHYS_BASE = 0x80300000
 _NOP = 0x00000013
-_AUIPC_X6_ZERO = 0x00000317
+_LUI_X6_HIGH_PAGE = 0xFFFFE337
 _JALR_X0_X6_ZERO = 0x00030067
 
 
 def _load_nop_page(env, base: int, *, low_source: bool = False) -> None:
     payload = int(_NOP).to_bytes(4, "little") * 1024
     if low_source:
-        # The architectural source is an indirect jump. The model supplies
-        # the high-boundary target through GoldenTrace; DUT still fetches the
-        # real AUIPC/JALR bytes from the low boundary page.
+        # RV64 LUI sign-extends 0xffffe000 to 0xffffffffffffe000. JALR x0,x6,0
+        # therefore reaches the real high endpoint; GoldenTrace agrees with
+        # the register value computed by these fetched instruction bytes.
         payload = bytearray(payload)
-        payload[0:4] = int(_AUIPC_X6_ZERO).to_bytes(4, "little")
+        payload[0:4] = int(_LUI_X6_HIGH_PAGE).to_bytes(4, "little")
         payload[4:8] = int(_JALR_X0_X6_ZERO).to_bytes(4, "little")
         payload = bytes(payload)
     LoadProgramSequence(
@@ -43,7 +51,7 @@ def _load_nop_page(env, base: int, *, low_source: bool = False) -> None:
 
 def _boundary_trace() -> GoldenTrace:
     entries = [
-        TraceEntry(0, _LOW_BASE, _AUIPC_X6_ZERO, 4),
+        TraceEntry(0, _LOW_BASE, _LUI_X6_HIGH_PAGE, 4),
         TraceEntry(1, _LOW_BASE + 4, _JALR_X0_X6_ZERO, 4,
                    "jump_indirect", True, _HIGH_BASE),
     ]
@@ -109,7 +117,7 @@ def _wait_for_boundary_witness(env, region: str, *, max_cycles: int = 12000) -> 
                     },
                 },
             )
-            pytest.skip(f"current DUT boundary trace is not attributable: {exc}")
+            raise AssertionError(f"current DUT boundary trace is not attributable: {exc}") from exc
     if env.icache_agent.get_stats().get("req_count", 0) == 0:
         env._emit_event(
             "ifu.bin900_address_boundary_blocked",
@@ -122,7 +130,7 @@ def _wait_for_boundary_witness(env, region: str, *, max_cycles: int = 12000) -> 
                 "icache_stats": env.icache_agent.get_stats(),
             },
         )
-        pytest.skip(
+        raise AssertionError(
             f"current DUT address map did not issue a cacheable request for {region} boundary"
         )
     blocker = {
@@ -180,7 +188,7 @@ def test_ifu_low_high_address_boundaries_preserve_pc_reconstruction(env) -> None
     )
     _load_nop_page(env, _LOW_PHYS_BASE, low_source=True)
     _load_nop_page(env, _HIGH_PHYS_BASE)
-    assert env.memory.read_u32(_LOW_PHYS_BASE) == _AUIPC_X6_ZERO
+    assert env.memory.read_u32(_LOW_PHYS_BASE) == _LUI_X6_HIGH_PAGE
     assert env.memory.read_u32(_LOW_PHYS_BASE + 4) == _JALR_X0_X6_ZERO
     env.initialize(reset_vector=_LOW_BASE, bare_mode=False, reset_cycles=20)
     _configure_exec_cacheable_4k(env, 0, _LOW_PHYS_BASE)
@@ -196,7 +204,7 @@ def test_ifu_low_high_address_boundaries_preserve_pc_reconstruction(env) -> None
     assert all(low["checks"].values())
     low_slots = low["slots"]
     assert low_slots[0]["pc"] == _LOW_BASE
-    assert low_slots[0]["instr"] == _AUIPC_X6_ZERO
+    assert low_slots[0]["instr"] == _LUI_X6_HIGH_PAGE
     assert low_slots[0]["is_rvc"] == 0
     assert any(
         item["pc"] == _LOW_BASE + 4
@@ -219,8 +227,11 @@ def test_ifu_low_high_address_boundaries_preserve_pc_reconstruction(env) -> None
         definition.bin_name,
         coverpoint=definition.coverpoint,
     )
+    assert high["start_pc_pruned_addr"] == _HIGH_PRUNED_ADDR
+    assert high["start_pc_guarded"] == _HIGH_GUARDED_PC
+    assert high["start_pc"] == _HIGH_BASE
     high_slots = high["slots"]
-    assert high_slots
+    assert len(high_slots) >= 8
     assert high_slots[0]["pc"] == _HIGH_BASE
     assert [item["pc"] for item in high_slots[:8]] == [
         _HIGH_BASE + 4 * index for index in range(min(8, len(high_slots)))
@@ -229,4 +240,20 @@ def test_ifu_low_high_address_boundaries_preserve_pc_reconstruction(env) -> None
         item["instr"] == _NOP and item["is_rvc"] == 0
         for item in high_slots[:8]
     )
+    assert low_slots[0]["ftq_ptr"] is not None
+    assert all(item["ftq_ptr"] == low_slots[0]["ftq_ptr"] for item in low_slots[:2])
+    assert high_slots[0]["ftq_ptr"] is not None
+    assert all(item["ftq_ptr"] == high_slots[0]["ftq_ptr"] for item in high_slots[:8])
+    assert all(item["foldpc"] == fold_pc(item["pc"]) for item in low_slots[:2] + high_slots[:8])
+    env._emit_event("ifu.address_boundary_pc_representations", {
+        "full_rv64_target": _HIGH_ARCH_PC,
+        "native_guarded_byte_pc": _HIGH_GUARDED_PC,
+        "native_pruned_halfword_addr": _HIGH_PRUNED_ADDR,
+        "architectural_vaddr": _HIGH_BASE,
+        "vaddr_bits": _ADDRESS_BITS,
+        "guarded_byte_bits": _ADDRESS_BITS + 1,
+        "pruned_addr_bits": _ADDRESS_BITS,
+        "source_instructions": [_LUI_X6_HIGH_PAGE, _JALR_X0_X6_ZERO],
+        "low": low, "high": high,
+    })
     assert not env.get_errors()

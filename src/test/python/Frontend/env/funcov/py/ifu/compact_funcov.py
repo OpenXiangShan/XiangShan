@@ -1144,11 +1144,12 @@ def _sample_owner_address_boundary(
 ) -> None:
     """Check BIN-900 at the two ends of the current 50-bit IFU PC space."""
 
-    if output_req_is_uncache != 0 or exception_type != 0 or not records:
+    if output_req_is_uncache != 0 or exception_type is None or not records:
         return
     start_pc, start_path = _read_ifu_internal_with_path(
         recorder, dut, "s2_fetchBlock_0_startVAddr_addr"
     )
+    start_pc_pruned_addr = start_pc
     start_pc = _decode_pruned_pc(start_pc)
     if start_pc is None:
         return
@@ -1166,6 +1167,55 @@ def _sample_owner_address_boundary(
             return 0 <= int(pc) < _OWNER_ADDRESS_BOUNDARY_BYTES
         return address_limit - _OWNER_ADDRESS_BOUNDARY_BYTES <= int(pc) < address_limit
 
+    # Ifu may leave ECC payload from an invalid fetch block on exceptionType.
+    # Qualify the *accepted* entries, while independently rejecting a fault on
+    # any valid fetch block. Missing scope probes must never imply a clean run.
+    scope_fields = (
+        "io_toIBuffer_valid", "io_toIBuffer_ready",
+        "io_toIBuffer_bits_valid", "io_toIBuffer_bits_enqEnable",
+        "io_toIBuffer_bits_exceptionMask", "io_toIBuffer_bits_exceptionType_value",
+        "s2_fetchBlock_0_valid", "s2_fetchBlock_1_valid",
+        "s2_icacheMeta_0_exception_value", "s2_icacheMeta_1_exception_value",
+    )
+    scope = {}
+    scope_paths = {}
+    for field in scope_fields:
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        if value is None or int(value) < 0:
+            return
+        scope[field] = int(value)
+        scope_paths[field] = path
+    if int(exception_type) < 0 or scope["io_toIBuffer_bits_exceptionType_value"] != int(exception_type):
+        return
+    if scope["io_toIBuffer_valid"] != 1 or scope["io_toIBuffer_ready"] != 1:
+        return
+    enq = scope["io_toIBuffer_bits_enqEnable"]
+    valid = scope["io_toIBuffer_bits_valid"]
+    if enq == 0 or enq & ~valid:
+        return
+    block_valids = [scope[f"s2_fetchBlock_{i}_valid"] for i in range(2)]
+    if any(value not in (0, 1) for value in block_valids) or 1 not in block_valids:
+        return
+    block_exceptions = [scope[f"s2_icacheMeta_{i}_exception_value"] for i in range(2)]
+    if any(block_valids[i] and block_exceptions[i] != 0 for i in range(2)):
+        return
+    effective_exception_mask = scope["io_toIBuffer_bits_exceptionMask"] & enq & valid
+    if effective_exception_mask != 0:
+        return
+    # Records must retain their actual per-lane observation, never a default 0.
+    if any(item.get("exception_mask") != 0 for item in records):
+        return
+    exception_scope = {
+        "exception_type_payload": int(exception_type),
+        "exception_mask": scope["io_toIBuffer_bits_exceptionMask"],
+        "enq_enable": enq,
+        "valid_mask": valid,
+        "effective_entry_mask": enq & valid,
+        "effective_exception_mask": effective_exception_mask,
+        "fetch_block_valids": block_valids,
+        "fetch_block_exceptions": block_exceptions,
+        "signal_paths": scope_paths,
+    }
     checks = {
         "all_delivery_pcs_observable": all(item["pc"] is not None for item in records),
         "all_foldpcs_match_delivery_pc": all(item["foldpc_matches_pc"] for item in records),
@@ -1179,8 +1229,11 @@ def _sample_owner_address_boundary(
         "address_bits": _GUARDED_PC_ADDR_WIDTH,
         "boundary_bytes": _OWNER_ADDRESS_BOUNDARY_BYTES,
         "start_pc": int(start_pc),
+        "start_pc_pruned_addr": int(start_pc_pruned_addr),
+        "start_pc_guarded": int(start_pc_pruned_addr) << 1,
         "start_pc_signal_path": start_path,
         "slots": records,
+        "exception_scope": exception_scope,
         "checks": checks,
     }
     if not all(checks.values()):
@@ -1191,9 +1244,12 @@ def _sample_owner_address_boundary(
         )
         return
 
-    witnesses = getattr(recorder, "_ifu_owner_address_boundary_witnesses", {})
+    # The native coverage model wraps the runtime hub. Keep run-level
+    # witnesses on that hub so the testcase and sink observe the same state.
+    owner = getattr(recorder, "_runtime", recorder)
+    witnesses = getattr(owner, "_ifu_owner_address_boundary_witnesses", {})
     witnesses.setdefault(region, {"cycle": int(cycle), **evidence})
-    recorder._ifu_owner_address_boundary_witnesses = witnesses
+    owner._ifu_owner_address_boundary_witnesses = witnesses
     if set(witnesses) == {"low", "high"}:
         mark_owner_v3_checked(
             recorder,
