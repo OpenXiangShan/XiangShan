@@ -255,27 +255,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val state = RegInit(s_idle)
   val state_next = Wire(chiselTypeOf(state))
 
-  val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
-  val tip_state = WireInit(0.U(4.W))
-  when(!isEmpty) {  // One or more inst in ROB
-    when(state === s_walk || in.redirect.valid) {
-      tip_state := tip_walk
-    }.elsewhen(out.commits.isCommit && PopCount(out.commits.commitValid) =/= 0.U) {
-      tip_state := tip_computing
-    }.otherwise {
-      tip_state := tip_stalled
-    }
-  }.otherwise {
-    tip_state := tip_drained
-  }
-  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry)
-  val tip_data = Wire(new TipEntry())
-  tip_data.state := tip_state
-  tip_data.commits := out.commits
-  tip_data.redirect := in.redirect
-  tip_data.redirect_pc := debugMeta(debug_microOp(in.redirect.bits.robIdx.value)(slotIndex(in.redirect.bits.robIdx))).pc
-  tip_data.debugLsInfo := debug_lsInfo(out.commits.robIdx(0).value)
-  tip_table.log(tip_data, true.B, "", clock, reset)
 
   val exceptionGen = Module(new ExceptionGen(params))
   val exceptionDataRead = exceptionGen.out.state
@@ -2232,6 +2211,31 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     }
   }
+
+  /**
+   * TIP simulation statistics
+   */
+  val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
+  val tip_state = WireInit(0.U(4.W))
+  when(!isEmpty) {  // One or more inst in ROB
+    when(state === s_walk || in.redirect.valid) {
+      tip_state := tip_walk
+    }.elsewhen(out.commits.isCommit && PopCount(out.commits.commitValid) =/= 0.U) {
+      tip_state := tip_computing
+    }.otherwise {
+      tip_state := tip_stalled
+    }
+  }.otherwise {
+    tip_state := tip_drained
+  }
+  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry)
+  val tip_data = Wire(new TipEntry())
+  tip_data.state := tip_state
+  tip_data.commits := out.commits
+  tip_data.redirect := in.redirect
+  tip_data.redirect_pc := debugMeta(debug_microOp(in.redirect.bits.robIdx.value)(slotIndex(in.redirect.bits.robIdx))).pc
+  tip_data.debugLsInfo := debug_lsInfo(out.commits.robIdx(0).value)
+  tip_table.log(tip_data, true.B, "", clock, reset)
 
   /**
    * Difftest
