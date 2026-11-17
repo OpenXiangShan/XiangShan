@@ -67,9 +67,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val in = IO(new In(params))
   val out = IO(new Out(params))
 
-  private val numExuWbPorts = in.exuWriteback.length
-  println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
-
   override lazy val io_perf: Vec[PerfEvent] = out.perfEvents
   override lazy val io_error: Vec[Bool] = out.criticalErrors
 
@@ -322,9 +319,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     hasWaitForward := false.B
   }
 
-  out.debugWaitForward.foreach(_ := hasWaitForward)
-  out.debugBlockBackward.foreach(_ := hasBlockBackward)
-
   // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
   // in.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
   // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
@@ -495,36 +489,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqVlsExceptionNeedCommit := true.B
   }
 
-  val hasCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
-  val retiredSlotPtrs = out.commits.robIdx.zip(out.commits.info).map { case (ptr, info) =>
-    val retired = WireDefault(ptr)
-    retired.isFormer := CompressType.isNORMAL(info.entryPairType)
-    retired
-  }
-  val newestCommit = PriorityMuxDefault(
-    out.commits.commitValid.zip(retiredSlotPtrs).reverse,
-    deqPtr
-  )
-  out.diffRatCommitRobIdx.foreach { commitRobIdx =>
-    commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
-    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr.asFormer, newestCommit)
-  }
-  out.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
-    assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
-    for (i <- 0 until CommitWidth) {
-      commitRobIdxVec(i).valid := out.commits.isCommit && out.commits.commitValid(i) &&
-        !deqVlsExceptionNeedCommit
-      commitRobIdxVec(i).bits := retiredSlotPtrs(i)
-    }
-    when(deqVlsExceptionNeedCommit) {
-      commitRobIdxVec.head.valid := true.B
-      commitRobIdxVec.head.bits := deqPtr.asFormer
-    }
-  }
-
-  XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
-  XSDebug(deqHasException && TriggerAction.isDmode(exceptionDataRead.bits.trigger), "Debug Mode: Deq has trigger entry debug Mode\n")
-
   val isFlushPipe = deqPtrEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
 
   // vsetvl instruction need another one cycle to write to vtype gen
@@ -586,11 +550,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
-  XSPerfAccumulate("flush_num", out.flushOut.valid)
-  XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
-  XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
-  XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
-  XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   val exceptionIsFormer = deqExceptionIsFormer
@@ -619,43 +578,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.vls := RegEnable(exceptionUop.isVectorMemory, exceptionHappen)
   out.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
-  // A latter exception flushes itself but preserves its older former slot.
-  // Hold only the difftest observation until that slot really retires after walk.
+  // Difftest drives this observation gate in the section below.
   val diffTrapPending = WireDefault(false.B)
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    val pending = RegInit(false.B)
-    val pendingPtr = Reg(new RobPtr)
-    val release = pending && out.commits.isCommit && out.commits.commitValid.head &&
-      deqPtr.isSameEntry(pendingPtr)
-    when(exceptionHappen && !exceptionIsFormer) {
-      assert(!pending, "A latter exception observation is already pending")
-      assert(!exceptionUop.isVectorMemory, "Vector memory instructions must not be compressed")
-      pending := true.B
-      pendingPtr := deqPtr
-    }.elsewhen(release) {
-      pending := false.B
-    }
-    when(release) {
-      assert(CompressType.isNORMAL(out.commits.info.head.entryPairType))
-      assert(PopCount(out.commits.commitValid) === 1.U)
-      assert(in.diffArchEvent.get.valid && in.diffArchEvent.get.bits,
-        "The surviving former and its latter exception must be observed together")
-    }
-    diffTrapPending := pending
-    out.diffCommitForTrap.get := release
-  }
 
   // data will be one cycle after valid
   out.readGPAMemAddr.valid := exceptionHappen
   out.readGPAMemAddr.bits.ftqPtr := exceptionDataRead.bits.ftqPtr
   out.readGPAMemAddr.bits.ftqOffset := exceptionDataRead.bits.ftqOffset
   out.readGPAMemAddr.bits.isRVC := exceptionDataRead.bits.isRVC
-
-  XSDebug(out.flushOut.valid,
-    p"generate redirect: pc 0x${Hexadecimal(out.exception.bits.pc)} intr $intrEnable " +
-      p"excp $deqHasException flushPipe $isFlushPipe " +
-      p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
-
 
   /**
    * Commits (and walk)
@@ -932,10 +862,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       state
     )
   )
-  XSPerfAccumulate("s_idle_to_idle", state === s_idle && state_next === s_idle)
-  XSPerfAccumulate("s_idle_to_walk", state === s_idle && state_next === s_walk)
-  XSPerfAccumulate("s_walk_to_idle", state === s_walk && state_next === s_idle)
-  XSPerfAccumulate("s_walk_to_walk", state === s_walk && state_next === s_walk)
   state := state_next
 
   /**
@@ -1371,8 +1297,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.in.enq(i).bits.vlmul := 0.U
   }
 
-  println(s"ExceptionGen:")
-  println(s"num of exceptions: ${params.numException}")
   require(exceptionWBs.length == exceptionGen.in.wb.length,
     f"exceptionWBs.length: ${exceptionWBs.length}, " +
       f"exceptionGen.in.wb.length: ${exceptionGen.in.wb.length}")
@@ -1416,8 +1340,44 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.toVecExcpMod.excpInfo := vecExcpInfo
 
   /**
+   * Assertion
+   */
+  XSError(enqPtr.isBeforeSlot(deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
+
+  /**
+   * Commit stuck detection.
+   *
+   * Commit stuck for a long time will trigger critical error
+   */
+  // max commit-stuck cycle
+  val mmioBusy = out.lsq.mmioBusy // lsq know uncache request is rob head
+  val commitStuck = (!out.commits.commitValid.reduce(_ || _) || !out.commits.isCommit) && !mmioBusy && (wfiResume.B || !hasWFI)
+  val commitStuckCounter = Module(new CommitStuckCounter(
+    width = log2Up(maxCommitStuck),
+    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
+  ))
+  val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
+  commitStuckCounter.in.stuck := commitStuck
+  commitStuckCounter.in.runtimeEnable := in.commitStuckCheckEnable
+  commitStuckCounter.in.overflowEnabled := commitStuckOverflowEnabled
+  val commitStuckCycle = commitStuckCounter.out.count
+  // check if stuck > 2^maxCommitStuckCycle
+  val commitStuckOverflow = commitStuckCounter.out.overflow
+  val criticalErrors = Seq(
+    ("rob_commit_stuck  ", commitStuckOverflow),
+  )
+  require(criticalErrors.length == out.criticalErrors.length)
+  generateCriticalErrors()
+
+  /**
    * Debug and difftest metadata
    */
+  private val numExuWbPorts = in.exuWriteback.length
+  println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
+
+  println(s"ExceptionGen:")
+  println(s"num of exceptions: ${params.numException}")
+
   // Per-slot copy of the full enqueue uop for debug and difftest.
   val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
   val debug_lqIdx = Reg(Vec(RobSize, Vec(2, new LqPtr)))
@@ -1593,52 +1553,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
   out.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)
 
-  // Retirement diagnostics.
-  for (i <- 0 until CommitWidth) {
-    XSInfo(out.commits.isCommit && out.commits.commitValid(i),
-      "retired pc %x wen %d ldest %d pdest %x data %x\n",
-      debugMeta(debug_microOp(deqPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
-      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
-      out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
-      debug_exuData(deqPtrVec(i).value)(0)
-    )
-    XSInfo(state === s_walk && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
-      debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
-      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
-      debug_exuData(walkPtrVec(i).value)(0)
-    )
-  }
-
-  val noCommitCycleCnt = RegInit(0.U(20.W))
-  when(out.commits.isCommit && out.commits.commitValid(0)) {
-    noCommitCycleCnt := 0.U
-  }.otherwise {
-    noCommitCycleCnt := noCommitCycleCnt + 1.U
-  }
-  // Read the architectural ROB entry explicitly for the debug-only counters.
-  // `robDeqGroup` is a `RobCommitEntryBundle`, which intentionally no longer
-  // carries the shadow uop state used to derive these values.
-  val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
-  val deqPtrFormerUopNum = deqPtrRobEntry.decodeFormerUopNum(
-    deqPtrRobEntry.entryPairType,
-    deqPtrRobEntry.uopState
-  )
-  val deqPtrLatterUopNum = deqPtrRobEntry.decodeLatterUopNum(
-    deqPtrRobEntry.entryPairType,
-    deqPtrRobEntry.uopState
-  )
-  when(noCommitCycleCnt === 14999.U) {
-    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
-      p"realDest=${deqPtrEntry.realDestSize} " +
-      p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
-      p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
-      p"formerUopNum=${deqPtrFormerUopNum} latterUopNum=${deqPtrLatterUopNum} " +
-      p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
-      p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
-  }
-
   /**
    * Trace extension
    */
@@ -1713,7 +1627,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Retired instruction totals are shared by CSR, performance counters, and difftest.
   val isCommit = out.commits.isCommit
   val isCommitReg = GatedValidRegNext(out.commits.isCommit)
-  val instrCntReg = RegInit(0.U(64.W))
   val fusionCommitCountNow = out.commits.commitValid.zip(out.commits.info).zip(deqPtrVec).map {
     case ((valid, info), ptr) =>
       val formerFusionCount = debugMeta(debug_microOp(ptr.value)(0)).fusionNum
@@ -1733,10 +1646,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     isCommit
   )
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
-  val instrCnt = instrCntReg + retireCounter
-  when(isCommitReg){
-    instrCntReg := instrCnt
-  }
   out.csr.perfinfo.retiredInstr := retireCounter
 
   val traceValids = out.trace.traceCommitInfo.blocks.map(_.valid)
@@ -1766,8 +1675,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Shared retirement views must precede HPM, simulation, database, and difftest users.
   // Normal RTL view used by the always-on performance events.
   val commitSlotInfo = deqPtrVec.map(_.value).map(slotUopBuf(_)).flatten
-  // Debug/difftest-only view of the full uop.
-  val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
   val commitSlotValid = out.commits.commitValid.zip(out.commits.info).flatMap { case (valid, info) =>
     Seq(valid, valid && !CompressType.isNORMAL(info.entryPairType))
   }
@@ -1783,19 +1690,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   def ifCommit(counter: UInt): UInt = Mux(isCommit, counter, 0.U)
   def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
-
-  // debug trigger for simulation
-  if (backendParams.debugEn) {
-    val debug_sim_trig = dontTouch(Wire(Bool()))
-    debug_sim_trig := out.commits.isCommit && (commitSlotValid zip commitDebugUop map {
-      case (valid, uop) => valid && debugMeta(uop).debug_sim_trig
-    }).reduce(_ || _)
-  }
-
-  /**
-   * Assertion
-   */
-  XSError(enqPtr.isBeforeSlot(deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 
   /**
    * Performance counters for HPM (after silicon)
@@ -1834,9 +1728,88 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * Performance counters for simulation (pre-silicon)
    */
 
+  // Debug/difftest-only view of the full uop.
+  val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
+  // Simulation diagnostics.
+  out.debugWaitForward.foreach(_ := hasWaitForward)
+  out.debugBlockBackward.foreach(_ := hasBlockBackward)
+
+  // debug trigger for simulation
+  if (backendParams.debugEn) {
+    val debug_sim_trig = dontTouch(Wire(Bool()))
+    debug_sim_trig := out.commits.isCommit && (commitSlotValid zip commitDebugUop map {
+      case (valid, uop) => valid && debugMeta(uop).debug_sim_trig
+    }).reduce(_ || _)
+  }
+
+  XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
+  XSDebug(deqHasException && TriggerAction.isDmode(exceptionDataRead.bits.trigger), "Debug Mode: Deq has trigger entry debug Mode\n")
+
+  XSDebug(out.flushOut.valid,
+    p"generate redirect: pc 0x${Hexadecimal(out.exception.bits.pc)} intr $intrEnable " +
+      p"excp $deqHasException flushPipe $isFlushPipe " +
+      p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
+
+  // Retirement diagnostics.
+  for (i <- 0 until CommitWidth) {
+    XSInfo(out.commits.isCommit && out.commits.commitValid(i),
+      "retired pc %x wen %d ldest %d pdest %x data %x\n",
+      debugMeta(debug_microOp(deqPtrVec(i).value).head).pc,
+      out.commits.info(i).rfWen,
+      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
+      out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
+      debug_exuData(deqPtrVec(i).value)(0)
+    )
+    XSInfo(state === s_walk && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
+      debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
+      out.commits.info(i).rfWen,
+      out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
+      debug_exuData(walkPtrVec(i).value)(0)
+    )
+  }
+
+  val noCommitCycleCnt = RegInit(0.U(20.W))
+  when(out.commits.isCommit && out.commits.commitValid(0)) {
+    noCommitCycleCnt := 0.U
+  }.otherwise {
+    noCommitCycleCnt := noCommitCycleCnt + 1.U
+  }
+  // Read the architectural ROB entry explicitly for the debug-only counters.
+  // `robDeqGroup` is a `RobCommitEntryBundle`, which intentionally no longer
+  // carries the shadow uop state used to derive these values.
+  val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
+  val deqPtrFormerUopNum = deqPtrRobEntry.decodeFormerUopNum(
+    deqPtrRobEntry.entryPairType,
+    deqPtrRobEntry.uopState
+  )
+  val deqPtrLatterUopNum = deqPtrRobEntry.decodeLatterUopNum(
+    deqPtrRobEntry.entryPairType,
+    deqPtrRobEntry.uopState
+  )
+  when(noCommitCycleCnt === 14999.U) {
+    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
+      p"realDest=${deqPtrEntry.realDestSize} " +
+      p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
+      p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
+      p"formerUopNum=${deqPtrFormerUopNum} latterUopNum=${deqPtrLatterUopNum} " +
+      p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
+      p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
+  }
+
   /**
    * Simple performance counters like XSPerf
    */
+  XSPerfAccumulate("flush_num", out.flushOut.valid)
+  XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
+  XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
+  XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
+  XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
+
+  XSPerfAccumulate("s_idle_to_idle", state === s_idle && state_next === s_idle)
+  XSPerfAccumulate("s_idle_to_walk", state === s_idle && state_next === s_walk)
+  XSPerfAccumulate("s_walk_to_idle", state === s_walk && state_next === s_idle)
+  XSPerfAccumulate("s_walk_to_walk", state === s_walk && state_next === s_walk)
+
   XSPerfAccumulate("branch_jump", brhJump)
   XSPerfAccumulate("br_mis_pred", misPred)
   XSPerfAccumulate("total_flush", in.redirect.valid)
@@ -2273,6 +2246,64 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Difftest
    */
+  val hasCommit = out.commits.isCommit && out.commits.commitValid.asUInt.orR
+  val retiredSlotPtrs = out.commits.robIdx.zip(out.commits.info).map { case (ptr, info) =>
+    val retired = WireDefault(ptr)
+    retired.isFormer := CompressType.isNORMAL(info.entryPairType)
+    retired
+  }
+  val newestCommit = PriorityMuxDefault(
+    out.commits.commitValid.zip(retiredSlotPtrs).reverse,
+    deqPtr
+  )
+  out.diffRatCommitRobIdx.foreach { commitRobIdx =>
+    commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
+    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr.asFormer, newestCommit)
+  }
+  out.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
+    assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
+    for (i <- 0 until CommitWidth) {
+      commitRobIdxVec(i).valid := out.commits.isCommit && out.commits.commitValid(i) &&
+        !deqVlsExceptionNeedCommit
+      commitRobIdxVec(i).bits := retiredSlotPtrs(i)
+    }
+    when(deqVlsExceptionNeedCommit) {
+      commitRobIdxVec.head.valid := true.B
+      commitRobIdxVec.head.bits := deqPtr.asFormer
+    }
+  }
+
+  // A latter exception flushes itself but preserves its older former slot.
+  // Hold only the difftest observation until that slot really retires after walk.
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    val pending = RegInit(false.B)
+    val pendingPtr = Reg(new RobPtr)
+    val release = pending && out.commits.isCommit && out.commits.commitValid.head &&
+      deqPtr.isSameEntry(pendingPtr)
+    when(exceptionHappen && !exceptionIsFormer) {
+      assert(!pending, "A latter exception observation is already pending")
+      assert(!exceptionUop.isVectorMemory, "Vector memory instructions must not be compressed")
+      pending := true.B
+      pendingPtr := deqPtr
+    }.elsewhen(release) {
+      pending := false.B
+    }
+    when(release) {
+      assert(CompressType.isNORMAL(out.commits.info.head.entryPairType))
+      assert(PopCount(out.commits.commitValid) === 1.U)
+      assert(in.diffArchEvent.get.valid && in.diffArchEvent.get.bits,
+        "The surviving former and its latter exception must be observed together")
+    }
+    diffTrapPending := pending
+    out.diffCommitForTrap.get := release
+  }
+
+  val instrCntReg = RegInit(0.U(64.W))
+  val instrCnt = instrCntReg + retireCounter
+  when(isCommitReg){
+    instrCntReg := instrCnt
+  }
+
   val firstValidCommit = deqPtr.addEntries(PriorityMux(out.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
 
   val wdata = Wire(Vec(2 * CommitWidth, UInt(XLEN.W)))
@@ -2423,31 +2454,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       port.preCommit.foreach(_ := port.robidx.isSameEntry(deqPtr))
     }
   }
-
-  /**
-   * Commit stuck detection.
-   *
-   * Commit stuck for a long time will trigger critical error
-   */
-  // max commit-stuck cycle
-  val mmioBusy = out.lsq.mmioBusy // lsq know uncache request is rob head
-  val commitStuck = (!out.commits.commitValid.reduce(_ || _) || !out.commits.isCommit) && !mmioBusy && (wfiResume.B || !hasWFI)
-  val commitStuckCounter = Module(new CommitStuckCounter(
-    width = log2Up(maxCommitStuck),
-    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
-  ))
-  val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
-  commitStuckCounter.in.stuck := commitStuck
-  commitStuckCounter.in.runtimeEnable := in.commitStuckCheckEnable
-  commitStuckCounter.in.overflowEnabled := commitStuckOverflowEnabled
-  val commitStuckCycle = commitStuckCounter.out.count
-  // check if stuck > 2^maxCommitStuckCycle
-  val commitStuckOverflow = commitStuckCounter.out.overflow
-  val criticalErrors = Seq(
-    ("rob_commit_stuck  ", commitStuckOverflow),
-  )
-  require(criticalErrors.length == out.criticalErrors.length)
-  generateCriticalErrors()
 
   // dontTouch for debug
   if (backendParams.debugEn) {
