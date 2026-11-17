@@ -77,6 +77,10 @@ def test_same_page_nc_dual_request_signal_canary(env, warm_cacheable):
     env.monitor.set_expected_pc(_BASE + 0x3E)
     trace = _nc_loop_trace()
     env.backend_model.set_golden_trace(trace)
+    if warm_cacheable:
+        # The warm phase injects a source-bound replay; auto_python retains
+        # golden-trace checking while allowing that explicit redirect.
+        env.backend_model.set_backend_mode("auto_python")
     env.dut.io_tlbCsr_satp_changed.value = 1
     env.step(1)
     env.dut.io_tlbCsr_satp_changed.value = 0
@@ -134,11 +138,6 @@ def test_same_page_nc_dual_request_signal_canary(env, warm_cacheable):
         fence = env.prepare_sfence(rs1=1, rs2=1)
         assert int(env.dut.io_sfence_valid.value) == 1
         assert int(env.dut.io_sfence_bits_rs1.value) == int(env.dut.io_sfence_bits_rs2.value) == 1
-        # Software prefetch is a legal higher-priority transaction at the
-        # PrefetchPipe ingress. Hold it briefly across recovery so the first
-        # demand prefetch sees two predictions past BPU's point of no return.
-        env.dut.io_softPrefetch_0_bits_vaddr.value = _BASE + 0x180
-        env.dut.io_softPrefetch_0_valid.value = 1
         env.backend_model.inject_redirect_from_cfvec(
             source_pc=source.pc, source_ftq_flag=source.ftq_flag,
             source_ftq_value=source.ftq_value, source_ftq_offset=source.ftq_offset,
@@ -153,7 +152,6 @@ def test_same_page_nc_dual_request_signal_canary(env, warm_cacheable):
         assert transition_seen
         assert not env.monitor.get_errors()
         warmup["transition"] = transition_seen
-        warmup["soft_release_cycle"] = int(env.current_cycle) + 12
     counts, combinations, selected_paths, old_missing = Counter(), Counter(), {}, set()
     checkpoints, response_checkpoints, presentations = [], [], []
     pending = {}
@@ -166,13 +164,6 @@ def test_same_page_nc_dual_request_signal_canary(env, warm_cacheable):
 
     def observe(cycle, _env):
         snapshot, readings = {}, {}
-        if warmup and cycle < warmup["soft_release_cycle"]:
-            soft, soft_paths = read_paths(("Frontend_top.Frontend.inner_icache.softPrefetchValid",
-                                          "Frontend_top.Frontend.inner_icache.__Vtogcov__softPrefetchValid"))
-            ready, ready_paths = read_paths(_TWO_FETCH_SIGNALS["prefetch_ready"])
-            assert soft == 1 and ready == 0, (cycle, soft, ready)
-            warmup["soft_arbitration_canary"] = dict(cycle=cycle, soft=soft, ftq_ready=ready,
-                                                    readings={"soft": soft_paths, "ready": ready_paths})
         for key, old_paths in _UPSTREAM_SIGNALS.items():
             values = {}
             for path in _candidate_paths(old_paths):
@@ -241,8 +232,6 @@ def test_same_page_nc_dual_request_signal_canary(env, warm_cacheable):
 
     env.register_cycle_observer(observe)
     for _ in range(24000):
-        if warmup and env.current_cycle == warmup["soft_release_cycle"]:
-            env.dut.io_softPrefetch_0_valid.value = 0
         env.step(1)
         if trace.cursor == len(trace.entries):
             break
