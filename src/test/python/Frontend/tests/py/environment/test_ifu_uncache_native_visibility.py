@@ -172,3 +172,29 @@ def test_mmio_owner_snapshot_without_native_probes_does_not_fabricate_pending(tm
     assert state["cross_8b_pending"] is None
     assert state["redirected_resend_pending"] is None
     assert not hub.toffee_sink.key_hit("ifu_instruncache_owner_v3", "instruncache_leaf_011")
+
+
+def test_instr_uncache_response_prefers_current_direct_short_alias(tmp_path):
+    from env.funcov.py.ifu.mmio_nc_owner_funcov import _read_instr_uncache
+
+    hub, _env, dut, _model = _runtime(tmp_path)
+    short = "inner_instrUncache.io_toIfu_resp_bits_data"
+    stale_toggle = "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data"
+    dut.set(short, 0x12340013)
+    dut.set(stale_toggle, 0xFFFFFFFF)
+    hub._dut_signal_cache.clear()
+    hub._first_signal_candidate_cache.clear()
+    hub.begin_cycle_snapshot(1)
+    assert _read_instr_uncache(hub, dut, "io_toIfu_resp_bits_data") == 0x12340013
+
+
+def test_instr_uncache_response_missing_remains_unknown(tmp_path):
+    from env.funcov.py.ifu.mmio_nc_owner_funcov import _read_instr_uncache
+
+    hub, _env, dut, _model = _runtime(tmp_path)
+    delattr(dut, _INSTR + "io_toIfu_resp_bits_data")
+    dut.set("Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data", 0xFFFFFFFF)
+    hub._dut_signal_cache.clear()
+    hub._first_signal_candidate_cache.clear()
+    hub.begin_cycle_snapshot(1)
+    assert _read_instr_uncache(hub, dut, "io_toIfu_resp_bits_data") is None

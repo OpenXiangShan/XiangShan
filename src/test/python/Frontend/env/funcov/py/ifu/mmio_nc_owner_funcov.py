@@ -53,7 +53,7 @@ _UNCACHE_PREFIXES = (
     "Frontend_top.Frontend.inner_ifu._uncacheUnit_",
 )
 _INSTR_UNCACHE_PREFIXES = (
-    "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__",
+    "inner_instrUncache.",
     "Frontend_top.Frontend.inner_instrUncache.",
     "Frontend_top.Frontend._inner_instrUncache_",
 )
