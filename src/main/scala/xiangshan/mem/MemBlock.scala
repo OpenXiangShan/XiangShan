@@ -1818,6 +1818,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // as atomics insts (LR/SC/AMO) will block the pipeline
   val s_normal +: s_atomics = Enum(StaCnt + HyuCnt + 1)
   val state = RegInit(s_normal)
+  val atomicsFlag = state =/= s_normal
+  val atomicsFlagPrev = RegNext(atomicsFlag, false.B)
+  val atomicsS1Kill = atomicsFlag && !atomicsFlagPrev
 
   val st_atomics = Seq.tabulate(StaCnt)(i =>
     io.ooo_to_mem.issueSta(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueSta(i).bits.uop.fuType))
@@ -1874,6 +1877,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // hw prefetch should be disabled while executing atomic insts
     loadUnits.map(i => i.io.prefetch_req.valid := false.B)
+
+    // Cancel the old S1 hardware prefetch before the shared TLB address is consumed.
+    when (atomicsS1Kill) {
+      dcache.io.lsu.load(0).s1_kill := true.B
+    }
 
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)
