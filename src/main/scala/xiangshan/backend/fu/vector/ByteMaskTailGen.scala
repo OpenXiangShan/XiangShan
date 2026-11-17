@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.utils.{MaskExtractor, UIntToContLow0s, UIntToContLow1s}
-import utility.XSDebug
+import utility.{XSDebug => XSSim}
 import yunsuan.vector.Common.SewOH
 import yunsuan.util.LookupTree
 
@@ -30,7 +30,7 @@ class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
     val activeEn   = UInt(numBytes.W)
     val agnosticEn = UInt(numBytes.W)
   })
-  val debugOnly = Output(new Bundle {
+  val simOnly = Output(new Bundle {
     val startBytes = UInt()
     val vlBytes = UInt()
     val prestartEn = UInt()
@@ -97,14 +97,14 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   io.out.activeEn := activeEn
   io.out.agnosticEn := agnosticEn
 
-  io.debugOnly.startBytes := startBytes
-  io.debugOnly.vlBytes := vlBytes
-  io.debugOnly.prestartEn := prestartEnInVd
-  io.debugOnly.bodyEn := bodyEn
-  io.debugOnly.tailEn := tailEnInVd
-  io.debugOnly.maskEn := maskEn
-  io.debugOnly.maskAgnosticEn := maskAgnosticEn
-  io.debugOnly.tailAgnosticEn := tailAgnosticEn
-  io.debugOnly.agnosticEn := agnosticEn
+  io.simOnly.startBytes := startBytes
+  io.simOnly.vlBytes := vlBytes
+  io.simOnly.prestartEn := prestartEnInVd
+  io.simOnly.bodyEn := bodyEn
+  io.simOnly.tailEn := tailEnInVd
+  io.simOnly.maskEn := maskEn
+  io.simOnly.maskAgnosticEn := maskAgnosticEn
+  io.simOnly.tailAgnosticEn := tailAgnosticEn
+  io.simOnly.agnosticEn := agnosticEn
 }
 

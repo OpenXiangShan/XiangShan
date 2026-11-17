@@ -173,7 +173,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   toItlb.bits              := DontCare
   toItlb.bits.size         := 3.U
   toItlb.bits.vaddr        := itlbVAddr.toUInt(VAddrBits - 1, 0)
-  toItlb.bits.debug.pc     := itlbFullVa
+  toItlb.bits.sim.pc       := itlbFullVa
   toItlb.bits.cmd          := TlbCmd.exec
   toItlb.bits.no_translate := false.B
   toItlb.bits.fullva       := itlbFullVa
@@ -211,7 +211,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // for area concern, we don't have 64 bits vaddr in frontend, but spec asks page fault when high bits are not all 0/1
   // this check is finished in backend, and passed to frontend with redirect, we see it as a part of itlb exception
   private val s1_itlbException = s1_backendException || s1_itlbExceptionRaw
-  // debug
+  // sim
   dontTouch(s1_itlbExceptionRaw)
   dontTouch(s1_itlbException)
 
@@ -329,8 +329,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     port.bits.exceptionEntry.gpAddr            := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
     port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-    port.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
-    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
+    port.bits.entry.sim_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
+    port.bits.entry.sim_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
 
     when(port.fire) {
       val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))

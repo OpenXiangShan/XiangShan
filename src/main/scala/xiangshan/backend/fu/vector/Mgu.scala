@@ -130,12 +130,12 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   io.out.active := activeEn
   io.out.illegal := false.B // (info.vl > vlMaxForAssert) && info.valid
 
-  io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
-  io.debugOnly.vlMapVdIdx := vlMapVdIdx
-  io.debugOnly.begin := maskTailGen.io.in.begin
-  io.debugOnly.end := maskTailGen.io.in.end
-  io.debugOnly.activeEn := activeEn
-  io.debugOnly.agnosticEn := agnosticEn
+  io.simOnly.vstartMapVdIdx := vstartMapVdIdx
+  io.simOnly.vlMapVdIdx := vlMapVdIdx
+  io.simOnly.begin := maskTailGen.io.in.begin
+  io.simOnly.end := maskTailGen.io.in.end
+  io.simOnly.activeEn := activeEn
+  io.simOnly.agnosticEn := agnosticEn
   def elemIdxMapVdIdx(elemIdx: UInt) = {
     require(elemIdx.getWidth >= log2Up(vlen))
     // 3 = log2(8)
@@ -178,7 +178,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
     val active = Output(UInt((vlen / 8).W))
     val illegal = Output(Bool())
   }
-  val debugOnly = Output(new Bundle {
+  val simOnly = Output(new Bundle {
     val vstartMapVdIdx = UInt()
     val vlMapVdIdx = UInt()
     val begin = UInt()
@@ -234,12 +234,12 @@ class MguTest extends AnyFlatSpec with Matchers with ChiselSim {
         m.io.in.info.vdIdx.poke(1.U)
 
         println("out.vd: " + m.io.out.vd.peek().litValue.toString(16))
-        println("debugOnly.vstartMapVdIdx: " + m.io.debugOnly.vstartMapVdIdx.peek().litValue.toString(16))
-        println("debugOnly.vlMapVdIdx: "     + m.io.debugOnly.vlMapVdIdx.peek().litValue.toString(16))
-        println("debugOnly.begin: "          + m.io.debugOnly.begin.peek().litValue)
-        println("debugOnly.end: "            + m.io.debugOnly.end.peek().litValue)
-        println("debugOnly.activeEn: "         + m.io.debugOnly.activeEn.peek().litValue.toString(2))
-        println("debugOnly.agnosticEn: "     + m.io.debugOnly.agnosticEn.peek().litValue.toString(2))
+        println("simOnly.vstartMapVdIdx: " + m.io.simOnly.vstartMapVdIdx.peek().litValue.toString(16))
+        println("simOnly.vlMapVdIdx: "     + m.io.simOnly.vlMapVdIdx.peek().litValue.toString(16))
+        println("simOnly.begin: "          + m.io.simOnly.begin.peek().litValue)
+        println("simOnly.end: "            + m.io.simOnly.end.peek().litValue)
+        println("simOnly.activeEn: "         + m.io.simOnly.activeEn.peek().litValue.toString(2))
+        println("simOnly.agnosticEn: "     + m.io.simOnly.agnosticEn.peek().litValue.toString(2))
     }
     println("test done")
   }

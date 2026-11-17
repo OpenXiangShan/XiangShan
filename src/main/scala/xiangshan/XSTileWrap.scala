@@ -83,7 +83,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
-      val debugTopDown = new Bundle {
+      val simTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
@@ -163,7 +163,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.stall, 3, 0)
     }
     io.traceCoreInterface.toEncoder := tile.module.io.traceCoreInterface.toEncoder
-    io.debugTopDown <> tile.module.io.debugTopDown
+    io.simTopDown <> tile.module.io.simTopDown
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
     io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
@@ -206,7 +206,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       // Modules are reset one by one
       // reset ----> SYNC --> XSTile
       val resetChain = Seq(Seq(tile.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, io.dft_reset)
+      ResetGen(resetChain, reset_sync, !simOpts.FPGAPlatform, io.dft_reset)
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)

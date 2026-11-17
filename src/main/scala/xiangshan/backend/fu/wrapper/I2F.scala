@@ -47,7 +47,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
       BitPat.N(4)
     )
   )
-  if (backendParams.debugEn) {
+  if (backendParams.simEn) {
     dontTouch(inSew1H)
     dontTouch(outSew1H)
   }

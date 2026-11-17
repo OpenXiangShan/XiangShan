@@ -35,7 +35,7 @@ import utils._
 import utility._
 import utility.CircularQueuePtr
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey, XSBundle, XSModule}
-import xiangshan.backend.rob.Rob.RobDebugRollingIO
+import xiangshan.backend.rob.Rob.RobSimRollingIO
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.cache._
 

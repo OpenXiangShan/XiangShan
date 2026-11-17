@@ -48,7 +48,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpTarget)
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
   redirect.isRVC := io.in.bits.ctrl.isRVC.get
-  //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
+  //  redirect.sim_runahead_checkpoint_id := uop.simInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
@@ -62,6 +62,6 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.bits.mispredict := needTrain
   io.toFrontendBJUResolve.get.bits.attribute.branchType := Mux(isJr, BranchType.Indirect, BranchType.Direct) // jr / j
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := io.in.bits.ctrl.rasAction.get
-  io.toFrontendBJUResolve.get.bits.debug_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
+  io.toFrontendBJUResolve.get.bits.sim_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
   connect0LatencyCtrlSingal
 }

@@ -250,7 +250,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
   val attribute:   BranchAttribute = new BranchAttribute
   val mispredict:  Bool            = Bool()
 
-  val debug_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
+  val sim_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
 
   // backend resolve train s1/s3 predictor
   def fromResolve(resolve: Resolve): Unit = {
@@ -261,10 +261,10 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
     this.mispredict  := resolve.mispredict
 
     if (!env.FPGAPlatform) {
-      this.debug_realCfiPc.get := getRealCfiPcFromOffset(
+      this.sim_realCfiPc.get := getRealCfiPcFromOffset(
         resolve.pc,
         resolve.ftqOffset,
-        resolve.debug_isRVC.get
+        resolve.sim_isRVC.get
       )
     }
   }
@@ -277,7 +277,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
     this.attribute   := prediction.attribute
     this.mispredict  := hasOverride
     // not available
-    this.debug_realCfiPc.foreach(_ := DontCare)
+    this.sim_realCfiPc.foreach(_ := DontCare)
   }
 }
 
@@ -289,7 +289,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:     BpuResolveMeta         = new BpuResolveMeta
   val perfMeta: BpuPerfMeta            = new BpuPerfMeta
 
-  val debug_source: UInt = ResolveSource()
+  val sim_source: UInt = ResolveSource()
 
   def startPc: Pc = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
 
@@ -310,7 +310,7 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
     this.meta       := that.meta
     this.perfMeta   := that.perfMeta
 
-    this.debug_source := that.debug_source
+    this.sim_source := that.sim_source
   }
 }
 
@@ -348,7 +348,7 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
   val phr:      PhrMeta             = new PhrMeta
   val commonHR: CommonHRResolveMeta = new CommonHRResolveMeta
 
-  // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
+  // val sim_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
   val utage: MicroTageMeta = new MicroTageMeta
 }
 

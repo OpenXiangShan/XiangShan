@@ -133,7 +133,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_prediction = Wire(new Prediction)
   private val s3_prediction = Wire(new Prediction)
 
-  private val debug_bpId = RegInit(0.U(XLEN.W))
+  private val sim_bpId = RegInit(0.U(XLEN.W))
 
   private val s0_startPc    = DuplicateInit(NumStartPcDuplicate, GuardedPcInit(0.U(GuardedVAddrBits.W)))
   private val s0_startPcReg = RegEnable(s0_startPc, !s0_stall)
@@ -199,8 +199,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** predictor specific inputs *** */
   abtb.io.normalPathHist := phr.io.oldFoldedPhr
-  abtb.io.debug_bpuS2StartPc.foreach(_ := s2_startPc.get)
-  abtb.io.debug_bpuS3StartPc.foreach(_ := s3_startPc.get)
+  abtb.io.sim_bpuS2StartPc.foreach(_ := s2_startPc.get)
+  abtb.io.sim_bpuS3StartPc.foreach(_ := s3_startPc.get)
 
   utage.io.fromAheadBtb     := abtb.io.toMicroTage
   utage.io.normalPathHist   := phr.io.oldFoldedPhr
@@ -233,7 +233,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   tage.io.fromMainBtb.baseConf           := VecInit(mbtb.io.meta.entries.flatten.map(_.counter.isSaturate))
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
+  tage.io.sim_trainValid                 := io.fromFtq.train.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
@@ -333,12 +333,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // Only the selected conditional branch can use micro-TAGE's direction.
   private val s1_abtbUseUtage = s1_abtbFirstTakenBr.attribute.isConditional &&
     Mux1H(s1_abtbFirstTakenBrOH, s1_utageHitMask)
-  private val debug_s1UseUbtb      = s1_taken && !useAbtb
-  private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_abtbUseUtage
-  private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_abtbUseUtage
+  private val sim_s1UseUbtb      = s1_taken && !useAbtb
+  private val sim_s1UseAbtb      = s1_taken && useAbtb && !s1_abtbUseUtage
+  private val sim_s1UseAbtbUtage = s1_taken && useAbtb && s1_abtbUseUtage
   // Both BTB paths select the micro-RAS target for a return when it is available.
   // Check the selected S1 prediction so an unused BTB return cannot claim the target.
-  private val debug_s1UseUras = s1_taken && s1_prediction.attribute.isReturn && uras.io.specOut.isCanUse
+  private val sim_s1UseUras = s1_taken && s1_prediction.attribute.isReturn && uras.io.specOut.isCanUse
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -528,7 +528,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_resolveMeta.commonHR := commonHR.io.s3ResolveMeta
   s3_resolveMeta.ittage   := ittage.io.meta
   s3_resolveMeta.phr      := s3_phrMeta
-  // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
+  // s3_resolveMeta.sim_utage.foreach(_ := s3_utageMeta)
   s3_resolveMeta.utage := s3_utageMeta
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
@@ -657,13 +657,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   /* *** check abtb output *** */
-  abtb.io.result.debug_startPc.foreach { debug_startPc =>
+  abtb.io.result.sim_startPc.foreach { sim_startPc =>
     when(io.toFtq.prediction.fire && !s1_flush && abtb.io.result.entries.map(_.valid).reduce(_ || _)) {
-      assert(debug_startPc === s1_startPc.head)
+      assert(sim_startPc === s1_startPc.head)
     }
   }
 
-  /* *** Debug Meta *** */
+  /* *** Simulation metadata *** */
   // used for performance counters
   private val s3_firstTakenBlameSc = Mux1H(s3_firstTakenBranchOH, s3_scUsed)
   // see class BpuPredictionSource in bpu/Bundles.scala
@@ -671,17 +671,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
-        debug_s1UseUbtb -> Mux(
-          debug_s1UseUras,
+        sim_s1UseUbtb -> Mux(
+          sim_s1UseUras,
           BpuPredictionSource.Stage1.UbtbUras,
           BpuPredictionSource.Stage1.Ubtb
         ),
-        debug_s1UseAbtb -> Mux(
-          debug_s1UseUras,
+        sim_s1UseAbtb -> Mux(
+          sim_s1UseUras,
           BpuPredictionSource.Stage1.AbtbUras,
           BpuPredictionSource.Stage1.Abtb
         ),
-        debug_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
+        sim_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
       )
     )
   private val s2_tageUsed = s2_taken && s2_firstTakenBranch.bits.attribute.isConditional &&
@@ -709,7 +709,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s3_perfMeta = Wire(new BpuPerfMeta)
   s3_perfMeta.startPc             := s3_startPc.head.unGuard
-  s3_perfMeta.bpId                := debug_bpId
+  s3_perfMeta.bpId                := sim_bpId
   s3_perfMeta.s1Prediction        := s3_s1Prediction
   s3_perfMeta.s2Prediction        := s3_s2Prediction
   s3_perfMeta.s3Prediction        := s3_prediction
@@ -727,7 +727,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** BpTrace *** */
   when(io.toFtq.meta.fire) {
-    debug_bpId := debug_bpId + 1.U
+    sim_bpId := sim_bpId + 1.U
   }
 
   private class PredictionTrace extends Bundle {
@@ -801,11 +801,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     "s1_use",
     s1PredictionFire,
     Seq(
-      ("ubtb", debug_s1UseUbtb && !debug_s1UseUras),
-      ("abtb", debug_s1UseAbtb && !debug_s1UseUras),
-      ("abtb_utage", debug_s1UseAbtbUtage),
-      ("ubtb_uras", debug_s1UseUbtb && debug_s1UseUras),
-      ("abtb_uras", debug_s1UseAbtb && debug_s1UseUras),
+      ("ubtb", sim_s1UseUbtb && !sim_s1UseUras),
+      ("abtb", sim_s1UseAbtb && !sim_s1UseUras),
+      ("abtb_utage", sim_s1UseAbtbUtage),
+      ("ubtb_uras", sim_s1UseUbtb && sim_s1UseUras),
+      ("abtb_uras", sim_s1UseAbtb && sim_s1UseUras),
       ("fallThrough", !s1_taken)
     )
   )

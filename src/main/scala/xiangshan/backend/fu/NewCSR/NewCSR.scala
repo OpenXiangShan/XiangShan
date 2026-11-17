@@ -161,7 +161,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
 
     val fromRename = Input(new Bundle {
-      val diffVl = Option.when(backendParams.basicDebugEn)(Vl())
+      val diffVl = Option.when(backendParams.basicSimEn)(Vl())
     })
 
     val fromVecExcpMod = Input(new Bundle {

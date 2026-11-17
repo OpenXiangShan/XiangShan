@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.MatchTriggerIO
 import org.chipsalliance.cde.config.Parameters
-import utility.XSDebug
+import utility.{XSDebug => XSSim}
 
 object ChainCheck {
   def TimingCheck(prevTiming: Bool, thisTiming: Bool, chain: Bool) = !((prevTiming ^ thisTiming) && chain)
@@ -29,7 +29,7 @@ object ChainCheck {
 
 object PrintTriggerInfo {
   def apply(enable: Bool, trigger: MatchTriggerIO)(implicit p: Parameters) = {
-    XSDebug(enable, p"Debug Mode: Match Type is ${trigger.matchType}; select is ${trigger.select};" +
+    XSSim(enable, p"Debug Mode: Match Type is ${trigger.matchType}; select is ${trigger.select};" +
       p"timing is ${trigger.timing}; action is ${trigger.action}; chain is ${trigger.chain};" +
       p"tdata2 is ${Hexadecimal(trigger.tdata2)}")
   }

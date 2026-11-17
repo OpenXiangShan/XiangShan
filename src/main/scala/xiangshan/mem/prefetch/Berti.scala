@@ -881,7 +881,7 @@ extends DCacheModule {
     XSPerfAccumulate(s"src_req_fire_${partName}_update", e0_fire && e0_update)
     XSPerfAccumulate(s"src_req_fire_${partName}_alloc", e0_fire && !e0_update)
 
-    // Debug DB logging per part
+    // Simulation DB logging per part
     val srcTable = ChiselDB.createTable(s"${name}_${partName}SourcePrefetch${p(XSCoreParamsKey).HartId}", new SourcePrefetchReq, basicDB = true)
     srcTable.log(data = e0_src, en = e0_fire, clock = clock, reset = reset)
   }
@@ -916,7 +916,7 @@ extends DCacheModule {
     tlbReqArb.io.in(i).bits.fullva := 0.U
     tlbReqArb.io.in(i).bits.checkfullva := false.B
     tlbReqArb.io.in(i).bits.memidx := DontCare
-    tlbReqArb.io.in(i).bits.debug := DontCare
+    tlbReqArb.io.in(i).bits.sim := DontCare
     tlbReqArb.io.in(i).bits.hlvx := DontCare
     tlbReqArb.io.in(i).bits.hyperinst := DontCare
     tlbReqArb.io.in(i).bits.pmp_addr := DontCare
@@ -1014,7 +1014,7 @@ extends DCacheModule {
   XSPerfAccumulate("pf_l2_req", io.l2_req.fire)
   XSPerfAccumulate("pf_l3_req", io.l3_req.fire)
 
-  /*** performance counter and debug */
+  /*** performance counter and sim */
   val sendTableL1 = ChiselDB.createTable(s"${name}_l1SendPrefetch${p(XSCoreParamsKey).HartId}", new Entry, basicDB = false)
   sendTableL1.log(data = entries(l1PfIdxGlobal), en = l1PfIdxArb.io.out.valid, clock = clock, reset = reset)
 

@@ -149,11 +149,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val stExceptionInfo = ValidIO(new MemExceptionInfo)
     val ldExceptionInfo = ValidIO(new MemExceptionInfo)
     // top-down
-    val debugTopDown = new LoadQueueTopDownIO
+    val simTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
     val specialMode = Output(Bool())
 
-    val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
+    val diffStore = OptionWrapper(simEn, Flipped(new DiffStoreIO))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -162,7 +162,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.hartId := io.hartId
   storeQueue.io.wfi <> io.wfi
 
-  if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
+  if (backendParams.simEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
@@ -193,7 +193,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     storeQueue.io.enq.req(i).bits.uop.isVec := LSUOpType.isVecMemOp(io.enq.req(i).bits.uop.fuOpType)
     // only enable difftest, it will be used.
     if(env.EnableDifftest){
-      storeQueue.io.enq.req(i).bits.debugUop.get := io.enq.req(i).bits.uop
+      storeQueue.io.enq.req(i).bits.simUop.get := io.enq.req(i).bits.uop
     }
 //    storeQueue.io.enq.req(i).bits.lqIdx := loadQueue.io.enq.resp(i) // TODO: need it ?
 
@@ -330,7 +330,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     storeQueue.io.toUncacheBuffer.idResp <> io.uncache.idResp
   }
 
-  loadQueue.io.debugTopDown <> io.debugTopDown
+  loadQueue.io.simTopDown <> io.simTopDown
   loadQueue.io.replayAllocate <> io.replayAllocate
   io.specialMode := loadQueue.io.specialMode
 
@@ -340,7 +340,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.toUncacheBuffer.resp.valid) && pendingstate === s_idle))
   }
 
-  // debug
+  // sim
   for (i <- 0 until io.enq.req.length) {
     XSError(io.enq.req(i).valid && io.enq.needAlloc(i)(1) && !storeQueue.io.enq.canAccept, s"storeQueue must accept $i\n")
     XSError(io.enq.req(i).valid && io.enq.needAlloc(i)(0) && !loadQueue.io.enq.canAccept, s"loadQueue must accept $i\n")
@@ -369,8 +369,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val lqRecoverStall = Input(Bool())
     val sqRecoverStall = Input(Bool())
     // for topdown
-    val lqStall = OptionWrapper(backendParams.debugEn, Output(Bool()))
-    val sqStall = OptionWrapper(backendParams.debugEn, Output(Bool()))
+    val lqStall = OptionWrapper(backendParams.simEn, Output(Bool()))
+    val sqStall = OptionWrapper(backendParams.simEn, Output(Bool()))
   })
 
   protected object State extends ChiselEnum {
@@ -487,7 +487,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val redirectUpdate = io.lqRedirectPtr.valid || io.sqRedirectPtr.valid
   io.fromDispatch.canAccept := RegNext(lqCanAccept && sqCanAccept && !redirectUpdate)
 
-  // only for debug
+  // only for sim
   for ((resp, i) <- io.fromDispatch.resp.zipWithIndex) {
     resp.lqIdx := io.fromDispatch.req(i).bits.reqStartPtr.lqIdx
     resp.sqIdx := io.fromDispatch.req(i).bits.reqStartPtr.sqIdx
@@ -511,9 +511,9 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   // for Topdown
   io.lqStall.foreach(_ := RegNext(!lqCanAccept))
   io.sqStall.foreach(_ := RegNext(!sqCanAccept))
-  // debug
+  // sim
 
-  if(debugEn) {
+  if(simEn) {
     dontTouch(sqTailPtrNext)
     dontTouch(WireInit(VecInit(loadFlowPopCount)))
     dontTouch(WireInit(VecInit(storeFlowPopCount)))

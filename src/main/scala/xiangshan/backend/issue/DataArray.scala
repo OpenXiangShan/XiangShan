@@ -3,7 +3,7 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{AsyncRawDataModuleTemplate, XSDebug, XSError}
+import utility.{AsyncRawDataModuleTemplate, XSDebug => XSSim, XSError}
 import xiangshan.XSModule
 
 class OHReadBundle[T <: Data](addrLen: Int, gen: T) extends Bundle {
@@ -41,6 +41,6 @@ class DataArray[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: Int)
   for (i <- 0 until numEntries) {
     val wCnt = VecInit(io.write.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
     XSError(RegNext(PopCount(wCnt) > 1.U), s"why not OH $i?")
-    XSDebug(PopCount(wCnt) > 1.U, "ERROR: IssueQueue DataArray write overlap!\n")
+    XSSim(PopCount(wCnt) > 1.U, "ERROR: IssueQueue DataArray write overlap!\n")
   }
 }

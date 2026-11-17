@@ -29,7 +29,7 @@ import xscache.chi.{CHIDataCheckKey, CHILogger, CHIPoisonKey}
 import xscache.openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import xscache.openLLC.TargetBinder._
 import xs.utils.debug.{HardwareAssertionKey, HwaParams}
-import xs.utils.perf.{DebugOptions => ZJDebugOptions, DebugOptionsKey => ZJDebugOptionsKey}
+import xs.utils.perf.{DebugOptions => ZJSimOptions, DebugOptionsKey => ZJSimOptionsKey}
 import xs.utils.perf.{LogUtilsOptions => ZJLogUtilsOptions, LogUtilsOptionsKey => ZJLogUtilsOptionsKey}
 import xs.utils.perf.{PerfCounterOptions => ZJPerfCounterOptions, PerfCounterOptionsKey => ZJPerfCounterOptionsKey, XSPerfLevel => ZJXSPerfLevel}
 import zhujiang.{HasCHIToZhuJiangBridge, HasZhuJiangAXI4Bridge, Zhujiang, ZJParametersKey}
@@ -337,7 +337,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
             hartIds = tiles.map(_.HartId),
-            FPGAPlatform = debugOpts.FPGAPlatform
+            FPGAPlatform = simOpts.FPGAPlatform
           )
         })))
       }
@@ -353,26 +353,26 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       case HardwareAssertionKey => HwaParams(enable = false)
       case ZJLogUtilsOptionsKey => ZJLogUtilsOptions(
         enableDebug = false,
-        enablePerf = debugOpts.EnablePerfDebug,
-        fpgaPlatform = debugOpts.FPGAPlatform
+        enablePerf = simOpts.EnableSimPerf,
+        fpgaPlatform = simOpts.FPGAPlatform
       )
       case ZJPerfCounterOptionsKey => ZJPerfCounterOptions(
-        enablePerfPrint = debugOpts.EnablePerfDebug && !debugOpts.FPGAPlatform,
-        enablePerfDB = debugOpts.EnableRollingDB && !debugOpts.FPGAPlatform,
-        perfLevel = ZJXSPerfLevel.withName(debugOpts.PerfLevel),
+        enablePerfPrint = simOpts.EnableSimPerf && !simOpts.FPGAPlatform,
+        enablePerfDB = simOpts.EnableRollingDB && !simOpts.FPGAPlatform,
+        perfLevel = ZJXSPerfLevel.withName(simOpts.PerfLevel),
         perfDBHartID = 0
       )
-      case ZJDebugOptionsKey => ZJDebugOptions(
-        FPGAPlatform = debugOpts.FPGAPlatform,
+      case ZJSimOptionsKey => ZJSimOptions(
+        FPGAPlatform = simOpts.FPGAPlatform,
         EnableDifftest = false,
         AlwaysBasicDiff = false,
         EnableDebug = false,
-        EnablePerfDebug = debugOpts.EnablePerfDebug,
+        EnablePerfDebug = simOpts.EnableSimPerf,
         UseDRAMSim = false,
         EnableTopDown = false,
         EnableChiselDB = false,
         AlwaysBasicDB = false,
-        EnableRollingDB = debugOpts.EnableRollingDB,
+        EnableRollingDB = simOpts.EnableRollingDB,
         EnableHWMoniter = false
       )
     }
@@ -529,9 +529,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           openLLC.io.sn.connect(memLogger.io.up)
           chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
           openLLC.io.nodeID := llcRouteId.U
-          openLLC.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+          openLLC.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.simTopDown.robHeadPaddr)
           core_with_l2.zip(openLLC.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
-            tile.module.io.debugTopDown.l3MissMatch := l3Match
+            tile.module.io.simTopDown.l3MissMatch := l3Match
           }
           core_with_l2.foreach(_.module.io.l3Miss := openLLC.io.l3Miss)
         }
@@ -567,7 +567,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         zj.dmaIO.foreach { axi => axi := DontCare }
         zj.hwaIO.foreach { axi => axi := DontCare }
 
-        core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+        core_with_l2.foreach(_.module.io.simTopDown.l3MissMatch := false.B)
         core_with_l2.foreach(_.module.io.l3Miss := false.B)
       }
     }
@@ -579,13 +579,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     if (isOpenLLC) chi_openllc_opt match {
       case Some(l3) =>
-        l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.simTopDown.robHeadPaddr)
         core_with_l2.zip(l3.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
-          tile.module.io.debugTopDown.l3MissMatch := l3Match
+          tile.module.io.simTopDown.l3MissMatch := l3Match
         }
         core_with_l2.foreach(_.module.io.l3Miss := l3.io.l3Miss)
       case None =>
-        core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+        core_with_l2.foreach(_.module.io.simTopDown.l3MissMatch := false.B)
         core_with_l2.foreach(_.module.io.l3Miss := false.B)
     }
 
@@ -621,12 +621,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, Cores}
       val resetChain = Seq(Seq(misc.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
+      ResetGen(resetChain, reset_sync, !simOpts.ResetGen)
       // Ensure that cores could be reset when DM disable `hartReset`.
       val dmResetReqVec = misc.module.debug_module_io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(Vec(core_with_l2.map(_.module).length, Bool())))
       val syncResetCores = misc.module.reset.asBool
       (core_with_l2.map(_.module)).zip(dmResetReqVec).map { case(core, dmResetReq) =>
-        ResetGen(Seq(Seq(core)), (syncResetCores || dmResetReq).asAsyncReset, !debugOpts.ResetGen)
+        ResetGen(Seq(Seq(core)), (syncResetCores || dmResetReq).asAsyncReset, !simOpts.ResetGen)
       }
     }
 
@@ -652,10 +652,10 @@ object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   // tools: init to close dpi-c when in fpga
-  val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-  val enableDifftest = config(DebugOptionsKey).EnableDifftest || config(DebugOptionsKey).AlwaysBasicDiff
-  val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
-  val enableConstantin = config(DebugOptionsKey).EnableConstantin
+  val envInFPGA = config(SimOptionsKey).FPGAPlatform
+  val enableDifftest = config(SimOptionsKey).EnableDifftest || config(SimOptionsKey).AlwaysBasicDiff
+  val enableChiselDB = config(SimOptionsKey).EnableChiselDB
+  val enableConstantin = config(SimOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 

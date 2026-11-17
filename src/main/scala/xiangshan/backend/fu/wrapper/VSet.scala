@@ -13,7 +13,7 @@ import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.vector.Decoder.VSetFuncUnit
 
 class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
-  val debugIO = IO(new Bundle() {
+  val simIO = IO(new Bundle() {
     val vconfig = Output(VConfig())
   })
   protected val in = io.in.bits
@@ -55,7 +55,7 @@ class VSetRiWi(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   out.res.data := vsetModule.io.out.vconfig.vl
 
-  debugIO.vconfig := vsetModule.io.out.vconfig
+  simIO.vconfig := vsetModule.io.out.vconfig
 }
 
 /**
@@ -85,7 +85,7 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && vl === 0.U
   if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && vl === vlmax
 
-  debugIO.vconfig := vsetModule.io.out.vconfig
+  simIO.vconfig := vsetModule.io.out.vconfig
 }
 
 /**
@@ -120,7 +120,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isCSRReadVl && vl === 0.U
   if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isCSRReadVl && vl === vlmax
 
-  debugIO.vconfig := vsetModule.io.out.vconfig
+  simIO.vconfig := vsetModule.io.out.vconfig
 }
 
 class VSetUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) with HasXSParameter {

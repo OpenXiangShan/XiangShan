@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.{PerfCCT, SelectOne}
 import utils.NamedUInt
 import xiangshan._
-import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
+import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInSim, RegionInUop, UopIdx}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
@@ -35,7 +35,7 @@ class VecIssueQueue(
   val out = IO(Output(new Out))
 
   in.enq.foreach { case enq =>
-    enq.bits.debug.foreach(x => PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
+    enq.bits.sim.foreach(x => PerfCCT.updateInstPos(x.sim_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
   }
 
   // Modules
@@ -937,7 +937,7 @@ object VecIssueQueue {
     val sqIdx     = new SqPtr
     val srcLoadDependency = Option.when(!param.inVecRegion)(Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
-    val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
+    val sim     = Option.when(backendParams.simEn)(new IssueQueueInSim)
 
     def fromDispatchOutUop(source: DispatchOutUop): Unit = {
       this.fuType := source.fuType
@@ -982,7 +982,7 @@ object VecIssueQueue {
       this.sqIdx := source.sqIdx
       this.srcLoadDependency.foreach(_ := source.srcLoadDependency)
 
-      this.debug.foreach(_ := source.debug.get)
+      this.sim.foreach(_ := source.sim.get)
     }
 
     def fromRegionInUop(source: RegionInUop): Unit = {
@@ -1028,7 +1028,7 @@ object VecIssueQueue {
 
       this.sqIdx := source.sqIdx.getOrElse(0.U.asTypeOf(this.sqIdx))
 
-      this.debug.foreach(_ := source.debug.get)
+      this.sim.foreach(_ := source.sim.get)
     }
   }
 
@@ -1084,7 +1084,7 @@ object VecIssueQueue {
 
     val loadDependency = Option.when(!exuParam.isVecExeUnit)(Vec(exuParam.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
-    val debug        = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
+    val sim        = Option.when(backendParams.simEn)(new VecRegionModule.SimBundle)
 
     def fromEntry(entry: Entry): Unit = {
       this.fuType := entry.payload.fuType
@@ -1134,10 +1134,10 @@ object VecIssueQueue {
       this.oldVType.foreach(_ := entry.payload.oldVType.get)
       this.loadDependency.foreach(_ := entry.status.srcStatus.map(_.loadDependency.get))
 
-      this.debug.foreach { case debug =>
-        debug.debug := 0.U.asTypeOf(debug.debug)
-        debug.perfDebugInfo := entry.payload.debug.get.perfDebugInfo
-        debug.seqNum := entry.payload.debug.get.debug_seqNum
+      this.sim.foreach { case sim =>
+        sim.sim := 0.U.asTypeOf(sim.sim)
+        sim.perfSimInfo := entry.payload.sim.get.perfSimInfo
+        sim.seqNum := entry.payload.sim.get.sim_seqNum
       }
     }
   }
@@ -1275,7 +1275,7 @@ object VecIssueQueue {
     val sqIdx     = Option.when(param.needSqIdx)(new SqPtr)
 
     val flushPipe = Option.when(param.needFlushPipe)(Bool())
-    val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
+    val sim     = Option.when(backendParams.simEn)(new IssueQueueInSim)
 
     def fromEnq(enq: Enq): Unit = {
       this.fuType := enq.fuType
@@ -1303,7 +1303,7 @@ object VecIssueQueue {
       this.pdestVl.foreach(_ := enq.pdestVl)
       this.sqIdx.foreach(_ := enq.sqIdx)
       this.flushPipe.foreach(_ := enq.flushPipe)
-      this.debug.foreach(_ := enq.debug.get)
+      this.sim.foreach(_ := enq.sim.get)
     }
   }
 

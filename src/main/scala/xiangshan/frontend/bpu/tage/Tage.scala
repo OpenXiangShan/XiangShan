@@ -41,7 +41,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val prediction:  TagePrediction  = Output(new TagePrediction)
     val meta:        TageMeta        = Output(new TageMeta)
 
-    val debug_trainValid: Bool = Input(Bool())
+    val sim_trainValid: Bool = Input(Bool())
   }
   val io: TageIO = IO(new TageIO)
 
@@ -252,9 +252,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   io.trainReady := !t0_readBankConflict
 
   // t0_readBankConflict can be high even there's no train.valid, causing perf counters to be inaccurate
-  // so we use a debug_ signal for perf counters
-  private val debug_readBankConflict = io.debug_trainValid && t0_readBankConflict
-  private val debug_readBankNoConflict = io.debug_trainValid && t0_needRead && s0_fire &&
+  // so we use a sim_ signal for perf counters
+  private val sim_readBankConflict = io.sim_trainValid && t0_readBankConflict
+  private val sim_readBankNoConflict = io.sim_trainValid && t0_needRead && s0_fire &&
     !t0_bankIdx.zip(s0_bankIdx).map { case (trainBank, predictBank) => trainBank === predictBank }.reduce(_ || _)
 
   private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
@@ -269,36 +269,36 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
 
   // only for perf
-  private val debug_readBankConflictReg     = RegNext(debug_readBankConflict)
-  private val debug_readBankConflictPos     = debug_readBankConflict && (!debug_readBankConflictReg)
-  private val debug_readBankConflictNeg     = !debug_readBankConflict && debug_readBankConflictReg
-  private val debug_readBankConflictDistCnt = RegInit(0.U(4.W))
-  private val debug_s0AlignedPc             = getAlignedPc(s0_startPc)
-  private val debug_s1AlignedPc             = getAlignedPc(s1_startPc)
-  private val debug_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
+  private val sim_readBankConflictReg     = RegNext(sim_readBankConflict)
+  private val sim_readBankConflictPos     = sim_readBankConflict && (!sim_readBankConflictReg)
+  private val sim_readBankConflictNeg     = !sim_readBankConflict && sim_readBankConflictReg
+  private val sim_readBankConflictDistCnt = RegInit(0.U(4.W))
+  private val sim_s0AlignedPc             = getAlignedPc(s0_startPc)
+  private val sim_s1AlignedPc             = getAlignedPc(s1_startPc)
+  private val sim_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
   // pred target within align 64B,and not blocked by s2
-  private val debug_readBankConflictShortLoop = debug_readBankConflictReg && s1_fire &&
-    debug_s1BankIdx.zip(s0_bankIdx).map { case (lastBank, bank) => lastBank === bank }.reduce(_ || _) &&
-    (debug_s0AlignedPc.toUInt - debug_s1AlignedPc.toUInt <= FetchBlockSize.U ||
-      debug_s1AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U) && s0_fire
-  private val debug_readBankConflictShortLoopReg = RegNext(debug_readBankConflictShortLoop)
-  private val debug_readBankConflictShortLoopNeg = !debug_readBankConflictShortLoop & debug_readBankConflictShortLoopReg
-  private val debug_readBankConflictShortLoopDistCnt = RegInit(0.U(4.W))
+  private val sim_readBankConflictShortLoop = sim_readBankConflictReg && s1_fire &&
+    sim_s1BankIdx.zip(s0_bankIdx).map { case (lastBank, bank) => lastBank === bank }.reduce(_ || _) &&
+    (sim_s0AlignedPc.toUInt - sim_s1AlignedPc.toUInt <= FetchBlockSize.U ||
+      sim_s1AlignedPc.toUInt - sim_s0AlignedPc.toUInt <= FetchBlockSize.U) && s0_fire
+  private val sim_readBankConflictShortLoopReg     = RegNext(sim_readBankConflictShortLoop)
+  private val sim_readBankConflictShortLoopNeg     = !sim_readBankConflictShortLoop & sim_readBankConflictShortLoopReg
+  private val sim_readBankConflictShortLoopDistCnt = RegInit(0.U(4.W))
   // dist cnt
-  debug_readBankConflictShortLoopDistCnt := Mux(
-    debug_readBankConflictShortLoopNeg,
+  sim_readBankConflictShortLoopDistCnt := Mux(
+    sim_readBankConflictShortLoopNeg,
     0.U,
     Mux(
-      debug_readBankConflictShortLoop,
-      debug_readBankConflictShortLoopDistCnt + 1.U,
-      debug_readBankConflictShortLoopDistCnt
+      sim_readBankConflictShortLoop,
+      sim_readBankConflictShortLoopDistCnt + 1.U,
+      sim_readBankConflictShortLoopDistCnt
     )
   )
 
-  debug_readBankConflictDistCnt := Mux(
-    debug_readBankConflictNeg,
+  sim_readBankConflictDistCnt := Mux(
+    sim_readBankConflictNeg,
     0.U,
-    Mux(debug_readBankConflict, debug_readBankConflictDistCnt + 1.U, debug_readBankConflictDistCnt)
+    Mux(sim_readBankConflict, sim_readBankConflictDistCnt + 1.U, sim_readBankConflictDistCnt)
   )
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -686,7 +686,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trace.useMeta := t3_useMeta
 
     trace.startPc := t3_startPc
-    trace.cfiPc   := t3_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
+    trace.cfiPc   := t3_branches(i).bits.sim_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
     trace.hasProvider       := t3_trainInfoVec(i).hasProvider
     trace.useProvider       := t3_trainInfoVec(i).useProvider
@@ -751,9 +751,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("total_train_read", t0_fire && t0_needRead)
-  XSPerfAccumulate("both_read", s0_fire && io.debug_trainValid && t0_needRead)
-  XSPerfAccumulate("read_conflict", debug_readBankConflict)
-  XSPerfAccumulate("read_no_conflict", debug_readBankNoConflict)
+  XSPerfAccumulate("both_read", s0_fire && io.sim_trainValid && t0_needRead)
+  XSPerfAccumulate("read_conflict", sim_readBankConflict)
+  XSPerfAccumulate("read_no_conflict", sim_readBankNoConflict)
   XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
@@ -836,8 +836,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
    */
   XSPerfHistogram(
     "read_conflict_bubble_dist",
-    debug_readBankConflictDistCnt,
-    debug_readBankConflictNeg,
+    sim_readBankConflictDistCnt,
+    sim_readBankConflictNeg,
     0,
     16
   )
@@ -849,8 +849,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
    */
   XSPerfHistogram(
     "read_conflict_loop_dist",
-    debug_readBankConflictShortLoopDistCnt,
-    debug_readBankConflictShortLoopNeg,
+    sim_readBankConflictShortLoopDistCnt,
+    sim_readBankConflictShortLoopNeg,
     0,
     16
   )

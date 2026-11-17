@@ -21,15 +21,15 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util.DecoupledIO
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundle, TLClientNode, TLIdentityNode, TLMasterParameters, TLMasterPortParameters}
-import utility.XSDebug
+import utility.{XSDebug => XSSim}
 
-class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
+class SimIdentityNode()(implicit p: Parameters) extends LazyModule  {
 
   val node = TLIdentityNode()
 
   val n = TLClientNode(Seq(TLMasterPortParameters.v1(
     Seq(
-      TLMasterParameters.v1("debug node")
+      TLMasterParameters.v1("sim node")
     )
   )))
 
@@ -37,21 +37,21 @@ class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
     val (out, _) = node.out(0)
     val (in, _) = node.in(0)
 
-    def debug(t: TLBundle, valid: Boolean = false): Unit ={
+    def sim(t: TLBundle, valid: Boolean = false): Unit ={
       def fire[T <: Data](x: DecoupledIO[T]) = if(valid) x.valid else x.fire
       val channels = Seq(t.a, t.b, t.c, t.d, t.e)
       channels.foreach { c =>
-        XSDebug(fire(c), " isFire:%d ", c.fire)
+        XSSim(fire(c), " isFire:%d ", c.fire)
         c.bits.dump(fire(c))
       }
     }
-    debug(in, false)
+    sim(in, false)
   }
 }
 
-object DebugIdentityNode {
+object SimIdentityNode {
   def apply()(implicit p: Parameters): TLIdentityNode = {
-    val identityNode = LazyModule(new DebugIdentityNode())
+    val identityNode = LazyModule(new SimIdentityNode())
     identityNode.node
   }
 }

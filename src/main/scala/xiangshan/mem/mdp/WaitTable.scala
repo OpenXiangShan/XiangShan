@@ -28,8 +28,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import utility._
-
+import utility.{XSDebug => XSSim, _}
 // 21264-like wait table, uses 2-bit counter
 class WaitTable(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -64,8 +63,8 @@ class WaitTable(implicit p: Parameters) extends XSModule {
     resetCounter:= 0.U
   }
 
-  // debug
-  XSDebug(io.update.valid, "%d: waittable update: pc %x data: %x\n", GTimer(), io.update.waddr, io.update.wdata)
+  // sim
+  XSSim(io.update.valid, "%d: waittable update: pc %x data: %x\n", GTimer(), io.update.waddr, io.update.wdata)
 
   XSPerfAccumulate("wait_table_bit_set", PopCount(data.map(d => d(1))))
 }

@@ -262,7 +262,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 
-    val debugTopDown = new LoadQueueTopDownIO
+    val simTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
     // Global stuck-recovery mode for loads that remain at the ROB head.
     val specialMode = Output(Bool())
@@ -828,11 +828,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := true.B
 
-    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    val sim_robIdx = enq.bits.uop.robIdx.asUInt
     XSError(
       needEnqueue(w) && enq.ready &&
       allocated(enqIndex) && !enq.bits.isLoadReplay,
-      p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
+      p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $sim_robIdx!")
 
     val enqFireBase = enq.fire && !cancelEnq(w)
     val replayInfo = enq.bits.rep_info
@@ -985,7 +985,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.lqFull := lqFull
 
   // Topdown
-  val robHeadVaddr = io.debugTopDown.robHeadVaddr
+  val robHeadVaddr = io.simTopDown.robHeadVaddr
 
   val uop_wrapper = Wire(Vec(LoadQueueReplaySize, new XSBundleWithMicroOp))
   (uop_wrapper.zipWithIndex).foreach {
@@ -1021,12 +1021,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   val rob_head_vio_replay = rob_head_nuke || rob_head_mem_amb
 
-  val rob_head_miss_in_dtlb = io.debugTopDown.robHeadMissInDTlb
-  io.debugTopDown.robHeadTlbReplay := rob_head_tlb_miss && !rob_head_miss_in_dtlb
-  io.debugTopDown.robHeadTlbMiss := rob_head_tlb_miss && rob_head_miss_in_dtlb
-  io.debugTopDown.robHeadLoadVio := rob_head_vio_replay
-  io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
-  io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
+  val rob_head_miss_in_dtlb = io.simTopDown.robHeadMissInDTlb
+  io.simTopDown.robHeadTlbReplay := rob_head_tlb_miss && !rob_head_miss_in_dtlb
+  io.simTopDown.robHeadTlbMiss := rob_head_tlb_miss && rob_head_miss_in_dtlb
+  io.simTopDown.robHeadLoadVio := rob_head_vio_replay
+  io.simTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
+  io.simTopDown.robHeadOtherReplay := rob_head_other_replay
   io.replayAllocate := allocated.asUInt.orR
 
   // Enter special mode after an aligned ROB-head request is written to the replay queue and

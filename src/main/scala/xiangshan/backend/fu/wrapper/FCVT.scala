@@ -56,7 +56,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
       BitPat.N(4)
     )
   )
-  if(backendParams.debugEn) {
+  if(backendParams.simEn) {
     dontTouch(inSew1H)
     dontTouch(outSew1H)
   }
@@ -142,7 +142,7 @@ class FCVTFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cf
       BitPat.N(4)
     )
   )
-  if(backendParams.debugEn) {
+  if(backendParams.simEn) {
     dontTouch(inSew1H)
     dontTouch(outSew1H)
   }

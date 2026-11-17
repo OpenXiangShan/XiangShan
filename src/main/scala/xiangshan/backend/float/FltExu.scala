@@ -92,7 +92,7 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
     exFadd(0).bits.bypassCtrl := ex(1).bypassCtrl
     exFadd(0).bits.fuSel := VecInit(param.fuConfigs.map(_.isFAlu.B))
     exFadd(0).bits.ctrl.latency := 1.U
-    exFadd(0).bits.debug.foreach(_ := ex(1).bits.debug.get)
+    exFadd(0).bits.sim.foreach(_ := ex(1).bits.sim.get)
   }.elsewhen(inEx.valid) {
     exFadd(0).bits := inEx.bits
     exFadd(0).bits.data.src := bypass.out.src

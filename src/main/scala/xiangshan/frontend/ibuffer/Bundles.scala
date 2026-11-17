@@ -58,7 +58,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt   = TriggerAction()
   val isLastInFtqEntry: Bool   = Bool()
 
-  val debug_seqNum: InstSeqNum = InstSeqNum()
+  val sim_seqNum: InstSeqNum = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst             := fetch.instrs(i)
@@ -70,7 +70,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     instrEndOffset   := fetch.instrEndOffset(i).offset
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
-    debug_seqNum     := fetch.debug_seqNum(i)
+    sim_seqNum       := fetch.sim_seqNum(i)
     this
   }
 
@@ -92,7 +92,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.isLastInFtqEntry   := isLastInFtqEntry
     result.vtype              := DontCare // assign outside
     result.specvtype          := DontCare // assign outside
-    result.debug_seqNum       := debug_seqNum
+    result.sim_seqNum         := sim_seqNum
     result.instrEndOffset     := instrEndOffset
     result
   }
@@ -133,7 +133,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
 
-  val debug_seqNum: InstSeqNum = InstSeqNum()
+  val sim_seqNum: InstSeqNum = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
@@ -162,7 +162,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.isLastInFtqEntry                              := isLastInFtqEntry
     cf.vtype                                         := vtype
     cf.specvtype                                     := specvtype
-    cf.debug_seqNum                                  := debug_seqNum
+    cf.sim_seqNum                                    := sim_seqNum
     cf
   }
 }

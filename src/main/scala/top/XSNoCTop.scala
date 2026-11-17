@@ -264,7 +264,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   // tie off core soft reset
   core_rst_node.out.head._1 := false.B.asAsyncReset
 
-  core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
+  core_with_l2.module.io.simTopDown.l3MissMatch := false.B
   core_with_l2.module.io.l3Miss := false.B
 }
 
@@ -512,8 +512,8 @@ class XSNoCDiffTop(implicit p: Parameters) extends XSNoCTop
     override protected def implicitReset: Reset = reset
 
     override def connectTopIOs(difftest: DifftestTopIO): Unit = {
-      val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
-      val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+      val hasPerf = !simOpts.FPGAPlatform && simOpts.EnableSimPerf
+      val hasLog = !simOpts.FPGAPlatform && simOpts.EnableSimLog
       val hasPerfLog = hasPerf || hasLog
       val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
       val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)

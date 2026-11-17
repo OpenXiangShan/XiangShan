@@ -19,7 +19,7 @@ package top
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, DFTOptionsKey, XSTileKey}
+import xiangshan.{SimOptionsKey, DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -112,7 +112,7 @@ object ArgParser {
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(UseDRAMSim = true)
           }), tail)
         case "--with-iommu" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -120,51 +120,51 @@ object ArgParser {
           }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableChiselDB = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableChiselDB = true)
           }), tail)
         case "--with-rollingdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableRollingDB = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableRollingDB = true)
           }), tail)
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableConstantin = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableConstantin = true)
           }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(FPGAPlatform = true)
           }), tail)
         case "--reset-gen" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(ResetGen = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(ResetGen = true)
           }), tail)
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableDifftest = true)
           }), tail)
         case "--full-basicdiff" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(FullBasicDiff = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(FullBasicDiff = true)
           }), tail)
         case "--disable-always-basic-diff" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
+            case SimOptionsKey => up(SimOptionsKey).copy(AlwaysBasicDiff = false)
           }), tail)
         case "--enable-log" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDebug = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableSimLog = true)
           }), tail)
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableSimPerf = false)
           }), tail)
         case "--perf-level" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(PerfLevel = value)
+            case SimOptionsKey => up(SimOptionsKey).copy(PerfLevel = value)
           }), tail)
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+            case SimOptionsKey => up(SimOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
         case "--external-llc" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -172,7 +172,7 @@ object ArgParser {
           }), tail)
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableSimFrontend = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableSimFrontend = true)
           }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -223,7 +223,7 @@ object ArgParser {
           }), tail)
         case "--sim-mem-size" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(SimMemSize = value.toLong * 1024 * 1024 * 1024) // GB
+            case SimOptionsKey => up(SimOptionsKey).copy(SimMemSize = value.toLong * 1024 * 1024 * 1024) // GB
           }), tail)
         case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -255,13 +255,13 @@ object ArgParser {
           }), tail)
         case "--disable-xmr" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableXMR = false)
+            case SimOptionsKey => up(SimOptionsKey).copy(EnableXMR = false)
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case "--dump-csr" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(DumpCSR = true)
+            case SimOptionsKey => up(SimOptionsKey).copy(DumpCSR = true)
           }), tail)
         case "--disable-cached-parameters"::tail => {
           nextOption(config.alter((site, here, up) => {
@@ -277,15 +277,15 @@ object ArgParser {
     val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
-        enableDebug = here(DebugOptionsKey).EnableDebug,
-        enablePerf = here(DebugOptionsKey).EnablePerfDebug,
-        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform,
-        enableXMR = here(DebugOptionsKey).EnableXMR
+        enableDebug = here(SimOptionsKey).EnableSimLog,
+        enablePerf = here(SimOptionsKey).EnableSimPerf,
+        fpgaPlatform = here(SimOptionsKey).FPGAPlatform,
+        enableXMR = here(SimOptionsKey).EnableXMR
       )
       case PerfCounterOptionsKey => PerfCounterOptions(
-        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
-        enablePerfDB = here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
-        perfLevel = XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
+        enablePerfPrint = here(SimOptionsKey).EnableSimPerf && !here(SimOptionsKey).FPGAPlatform,
+        enablePerfDB = here(SimOptionsKey).EnableRollingDB && !here(SimOptionsKey).FPGAPlatform,
+        perfLevel = XSPerfLevel.withName(here(SimOptionsKey).PerfLevel),
         perfDBHartID = 0
       )
     })

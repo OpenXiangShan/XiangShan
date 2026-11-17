@@ -23,7 +23,7 @@ import difftest._
 import freechips.rocketchip.util._
 import utility.MaskedRegMap.WritableMask
 import utils._
-import utility._
+import utility.{XSDebug => XSSim, _}
 import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
@@ -49,7 +49,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(Vstart())
   val vxrm = Input(UInt(2.W))
 
-  val diffVl = Option.when(backendParams.basicDebugEn)(Output(Vl()))
+  val diffVl = Option.when(backendParams.basicSimEn)(Output(Vl()))
 
   val setVstart = Output(Valid(UInt(XLEN.W)))
   val setVtype = Output(Valid(UInt(XLEN.W)))
@@ -228,7 +228,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.debugMode := debugMode
 
   val dpcPrev = RegNext(dpc)
-  XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x\n", dpc, dpcPrev)
+  XSSim(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x\n", dpc, dpcPrev)
 
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
@@ -457,7 +457,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val sieMask = "h222".U & mideleg
   val sipMask = "h222".U & mideleg
   val sipWMask = "h2".U(XLEN.W) // ssip is writeable in smode
-  val satp = if(EnableTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
+  val satp = if(EnableTlbSim) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
   // TODO: use config to control the length of asid
@@ -1096,7 +1096,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrio.customCtrl.frontend_trigger.tUpdate.valid := RegNext(RegNext(frontendTriggerUpdate))
   csrio.customCtrl.mem_trigger.tUpdate.valid := RegNext(RegNext(memTriggerUpdate))
-  XSDebug(triggerEnableVec.reduce(_ || _), p"Debug Mode: At least 1 trigger is enabled," +
+  XSSim(triggerEnableVec.reduce(_ || _), p"Debug Mode: At least 1 trigger is enabled," +
     p"trigger enable is ${Binary(triggerEnableVec.asUInt)}\n")
 
   // CSR inst decode
@@ -1182,7 +1182,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       debugModeNew := false.B
       debugIntrEnable := true.B
       debugMode := debugModeNew
-      XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
+      XSSim("Debug Mode: Dret executed, returning to %x.", retTarget)
     }.elsewhen(isMret && !illegalMret) {
       val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
       val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1262,7 +1262,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrExceptionVec(virtualInstr) := isIllegalVAccess || isIllegalVPrivOp
   io.out.bits.ctrl.exceptionVec.get := csrExceptionVec
 
-  XSDebug(io.in.valid, s"Debug Mode: an Ebreak is executed, ebreak cause enter-debug-mode exception ? ${raiseDebugException}\n")
+  XSSim(io.in.valid, s"Debug Mode: an Ebreak is executed, ebreak cause enter-debug-mode exception ? ${raiseDebugException}\n")
 
   /**
     * Exception and Intr
@@ -1275,7 +1275,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     ((privilegeMode === ModeM) && mstatusStruct.ie.m) || (privilegeMode < ModeM))
 
   val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
-  XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
+  XSSim(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(13, Bool()))
   val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie)
@@ -1301,7 +1301,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val iexceptionGPAddr = Mux(ivmEnable, SignExt(csrio.exception.bits.gpaddr, XLEN), csrio.exception.bits.gpaddr)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
-  XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
+  XSSim(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
   val hasDebugIntr = intrNO === IRQ_DEBUG.U && hasIntr
 
   // exceptions from rob need to handle
@@ -1331,8 +1331,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val triggerFireAction = PriorityMux(triggerFireOH, tdata1WireVec.map(_.getTriggerAction)).asUInt
 
 
-  XSDebug(hasSingleStep, "Debug Mode: single step exception\n")
-  XSDebug(hasTriggerFire, p"Debug Mode: trigger fire, frontend hit vec ${Binary(csrio.exception.bits.trigger.frontendHit.asUInt)} " +
+  XSSim(hasSingleStep, "Debug Mode: single step exception\n")
+  XSSim(hasTriggerFire, p"Debug Mode: trigger fire, frontend hit vec ${Binary(csrio.exception.bits.trigger.frontendHit.asUInt)} " +
     p"backend hit vec ${Binary(csrio.exception.bits.trigger.backendHit.asUInt)}\n")
 
   val hasExceptionVec = csrio.exception.bits.exceptionVec
@@ -1348,10 +1348,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val hasDebugTrap = hasDebugException || hasDebugIntr
   val ebreakEnterParkLoop = debugMode && hasExceptionIntr
 
-  XSDebug(hasExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
+  XSSim(hasExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     dexceptionPC, intrNO, intrVec, exceptionNO, hasExceptionVec.asUInt
   )
-  XSDebug(hasExceptionIntr,
+  XSSim(hasExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
     dexceptionPC,
     mstatus,
@@ -1479,7 +1479,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       when(hasDebugIntr) {
         dpc := iexceptionPC
         dcsrNew.cause := CAUSE_HALTREQ
-        XSDebug(hasDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
+        XSSim(hasDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
       }.otherwise { // hasDebugException
         dpc := iexceptionPC // TODO: check it when hasSingleStep
         dcsrNew.cause := MuxCase(0.U, Seq(

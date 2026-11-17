@@ -101,7 +101,7 @@ object Bundles {
     val storeSetHit = Bool() // inst has been allocated an store set
     val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
 
-    val debug_robIdx = OptionWrapper(debugEn, new RobPtr)
+    val sim_robIdx = OptionWrapper(simEn, new RobPtr)
   }
 
   class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {
@@ -205,7 +205,7 @@ object Bundles {
     val paddr = Output(UInt(PAddrBits.W))
     val mask = Output(UInt((VLEN/8).W))
     val uop = Output(new DynInst) // for replay
-    val pc = Output(UInt(VAddrBits.W)) //for debug
+    val pc = Output(UInt(VAddrBits.W)) //for sim
     val valid = Output(Bool())
 
     val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
@@ -236,7 +236,7 @@ object Bundles {
   // Difference between PipeLoadForwardQueryIO and LoadForwardQueryIO:
   // PipeIO use predecoded sqIdxMask for better forward timing
   class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO {
-    // val sqIdx = Output(new SqPtr) // for debug, should not be used in pipeline for timing reasons
+    // val sqIdx = Output(new SqPtr) // for sim, should not be used in pipeline for timing reasons
     // sqIdxMask is calcuated in earlier stage for better timing
     val sqIdxMask = Output(UInt(StoreQueueSize.W))
 
@@ -294,7 +294,7 @@ object Bundles {
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val pc = UInt(VAddrBits.W)
-    val debugInfo = new PerfDebugInfo
+    val simInfo = new PerfSimInfo
   }
 
   class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
@@ -439,7 +439,7 @@ class ToSbufferDifftestInfoBundle(implicit p: Parameters) extends XSBundle{
 }
 
 
-class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
+class VecMissalignedSimBundle (implicit p: Parameters) extends XSBundle {
   val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
   val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
 }

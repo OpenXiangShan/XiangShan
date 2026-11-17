@@ -30,7 +30,7 @@ import chisel3.util._
 import difftest._
 import xiangshan._
 import utils._
-import utility._
+import utility.{XSDebug => XSSim, _}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -144,7 +144,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     info.ifetch := ifetch
     info.s2xlate := getS2xlate(isVirt, csr.vsatp.mode, csr.hgatp.mode)
     vmEnable(i) := !isVirt && (
-      if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
+      if (EnableTlbSim) (Sv39Enable || Sv48Enable)
       else (Sv39Enable || Sv48Enable) && (info.mode < ModeM))
     val s2xlateEnable = isVirt &&
       (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (info.mode < ModeM)
@@ -157,7 +157,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     info
   }
   val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, accessInfo(i).mode))
-  val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
+  val isRobMatch = (0 until Width).map(i => req_out(i).sim.robIdx === io.robPendingPtr)
   val canGetGpa = (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
   for (i <- 0 until Width) {
@@ -177,8 +177,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     entries.io.r.req(i).valid := io.requestor(i).req.valid
     entries.io.r.req(i).bits := preCheck(i).query
     // TODO: RegNext enable:req.valid
-    resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
-    resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
+    resp(i).bits.sim.isFirstIssue := RegEnable(req(i).bits.sim.isFirstIssue, req(i).valid)
+    resp(i).bits.sim.robIdx := RegEnable(req(i).bits.sim.robIdx, req(i).valid)
   }
 
   // read TLB, get hit/miss, paddr, perm bits
@@ -220,8 +220,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(i).vaddr) && need_gpa_s2xlate === accessInfo(i).s2xlate
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
     val isPrefetch = req_out(i).isPrefetch
-    val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
-    val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
+    val currentRedirect = req_out(i).sim.robIdx.needFlush(redirect)
+    val lastCycleRedirect = req_out(i).sim.robIdx.needFlush(RegNext(redirect))
 
     when (
       (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect)) ||
@@ -244,7 +244,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
         need_gpa_vpn := get_pn(req_out(i).vaddr)
         need_gpa_s2xlate := accessInfo(i).s2xlate
         resp_gpa_refill := false.B
-        need_gpa_robidx := req_out(i).debug.robIdx
+        need_gpa_robidx := req_out(i).sim.robIdx
         need_gpa_robidx_valid := true.B
         when (bypass.hitFast) {
           need_clear_need_gpa_vec(i) := true.B
@@ -321,7 +321,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
     resp(i).bits.fastMiss := !result.hit && enable
 
-    XSDebug(req_out_v(i), p"(${i.U}) hit:${result.hit} miss:${result.miss} ppn:${Hexadecimal(ppn(0))} perm:${result.perm(0)}\n")
+    XSSim(req_out_v(i), p"(${i.U}) hit:${result.hit} miss:${result.miss} ppn:${Hexadecimal(ppn(0))} perm:${result.perm(0)}\n")
     result
   }
 
@@ -459,9 +459,9 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   // perf log
   for (i <- 0 until Width) {
-    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && RegEnable(req(i).bits.sim.isFirstIssue, req(i).valid))
     XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable)
-    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && missVec(i) && RegEnable(req(i).bits.sim.isFirstIssue, req(i).valid))
     XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && missVec(i))
     XSPerfAccumulate(s"ptw_req${i}", ptw.req(i).fire)
     XSPerfAccumulate(s"tlb_replay${i}", io.tlbreplay(i))
@@ -472,16 +472,16 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   // Log
   for(i <- 0 until Width) {
-    XSDebug(req(i).valid, p"req(${i.U}): (${req(i).valid} ${req(i).ready}) ${req(i).bits}\n")
-    XSDebug(resp(i).valid, p"resp(${i.U}): (${resp(i).valid} ${resp(i).ready}) ${resp(i).bits}\n")
+    XSSim(req(i).valid, p"req(${i.U}): (${req(i).valid} ${req(i).ready}) ${req(i).bits}\n")
+    XSSim(resp(i).valid, p"resp(${i.U}): (${resp(i).valid} ${resp(i).ready}) ${resp(i).bits}\n")
   }
 
-  XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
-  XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
+  XSSim(io.sfence.valid, p"Sfence: ${io.sfence}\n")
+  XSSim(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
+    XSSim(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
   }
-  XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
+  XSSim(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
   println(s"${q.name}: page: ${q.NWays} ${q.Associative} ${q.Replacer.get}")
 
@@ -651,7 +651,7 @@ class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbMod
   val Sv48x4Enable = csr.hgatp.mode === Sv48
 
   val prevmEnable = !(virt_in || req.hyperinst) && (
-    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
+    if (EnableTlbSim) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (premode < ModeM))
   val pres2xlateEnable = (virt_in || req.hyperinst) &&
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (premode < ModeM)

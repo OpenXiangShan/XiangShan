@@ -240,20 +240,20 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
   private val intDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isIntSchd, Wire(Vec(intSchdParams.numPregs, UInt(XLEN.W))))
+    OptionWrapper(backendParams.basicSimEn && param.isIntSchd, Wire(Vec(intSchdParams.numPregs, UInt(XLEN.W))))
   private val fpDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isFpSchd, Wire(Vec(fpSchdParams.numPregs, UInt(XLEN.W))))
+    OptionWrapper(backendParams.basicSimEn && param.isFpSchd, Wire(Vec(fpSchdParams.numPregs, UInt(XLEN.W))))
   private val vfDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(vecSchdParams.numPregs, UInt(VLEN.W))))
+    OptionWrapper(backendParams.basicSimEn && param.isVecSchd, Wire(Vec(vecSchdParams.numPregs, UInt(VLEN.W))))
   private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
+    OptionWrapper(backendParams.basicSimEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
   private val diffNumWidth = 64
   private val vecDiffNumPregs = VLEN / diffNumWidth * vecSchdParams.numPregs
   private val vecDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(vecDiffNumPregs, UInt(diffNumWidth.W))))
+    OptionWrapper(backendParams.basicSimEn && param.isVecSchd, Wire(Vec(vecDiffNumPregs, UInt(diffNumWidth.W))))
   private val vlDiffReadData: Option[UInt] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(UInt(VlData().dataWidth.W)))
+    OptionWrapper(backendParams.basicSimEn && param.isVecSchd, Wire(UInt(VlData().dataWidth.W)))
 
   vecDiffReadData.foreach(_ :=
     vfDiffReadData
@@ -268,7 +268,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
 
   io.toWakeupQueueRCIdx := 0.U.asTypeOf(io.toWakeupQueueRCIdx)
   io.toBypassNetworkRCData := 0.U.asTypeOf(io.toBypassNetworkRCData)
-  val splitNum = if (backendParams.debugEn) 1 else 4
+  val splitNum = if (backendParams.simEn) 1 else 4
   if (param.isIntSchd) {
     val intRfRaddr = Wire(Vec(params.numPregRd(IntData()), Vec(intPregNumBank, UInt(intArbiterAddrWidth.W))))
     val intRfWen = Wire(Vec(io.fromIntWb.get.length, Bool()))
@@ -287,16 +287,16 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     IntRegFileBank(
       "IntRegFile", intSchdParams.numPregs, intPregNumBank,
       intRfRaddr, intRfRdata.get, intRfWen, intRfWaddr, intRfWdata,
-      debugAllRData = intDiffReadData
+      simAllRData = intDiffReadData
     )
     FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata.get, vlRfWen, vlRfWaddr, vlRfWdata,
       bankNum = 1,
       isVlRegfile = true,
-      debugReadAddr = vlDiffRead.map(_._1),
-      debugReadData = vlDiffRead.map(_._2)
+      simReadAddr = vlDiffRead.map(_._1),
+      simReadData = vlDiffRead.map(_._2)
     )
     VfRegFile("V0RegFile", V0PhyRegs, v0RfSplitNum, v0RfRaddr, v0RfRdata.get, v0RfWen, v0RfWaddr, v0RfWdata,
-      debugAllRData = None
+      simAllRData = None
     )
     intRfWaddr := io.fromIntWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     intRfWdata := io.fromIntWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
@@ -383,7 +383,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     val fpRfWdata = Wire(Vec(io.fromFpWb.get.length, UInt(fpSchdParams.rfDataWidth.W)))
     FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum, fpRfRaddr, fpRfRdata.get, fpRfWen, fpRfWaddr, fpRfWdata,
       bankNum = 1,
-      debugAllRData = fpDiffReadData
+      simAllRData = fpDiffReadData
     )
     fpRfWaddr := io.fromFpWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     fpRfWdata := io.fromFpWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
@@ -415,16 +415,16 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     val vlRfWaddr = Wire(Vec(io.fromVlWb.get.length, UInt(log2Up(VlPhyRegs).W)))
     val vlRfWdata = Wire(Vec(io.fromVlWb.get.length, UInt(VlData().dataWidth.W)))
     VfRegFile("VfRegFile", vecSchdParams.numPregs, splitNum, vfRfRaddr, vfRfRdata.get, vfRfWen, vfRfWaddr, vfRfWdata,
-      debugAllRData = vfDiffReadData
+      simAllRData = vfDiffReadData
     )
     VfRegFile("V0RegFile", V0PhyRegs, v0RfSplitNum, v0RfRaddr, v0RfRdata.get, v0RfWen, v0RfWaddr, v0RfWdata,
-      debugAllRData = None
+      simAllRData = None
     )
     FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata.get, vlRfWen, vlRfWaddr, vlRfWdata,
       bankNum = 1,
       isVlRegfile = true,
-      debugReadAddr = vlDiffRead.map(_._1),
-      debugReadData = vlDiffRead.map(_._2)
+      simReadAddr = vlDiffRead.map(_._1),
+      simReadData = vlDiffRead.map(_._2)
     )
     vfRfWaddr := io.fromVfWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     vfRfWdata := io.fromVfWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
@@ -607,8 +607,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       val s1_ready = s1_toExuReady(i)(j)
       val s1_data = s1_toExuDataWire(i)(j)
       val s0: DecoupledIO[Og0InUop] = fromIQ(i)(j) // s0
-      s0.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset))
-      s1_data.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset))
+      s0.bits.sim_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset))
+      s1_data.sim_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset))
 
       for (k <- s0.bits.dataSources.indices) {
         rdSrcsNotBlock(i)(j)(k) := intRdArbWinner(i)(j)(k) && fpRdArbWinner(i)(j)(k) && vfRdArbWinner(i)(j)(k)
@@ -691,7 +691,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
 
 
-  if (backendParams.debugEn){
+  if (backendParams.simEn){
     dontTouch(og0_cancel_no_load)
     dontTouch(is_0latency)
     dontTouch(og0_cancel_delay)
@@ -892,7 +892,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
   val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getExuRCWriteSize,
-    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
+    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.simEn)
   )
 
   val toBypassNetworkRCData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
@@ -903,10 +903,10 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getExuRCWriteSize, Output(UInt(RegCacheIdxWidth.W)))
 
-  val diffVlRat = Option.when(params.basicDebugEn && param.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
-  val diffVl = Option.when(params.basicDebugEn && param.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
+  val diffVlRat = Option.when(params.basicSimEn && param.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
+  val diffVl = Option.when(params.basicSimEn && param.isVecSchd)(Output(UInt(VlData().dataWidth.W)))
 
-  val diffRcIdx = Option.when(params.basicDebugEn && param.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
+  val diffRcIdx = Option.when(params.basicSimEn && param.needWriteRegCache)(Input(Vec(params.getExuRCWriteSize, new DiffRCIdx)))
 
   val uopTopDown = new UopTopDown
 }

@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.XSDebug
+import utility.{XSDebug => XSSim}
 import xiangshan._
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
@@ -92,12 +92,12 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.robIdx := uop.ctrl.robIdx
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
-  io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
-  io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.out.bits.perfSimInfo.foreach(_ := io.in.bits.perfSimInfo.get)
+  io.out.bits.sim_seqNum.foreach(_ := io.in.bits.sim_seqNum.get)
 
-  XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
-  XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
-  XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
+  XSSim(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
+  XSSim(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
+  XSSim(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
 
   assert(!io.out.valid || io.out.ready, "when fence is out valid, out ready should always be true")
 }

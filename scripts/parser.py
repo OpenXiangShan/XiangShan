@@ -57,13 +57,13 @@ class VModule(object):
         self.in_difftest = False
 
     def add_line(self, line):
-        debug_dontCare = False
+        sim_dontCare = False
         if "RenameTable" in self.name:
-            if line.strip().startswith("assign io_debug_rdata_"):
-                debug_dontCare = True
+            if line.strip().startswith("assign io_sim_rdata_"):
+                sim_dontCare = True
         elif "SynRegfileSlice" in self.name:
-            if line.strip().startswith("assign io_debug_ports_"):
-                debug_dontCare = True
+            if line.strip().startswith("assign io_sim_ports_"):
+                sim_dontCare = True
 
         # start of difftest module
         difftest_match = self.difftest_module_re.match(line)
@@ -71,13 +71,13 @@ class VModule(object):
             self.in_difftest = True
             self.lines.append("`ifndef SYNTHESIS\n")
 
-        if debug_dontCare:
+        if sim_dontCare:
             self.lines.append("`ifndef SYNTHESIS\n")
         self.lines.append(line)
-        if debug_dontCare:
+        if sim_dontCare:
             self.lines.append("`else\n")
-            debug_dontCare_name = line.strip().split(" ")[1]
-            self.lines.append(f"  assign {debug_dontCare_name} = 0;\n")
+            sim_dontCare_name = line.strip().split(" ")[1]
+            self.lines.append(f"  assign {sim_dontCare_name} = 0;\n")
             self.lines.append("`endif\n")
 
         # end of difftest module

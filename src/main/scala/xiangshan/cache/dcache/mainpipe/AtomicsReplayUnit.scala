@@ -19,7 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.XSDebug
+import utility.{XSDebug => XSSim}
 
 class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
 {
@@ -49,7 +49,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   io.block_addr.bits  := req.addr
 
 
-  XSDebug(state =/= s_invalid, "AtomicsReplayEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
+  XSSim(state =/= s_invalid, "AtomicsReplayEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
 
   // --------------------------------------------
   // s_invalid: receive requests
@@ -128,7 +128,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     }
   }
 
-  // debug output
+  // sim output
   // when (io.lsu.req.fire) {
   //   io.lsu.req.bits.dump()
   // }

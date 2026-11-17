@@ -25,12 +25,12 @@ import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
-import utility._
+import utility.{XSDebug => XSSim, _}
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import utils._
 import xiangshan._
-import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
+import xiangshan.backend.ctrlblock.{SimLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.FuType._
@@ -38,7 +38,7 @@ import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.rob.Rob.RobDebugRollingIO
+import xiangshan.backend.rob.Rob.RobSimRollingIO
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
@@ -79,8 +79,8 @@ trait HasMemBlockParameters extends HasXSParameter {
   val UncacheWBPort  = 2
   val NCWBPorts: Seq[Int] = 0 until LoadPipelineWidth // TODO: remove this
 
-  def debugEn: Boolean = p(DebugOptionsKey).EnableDifftest
-  def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
+  def simEn: Boolean = p(SimOptionsKey).EnableDifftest
+  def basicSimEn(implicit p: Parameters): Boolean = p(SimOptionsKey).AlwaysBasicDiff || simEn
   def pageOffset: Int      = PageOffsetWidth
 
   def arbiter[T <: Bundle](
@@ -174,8 +174,8 @@ class VStd(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
   io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
   io.out.bits.ctrl.isRVC.foreach(_ := false.B)
-  io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
-  io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.out.bits.perfSimInfo.foreach(_ := io.in.bits.perfSimInfo.get)
+  io.out.bits.sim_seqNum.foreach(_ := io.in.bits.sim_seqNum.get)
 }
 
 class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
@@ -236,7 +236,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val toLsqEnqCtrl = new ToLsqEnqCtrl(hasStore = true, hasLoad = true)
   }
 
-  val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+  val storeSimInfo = Vec(EnsbufferWidth, new Bundle {
     val robidx = Output(new RobPtr)
     val pc     = Input(UInt(VAddrBits.W))
     val storeOffset = Option.when(env.EnableDifftest)(Input(UInt(log2Ceil(RenameWidth + 1).W)))
@@ -393,7 +393,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
-    val debug_ls = new DebugLSIO
+    val sim_ls = new SimLSIO
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val l2PfqBusy = Input(Bool())
@@ -401,11 +401,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_pmp_resp = new PMPRespBundle
     val l2_flush_done = Input(Bool())
 
-    val debugTopDown = new Bundle {
+    val simTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
       val toCore = new MemCoreTopDownIO
     }
-    val debugRolling = Flipped(new RobDebugRollingIO)
+    val simRolling = Flipped(new RobSimRollingIO)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val fromTopToBackend = Input(new Bundle {
@@ -474,10 +474,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val writebackVldu = vecWriteback
 
   intWriteback.zipWithIndex.foreach{ case (wb, i) =>
-    wb.toRob.bits.debugInfo.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
+    wb.toRob.bits.simInfo.sim_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
   }
   vecWriteback.zipWithIndex.foreach{ case (wb, i) =>
-    wb.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
+    wb.sim_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
   }
 
   dontTouch(io.inner_hartId)
@@ -721,7 +721,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbreplay_reg = GatedValidRegNext(tlbreplay)
   val dtlb_ld0_tlbreplay_reg = GatedValidRegNext(dtlb_ld(0).tlbreplay)
 
-  if (backendParams.debugEn){ dontTouch(tlbreplay) }
+  if (backendParams.simEn){ dontTouch(tlbreplay) }
 
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
@@ -758,7 +758,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
   val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
 
-  lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
+  lsq.io.simTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
 
   // pmp
   val pmp = Module(new PMP())
@@ -863,8 +863,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.prefetch_req.bits <> l1_pf_req.bits
 
   /** l1 pf fuzzer interface */
-  val DebugEnableL1PFFuzzer = false
-  if (DebugEnableL1PFFuzzer) {
+  val SimEnableL1PFFuzzer = false
+  if (SimEnableL1PFFuzzer) {
     // l1 pf req fuzzer
     val fuzzer = Module(new L1PrefetchFuzzer())
     fuzzer.io.vaddr := DontCare
@@ -878,10 +878,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   for (i <- 0 until LduCnt) {
-    io.debug_ls.debugLsInfo(i) := newLoadUnits(i).io.debugInfo
+    io.sim_ls.simLsInfo(i) := newLoadUnits(i).io.simInfo
   }
   for (i <- 0 until StaCnt) {
-    io.debug_ls.debugLsInfo.drop(LduCnt)(i) := storeUnits(i).io.debugInfo
+    io.sim_ls.simLsInfo.drop(LduCnt)(i) := storeUnits(i).io.simInfo
   }
 
   io.mem_to_ooo.lsTopdownInfo := newLoadUnits.map(_.io.topDownInfo)
@@ -899,7 +899,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
 
-  XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
+  XSSim(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
   for (j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
@@ -1169,7 +1169,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Initialize when unenabled difftest.
   sbuffer.io.diffStore := DontCare
   lsq.io.diffStore.foreach(_ := DontCare)
-  io.mem_to_ooo.storeDebugInfo := DontCare
+  io.mem_to_ooo.storeSimInfo := DontCare
   // store event difftest information
   if (env.EnableDifftest) {
     // diffStoreEvent for vSegment, cacheableStore and ncStore
@@ -1177,10 +1177,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.get.diffInfo(i)
       sbuffer.io.diffStore.cacheableStore(i) := lsq.io.diffStore.get.cacheableStore(i)
       sbuffer.io.diffStore.ncStore := lsq.io.diffStore.get.ncStore
-      io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
-      sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
-      sbuffer.io.diffStoreOffset.get(i) := io.mem_to_ooo.storeDebugInfo(i).storeOffset.get
-      sbuffer.io.diffStorePreCommit.get(i) := io.mem_to_ooo.storeDebugInfo(i).preCommit.get
+      io.mem_to_ooo.storeSimInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
+      sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeSimInfo(i).pc
+      sbuffer.io.diffStoreOffset.get(i) := io.mem_to_ooo.storeSimInfo(i).storeOffset.get
+      sbuffer.io.diffStorePreCommit.get(i) := io.mem_to_ooo.storeSimInfo(i).preCommit.get
     }
   }
 
@@ -1317,7 +1317,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pfCtrl.toL2PrefetchCtrl(), 2)
 
   // reset tree of MemBlock
-  if (p(DebugOptionsKey).ResetGen) {
+  if (p(SimOptionsKey).ResetGen) {
     val leftResetTree = ResetGenNode(
       Seq(
         ModuleNode(ptw)
@@ -1377,16 +1377,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // top-down info
-  dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
-  dtlbRepeater.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
-  lsq.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
-  io.debugTopDown.toCore.robHeadMissInDCache := dcache.io.debugTopDown.robHeadMissInDCache
-  io.debugTopDown.toCore.robHeadTlbReplay := lsq.io.debugTopDown.robHeadTlbReplay
-  io.debugTopDown.toCore.robHeadTlbMiss := lsq.io.debugTopDown.robHeadTlbMiss
-  io.debugTopDown.toCore.robHeadLoadVio := lsq.io.debugTopDown.robHeadLoadVio
-  io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
-  dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
-  dcache.io.debugRolling := io.debugRolling
+  dcache.io.simTopDown.robHeadVaddr := io.simTopDown.robHeadVaddr
+  dtlbRepeater.io.simTopDown.robHeadVaddr := io.simTopDown.robHeadVaddr
+  lsq.io.simTopDown.robHeadVaddr := io.simTopDown.robHeadVaddr
+  io.simTopDown.toCore.robHeadMissInDCache := dcache.io.simTopDown.robHeadMissInDCache
+  io.simTopDown.toCore.robHeadTlbReplay := lsq.io.simTopDown.robHeadTlbReplay
+  io.simTopDown.toCore.robHeadTlbMiss := lsq.io.simTopDown.robHeadTlbMiss
+  io.simTopDown.toCore.robHeadLoadVio := lsq.io.simTopDown.robHeadLoadVio
+  io.simTopDown.toCore.robHeadLoadMSHR := lsq.io.simTopDown.robHeadLoadMSHR
+  dcache.io.simTopDown.robHeadOtherReplay := lsq.io.simTopDown.robHeadOtherReplay
+  dcache.io.simRolling := io.simRolling
 
   io.topDownInfo.toBackend.replayAllocate := lsq.io.replayAllocate
   io.topDownInfo.toBackend.sqFull  := lsq.io.sqFull
@@ -1600,7 +1600,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     cg.cgen := false.B
   }
 
-  // sram debug
+  // sram sim
   sigFromSrams.foreach({ case sig => sig := DontCare })
   sigFromSrams.zip(io.dft).foreach {
     case (sig, dft) =>
@@ -1638,7 +1638,7 @@ class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
 
-  if (p(DebugOptionsKey).ResetGen) {
+  if (p(SimOptionsKey).ResetGen) {
     ResetGen(
       ResetGenNode(Seq(ModuleNode(wrapper.inner.module))),
       reset, sim = false, io.dft_reset

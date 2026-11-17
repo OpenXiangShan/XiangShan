@@ -24,7 +24,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
-import utility._
+import utility.{XSDebug => XSSim, _}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
@@ -676,7 +676,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
 
-  XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
+  XSSim(p"[ptw] level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("ptw_fsm_req_count", io.req.fire)

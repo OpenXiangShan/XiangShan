@@ -56,7 +56,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     val exceptionInfo = ValidIO(new MemExceptionInfo)
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
-  io.in.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset))
+  io.in.bits.sim_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset))
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
@@ -503,9 +503,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dtlb.req.bits.checkfullva := true.B
   io.dtlb.resp.ready      := true.B
   io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
-  io.dtlb.req.bits.debug.pc := uop.pc
-  io.dtlb.req.bits.debug.robIdx := uop.robIdx
-  io.dtlb.req.bits.debug.isFirstIssue := false.B
+  io.dtlb.req.bits.sim.pc := uop.pc
+  io.dtlb.req.bits.sim.robIdx := uop.robIdx
+  io.dtlb.req.bits.sim.isFirstIssue := false.B
 
   // send req to sbuffer to flush it if it is not empty
   io.flush_sbuffer.valid := !sbuffer_empty && (
@@ -539,13 +539,13 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)
-  io.out.toRob.bits.debugInfo.isNCIO.foreach(_ := false.B)
-  io.out.toRob.bits.debugInfo.isPerfCnt.foreach(_ := DontCare)
-  io.out.toRob.bits.debugInfo.isMMIO.foreach(_ := is_mmio)
-  io.out.toRob.bits.debugInfo.paddr.foreach(_ := paddr)
-  io.out.toRob.bits.debugInfo.vaddr.foreach(_ := vaddr)
-  io.out.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
-  io.out.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
+  io.out.toRob.bits.simInfo.isNCIO.foreach(_ := false.B)
+  io.out.toRob.bits.simInfo.isPerfCnt.foreach(_ := DontCare)
+  io.out.toRob.bits.simInfo.isMMIO.foreach(_ := is_mmio)
+  io.out.toRob.bits.simInfo.paddr.foreach(_ := paddr)
+  io.out.toRob.bits.simInfo.vaddr.foreach(_ := vaddr)
+  io.out.toRob.bits.simInfo.sim_seqNum.foreach(_ := uop.sim_seqNum)
+  io.out.toRob.bits.simInfo.perfSimInfo.foreach(_ := uop.perfSimInfo)
 
   io.dcache.req.valid := Mux(
     io.dcache.req.bits.cmd === M_XLR,

@@ -57,8 +57,8 @@ class FltIssuePipe(
   val ex0Resp = out.ex0Resp
   val ex1Resp = out.ex1Resp
 
-  is0.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
-  is1.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
+  is0.bits.sim.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
+  is1.bits.sim.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
 
   /**
    * is0 stage
@@ -151,16 +151,16 @@ class FltIssuePipe(
     }.reduce(_ || _) ||
     is0LoadCancel(srcIdx) || (if (srcIdx == 2) is0FmaM4NoM2Cancel else false.B)
   }
-  is0Resp.debugCancelSource.foreach { source =>
+  is0Resp.simCancelSource.foreach { source =>
     val loadCancel = is0LoadCancel.asUInt.orR ||
       (is0FmaM4NoM2Cancel && is0.bits.fmaSrc3LoadM4.get)
     source := Mux(is0Resp.fail, Mux(loadCancel, IQCancelSource.ld, IQCancelSource.og0), IQCancelSource.none)
   }
-  is1Resp.debugCancelSource.foreach(_ := Mux(is1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
+  is1Resp.simCancelSource.foreach(_ := Mux(is1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
   // EX0 resource rejection uses the late issue-cancel class; the other EX0 and EX1 failures are load cancellations.
-  ex0Resp.debugCancelSource.foreach(_ := Mux(ex0Resp.fail,
+  ex0Resp.simCancelSource.foreach(_ := Mux(ex0Resp.fail,
     Mux(ex0Resp.srcCancel.asUInt.orR, IQCancelSource.ld, IQCancelSource.og1), IQCancelSource.none))
-  ex1Resp.debugCancelSource.foreach(_ := Mux(ex1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
+  ex1Resp.simCancelSource.foreach(_ := Mux(ex1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
   is1RespSrcCancelNext.zipWithIndex.map { case (srcCancel, srcIdx) =>
     srcCancel := is0.valid && ldWBPort.zip(ldCancelVec).map { case (wbIdx, ldCancel) =>
       is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay1 && ldCancel
@@ -213,7 +213,7 @@ class FltIssuePipe(
   ex0Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
   ex0Next.bits.data.pc.foreach(_ := ???)
   ex0Next.bits.bypassCtrl.fromIssueDeq(is1.bits)
-  ex0Next.bits.debug.foreach(_ := is1.bits.debug.get)
+  ex0Next.bits.sim.foreach(_ := is1.bits.sim.get)
 
   ex0Next.bits.data.src.zipWithIndex.foreach {
     case (src, srcIdx) =>

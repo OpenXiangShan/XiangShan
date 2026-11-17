@@ -53,9 +53,9 @@ class IssuePipe(
   val is0Resp = out.is0Resp
   val is1Resp = out.is1Resp
 
-  is0.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
-  is1.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
-  is2.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is2.valid, clock, reset))
+  is0.bits.sim.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
+  is1.bits.sim.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
+  is2.bits.sim.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is2.valid, clock, reset))
 
   /**
    * is0 stage
@@ -176,7 +176,7 @@ class IssuePipe(
   is2Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
   is2Next.bits.data.pc.foreach(_ := ???)
   is2Next.bits.bypassCtrl.fromIssueDeq(is1.bits)
-  is2Next.bits.debug.foreach(_ := is1.bits.debug.get)
+  is2Next.bits.sim.foreach(_ := is1.bits.sim.get)
 
   is2Next.bits.data.src.zipWithIndex.foreach {
     case (src, srcIdx) =>

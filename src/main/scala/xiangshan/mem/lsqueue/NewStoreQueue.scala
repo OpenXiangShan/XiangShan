@@ -130,14 +130,14 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val prefetch                 = Bool() //TODO: need it ?
   val isHyper                  = Bool()
 
-  // debug signal
-  val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
-  val debugVaddr               = Option.when(debugEn)(UInt((VAddrBits).W))
-  val debugData                = Option.when(debugEn)(UInt((XLEN).W))
+  // sim signal
+  val simPaddr               = Option.when(simEn)(UInt((PAddrBits).W))
+  val simVaddr               = Option.when(simEn)(UInt((VAddrBits).W))
+  val simData                = Option.when(simEn)(UInt((XLEN).W))
   // only use for unit-stride difftest
-  val debugVecUnalignedStart   = Option.when(debugEn)(UInt((log2Up(XLEN)).W))
-  val debugVecUnalignedOffset  = Option.when(debugEn)(UInt((log2Up(XLEN)).W))
-  val debugUop                 = Option.when(debugEn)(new DynInst())
+  val simVecUnalignedStart   = Option.when(simEn)(UInt((log2Up(XLEN)).W))
+  val simVecUnalignedOffset  = Option.when(simEn)(UInt((log2Up(XLEN)).W))
+  val simUop                 = Option.when(simEn)(new DynInst())
 
 }
 
@@ -156,8 +156,8 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
 
   val isCbo              = Bool() // Indicate if is cbo request, true is cbo request
 
-  //debug information
-  val unalignWithin16Byte = Option.when(debugEn)(Bool())
+  //sim information
+  val unalignWithin16Byte = Option.when(simEn)(Bool())
 
   def allValid: Bool     = dataValid && addrValid
 }
@@ -167,7 +167,7 @@ class UnalignBufferEntry(implicit p: Parameters) extends MemBlockBundle {
   def paddr :UInt        = Cat(paddrHigh, 0.U(pageOffset.W))
   val sqIdx              = new SqPtr
 
-  val debugRobIdx        = new RobPtr
+  val simRobIdx        = new RobPtr
 }
 
 class UnalignQueueForwardEntry(implicit p: Parameters) extends MemBlockBundle {
@@ -590,7 +590,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         s2WaitSqIdx.isBefore(s2PhysicalQueueUpper)
       val s2PreciseMdpWait     = s2MdpHitInPhysical && !io.ctrlEntriesIn(s2WaitSqIdx.value).addrValid
       val s2NeedPreciseMdpWait = s2PreciseMdpWait || s2MdpHitOutOfRange
-      // debug
+      // sim
       XSError(s1SelectOH.orR && !s1SelectCtrlEntry.addrValid && s1Valid, "forward select a invalid entry!\n")
       /*================================================== Stage 2 ===================================================*/
 
@@ -700,7 +700,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       s2Resp.bits.perfMdpAddrHit    := perfS2MdpSelectedAddrMatch && perfS2MdpForwardMaskMatch
       s2Resp.bits.perfWaitStoreRetired := s2Valid && perfS2WaitStoreRetired
 
-      if(debugEn) {
+      if(simEn) {
         dontTouch(io.query)
         dontTouch(s1OverlapMask)
         dontTouch(s1AgeMaskLow)
@@ -859,7 +859,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       sink := entries(deqPtrVec(i).value).deqPtrMove && io.toSbuffer.req(i).fire
     }
 
-    if(debugEn) {
+    if(simEn) {
       dontTouch(deqSameCycle)
       dontTouch(enqPtrVec)
       dontTouch(deqPtrVec)
@@ -897,8 +897,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         val paddr         = UInt(PAddrBits.W)
         val sqIdx         = new SqPtr
       }))
-      // for debug
-      val diffStore       = Option.when(debugEn)(Flipped(new DiffStoreIO))
+      // for sim
+      val diffStore       = Option.when(simEn)(Flipped(new DiffStoreIO))
       // for perf
       val perfMmioBusy    = Output(Bool())
     })
@@ -1127,14 +1127,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     writeBackToRob.isRVC.foreach(_ := DontCare)
     writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
     // for difftest, ref will skip mmio store
-    writeBackToRob.debugInfo := DontCare
-    writeBackToRob.debugInfo.vaddr.foreach(_ := dataEntries.head.debugVaddr.get)
-    writeBackToRob.debugInfo.paddr.foreach(_ := dataEntries.head.debugPaddr.get)
-    writeBackToRob.debugInfo.isPerfCnt.foreach(_ := DontCare)
-    writeBackToRob.debugInfo.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
-    writeBackToRob.debugInfo.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
-    writeBackToRob.debugInfo.isMMIO.foreach(_ := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType))
-    writeBackToRob.debugInfo.isNCIO.foreach(_ := isPbmtNC(dataEntries.head.memoryType))
+    writeBackToRob.simInfo := DontCare
+    writeBackToRob.simInfo.vaddr.foreach(_ := dataEntries.head.simVaddr.get)
+    writeBackToRob.simInfo.paddr.foreach(_ := dataEntries.head.simPaddr.get)
+    writeBackToRob.simInfo.isPerfCnt.foreach(_ := DontCare)
+    writeBackToRob.simInfo.sim_seqNum.foreach(_ := dataEntries.head.simUop.get.sim_seqNum)
+    writeBackToRob.simInfo.perfSimInfo.foreach(_ := dataEntries.head.simUop.get.perfSimInfo)
+    writeBackToRob.simInfo.isMMIO.foreach(_ := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType))
+    writeBackToRob.simInfo.isNCIO.foreach(_ := isPbmtNC(dataEntries.head.memoryType))
     io.writeBack.valid := writeBackValid
     io.writeBack.bits := writeBackToRob
 
@@ -1192,7 +1192,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     for (i <- 0 until EnsbufferWidth) {
       unalignMask(i)         := Fill(VLENB, true.B) << dataEntries(i).vaddr(3, 0)
       // unalignWithin16Byte is for old unalign framework difftest, will be remove in the future.
-      val unalignWithin16Byte = (if (debugEn) ctrlEntries(i).unalignWithin16Byte.get else false.B)
+      val unalignWithin16Byte = (if (simEn) ctrlEntries(i).unalignWithin16Byte.get else false.B)
       if(i == 0) {
         writeSbufferData(i)  := outData(i)
         writeSbufferMask(i)  := outMask(i) & unalignMask(i)
@@ -1415,7 +1415,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     io.toRob.mmioBusy := uncacheState =/= UncacheState.idle
     io.sbufferCtrl.req.physicalStoreQueueFull := valid_cnt === StoreQueuePhysicalSize.U
 
-    if(debugEn) {
+    if(simEn) {
       val deqCanDoCbo = deqCtrlEntries.head.allValid && !deqCtrlEntries.head.hasException && deqCtrlEntries.head.isCbo
       val diffStore = io.diffStore.get
       // commit cbo.inval to difftest
@@ -1434,10 +1434,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
         val ptr = io.rdataPtrExt(i).value
           if(i == 1) {
-            val selectedUop = Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            val selectedUop = Mux(headCross16B, dataEntries.head.simUop.get, dataEntries(i).simUop.get)
             val selectedVaddr = Mux(headCross16B, dataEntries.head.vaddr, dataEntries(i).vaddr)
             diffStore.diffInfo(i).uop                     := selectedUop
-            diffStore.diffInfo(i).start                   := Mux(headCross16B, dataEntries.head.debugVecUnalignedStart.get, dataEntries(i).debugVecUnalignedStart.get)
+            diffStore.diffInfo(i).start                   := Mux(headCross16B, dataEntries.head.simVecUnalignedStart.get, dataEntries(i).simVecUnalignedStart.get)
             val eew = LSUOpType.vecElemSize(selectedUop.fuOpType)
             diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
               0.U -> 0.U,
@@ -1447,9 +1447,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
             ))
           }
           else {
-            diffStore.diffInfo(i).uop                     := dataEntries(i).debugUop.get
-            diffStore.diffInfo(i).start                   := dataEntries(i).debugVecUnalignedStart.get
-            val eew = LSUOpType.vecElemSize(dataEntries(i).debugUop.get.fuOpType)
+            diffStore.diffInfo(i).uop                     := dataEntries(i).simUop.get
+            diffStore.diffInfo(i).start                   := dataEntries(i).simVecUnalignedStart.get
+            val eew = LSUOpType.vecElemSize(dataEntries(i).simUop.get.fuOpType)
             diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
               0.U -> 0.U,
               1.U -> dataEntries(i).vaddr(0),
@@ -1472,8 +1472,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       (1 until EnsbufferWidth).foreach(i => when(io.writeToSbuffer.req(i).fire) { assert(io.writeToSbuffer.req(i - 1).fire) })
     }
 
-    /*=============================================== debug dontTouch =================================================*/
-    if(debugEn) {
+    /*=============================================== sim dontTouch =================================================*/
+    if(simEn) {
       dontTouch(toSbufferValid)
       dontTouch(writeSbufferData)
       dontTouch(writeSbufferMask)
@@ -1535,8 +1535,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       entries(enqPtr.value).paddrHigh  := doEnqReq.paddr(PAddrBits - 1, PageOffsetWidth)
       entries(enqPtr.value).sqIdx      := doEnqReq.sqIdx
 
-      if(debugEn) {
-        entries(enqPtr.value).debugRobIdx     := doEnqReq.robIdx // for debug
+      if(simEn) {
+        entries(enqPtr.value).simRobIdx     := doEnqReq.robIdx // for sim
         dontTouch(doEnqReq.robIdx)
       }
     }
@@ -1817,7 +1817,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
 
     XSError(ctrlEntries(i).vecInactive && staSetValid, s"inactive vector element allocate! index: ${i}\n")
 
-    if(debugEn) {
+    if(simEn) {
       val unalignWithin16BSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
         port.bits.isUnalign && !port.bits.cross16Byte && staValidSetVec(j)
       }.reduce(_ || _)
@@ -1826,7 +1826,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       }
 
       when(staSetValid){
-        dataEntries(i).debugUop.get := selectBits.debugUop.get
+        dataEntries(i).simUop.get := selectBits.simUop.get
       }
     }
 
@@ -1926,8 +1926,8 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     // XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
     XSError(!ctrlEntries(i).addrValid && !ctrlEntries(i).vecInactive && deqCancel, s"double deq! index: ${i}\n")
 
-    // debug don't touch
-    if(debugEn) {
+    // sim don't touch
+    if(simEn) {
       dontTouch(deqCancel)
       dontTouch(staSetValid)
       dontTouch(staReValid)
@@ -2019,9 +2019,9 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       )
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
-      // debug singal
-      if(debugEn) {
-        dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
+      // sim singal
+      if(simEn) {
+        dataEntries(stWbIdx).simPaddr.get := storeAddrIn.bits.paddr
       }
     }
     XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
@@ -2036,10 +2036,10 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       // if it's a cbo.zero, write zero.
       dataEntries(stWbIdx).data  := Mux(LSUOpType.isCboZero(storeDataIn.bits.fuOpType), 0.U, storeDataIn.bits.data)
 
-      // debug signal
-      if(debugEn) {
-        dataEntries(stWbIdx).debugVecUnalignedStart.get  := io.storeDataIn(i).bits.vecDebug.get.start
-        dataEntries(stWbIdx).debugVecUnalignedOffset.get := io.storeDataIn(i).bits.vecDebug.get.offset
+      // sim signal
+      if(simEn) {
+        dataEntries(stWbIdx).simVecUnalignedStart.get  := io.storeDataIn(i).bits.vecSim.get.start
+        dataEntries(stWbIdx).simVecUnalignedOffset.get := io.storeDataIn(i).bits.vecSim.get.offset
       }
     }
   }
@@ -2108,8 +2108,8 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
   io.sqDeq.valid := RegNext(sqDeqCnt.orR)
   io.sqDeq.bits  := RegEnable(sqDeqCnt, sqDeqCnt.orR)
 
-  /*=============================================== debug ============================================================*/
-  if(debugEn) {
+  /*=============================================== sim ============================================================*/
+  if(simEn) {
     dontTouch(enqPtr)
     dontTouch(deqPtrExt)
     dontTouch(dataEntries)
@@ -2136,7 +2136,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
   // Only the vector store difftest required signal is separated from the rtl code.
   val deqCanDoCbo = deqCtrlEntries.head.allValid && !deqCtrlEntries.head.hasException && deqCtrlEntries.head.isCbo
 
-  if (debugEn) {
+  if (simEn) {
     io.diffStore.get := diffStore.get
   }
 

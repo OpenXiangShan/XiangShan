@@ -182,11 +182,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     (0 until MaxFetchReqNum).foreach { i =>
       when(s0_fire && s0_req(i).valid) {
         assert(
-          s0_wayLookupEntry(i).debug_ftqIdx.get === s0_req(i).ftqIdx,
+          s0_wayLookupEntry(i).sim_ftqIdx.get === s0_req(i).ftqIdx,
           "ICache MainPipe: wayLookupEntry ftqIdx mismatch"
         )
         assert(
-          s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr.unGuard,
+          s0_wayLookupEntry(i).sim_startVAddr.get === s0_req(i).startVAddr.unGuard,
           "ICache MainPipe: wayLookupEntry startVAddr mismatch"
         )
       }

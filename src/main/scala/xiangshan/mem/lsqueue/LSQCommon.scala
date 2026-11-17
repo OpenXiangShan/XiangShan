@@ -19,7 +19,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{HasCircularQueuePtrHelper, HasPerfEvents}
 import utils.NamedUInt
-import xiangshan.{DebugOptionsKey, LSUOpType, XSBundle, XSModule}
+import xiangshan.{SimOptionsKey, LSUOpType, XSBundle, XSModule}
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.mem.HasVLSUParameters
 

@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
-import utility._
+import utility.{XSDebug => XSSim, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 import xiangshan._
@@ -565,7 +565,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
     ).asUInt.orR && !f1_kill
-    XSDebug(
+    XSSim(
       f1_tagMismatchVec(i),
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
       f1_ptagMatches.asUInt,
@@ -588,20 +588,20 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
 
   /******************************************************************
-   * Debug / Performance
+   * Simulation / Performance
    ******************************************************************/
 
-  /* Debug Counters */
-  // print all input/output requests for debug purpose
+  /* Simulation counters */
+  // print all input/output requests for sim purpose
   // print req/resp
-  XSDebug(req.fire, "req cmd: %x addr: %x data: %x mask: %x\n",
+  XSSim(req.fire, "req cmd: %x addr: %x data: %x mask: %x\n",
     req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask)
-  XSDebug(resp.fire, "data: %x\n", req.bits.data)
+  XSSim(resp.fire, "data: %x\n", req.bits.data)
   // print tilelink messages
-  XSDebug(mem_acquire.valid, "mem_acquire valid, ready=%d ", mem_acquire.ready)
+  XSSim(mem_acquire.valid, "mem_acquire valid, ready=%d ", mem_acquire.ready)
   mem_acquire.bits.dump(mem_acquire.valid)
 
-  XSDebug(mem_grant.fire, "mem_grant fire ")
+  XSSim(mem_grant.fire, "mem_grant fire ")
   mem_grant.bits.dump(mem_grant.fire)
 
   /* Performance Counters */

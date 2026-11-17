@@ -32,8 +32,8 @@ class VirtualStoreQueueDataEntry (implicit p: Parameters) extends MemBlockBundle
   val robIdx   = new RobPtr
   val uopIdx   = UopIdx()
 
-  // debug info
-  val debugUop = Option.when(debugEn)(new DynInst())
+  // sim info
+  val simUop = Option.when(simEn)(new DynInst())
 }
 
 class VirtualStoreQueueCtrlEntry (implicit p: Parameters) extends MemBlockBundle {
@@ -188,10 +188,10 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
       snapshotQueue(i / SnapshotInterval).entryEndSqIdx := enqBits.reqEndPtr.sqIdx
     }
 
-    // debug info
-    if(debugEn){
+    // sim info
+    if(simEn){
       when(enqSet) {
-        dataEntries(i).debugUop.get := enqBits.debugUop.get
+        dataEntries(i).simUop.get := enqBits.simUop.get
       }
     }
   }
@@ -386,7 +386,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     sink := io.fromPhysicalQueue.deqPtr >= getEntryEndSqIdx(ptr) && io.fromPhysicalQueue.deqCount.valid && ctrlEntries(ptr.value).allocated
   }
 
-  if(debugEn) {
+  if(simEn) {
     dontTouch(retireVec)
     dontTouch(preCommitPtrNext)
     dontTouch(preCommitMoveValid)

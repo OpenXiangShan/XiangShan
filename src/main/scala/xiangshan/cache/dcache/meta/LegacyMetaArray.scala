@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug}
+import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug => XSSim}
 import utility.sram.SRAMTemplate
 import xiangshan.L1CacheErrorInfo
 
@@ -98,20 +98,20 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   io.read.ready := !wen
 
   def dumpRead = {
-    XSDebug(io.read.fire,
+    XSSim(io.read.fire,
       "MetaArray Read: idx: %d way_en: %x tag: %x\n",
       io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
   }
 
   def dumpWrite = {
-    XSDebug(io.write.fire,
+    XSSim(io.write.fire,
       "MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
       io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
   }
 
   // def dumpResp() = {
   //   (0 until nWays) map { i =>
-  //     XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
+  //     XSSim(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
   //       io.resp(i).tag, io.resp(i).coh.state)
   //   }
   // }
@@ -152,14 +152,14 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
 
   def dumpRead = {
     (0 until numReadPorts) map { w =>
-      XSDebug(io.read(w).fire,
+      XSSim(io.read(w).fire,
         s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
         io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
     }
   }
 
   def dumpWrite = {
-    XSDebug(io.write.fire,
+    XSSim(io.write.fire,
       "MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
       io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
   }
@@ -167,7 +167,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
   // def dumpResp() = {
   //   (0 until LoadPipelineWidth) map { w =>
   //     (0 until nWays) map { i =>
-  //       XSDebug(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
+  //       XSSim(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
   //         io.resp(w)(i).tag, io.resp(w)(i).coh.state)
   //     }
   //   }

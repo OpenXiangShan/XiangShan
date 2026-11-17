@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.{XSDebug => XSSim, XSPerfAccumulate, HasPerfEvents}
 import xiangshan.L1CacheErrorInfo
 
 class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
@@ -45,7 +45,7 @@ class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
   val s1_kill = Output(Bool())
   // Access Fault or MMIO in STA s2, kill Dcache req
   val s2_kill = Output(Bool())
-  // Debug PC
+  // Simulation PC
   val s2_pc = Output(UInt(VAddrBits.W))
 
   val req = DecoupledIO(new DcacheStoreRequestIO)

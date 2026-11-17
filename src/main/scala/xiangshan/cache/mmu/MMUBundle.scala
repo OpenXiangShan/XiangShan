@@ -518,14 +518,14 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val no_translate = Output(Bool())
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
   val frm_mabuf = Output(Bool())
-  val debug = new Bundle {
+  val sim = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(sim.pc)} robIdx:${sim.robIdx}"
   }
 }
 
@@ -628,7 +628,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
   val memidx = Output(new MemBlockidxBundle)
 
-  val debug = new Bundle {
+  val sim = new Bundle {
     val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }

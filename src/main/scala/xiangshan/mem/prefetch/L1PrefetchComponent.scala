@@ -222,7 +222,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val sent_vec = UInt(BIT_VEC_WITDH.W)
   val is_vaddr = Bool()
   val source = new L1PrefetchSource()
-  val debug_va_region = UInt(REGION_TAG_BITS.W)
+  val sim_va_region = UInt(REGION_TAG_BITS.W)
   val confidence = UInt(1.W)
 
   def reset(index: Int) = {
@@ -232,7 +232,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     sent_vec := 0.U
     is_vaddr := false.B
     source.value := L1_HW_PREFETCH_NULL
-    debug_va_region := 0.U
+    sim_va_region := 0.U
     confidence := 0.U
   }
 
@@ -269,7 +269,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
 
   def get_pf_vaddr(forward_sent_vec: UInt): UInt = {
     val candidate = PriorityEncoder(bit_vec & ~forward_sent_vec).asTypeOf(UInt(REGION_BITS.W))
-    Cat(debug_va_region, candidate, 0.U(BLOCK_OFFSET.W))
+    Cat(sim_va_region, candidate, 0.U(BLOCK_OFFSET.W))
   }
 
   def get_tlb_va(): UInt = {
@@ -286,7 +286,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res.sent_vec := 0.U
     res.is_vaddr := true.B
     res.source := x.source
-    res.debug_va_region := x.region
+    res.sim_va_region := x.region
     res.confidence := x.confidence
 
     res
@@ -359,7 +359,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     req.bits.fullva := 0.U
     req.bits.checkfullva := false.B
     req.bits.memidx := DontCare
-    req.bits.debug := DontCare
+    req.bits.sim := DontCare
     req.bits.hlvx := DontCare
     req.bits.hyperinst := DontCare
     req.bits.pmp_addr := DontCare
@@ -374,11 +374,11 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val l3_tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, MLP_L3_SIZE))
   val l1_pf_req_arb = Module(new TwoLevelRRArbiter(new Bundle {
     val req = new L1PrefetchReq
-    val debug_vaddr = UInt(VAddrBits.W)
+    val sim_vaddr = UInt(VAddrBits.W)
   }, MLP_L1_SIZE))
   val l2_pf_req_arb = Module(new TwoLevelRRArbiter(new Bundle {
     val req = new L2PrefetchReq
-    val debug_vaddr = UInt(VAddrBits.W)
+    val sim_vaddr = UInt(VAddrBits.W)
   }, MLP_L2_SIZE))
   val l3_pf_req_arb = Module(new TwoLevelRRArbiter(new L3PrefetchReq, MLP_L3_SIZE))
 
@@ -560,13 +560,13 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     s1_l3_alloc && l3_array(s1_l3_index).can_send_pf(l3_valids(s1_l3_index))
   )
 
-  // stream pf debug db here
+  // stream pf sim db here
   // Hit:
   // now seens only pending = (region_bits & ~filter_bits) are the peeding request
   // if a PfGen comes, new added request can be new_req = PfGen.region_bits & ~(pending)
   // Alloc:
   // new_req = PfGen.region_bits
-  val stream_pf_trace_debug_table = ChiselDB.createTable("StreamPFTrace" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceInEntry, basicDB = false)
+  val stream_pf_trace_sim_table = ChiselDB.createTable("StreamPFTrace" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceInEntry, basicDB = false)
   for (i <- 0 until BIT_VEC_WITDH) {
     // l1 enq log
     val hit_entry = l1_array(s0_l1_index)
@@ -582,7 +582,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     log_data.TriggerVaddr := io.l1_prefetch_req.bits.trigger_va
     log_data.PFVaddr := Cat(s0_l1_region, i.U(REGION_BITS.W), 0.U(log2Up(dcacheParameters.blockBytes).W))
 
-    stream_pf_trace_debug_table.log(
+    stream_pf_trace_sim_table.log(
       data = log_data,
       en = log_enable,
       site = "StreamPFTrace",
@@ -605,7 +605,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     log_data.TriggerVaddr := io.l2_prefetch_req.bits.trigger_va
     log_data.PFVaddr := Cat(s0_l2_region, i.U(REGION_BITS.W), 0.U(log2Up(dcacheParameters.blockBytes).W))
 
-    stream_pf_trace_debug_table.log(
+    stream_pf_trace_sim_table.log(
       data = log_data,
       en = log_enable,
       site = "StreamPFTrace",
@@ -628,7 +628,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     log_data.TriggerVaddr := io.l3_prefetch_req.bits.trigger_va
     log_data.PFVaddr := Cat(s0_l3_region, i.U(REGION_BITS.W), 0.U(log2Up(dcacheParameters.blockBytes).W))
 
-    stream_pf_trace_debug_table.log(
+    stream_pf_trace_sim_table.log(
       data = log_data,
       en = log_enable,
       site = "StreamPFTrace",
@@ -801,7 +801,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
-    l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
+    l1_pf_req_arb.io.in(i).bits.sim_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
 
@@ -866,7 +866,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))
-    l2_pf_req_arb.io.in(i).bits.debug_vaddr := l2_array(i).get_pf_vaddr(forward_sent_vec)
+    l2_pf_req_arb.io.in(i).bits.sim_vaddr := l2_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
   // s1: send out to l2 and update sent_vec
@@ -885,21 +885,21 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     }
   }
 
-  val stream_out_debug_table = ChiselDB.createTable("StreamPFTraceOut" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceOutEntry, basicDB = false)
-  val l1_debug_data = Wire(new StreamPFTraceOutEntry)
-  val l2_debug_data = Wire(new StreamPFTraceOutEntry)
-  l1_debug_data.PFVaddr := l1_pf_req_arb.io.out.bits.debug_vaddr
-  l2_debug_data.PFVaddr := l2_pf_req_arb.io.out.bits.debug_vaddr
+  val stream_out_sim_table = ChiselDB.createTable("StreamPFTraceOut" + p(XSCoreParamsKey).HartId.toString, new StreamPFTraceOutEntry, basicDB = false)
+  val l1_sim_data = Wire(new StreamPFTraceOutEntry)
+  val l2_sim_data = Wire(new StreamPFTraceOutEntry)
+  l1_sim_data.PFVaddr := l1_pf_req_arb.io.out.bits.sim_vaddr
+  l2_sim_data.PFVaddr := l2_pf_req_arb.io.out.bits.sim_vaddr
 
-  stream_out_debug_table.log(
-    data = l1_debug_data,
+  stream_out_sim_table.log(
+    data = l1_sim_data,
     en = l1_pf_req_arb.io.out.fire && isFromStream(l1_pf_req_arb.io.out.bits.req.pf_source.value),
     site = "StreamPFTraceOut",
     clock = clock,
     reset = reset
   )
-  stream_out_debug_table.log(
-    data = l2_debug_data,
+  stream_out_sim_table.log(
+    data = l2_sim_data,
     en = l2_pf_req_arb.io.out.fire && (l2_pf_req_arb.io.out.bits.req.source === MemReqSource.Prefetch2L2Stream.id.U),
     site = "StreamPFTraceOut",
     clock = clock,

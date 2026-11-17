@@ -62,7 +62,7 @@ class FltRegionImp(
   implicit
   p: Parameters, param: RegionParam
 ) extends LazyModuleImp(wrapper) with HasXSParameter {
-  val basicDebugEn = backendParams.basicDebugEn
+  val basicSimEn = backendParams.basicSimEn
 
   val numFp = backendParams.fpPregParams.numEntries
   val numFpWritePort = backendParams.getFpRfWriteSize
@@ -84,12 +84,12 @@ class FltRegionImp(
   val fpWen   = Wire(Vec(numFpWritePort, Bool()))
   val fpWaddr = Wire(Vec(numFpWritePort, UInt(FpPhyRegIdxWidth.W)))
   val fpWdata = Wire(Vec(numFpWritePort, UInt(XLEN.W)))
-  val fpDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(numFp, UInt(XLEN.W))))
+  val fpDiffReadData: Option[Vec[UInt]] = Option.when(basicSimEn)(Wire(Vec(numFp, UInt(XLEN.W))))
 
 
   FpRegFile("FpRegFile", FpPhyRegs, fpRaddr, fpRdata, fpWen, fpWaddr, fpWdata,
     bankNum = 1,
-    debugAllRData = fpDiffReadData,
+    simAllRData = fpDiffReadData,
   )
 
   // These ids are global regfile writeback port indices from the active backend
@@ -319,13 +319,13 @@ class FltRegionImp(
   fpRaddr := fltRFReadArbiter.io.out.map(_.bits.addr)
 
   out.toDispatch.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum)
-  out.toDispatch.debug.foreach(_.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum))
-  out.toDispatch.debug.foreach(_.IQEnqHasIssuedVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.debugEnqHasIssued.get))
+  out.toDispatch.sim.foreach(_.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum))
+  out.toDispatch.sim.foreach(_.IQEnqHasIssuedVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.simEnqHasIssued.get))
   for ((iq, i) <- issueQueues.filterNot(_.param.hasVStd).zipWithIndex) {
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
-  out.toDispatch.debugIQValidNumVec.foreach(_ := issueQueues.map(_.out.validNum))
-  out.toDispatch.debugIQEnqHasIssuedVec.foreach(_ := issueQueues.map(_.out.debugEnqHasIssued.get))
+  out.toDispatch.simIQValidNumVec.foreach(_ := issueQueues.map(_.out.validNum))
+  out.toDispatch.simIQEnqHasIssuedVec.foreach(_ := issueQueues.map(_.out.simEnqHasIssued.get))
   out.toDispatch.wakeUpFp := fpWbM2WakeupToDispatch
   out.toDispatch.wakeUpFpIs1Lat := fpWbM2WakeUpIs1Lat
   val wakeupF2I = Wire(new FltWakeUpBundle(backendParams.intPregParams))
@@ -383,13 +383,13 @@ class FltRegionImp(
       sink.delay := BypassDelay.delay1
   }
   out.toVecRegion.wb0 := fpWbDataPath.out.wb0.map(_.data)
-  out.toRob.debugIQDeqRobIdxVec.foreach(_ := 0.U.asTypeOf(out.toRob.debugIQDeqRobIdxVec.get))
+  out.toRob.simIQDeqRobIdxVec.foreach(_ := 0.U.asTypeOf(out.toRob.simIQDeqRobIdxVec.get))
   val issuedLastCycle = issueQueues.flatMap(_.out.deq).map(deq => RegNext(deq.valid, false.B))
   out.toTopDownMod.uopTopDown.uopsIssued := issuedLastCycle.reduce(_ || _)
   out.toTopDownMod.uopTopDown.uopsIssuedCnt := PopCount(issuedLastCycle)
   out.toTopDownMod.uopTopDown.noStoreIssued := true.B
 
-  if (backendParams.debugEn) {
+  if (backendParams.simEn) {
     val topdownIQInfoVec = issueQueues.flatMap(_.out.topdownIQInfoVec.get)
     val configuredEntryNum = param.issueParams.map(_.numEntries).sum
     val physicalEntryNum = param.issueParams.map(_.numEntry).sum
@@ -571,8 +571,8 @@ object FltRegionModule {
       )
       val IQNum = param.issueParams.size
       val maxIQSize = param.issueParams.map(_.numEntry).max
-      val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
-      val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
+      val simIQValidNumVec = Option.when(backendParams.simEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
+      val simIQEnqHasIssuedVec = Option.when(backendParams.simEn)(Vec(IQNum, Output(Bool())))
       val wakeUpFp: Vec[FltWakeUpBundle] = Vec(backendParams.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
       val wakeUpFpIs1Lat: Vec[Bool] = Vec(backendParams.getFpWriteSize, Bool())
 
@@ -580,7 +580,7 @@ object FltRegionModule {
         param.issueParams.filterNot(_.hasVStd).map(x => Flipped(Vec(x.numEnq, Bool())))
       )
 
-      val debug = Option.when(backendParams.debugEn)(new Bundle {
+      val sim = Option.when(backendParams.simEn)(new Bundle {
         val IQValidNumVec = Vec(numIQ, UInt(numEntry.U.getWidth.W))
         val IQEnqHasIssuedVec = Vec(numIQ, Output(Bool()))
       })
@@ -600,12 +600,12 @@ object FltRegionModule {
     val toRob = new Bundle {
       val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_))
       val iqDeqSum = param.issueParams.map(_.numDeq).sum
-      val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
+      val simIQDeqRobIdxVec = Option.when(backendParams.simEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
     }
     val toTopDownMod = new Bundle {
       val uopTopDown = new UopTopDown
     }
-    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Vec(param.issueParams.map(_.numEntries).sum, ValidIO(new TopdownIQExtendedInfo)))
+    val topdownIQInfoVec = Option.when(backendParams.simEn)(Vec(param.issueParams.map(_.numEntries).sum, ValidIO(new TopdownIQExtendedInfo)))
     val gpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.intPregParams)
     val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
 

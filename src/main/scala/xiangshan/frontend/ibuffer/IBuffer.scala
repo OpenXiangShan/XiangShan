@@ -21,12 +21,12 @@ import freechips.rocketchip.rocket.Instructions.VSETIVLI
 import freechips.rocketchip.rocket.Instructions.VSETVL
 import freechips.rocketchip.rocket.Instructions.VSETVLI
 import org.chipsalliance.cde.config.Parameters
+import utility.{XSDebug => XSSim}
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
 import utility.PriorityMuxDefault
 import utility.QueuePerf
 import utility.UIntToMask
-import utility.XSDebug
 import utility.XSError
 import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
@@ -392,7 +392,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       // Each IBuffer entry has a PredictWidth -> 1 Mux
       val writeEntry = Mux1H(validOH, enqBankEntrys(bank))
       ibuf(bank + idx * NumWriteBank) := Mux(wen, writeEntry, ibuf(bank + idx * NumWriteBank))
-      // Debug Assertion
+      // Simulation assertion
       XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
     }
   }
@@ -552,23 +552,23 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }
   }
 
-  // Debug info
+  // Simulation info
   XSError(
     deqPtr.value =/= deqBankPtr.value + deqInBankPtr(deqBankPtr.value).value * NumReadBank.asUInt,
     "Dequeue PTR mismatch"
   )
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 
-  XSDebug(io.flush, "IBuffer Flushed\n")
+  XSSim(io.flush, "IBuffer Flushed\n")
 
-  XSDebug(io.in.fire, "Enque:\n")
-  XSDebug(io.in.fire, p"MASK=${Binary(io.in.bits.valid)}\n")
+  XSSim(io.in.fire, "Enque:\n")
+  XSSim(io.in.fire, p"MASK=${Binary(io.in.bits.valid)}\n")
   for (i <- 0 until EnqueueWidth) {
-    XSDebug(io.in.fire, p"PC=${Hexadecimal(io.in.bits.pc(i).toUInt)} ${Hexadecimal(io.in.bits.instrs(i))}\n")
+    XSSim(io.in.fire, p"PC=${Hexadecimal(io.in.bits.pc(i).toUInt)} ${Hexadecimal(io.in.bits.instrs(i))}\n")
   }
 
   for (i <- 0 until DecodeWidth) {
-    XSDebug(
+    XSSim(
       io.out(i).fire,
       p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)}" +
         p"v=${io.out(i).valid} r=${io.out(i).ready} " +
@@ -576,9 +576,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     )
   }
 
-  XSDebug(p"numValid: ${numValid}\n")
-  XSDebug(p"EnqNum: ${numEnq}\n")
-  XSDebug(p"DeqNum: ${numDeq}\n")
+  XSSim(p"numValid: ${numValid}\n")
+  XSSim(p"EnqNum: ${numEnq}\n")
+  XSSim(p"DeqNum: ${numDeq}\n")
 
   private val perf_afterInit  = RegInit(false.B)
   private val perf_headBubble = RegInit(false.B)

@@ -253,8 +253,8 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
     cfVec.bits.isLastInFtqEntry := fetchOut.preDecode(14)
     cfVec.bits.ftqOffset        := fetchOut.preDecode(18, 15)
 
-    cfVec.bits.debug_seqNum := 0.U.asTypeOf(new InstSeqNum)
-    cfVec.bits.debug_seqNum.seqNum := PerfCCT.createInstMetaAtFetch(
+    cfVec.bits.sim_seqNum := 0.U.asTypeOf(new InstSeqNum)
+    cfVec.bits.sim_seqNum.seqNum := PerfCCT.createInstMetaAtFetch(
       (idx + 1).U,
       fetchOut.pc,
       fetchOut.instr,

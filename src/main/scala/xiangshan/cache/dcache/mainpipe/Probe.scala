@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
 import utils.HasTLDump
-import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.{XSDebug => XSSim, XSPerfAccumulate, HasPerfEvents}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -36,7 +36,7 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val id = UInt(log2Up(cfg.nProbeEntries).W)
 
   def dump(cond: Bool) = {
-    XSDebug(cond, "ProbeReq source: %d opcode: %d addr: %x param: %d\n",
+    XSSim(cond, "ProbeReq source: %d opcode: %d addr: %x param: %d\n",
       source, opcode, addr, param)
   }
 }
@@ -72,9 +72,9 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   io.block_addr.valid := state =/= s_invalid
   io.block_addr.bits  := req.addr
 
-  XSDebug(state =/= s_invalid, "state: %d\n", state)
+  XSSim(state =/= s_invalid, "state: %d\n", state)
 
-  XSDebug(state =/= s_invalid, "ProbeEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
+  XSSim(state =/= s_invalid, "ProbeEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
 
   when (state === s_invalid) {
     io.req.ready := true.B
@@ -206,7 +206,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     selected_req_valid := true.B
   }
 
-  // print all input/output requests for debug purpose
+  // print all input/output requests for sim purpose
   when (io.mem_probe.valid) {
     // before a probe finishes, L2 should not further issue probes on this block
     val probe_conflict = VecInit(entries.map(e => e.io.block_addr.valid && get_block(e.io.block_addr.bits) === get_block(io.mem_probe.bits.address))).asUInt.orR
@@ -215,13 +215,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     assert (io.mem_probe.bits.opcode === TLMessages.Probe)
   }
 
-  // debug output
-  XSDebug(io.mem_probe.fire, "mem_probe: ")
+  // sim output
+  XSSim(io.mem_probe.fire, "mem_probe: ")
   io.mem_probe.bits.dump(io.mem_probe.fire)
 
 // io.pipe_req.bits.dump(io.pipe_req.fire)
 
-  XSDebug(io.lrsc_locked_block.valid, "lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
+  XSSim(io.lrsc_locked_block.valid, "lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   XSPerfAccumulate("ProbeL1DCache", io.mem_probe.fire)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))

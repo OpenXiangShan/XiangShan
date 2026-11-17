@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
 import utils._
-import utility._
+import utility.{XSDebug => XSSim, _}
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.rob.RobPtr
@@ -228,10 +228,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioOut.bits.uop.exceptionVec(loadAccessFault) := nderr
     io.mmioOut.bits.uop.exceptionVec(hardwareError) := derr
     io.mmioOut.bits.data := uncacheData
-    io.mmioOut.bits.debug.isMMIO := true.B
-    io.mmioOut.bits.debug.isNCIO := false.B
-    io.mmioOut.bits.debug.paddr := req.paddr
-    io.mmioOut.bits.debug.vaddr := req.vaddr
+    io.mmioOut.bits.sim.isMMIO := true.B
+    io.mmioOut.bits.sim.isNCIO := false.B
+    io.mmioOut.bits.sim.paddr := req.paddr
+    io.mmioOut.bits.sim.vaddr := req.vaddr
     io.mmioRawData.lqData := uncacheData
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
@@ -246,8 +246,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.exception.bits.uop.exceptionVec(loadAccessFault) := RegEnable(nderr, writeback)
   io.exception.bits.uop.exceptionVec(hardwareError) := RegEnable(derr, writeback)
 
-  /* debug log */
-  XSDebug(io.uncache.req.fire,
+  /* sim log */
+  XSSim(io.uncache.req.fire,
     "uncache req: pc %x addr %x data %x op %x mask %x\n",
     req.uop.pc,
     io.uncache.req.bits.addr,
@@ -530,7 +530,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
       matchednderr := respMatchNCOut.uop.exceptionVec(loadAccessFault)
       matchedderr := respMatchNCOut.uop.exceptionVec(hardwareError)
     }.elsewhen (respMMIOMatch) {
-      matchedPaddr := respMatchMMIOOut.debug.paddr
+      matchedPaddr := respMatchMMIOOut.sim.paddr
       matchedData := respMatchMMIOData.lqData
       matchednderr := respMatchMMIOOut.uop.exceptionVec(loadAccessFault)
       matchedderr := respMatchMMIOOut.uop.exceptionVec(hardwareError)
@@ -614,7 +614,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).perfDebugInfo.runahead_checkpoint_id
+    redirect.bits.sim_runahead_checkpoint_id := reqSelUops(i).perfSimInfo.runahead_checkpoint_id
     redirect
   })
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)

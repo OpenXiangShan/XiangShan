@@ -79,8 +79,8 @@ class Regfile
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
-    val debug_rports = Vec(65, new RfReadPort(len, width))
-    val debug_all_rdata = Vec(numPregs, UInt(len.W))
+    val sim_rports = Vec(65, new RfReadPort(len, width))
+    val sim_all_rdata = Vec(numPregs, UInt(len.W))
   })
   override def desiredName = name
   println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
@@ -131,10 +131,10 @@ class Regfile
     }
   }
 
-  for (rport <- io.debug_rports) {
+  for (rport <- io.sim_rports) {
     rport.data := memForRead(rport.addr)
   }
-  io.debug_all_rdata.zipWithIndex.foreach { case (rdata, idx) =>
+  io.sim_all_rdata.zipWithIndex.foreach { case (rdata, idx) =>
     if (idx == 0)
       rdata := mem_0
     else
@@ -157,8 +157,8 @@ class RegfileBank
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPortBank(len, width, numBank))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
-    val debug_rports = Vec(65, new RfReadPort(len, width))
-    val debug_all_rdata = Vec(numPregs, UInt(len.W))
+    val sim_rports = Vec(65, new RfReadPort(len, width))
+    val sim_all_rdata = Vec(numPregs, UInt(len.W))
   })
   override def desiredName = name
   println(name + ": size: " + numPregs + " read: " + numReadPorts + " write: " + numWritePorts + " numBank: " + numBank)
@@ -203,10 +203,10 @@ class RegfileBank
     }
   }
 
-  for (rport <- io.debug_rports) {
+  for (rport <- io.sim_rports) {
     rport.data := memForRead(rport.addr)
   }
-  io.debug_all_rdata.zipWithIndex.foreach { case (rdata, idx) =>
+  io.sim_all_rdata.zipWithIndex.foreach { case (rdata, idx) =>
     if (idx == 0)
       rdata := mem_0
     else
@@ -227,9 +227,9 @@ object Regfile {
     hasZero      : Boolean,
     withReset    : Boolean = false,
     bankNum      : Int = 1,
-    debugReadAddr: Option[Seq[UInt]],
-    debugReadData: Option[Vec[UInt]],
-    debugAllRData: Option[Vec[UInt]],
+    simReadAddr: Option[Seq[UInt]],
+    simReadData: Option[Vec[UInt]],
+    simAllRData: Option[Vec[UInt]],
     isVlRegfile  : Boolean = false,
   )(implicit p: Parameters): Unit = {
     val numReadPorts = raddr.length
@@ -273,16 +273,16 @@ object Regfile {
       }
     }
 
-    require(debugReadAddr.nonEmpty == debugReadData.nonEmpty, "Both debug addr and data bundles should be empty or not")
-    regfile.io.debug_rports := DontCare
-    if (debugReadAddr.nonEmpty && debugReadData.nonEmpty) {
-      debugReadData.get := VecInit(regfile.io.debug_rports.zip(debugReadAddr.get).map { case (rport, addr) =>
+    require(simReadAddr.nonEmpty == simReadData.nonEmpty, "Both sim addr and data bundles should be empty or not")
+    regfile.io.sim_rports := DontCare
+    if (simReadAddr.nonEmpty && simReadData.nonEmpty) {
+      simReadData.get := VecInit(regfile.io.sim_rports.zip(simReadAddr.get).map { case (rport, addr) =>
         rport.addr := addr
         rport.data
       })
     }
-    if (debugAllRData.nonEmpty) {
-      debugAllRData.get := regfile.io.debug_all_rdata
+    if (simAllRData.nonEmpty) {
+      simAllRData.get := regfile.io.sim_all_rdata
     }
   }
 }
@@ -300,9 +300,9 @@ object RegfileBank {
              wdata        : Seq[UInt],
              hasZero      : Boolean,
              withReset    : Boolean = false,
-             debugReadAddr: Option[Seq[UInt]],
-             debugReadData: Option[Vec[UInt]],
-             debugAllRData: Option[Vec[UInt]],
+             simReadAddr: Option[Seq[UInt]],
+             simReadData: Option[Vec[UInt]],
+             simAllRData: Option[Vec[UInt]],
              isVlRegfile  : Boolean = false,
            )(implicit p: Parameters): Unit = {
     val numReadPorts = raddr.length
@@ -346,16 +346,16 @@ object RegfileBank {
       }
     }
 
-    require(debugReadAddr.nonEmpty == debugReadData.nonEmpty, "Both debug addr and data bundles should be empty or not")
-    regfile.io.debug_rports := DontCare
-    if (debugReadAddr.nonEmpty && debugReadData.nonEmpty) {
-      debugReadData.get := VecInit(regfile.io.debug_rports.zip(debugReadAddr.get).map { case (rport, addr) =>
+    require(simReadAddr.nonEmpty == simReadData.nonEmpty, "Both sim addr and data bundles should be empty or not")
+    regfile.io.sim_rports := DontCare
+    if (simReadAddr.nonEmpty && simReadData.nonEmpty) {
+      simReadData.get := VecInit(regfile.io.sim_rports.zip(simReadAddr.get).map { case (rport, addr) =>
         rport.addr := addr
         rport.data
       })
     }
-    if (debugAllRData.nonEmpty) {
-      debugAllRData.get := regfile.io.debug_all_rdata
+    if (simAllRData.nonEmpty) {
+      simAllRData.get := regfile.io.sim_all_rdata
     }
   }
 }
@@ -370,15 +370,15 @@ object IntRegFile {
     wen          : Seq[Bool],
     waddr        : Seq[UInt],
     wdata        : Seq[UInt],
-    debugReadAddr: Option[Seq[UInt]] = None,
-    debugReadData: Option[Vec[UInt]] = None,
-    debugAllRData: Option[Vec[UInt]] = None,
+    simReadAddr: Option[Seq[UInt]] = None,
+    simReadData: Option[Vec[UInt]] = None,
+    simAllRData: Option[Vec[UInt]] = None,
     withReset    : Boolean = false,
     bankNum      : Int,
   )(implicit p: Parameters): Unit = {
     Regfile(
       name, numEntries, raddr, rdata, wen, waddr, wdata,
-      hasZero = true, withReset, bankNum, debugReadAddr, debugReadData, debugAllRData)
+      hasZero = true, withReset, bankNum, simReadAddr, simReadData, simAllRData)
   }
 }
 
@@ -393,9 +393,9 @@ object IntRegFileSplit {
     wen          : Seq[Bool],
     waddr        : Seq[UInt],
     wdata        : Seq[UInt],
-    debugReadAddr: Option[Seq[UInt]] = None,
-    debugReadData: Option[Vec[UInt]] = None,
-    debugAllRData: Option[Vec[UInt]] = None,
+    simReadAddr: Option[Seq[UInt]] = None,
+    simReadData: Option[Vec[UInt]] = None,
+    simAllRData: Option[Vec[UInt]] = None,
     withReset    : Boolean = false,
     bankNum      : Int,
  )(implicit p: Parameters): Unit = {
@@ -404,16 +404,16 @@ object IntRegFileSplit {
     rdata.zipWithIndex.map{ case (r, i) =>
       r := Cat((0 until splitNum).map(x => rdataVec(x)(i)).reverse)
     }
-    val debugReadDataVec = OptionWrapper(debugReadData.nonEmpty, Wire(Vec(splitNum, Vec(debugReadData.get.length, UInt((debugReadData.get.head.getWidth / splitNum).W)))))
-    if (debugReadData.nonEmpty) {
-      debugReadData.get.zipWithIndex.map { case (r, i) =>
-        r := Cat((0 until splitNum).map(x => debugReadDataVec.get(x)(i)).reverse)
+    val simReadDataVec = OptionWrapper(simReadData.nonEmpty, Wire(Vec(splitNum, Vec(simReadData.get.length, UInt((simReadData.get.head.getWidth / splitNum).W)))))
+    if (simReadData.nonEmpty) {
+      simReadData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => simReadDataVec.get(x)(i)).reverse)
       }
     }
-    val debugAllRDataVec = OptionWrapper(debugAllRData.nonEmpty, Wire(Vec(splitNum, Vec(debugAllRData.get.length, UInt((debugAllRData.get.head.getWidth / splitNum).W)))))
-    if (debugAllRData.nonEmpty) {
-      debugAllRData.get.zipWithIndex.map { case (r, i) =>
-        r := Cat((0 until splitNum).map(x => debugAllRDataVec.get(x)(i)).reverse)
+    val simAllRDataVec = OptionWrapper(simAllRData.nonEmpty, Wire(Vec(splitNum, Vec(simAllRData.get.length, UInt((simAllRData.get.head.getWidth / splitNum).W)))))
+    if (simAllRData.nonEmpty) {
+      simAllRData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => simAllRDataVec.get(x)(i)).reverse)
       }
     }
     for (i <- 0 until splitNum){
@@ -424,8 +424,8 @@ object IntRegFileSplit {
       val nameSuffix = if (splitNum > 1) s"Part${i}" else ""
       Regfile(
         name + nameSuffix, numEntries, raddr, rdataVec(i), wen, waddr, wdataThisPart,
-        hasZero = true, withReset, bankNum, debugReadAddr, OptionWrapper(debugReadData.nonEmpty, debugReadDataVec.get(i)),
-        OptionWrapper(debugAllRData.nonEmpty, debugAllRDataVec.get(i))
+        hasZero = true, withReset, bankNum, simReadAddr, OptionWrapper(simReadData.nonEmpty, simReadDataVec.get(i)),
+        OptionWrapper(simAllRData.nonEmpty, simAllRDataVec.get(i))
       )
     }
   }
@@ -442,15 +442,15 @@ object IntRegFileBank {
              wen          : Seq[Bool],
              waddr        : Seq[UInt],
              wdata        : Seq[UInt],
-             debugReadAddr: Option[Seq[UInt]] = None,
-             debugReadData: Option[Vec[UInt]] = None,
-             debugAllRData: Option[Vec[UInt]] = None,
+             simReadAddr: Option[Seq[UInt]] = None,
+             simReadData: Option[Vec[UInt]] = None,
+             simAllRData: Option[Vec[UInt]] = None,
              withReset    : Boolean = false,
            )(implicit p: Parameters): Unit = {
     require(Seq(1, 2, 4).contains(numBank), "bankNum must be 1 or 2 or 4")
     RegfileBank(
       name, numEntries, numBank, raddr, rdata, wen, waddr, wdata,
-      hasZero = true, withReset, debugReadAddr, debugReadData, debugAllRData
+      hasZero = true, withReset, simReadAddr, simReadData, simAllRData
     )
   }
 }
@@ -465,16 +465,16 @@ object FpRegFile {
              wen          : Seq[Bool],
              waddr        : Seq[UInt],
              wdata        : Seq[UInt],
-             debugReadAddr: Option[Seq[UInt]] = None,
-             debugReadData: Option[Vec[UInt]] = None,
-             debugAllRData: Option[Vec[UInt]] = None,
+             simReadAddr: Option[Seq[UInt]] = None,
+             simReadData: Option[Vec[UInt]] = None,
+             simAllRData: Option[Vec[UInt]] = None,
              withReset    : Boolean = false,
              bankNum      : Int,
              isVlRegfile  : Boolean = false,
            )(implicit p: Parameters): Unit = {
     Regfile(
       name, numEntries, raddr, rdata, wen, waddr, wdata,
-      hasZero = false, withReset, bankNum, debugReadAddr, debugReadData, debugAllRData, isVlRegfile)
+      hasZero = false, withReset, bankNum, simReadAddr, simReadData, simAllRData, isVlRegfile)
   }
 }
 
@@ -489,9 +489,9 @@ object FpRegFileSplit {
              wen          : Seq[Bool],
              waddr        : Seq[UInt],
              wdata        : Seq[UInt],
-             debugReadAddr: Option[Seq[UInt]] = None,
-             debugReadData: Option[Vec[UInt]] = None,
-             debugAllRData: Option[Vec[UInt]] = None,
+             simReadAddr: Option[Seq[UInt]] = None,
+             simReadData: Option[Vec[UInt]] = None,
+             simAllRData: Option[Vec[UInt]] = None,
              withReset    : Boolean = false,
              bankNum      : Int,
              isVlRegfile  : Boolean = false,
@@ -501,16 +501,16 @@ object FpRegFileSplit {
     rdata.zipWithIndex.map{ case (r, i) =>
       r := Cat((0 until splitNum).map(x => rdataVec(x)(i)).reverse)
     }
-    val debugReadDataVec = OptionWrapper(debugReadData.nonEmpty, Wire(Vec(splitNum, Vec(debugReadData.get.length, UInt((debugReadData.get.head.getWidth / splitNum).W)))))
-    if (debugReadData.nonEmpty) {
-      debugReadData.get.zipWithIndex.map { case (r, i) =>
-        r := Cat((0 until splitNum).map(x => debugReadDataVec.get(x)(i)).reverse)
+    val simReadDataVec = OptionWrapper(simReadData.nonEmpty, Wire(Vec(splitNum, Vec(simReadData.get.length, UInt((simReadData.get.head.getWidth / splitNum).W)))))
+    if (simReadData.nonEmpty) {
+      simReadData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => simReadDataVec.get(x)(i)).reverse)
       }
     }
-    val debugAllRDataVec = OptionWrapper(debugAllRData.nonEmpty, Wire(Vec(splitNum, Vec(debugAllRData.get.length, UInt((debugAllRData.get.head.getWidth / splitNum).W)))))
-    if (debugAllRData.nonEmpty) {
-      debugAllRData.get.zipWithIndex.map { case (r, i) =>
-        r := Cat((0 until splitNum).map(x => debugAllRDataVec.get(x)(i)).reverse)
+    val simAllRDataVec = OptionWrapper(simAllRData.nonEmpty, Wire(Vec(splitNum, Vec(simAllRData.get.length, UInt((simAllRData.get.head.getWidth / splitNum).W)))))
+    if (simAllRData.nonEmpty) {
+      simAllRData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => simAllRDataVec.get(x)(i)).reverse)
       }
     }
     for (i <- 0 until splitNum){
@@ -521,8 +521,8 @@ object FpRegFileSplit {
       val nameSuffix = if (splitNum > 1) s"Part${i}" else ""
       Regfile(
         name + nameSuffix, numEntries, raddr, rdataVec(i), wen, waddr, wdataThisPart,
-        hasZero = false, withReset, bankNum, debugReadAddr, OptionWrapper(debugReadData.nonEmpty, debugReadDataVec.get(i)),
-        OptionWrapper(debugAllRData.nonEmpty, debugAllRDataVec.get(i)), isVlRegfile)
+        hasZero = false, withReset, bankNum, simReadAddr, OptionWrapper(simReadData.nonEmpty, simReadDataVec.get(i)),
+        OptionWrapper(simAllRData.nonEmpty, simAllRDataVec.get(i)), isVlRegfile)
     }
   }
 }
@@ -538,9 +538,9 @@ object VfRegFile {
     wen          : Seq[Seq[Bool]],
     waddr        : Seq[UInt],
     wdata        : Seq[UInt],
-    debugReadAddr: Option[Seq[UInt]] = None,
-    debugReadData: Option[Vec[UInt]] = None,
-    debugAllRData: Option[Vec[UInt]] = None,
+    simReadAddr: Option[Seq[UInt]] = None,
+    simReadData: Option[Vec[UInt]] = None,
+    simAllRData: Option[Vec[UInt]] = None,
     withReset    : Boolean = false,
   )(implicit p: Parameters): Unit = {
     require(splitNum >= 1, "splitNum should be no less than 1")
@@ -548,33 +548,33 @@ object VfRegFile {
     if (splitNum == 1) {
       Regfile(
         name, numEntries, raddr, rdata, wen.head, waddr, wdata,
-        hasZero = false, withReset, bankNum = 1, debugReadAddr, debugReadData, debugAllRData)
+        hasZero = false, withReset, bankNum = 1, simReadAddr, simReadData, simAllRData)
     } else {
       val dataWidth = wdata.head.getWidth / splitNum
       val numReadPorts = raddr.length
       require(splitNum > 1 && wdata.head.getWidth == dataWidth * splitNum)
       val wdataVec = Wire(Vec(splitNum, Vec(wdata.length, UInt(dataWidth.W))))
       val rdataVec = Wire(Vec(splitNum, Vec(raddr.length, UInt(dataWidth.W))))
-      val debugRDataVec: Option[Vec[Vec[UInt]]] = debugReadData.map(x => Wire(Vec(splitNum, Vec(x.length, UInt(dataWidth.W)))))
-      val debugAllRDataVec: Option[Vec[Vec[UInt]]] = debugAllRData.map(x => Wire(Vec(splitNum, Vec(x.length, UInt(dataWidth.W)))))
+      val simRDataVec: Option[Vec[Vec[UInt]]] = simReadData.map(x => Wire(Vec(splitNum, Vec(x.length, UInt(dataWidth.W)))))
+      val simAllRDataVec: Option[Vec[Vec[UInt]]] = simAllRData.map(x => Wire(Vec(splitNum, Vec(x.length, UInt(dataWidth.W)))))
       for (i <- 0 until splitNum) {
         wdataVec(i) := wdata.map(_ ((i + 1) * dataWidth - 1, i * dataWidth))
         Regfile(
           name + s"Part${i}", numEntries, raddr, rdataVec(i), wen(i), waddr, wdataVec(i),
-          hasZero = false, withReset, bankNum = 1, debugReadAddr, debugRDataVec.map(_(i)), debugAllRDataVec.map(_(i))
+          hasZero = false, withReset, bankNum = 1, simReadAddr, simRDataVec.map(_(i)), simAllRDataVec.map(_(i))
         )
       }
       for (i <- 0 until rdata.length) {
         rdata(i) := Cat(rdataVec.map(_ (i)).reverse)
       }
-      if (debugReadData.nonEmpty) {
-        for (i <- 0 until debugReadData.get.length) {
-          debugReadData.get(i) := Cat(debugRDataVec.get.map(_ (i)).reverse)
+      if (simReadData.nonEmpty) {
+        for (i <- 0 until simReadData.get.length) {
+          simReadData.get(i) := Cat(simRDataVec.get.map(_ (i)).reverse)
         }
       }
-      if (debugAllRData.nonEmpty) {
-        for (i <- 0 until debugAllRData.get.length) {
-          debugAllRData.get(i) := Cat(debugAllRDataVec.get.map(_(i)).reverse)
+      if (simAllRData.nonEmpty) {
+        for (i <- 0 until simAllRData.get.length) {
+          simAllRData.get(i) := Cat(simAllRDataVec.get.map(_(i)).reverse)
         }
       }
     }

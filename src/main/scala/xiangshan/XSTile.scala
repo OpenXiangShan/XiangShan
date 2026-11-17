@@ -120,7 +120,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
-      val debugTopDown = new Bundle {
+      val simTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
@@ -199,9 +199,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
-      core.module.io.debugTopDown.l2MissMatch := l2top.module.io.debugTopDown.l2MissMatch
-      l2top.module.io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
-      l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
+      core.module.io.simTopDown.l2MissMatch := l2top.module.io.simTopDown.l2MissMatch
+      l2top.module.io.simTopDown.robHeadPaddr := core.module.io.simTopDown.robHeadPaddr
+      l2top.module.io.simTopDown.robTrueCommit := core.module.io.simTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
       core.module.io.topDownInfo.l2Miss := l2top.module.io.l2Miss
@@ -213,7 +213,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
-      core.module.io.debugTopDown.l2MissMatch := false.B
+      core.module.io.simTopDown.l2MissMatch := false.B
       core.module.io.topDownInfo.l2Miss := false.B
 
       core.module.io.l2_tlb_req.req.valid := false.B
@@ -224,8 +224,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.perfEvents <> DontCare
     }
 
-    io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
-    core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
+    io.simTopDown.robHeadPaddr := core.module.io.simTopDown.robHeadPaddr
+    core.module.io.simTopDown.l3MissMatch := io.simTopDown.l3MissMatch
     l2top.module.io.l3Miss.fromTile := io.l3Miss
     core.module.io.topDownInfo.l3Miss := l2top.module.io.l3Miss.toCore
 
@@ -233,7 +233,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.decoupledCHI.foreach(_ <> l2top.module.io.decoupledCHI.get)
     l2top.module.io.nodeID.foreach(_ := io.nodeID.get)
 
-    if (debugOpts.ResetGen && enableL2) {
+    if (simOpts.ResetGen && enableL2) {
       core.module.reset := l2top.module.reset_core
     }
   }

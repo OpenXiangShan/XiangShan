@@ -63,7 +63,7 @@ class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
   outFuWakeUp.delay := BypassDelay.delay3
 
   protected val nonFixedLatOutCtrl = RegInit(0.U.asTypeOf(new Func.OutCtrl(cfg)))
-  protected val nonFixedLatOutDebug = ex(0).bits.debug.map(debug => Reg(chiselTypeOf(debug)))
+  protected val nonFixedLatOutSim = ex(0).bits.sim.map(sim => Reg(chiselTypeOf(sim)))
 
   private val nonFixedLatOutCtrlNext = Wire(new Func.OutCtrl(cfg))
   nonFixedLatOutCtrlNext.robIdx := ex0ctrl.robIdx
@@ -82,14 +82,14 @@ class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
   nonFixedLatOutCtrlNext.fflagsWen.zip(ex0ctrl.fflagsWen).foreach { case (sink, source) => sink := source }
 
   out.ex(0).bits.ctrl := nonFixedLatOutCtrl
-  out.ex(0).bits.debug.zip(nonFixedLatOutDebug).foreach { case (sink, source) =>
+  out.ex(0).bits.sim.zip(nonFixedLatOutSim).foreach { case (sink, source) =>
     sink := source
   }
 
   protected def latchNonFixedLatOutCtrl(fire: Bool): Unit = {
     when(fire) {
       nonFixedLatOutCtrl := nonFixedLatOutCtrlNext
-      nonFixedLatOutDebug.zip(ex(0).bits.debug).foreach { case (sink, source) =>
+      nonFixedLatOutSim.zip(ex(0).bits.sim).foreach { case (sink, source) =>
         sink := source
       }
     }

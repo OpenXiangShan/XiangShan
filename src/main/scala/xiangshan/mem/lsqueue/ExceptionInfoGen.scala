@@ -190,7 +190,7 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
     currentExcp  := oldestBits
   }
 
-  when(!currentValid && outValid) { // TODO: need valid ? maby for debug.
+  when(!currentValid && outValid) { // TODO: need valid ? maby for sim.
     currentValid := true.B
   }.elsewhen(currentValid && currentExcp.robIdx.needFlush(io.redirect) && !outValid) {
     currentValid := false.B

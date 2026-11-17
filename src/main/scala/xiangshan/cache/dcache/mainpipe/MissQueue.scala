@@ -1265,7 +1265,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     val wfi = Flipped(new WfiReqBundle)
 
-    val debugTopDown = new DCacheTopDownIO
+    val simTopDown = new DCacheTopDownIO
     val l1Miss = Output(Bool())
   })
 
@@ -2114,18 +2114,18 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // L1MissTrace Chisel DB - support multiple enqueue ports
-  val debug_miss_trace_vec = Wire(Vec(reqNum, new L1MissTrace))
+  val sim_miss_trace_vec = Wire(Vec(reqNum, new L1MissTrace))
   for (i <- 0 until reqNum) {
-    debug_miss_trace_vec(i).vaddr := io.queryMQ(i).req.bits.vaddr
-    debug_miss_trace_vec(i).paddr := io.queryMQ(i).req.bits.addr
-    debug_miss_trace_vec(i).source := io.queryMQ(i).req.bits.source
-    debug_miss_trace_vec(i).pc := io.queryMQ(i).req.bits.pc
+    sim_miss_trace_vec(i).vaddr := io.queryMQ(i).req.bits.vaddr
+    sim_miss_trace_vec(i).paddr := io.queryMQ(i).req.bits.addr
+    sim_miss_trace_vec(i).source := io.queryMQ(i).req.bits.source
+    sim_miss_trace_vec(i).pc := io.queryMQ(i).req.bits.pc
   }
 
   val isWriteL1MissQMissTable = Constantin.createRecord(s"isWriteL1MissQMissTable${p(XSCoreParamsKey).HartId}")
   val table = ChiselDB.createTable(s"L1MissQMissTrace_hart${p(XSCoreParamsKey).HartId}", new L1MissTrace)
   for (i <- 0 until reqNum) {
-    table.log(debug_miss_trace_vec(i), isWriteL1MissQMissTable.orR && query_fire(i) && !io.queryMQ(i).req.bits.cancel && ((analysis.strategy(i) & 1.U) =/= 0.U), s"MissQueue_$i", clock, reset)
+    table.log(sim_miss_trace_vec(i), isWriteL1MissQMissTable.orR && query_fire(i) && !io.queryMQ(i).req.bits.cancel && ((analysis.strategy(i) & 1.U) =/= 0.U), s"MissQueue_$i", clock, reset)
   }
 
   // Difftest
@@ -2248,12 +2248,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   entries.foreach {
     case e => {
-      e.io.rob_head_query.query_valid := io.debugTopDown.robHeadVaddr.valid
-      e.io.rob_head_query.vaddr := io.debugTopDown.robHeadVaddr.bits
+      e.io.rob_head_query.query_valid := io.simTopDown.robHeadVaddr.valid
+      e.io.rob_head_query.vaddr := io.simTopDown.robHeadVaddr.bits
     }
   }
 
-  io.debugTopDown.robHeadMissInDCache := rob_head_miss_in_dcache
+  io.simTopDown.robHeadMissInDCache := rob_head_miss_in_dcache
 
   val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
   val query_fire_next = RegNext(query_fire)

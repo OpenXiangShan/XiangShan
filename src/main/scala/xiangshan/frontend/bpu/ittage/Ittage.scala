@@ -25,11 +25,11 @@ package xiangshan.frontend.bpu.ittage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.{XSDebug => XSSim}
 import utility.GTimer
 import utility.LowerMask
 import utility.ParallelSelectTwo
 import utility.SelectTwoInterRes
-import utility.XSDebug
 import utility.XSPerfAccumulate
 import xiangshan.XSModule
 import xiangshan.frontend.GuardedPc
@@ -280,7 +280,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   s2_providerTarget    := providerCatTarget
   s2_altProviderTarget := altProviderCatTarget
 
-  XSDebug(s2_fire, p"hit_taken_jalr:")
+  XSSim(s2_fire, p"hit_taken_jalr:")
 
   ittageMeta.valid             := s3_fire
   ittageMeta.provider.valid    := s3_provided
@@ -293,7 +293,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.altProviderCnt    := s3_altProviderCnt
   ittageMeta.providerTarget    := s3_providerTarget.unGuard
   ittageMeta.altProviderTarget := s3_altProviderTarget.unGuard
-  ittageMeta.debug_predCycle.foreach(_ := GTimer())
+  ittageMeta.sim_predCycle.foreach(_ := GTimer())
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
   private val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && r.bits.usefulCnt.isSaturateNegative)).asUInt &
@@ -363,13 +363,13 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       updateOldTargetOffset(provider) := metaProviderTargetOffset
     }
   }
-  XSDebug(
+  XSSim(
     updateValid && t1_meta.provider.valid,
-    p"t1_train provider $provider, pred cycle ${t1_meta.debug_predCycle.getOrElse(0.U)}\n"
+    p"t1_train provider $provider, pred cycle ${t1_meta.sim_predCycle.getOrElse(0.U)}\n"
   )
-  XSDebug(
+  XSSim(
     updateValid && t1_meta.provider.valid && usedAltPred && updateMisPred,
-    p"t1_train altprovider $altProvider, pred cycle ${t1_meta.debug_predCycle.getOrElse(0.U)}\n"
+    p"t1_train altprovider $altProvider, pred cycle ${t1_meta.sim_predCycle.getOrElse(0.U)}\n"
   )
 
   // if mispredicted and not the case that
@@ -390,9 +390,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     }
   }
 
-  XSDebug(
+  XSSim(
     updateValid && updateMisPred && !(providerCorrect && providerUnconf) && allocate.valid,
-    p"allocate new table entry, pred cycle ${t1_meta.debug_predCycle.getOrElse(0.U)}\n"
+    p"allocate new table entry, pred cycle ${t1_meta.sim_predCycle.getOrElse(0.U)}\n"
   )
 
   when(tickCnt.isSaturatePositive) {
@@ -415,7 +415,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     tables(i).io.update.foldedHist     := RegEnable(updateFoldedPhr, updateMask(i))
   }
 
-  // Debug and perf info
+  // Simulation and performance info
   XSPerfAccumulate("ittage_reset_u", updateResetUsefulCnt)
   XSPerfAccumulate("ittage_used", s1_fire && s1_isIndirect)
   XSPerfAccumulate("ittage_closed_due_to_uftb_info", s1_fire && !s1_isIndirect)
@@ -480,17 +480,17 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittagePerf("use_ftb_as_alt_provider", predUseBimAsAltPred, commitUseFtbAsAltPred)
   XSPerfAccumulate("updated", updateValid)
 
-  if (debug) {
+  if (sim) {
     val s2_respsRegs = RegEnable(s2_resps, s2_fire)
-    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_startPc.toUInt)
-    XSDebug("s1_fire:%d, resp: pc=%x\n", s1_fire, s1_startPc.toUInt)
-    XSDebug(
+    XSSim("req: v=%d, pc=0x%x\n", s0_fire, s0_startPc.toUInt)
+    XSSim("s1_fire:%d, resp: pc=%x\n", s1_fire, s1_startPc.toUInt)
+    XSSim(
       "s2_fireOnLastCycle: resp: pc=%x, hit=%b\n",
       s2_startPc.toUInt,
       s2_provided
     )
     for (i <- 0 until NumTables) {
-      XSDebug(
+      XSSim(
         "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U,
         VecInit(s2_respsRegs(i).valid).asUInt,
@@ -500,10 +500,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       )
     }
   }
-  XSDebug(
+  XSSim(
     updateValid,
     p"pc: ${Hexadecimal(updateStartPc.toUInt)}, target: ${Hexadecimal(t1_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
   )
-  XSDebug(updateValid, t1_meta.toPrintable + p"\n")
-  XSDebug(updateValid, p"correct(${!updateMisPred})\n")
+  XSSim(updateValid, t1_meta.toPrintable + p"\n")
+  XSSim(updateValid, p"correct(${!updateMisPred})\n")
 }

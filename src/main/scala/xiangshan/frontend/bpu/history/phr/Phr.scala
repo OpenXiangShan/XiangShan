@@ -401,12 +401,12 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   if (io.commit.bits.meta.phr.predFoldedHist.isDefined) {
-    val debug_predFoldedHist = io.commit.bits.meta.phr.predFoldedHist.get
+    val sim_predFoldedHist = io.commit.bits.meta.phr.predFoldedHist.get
     require(
-      debug_predFoldedHist.hist.length == metaPhrFolded.hist.length,
+      sim_predFoldedHist.hist.length == metaPhrFolded.hist.length,
       "pred folded hist length mismatch"
     )
-    val predictFHist_diff_trainFHist = io.commit.valid && debug_predFoldedHist.asUInt =/= metaPhrFolded.asUInt
+    val predictFHist_diff_trainFHist = io.commit.valid && sim_predFoldedHist.asUInt =/= metaPhrFolded.asUInt
     XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
   }
 

@@ -101,15 +101,15 @@ class PipelineState(implicit p: Parameters) extends AheadBtbBundle with Helpers 
   val ctrVec:   Vec[SaturateCounter] = Vec(NumWays, TakenCounter())
   val hitMask:  Vec[Bool]            = Vec(NumWays, Bool())
 
-  val debug_indexPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
+  val sim_indexPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
 
   def getHitMask: Vec[Bool] =
     VecInit(entries.map(e => e.valid && e.tag === getTag(startPc)))
 }
 
 class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
-  val entries:       Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
-  val debug_startPc: Option[GuardedPc]      = Option.when(!env.FPGAPlatform)(GuardedPc())
+  val entries:     Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
+  val sim_startPc: Option[GuardedPc]      = Option.when(!env.FPGAPlatform)(GuardedPc())
 }
 
 class AheadBtbToMicroTageResult(implicit p: Parameters) extends AheadBtbBundle {

@@ -1,6 +1,6 @@
 ifneq ($(DEVICE_PREFIX),)
 RELEASE_ARGS += --xstop-prefix $(DEVICE_PREFIX)
-DEBUG_ARGS += --xstop-prefix $(DEVICE_PREFIX)
+INSTRUMENTED_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 PLDM_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 endif
 

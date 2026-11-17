@@ -18,11 +18,11 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.{XSDebug => XSSim}
 import utility.ChiselDB
 import utility.Constantin
 import utility.HasPerfEvents
 import utility.SignExt
-import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.Redirect

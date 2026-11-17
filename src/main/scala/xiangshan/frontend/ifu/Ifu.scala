@@ -534,7 +534,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.isRvc     := s2_expandedInstrVec.map(_.isRvc)
   io.toIBuffer.bits.pc := VecInit(
     s2_alignedInstrPcVec.map(_.unGuard)
-  ) // for debug
+  ) // for sim
   io.toIBuffer.bits.prevIBufEnqPtr := s2_prevIBufEnqPtr
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
     ftqPtr := Mux(s2_blockSel(i) || s2_isCrossBlockInstr(i), s2_fetchBlock(1).ftqIdx, s2_fetchBlock(0).ftqIdx)
@@ -621,7 +621,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     // leave uopIdx to 0.U
     res
   })
-  io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
+  io.toIBuffer.bits.sim_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
     seqNum := Mux(s2_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
   }
 

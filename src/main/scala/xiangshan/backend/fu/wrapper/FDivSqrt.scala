@@ -90,12 +90,12 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
     thisRobIdx := out.ex(0).bits.ctrl.robIdx
   }
   out.ex(0).bits.ctrl := Mux(inFire, nonFixedLatOutCtrlNext, nonFixedLatOutCtrl)
-  out.ex(0).bits.debug.zip(nonFixedLatOutDebug).foreach { case (sink, source) =>
-    sink := Mux(inFire, in.ex(0).bits.debug.get, source)
+  out.ex(0).bits.sim.zip(nonFixedLatOutSim).foreach { case (sink, source) =>
+    sink := Mux(inFire, in.ex(0).bits.sim.get, source)
   }
   when(inFire) {
     nonFixedLatOutCtrl := nonFixedLatOutCtrlNext
-    nonFixedLatOutDebug.zip(ex(0).bits.debug).foreach { case (sink, source) =>
+    nonFixedLatOutSim.zip(ex(0).bits.sim).foreach { case (sink, source) =>
       sink := source
     }
   }

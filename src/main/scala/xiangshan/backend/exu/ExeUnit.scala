@@ -134,7 +134,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       case _ =>
     }
   }
-  if(backendParams.debugEn) {
+  if(backendParams.simEn) {
     dontTouch(io.out.ready)
   }
   // rob flush --> funcUnits
@@ -199,8 +199,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.vtype       .foreach(x => x := source.bits.ctrl.vtype.get)
       sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
       sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
-      sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
-      sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
+      sink.bits.perfSimInfo    .foreach(_ := source.bits.perfSimInfo.get)
+      sink.bits.sim_seqNum     .foreach(_ := source.bits.sim_seqNum.get)
   }
   funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
     val latency = fu.cfg.latency.latencyVal.getOrElse(0)
@@ -452,11 +452,11 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   // RegNext for better timing and it should be fine
   io.instrAddrTransType.foreach(exuio => funcUnits.foreach(fu => fu.io.instrAddrTransType.foreach(fuio => fuio := RegNext(exuio))))
 
-  // debug info
-  io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
-  io.out.bits.debug.isPerfCnt := funcUnits.map(_.io.csrio.map(_.isPerfCnt)).map(_.getOrElse(false.B)).reduce(_ || _)
-  io.out.bits.perfDebugInfo.foreach(_ := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo)))))
-  io.out.bits.debug_seqNum.foreach(_ := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum())))))
+  // sim info
+  io.out.bits.sim     := 0.U.asTypeOf(io.out.bits.sim)
+  io.out.bits.sim.isPerfCnt := funcUnits.map(_.io.csrio.map(_.isPerfCnt)).map(_.getOrElse(false.B)).reduce(_ || _)
+  io.out.bits.perfSimInfo.foreach(_ := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfSimInfo.getOrElse(0.U.asTypeOf(new PerfSimInfo)))))
+  io.out.bits.sim_seqNum.foreach(_ := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.sim_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum())))))
 }
 
 class DispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {

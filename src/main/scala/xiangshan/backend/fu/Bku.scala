@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, ZeroExt}
-import utility.{XSDebug, XSError}
+import utility.{XSDebug => XSSim, XSError}
 import xiangshan._
 import xiangshan.backend.fu.util._
 

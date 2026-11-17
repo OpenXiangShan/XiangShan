@@ -86,7 +86,7 @@ class TraceBuffer(implicit val p: Parameters) extends Module
   io.out.blockCommit := blockCommit
   io.out.groups := blockOut
 
-  if(backendParams.debugEn){
+  if(backendParams.simEn){
     dontTouch(countVec)
     dontTouch(numNeedPc)
     dontTouch(traceIdxVec)

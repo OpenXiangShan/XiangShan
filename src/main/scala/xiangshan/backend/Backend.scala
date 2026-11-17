@@ -32,7 +32,7 @@ import utility._
 import utility.sram.SramBroadcastBundle
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
+import xiangshan.backend.ctrlblock.{SimLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataConfig._
@@ -43,7 +43,7 @@ import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.rob.Rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
+import xiangshan.backend.rob.Rob.{RobCoreTopDownIO, RobSimRollingIO, RobLsqIO}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.backend.vector.{Exu, VecIssueQueue, VecRegionImp, VecRegionModule}
 import xiangshan.backend.float.{FltExu, FltIssueQueue, FltRegionImp, FltRegionModule}
@@ -62,7 +62,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 class BackendImp(wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
   val io = IO(new BackendIO()(p, wrapper.params))
   io <> wrapper.inner.module.io
-  if (p(DebugOptionsKey).ResetGen) {
+  if (p(SimOptionsKey).ResetGen) {
     ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
@@ -98,8 +98,8 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
   }
 
 
-  println(s"[Backend] debugEn:${backendParams.debugEn}")
-  println(s"[Backend] basicDebugEn:${backendParams.basicDebugEn}")
+  println(s"[Backend] simEn:${backendParams.simEn}")
+  println(s"[Backend] basicSimEn:${backendParams.basicSimEn}")
   println("[Backend] ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs
@@ -244,10 +244,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     s"vec(${vecRegion.out.toDispatch.IQValidNumVec.size})"
   )
   ctrlBlock.io.toDispatch.IQValidNumVec := intRegion.io.IQValidNumVec ++ fpRegion.out.toDispatch.IQValidNumVec ++ vecRegion.out.toDispatch.IQValidNumVec
-  ctrlBlock.io.toDispatch.debugIQValidNumVec.foreach(_ := intRegion.io.debugIQValidNumVec.get ++
-    fpRegion.out.toDispatch.debugIQValidNumVec.get ++ vecRegion.out.toDispatch.debug.get.IQValidNumVec)
-  ctrlBlock.io.toDispatch.debugIQEnqHasIssuedVec.foreach(_ := intRegion.io.debugIQEnqHasIssuedVec.get ++
-    fpRegion.out.toDispatch.debugIQEnqHasIssuedVec.get ++ vecRegion.out.toDispatch.debug.get.IQEnqHasIssuedVec)
+  ctrlBlock.io.toDispatch.simIQValidNumVec.foreach(_ := intRegion.io.simIQValidNumVec.get ++
+    fpRegion.out.toDispatch.simIQValidNumVec.get ++ vecRegion.out.toDispatch.sim.get.IQValidNumVec)
+  ctrlBlock.io.toDispatch.simIQEnqHasIssuedVec.foreach(_ := intRegion.io.simIQEnqHasIssuedVec.get ++
+    fpRegion.out.toDispatch.simIQEnqHasIssuedVec.get ++ vecRegion.out.toDispatch.sim.get.IQEnqHasIssuedVec)
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
   // Todo: when add cross domain wake up, it is necessary to add assertions that fp and vec do not have 0 lat fu.
   ctrlBlock.io.toDispatch.og0Cancel := intRegion.io.og0Cancel
@@ -275,13 +275,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.csr.criticalErrorState := intRegion.io.csrio.get.criticalErrorState
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
-  ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
-  ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
-  ctrlBlock.io.debugEnqLsq.recoverStall := io.mem.lsqEnqIO.recoverStall
-  ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
-  ctrlBlock.io.debugEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
-  ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
-  ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
+  ctrlBlock.io.robio.sim_ls <> io.mem.simLS
+  ctrlBlock.io.simEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
+  ctrlBlock.io.simEnqLsq.recoverStall := io.mem.lsqEnqIO.recoverStall
+  ctrlBlock.io.simEnqLsq.resp := io.mem.lsqEnqIO.resp
+  ctrlBlock.io.simEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
+  ctrlBlock.io.simEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
+  ctrlBlock.io.simEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   intRegion.io.hartId := io.fromTop.hartId
@@ -633,7 +633,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
-  io.mem.storeDebugInfo <> ctrlBlock.io.robio.storeDebugInfo
+  io.mem.storeSimInfo <> ctrlBlock.io.robio.storeSimInfo
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
@@ -647,10 +647,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.traceCoreInterface <> ctrlBlock.io.traceCoreInterface
 
-  io.debugTopDown.fromRob := ctrlBlock.io.debugTopDown.fromRob
-  ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
+  io.simTopDown.fromRob := ctrlBlock.io.simTopDown.fromRob
+  ctrlBlock.io.simTopDown.fromCore := io.simTopDown.fromCore
 
-  io.debugRolling := ctrlBlock.io.debugRolling
+  io.simRolling := ctrlBlock.io.simRolling
 
   // Top-Down
   topDownMod.io.intTopDown.uopsIssued    := intRegion.io.uopTopDown.uopsIssued
@@ -677,7 +677,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     cg.cgen := false.B
   }
   // reset tree
-  if (p(DebugOptionsKey).ResetGen) {
+  if (p(SimOptionsKey).ResetGen) {
     val rightResetTree = ResetGenNode(Seq(
       ModuleNode(intRegion),
       ModuleNode(fpRegion),
@@ -794,7 +794,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val stIssuePtr = Input(new SqPtr())
 
-  val debugLS = Flipped(Output(new DebugLSIO))
+  val simLS = Flipped(Output(new SimLSIO))
 
   val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Flipped(Output(new LsTopdownInfo)))
   // Output
@@ -815,7 +815,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
     backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
 
   // store event difftest information
-  val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+  val storeSimInfo = Vec(EnsbufferWidth, new Bundle {
     val robidx = Input(new RobPtr)
     val pc     = Output(UInt(VAddrBits.W))
     val storeOffset = Option.when(env.EnableDifftest)(Output(UInt(log2Ceil(RenameWidth + 1).W)))
@@ -862,11 +862,11 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
 
   val csrCustomCtrl = Output(new CustomCSRCtrlIO)
 
-  val debugTopDown = new Bundle {
+  val simTopDown = new Bundle {
     val fromRob = new RobCoreTopDownIO
     val fromCore = new CoreDispatchTopDownIO
   }
-  val debugRolling = new RobDebugRollingIO
+  val simRolling = new RobSimRollingIO
   val topDownInfo = new TopDownInfo
   val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
   val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))

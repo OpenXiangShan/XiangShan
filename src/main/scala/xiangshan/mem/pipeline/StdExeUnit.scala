@@ -68,9 +68,9 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.toRob.bits.robIdx := io.in.bits.robIdx
   io.out.toRob.bits.isRVC.foreach(_ := DontCare)
   io.out.toRob.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
-  io.out.toRob.bits.debugInfo := DontCare
-  io.out.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
-  io.out.toRob.bits.debugInfo.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.out.toRob.bits.simInfo := DontCare
+  io.out.toRob.bits.simInfo.perfSimInfo.foreach(_ := io.in.bits.perfSimInfo.get)
+  io.out.toRob.bits.simInfo.sim_seqNum.foreach(_ := io.in.bits.sim_seqNum.get)
   io.writebackAtRobHead := io.out.toRob.valid && io.out.toRob.bits.robIdx === io.perfRobHeadPtr
 
   io.atomicData.valid := io.in.fire && FuType.storeIsAMO(io.in.bits.fuType)
@@ -82,7 +82,7 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.sqData.bits.fuOpType := Mux(io.vstdIn.valid, io.vstdIn.bits.fuOpType, io.in.bits.fuOpType)
   io.sqData.bits.data := Mux(io.vstdIn.valid, io.vstdIn.bits.data, io.in.bits.src(0))
   io.sqData.bits.sqIdx := Mux(io.vstdIn.valid, io.vstdIn.bits.sqIdx, io.in.bits.sqIdx.get)
-  io.sqData.bits.vecDebug.foreach(_ := io.vstdIn.bits.vecDebug.get) // DontCare for scalar stds
+  io.sqData.bits.vecSim.foreach(_ := io.vstdIn.bits.vecSim.get) // DontCare for scalar stds
 
   XSPerfAccumulate("STD_out_of_range_issue", !(io.in.valid && s0IllegalIssue))
 }

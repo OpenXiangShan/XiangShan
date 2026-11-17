@@ -21,7 +21,7 @@ class VsetTop(implicit p: Parameters) extends XSModule {
     val out = Output(new XSBundle {
       val vconfig = VConfig()
     })
-    val debug = new XSBundle() {
+    val sim = new XSBundle() {
       val fuOpType0 = Output(FuOpType())
       val src0      = Output(Vec(2, UInt(64.W)))
       val fuOpType1 = Output(FuOpType())
@@ -85,20 +85,20 @@ class VsetTop(implicit p: Parameters) extends XSModule {
                               io.in.func === VSETOpType.uvsetvcfg_keep_v
 
   io.out.vconfig := MuxCase(0.U.asTypeOf(VConfig()), Seq(
-    selVsetIVL -> vsetRiWi.debugIO.vconfig,
-    selVsetIVConfig -> vsetRiWvf.debugIO.vconfig,
-    selVsetFVConfig -> vsetRvfWvf.debugIO.vconfig,
+    selVsetIVL -> vsetRiWi.simIO.vconfig,
+    selVsetIVConfig -> vsetRiWvf.simIO.vconfig,
+    selVsetFVConfig -> vsetRvfWvf.simIO.vconfig,
   ))
 
-  io.debug.fuOpType0 := vsetRiWi.io.in.bits.ctrl.fuOpType
-  io.debug.src0(0) := vsetRiWi.io.in.bits.data.src(0)
-  io.debug.src0(1) := vsetRiWi.io.in.bits.data.src(1)
+  io.sim.fuOpType0 := vsetRiWi.io.in.bits.ctrl.fuOpType
+  io.sim.src0(0) := vsetRiWi.io.in.bits.data.src(0)
+  io.sim.src0(1) := vsetRiWi.io.in.bits.data.src(1)
 
-  io.debug.fuOpType1 := vsetRiWvf.io.in.bits.ctrl.fuOpType
-  io.debug.src1(0) := vsetRiWvf.io.in.bits.data.src(0)
-  io.debug.src1(1) := vsetRiWvf.io.in.bits.data.src(1)
+  io.sim.fuOpType1 := vsetRiWvf.io.in.bits.ctrl.fuOpType
+  io.sim.src1(0) := vsetRiWvf.io.in.bits.data.src(0)
+  io.sim.src1(1) := vsetRiWvf.io.in.bits.data.src(1)
 
-  io.debug.fuOpType2 := vsetRvfWvf.io.in.bits.ctrl.fuOpType
-  io.debug.src2(0) := vsetRvfWvf.io.in.bits.data.src(0)
-  io.debug.src2(1) := vsetRvfWvf.io.in.bits.data.src(1)
+  io.sim.fuOpType2 := vsetRvfWvf.io.in.bits.ctrl.fuOpType
+  io.sim.src2(0) := vsetRvfWvf.io.in.bits.data.src(0)
+  io.sim.src2(1) := vsetRvfWvf.io.in.bits.data.src(1)
 }

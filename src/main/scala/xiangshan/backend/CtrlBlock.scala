@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{SimLSIO, SimLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
@@ -32,7 +32,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobPtr}
-import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
+import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobSimRollingIO, RobLsqIO}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
@@ -161,7 +161,7 @@ class CtrlBlockImp(
     val delayed = Wire(Valid(new WriteBackRobBundle(x.bits.params, backendParams)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
-    delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
+    delayed.bits.perfSimInfo.foreach(_.writebackTime := GTimer())
     delayed
   }).toSeq
   private val delayedWriteBack = Wire(chiselTypeOf(io.fromWB.wbData))
@@ -231,8 +231,8 @@ class CtrlBlockImp(
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.isFromLoad := true.B
-  loadReplay.bits.debugIsCtrl := false.B
-  loadReplay.bits.debugIsMemVio := true.B
+  loadReplay.bits.simIsCtrl := false.B
+  loadReplay.bits.simIsMemVio := true.B
 
   println(s"[CtrlBlock] pcMem read port for \"redirect\": ${pcMemRdIndexes("redirect").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
@@ -515,7 +515,7 @@ class CtrlBlockImp(
    * All accepted insts are before the first unaccepted one. */
   val decodeFromFrontendAcceptNum = PriorityMuxDefault(decodeFromFrontendNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
 
-  if (backendParams.debugEn) {
+  if (backendParams.simEn) {
     dontTouch(decodeBufNotAccept)
     dontTouch(decodeBufAcceptNum)
     dontTouch(decodeFromFrontendNotAccept)
@@ -760,7 +760,7 @@ class CtrlBlockImp(
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
-  rename.io.debugDispatchAllFire.foreach(_ := dispatch.io.toRenameAllFire)
+  rename.io.simDispatchAllFire.foreach(_ := dispatch.io.toRenameAllFire)
 
   for (i <- 0 until RenameWidth - 1) {
     when (fusionDecoder.io.out(i).valid) {
@@ -786,7 +786,7 @@ class CtrlBlockImp(
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
 
-  rename.io.debugOutValidVec.foreach(_ := dispatch.io.fromRename.map(_.valid))
+  rename.io.simOutValidVec.foreach(_ := dispatch.io.fromRename.map(_.valid))
 
 
   dispatch.io.redirect := s1_s3_redirect
@@ -835,11 +835,11 @@ class CtrlBlockImp(
   dispatch.io.fromLsqEnqCtrl.sqStall.foreach(_ := lsqEnqCtrl.io.sqStall.get)
   io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
 
-  dispatch.io.debugBlockBackward.foreach(_ := rob.out.debugBlockBackward.get)
-  dispatch.io.debugWaitForward.foreach(_ := rob.out.debugWaitForward.get)
-  dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
-  dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
-  dispatch.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
+  dispatch.io.simBlockBackward.foreach(_ := rob.out.simBlockBackward.get)
+  dispatch.io.simWaitForward.foreach(_ := rob.out.simWaitForward.get)
+  dispatch.io.simIQValidNumVec.foreach(_ := io.toDispatch.simIQValidNumVec.get)
+  dispatch.io.simIQEnqHasIssuedVec.foreach(_ := io.toDispatch.simIQEnqHasIssuedVec.get)
+  dispatch.io.simRobHeadStall.foreach(_ := rob.out.simRobHeadStall.get)
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -908,17 +908,17 @@ class CtrlBlockImp(
 
   io.diff_vl_rat .foreach(_ := rename.io.diff_vl_rat.get)
 
-  rob.in.debug_ls := io.robio.debug_ls
-  rob.in.debugHeadLsIssue := io.robio.robHeadLsIssue
+  rob.in.sim_ls := io.robio.sim_ls
+  rob.in.simHeadLsIssue := io.robio.robHeadLsIssue
   rob.in.lsTopdownInfo := io.robio.lsTopdownInfo
   rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
-  rob.in.debugEnqLsq := io.debugEnqLsq
-  rob.in.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
+  rob.in.simEnqLsq := io.simEnqLsq
+  rob.in.simInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.in.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
   io.robio.robDeqPtr := rob.out.robDeqPtr
 
-  io.robio.storeDebugInfo <> rob.in.storeDebugInfo
+  io.robio.storeSimInfo <> rob.in.storeSimInfo
 
   // rob to backend
   io.robio.commitVType := rob.out.toDecode.commitVType
@@ -933,11 +933,11 @@ class CtrlBlockImp(
   io.toVecExcpMod.excpInfo       := rob.out.toVecExcpMod.excpInfo
   io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
-  io.debugTopDown.fromRob := rob.out.debugTopDown.toCore
-  rob.in.debugTopDown.fromCore := io.debugTopDown.fromCore
-  io.debugRolling := rob.out.debugRolling
-  dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.debugTopDown.toDispatch.robTrueCommit)
-  rename.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
+  io.simTopDown.fromRob := rob.out.simTopDown.toCore
+  rob.in.simTopDown.fromCore := io.simTopDown.fromCore
+  io.simRolling := rob.out.simRolling
+  dispatch.io.simRobTrueCommit.foreach(_ := rob.out.simTopDown.toDispatch.robTrueCommit)
+  rename.io.simRobHeadStall.foreach(_ := rob.out.simRobHeadStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.out.robFull)
   io.perfInfo.ctrlInfo.intdqFull := false.B
@@ -1003,8 +1003,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vlWriteBackInfo = new Bundle {
       val vlFromIntIsVlmax = Input(Bool())
     }
-    val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Input(UInt(maxIQSize.U.getWidth.W))))
-    val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Input(Bool())))
+    val simIQValidNumVec = Option.when(backendParams.simEn)(Vec(IQNum, Input(UInt(maxIQSize.U.getWidth.W))))
+    val simIQEnqHasIssuedVec = Option.when(backendParams.simEn)(Vec(IQNum, Input(Bool())))
   }
   val toDataPath = new Bundle {
     val flush = ValidIO(new Redirect)
@@ -1038,7 +1038,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Valid(Bool())))
     val lsq = new RobLsqIO
     val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
-    val debug_ls = Input(new DebugLSIO())
+    val sim_ls = Input(new SimLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)
     val commitVType = new Bundle {
@@ -1046,13 +1046,13 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val hasVsetvl = Output(Bool())
     }
     // store event difftest information
-    val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+    val storeSimInfo = Vec(EnsbufferWidth, new Bundle {
       val robidx = Input(new RobPtr)
       val pc     = Output(UInt(VAddrBits.W))
       val storeOffset = Option.when(env.EnableDifftest)(Output(UInt(log2Ceil(RenameWidth + 1).W)))
       val preCommit = Option.when(env.EnableDifftest)(Output(Bool()))
     })
-    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
+    val topdownIQInfoVec = Option.when(backendParams.simEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
   }
 
   val toDecode = new Bundle {
@@ -1080,17 +1080,17 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vl_rat  = if (params.basicSimEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
 
-  val debugTopDown = new Bundle {
+  val simTopDown = new Bundle {
     val fromRob = new RobCoreTopDownIO
     val fromCore = new CoreDispatchTopDownIO
   }
-  val debugRolling = new RobDebugRollingIO
-  val debugEnqLsq = Input(new LsqEnqIO)
+  val simRolling = new RobSimRollingIO
+  val simEnqLsq = Input(new LsqEnqIO)
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

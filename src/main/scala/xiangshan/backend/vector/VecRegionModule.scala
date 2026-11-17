@@ -61,8 +61,8 @@ class VecRegionImp(
   implicit
   p: Parameters, param: RegionParam
 ) extends LazyModuleImp(wrapper) with HasXSParameter {
-  val debugEn = backendParams.debugEn
-  val basicDebugEn = backendParams.basicDebugEn
+  val simEn = backendParams.simEn
+  val basicSimEn = backendParams.basicSimEn
 
   val numVp = backendParams.vfPregParams.numEntries
   val numVpWritePort = backendParams.getVfRfWriteSize
@@ -90,25 +90,25 @@ class VecRegionImp(
   val vpWen   = Wire(Vec(numVpWritePort, Bool()))
   val vpWaddr = Wire(Vec(numVpWritePort, UInt(VfPhyRegIdxWidth.W)))
   val vpWdata = Wire(Vec(numVpWritePort, UInt(VLEN.W)))
-  val vpDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(numVp, UInt(VLEN.W))))
+  val vpDiffReadData: Option[Vec[UInt]] = Option.when(basicSimEn)(Wire(Vec(numVp, UInt(VLEN.W))))
 
   val vlRaddr = Wire(Vec(numVlReadPort, UInt(VlPhyRegIdxWidth.W)))
   val vlRdata = Wire(Vec(numVlReadPort, UInt(vlWidth.W)))
   val vlWen   = Wire(Vec(numVlWritePort, Bool()))
   val vlWaddr = Wire(Vec(numVlWritePort, UInt(VlPhyRegIdxWidth.W)))
   val vlWdata = Wire(Vec(numVlWritePort, UInt(vlWidth.W)))
-  val vlDiffReadAddr: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(VlPhyRegIdxWidth.W))))
-  val vlDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(vlWidth.W))))
+  val vlDiffReadAddr: Option[Vec[UInt]] = Option.when(basicSimEn)(Wire(Vec(1, UInt(VlPhyRegIdxWidth.W))))
+  val vlDiffReadData: Option[Vec[UInt]] = Option.when(basicSimEn)(Wire(Vec(1, UInt(vlWidth.W))))
 
   VfRegFile("VfRegFile", VfPhyRegs, 1, vpRaddr, vpRdata, Seq(vpWen), vpWaddr, vpWdata,
-    debugAllRData = vpDiffReadData
+    simAllRData = vpDiffReadData
   )
 
   FpRegFile("VlRegFile", VlPhyRegs, vlRaddr, vlRdata, vlWen, vlWaddr, vlWdata,
     bankNum = 1,
     isVlRegfile = true,
-    debugReadAddr = vlDiffReadAddr,
-    debugReadData = vlDiffReadData,
+    simReadAddr = vlDiffReadAddr,
+    simReadData = vlDiffReadData,
   )
 
   // These ids are global regfile writeback port indices from the active backend
@@ -356,8 +356,8 @@ class VecRegionImp(
 
   out.toDispatch.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum)
   out.toDispatch.topdownIQInfoVec.foreach(x => x := 0.U.asTypeOf(x))
-  out.toDispatch.debug.foreach(_.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum))
-  out.toDispatch.debug.foreach(_.IQEnqHasIssuedVec.foreach(_ := 0.U) )
+  out.toDispatch.sim.foreach(_.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum))
+  out.toDispatch.sim.foreach(_.IQEnqHasIssuedVec.foreach(_ := 0.U) )
   for ((iq, i) <- issueQueues.filterNot(_.param.hasVStd).zipWithIndex) {
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
@@ -415,7 +415,7 @@ class VecRegionImp(
     val diffNumWidth = 64
     val vecDiffNumPregs = VLEN / diffNumWidth * backendParams.vfPregParams.numEntries
     val vecDiffReadData: Option[Vec[UInt]] =
-      Option.when(backendParams.basicDebugEn)(Wire(Vec(vecDiffNumPregs, UInt(diffNumWidth.W))))
+      Option.when(backendParams.basicSimEn)(Wire(Vec(vecDiffNumPregs, UInt(diffNumWidth.W))))
 
     vecDiffReadData.foreach(_ :=
       vpDiffReadData
@@ -530,7 +530,7 @@ object VecRegionModule {
 
     val vlWb0WakeUp = Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams))
 
-    val diff = Option.when(backendParams.basicDebugEn)(new DiffIn)
+    val diff = Option.when(backendParams.basicSimEn)(new DiffIn)
   }
 
   class FromMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
@@ -563,9 +563,9 @@ object VecRegionModule {
         param.issueParams.filterNot(_.hasVStd).map(x => Flipped(Vec(x.numEnq, Bool())))
       )
 
-      val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
+      val topdownIQInfoVec = Option.when(backendParams.simEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
 
-      val debug = Option.when(backendParams.debugEn)(new Bundle {
+      val sim = Option.when(backendParams.simEn)(new Bundle {
         val IQValidNumVec = Vec(numIQ, UInt(numEntry.U.getWidth.W))
         val IQEnqHasIssuedVec = Vec(numIQ, Output(Bool()))
       })
@@ -613,7 +613,7 @@ object VecRegionModule {
 
     val toVecExcpMod = new VprfToExcpMod(maxMergeNumPerCycle * 2)
 
-    val diff = Option.when(backendParams.basicDebugEn)(new DiffOut)
+    val diff = Option.when(backendParams.basicSimEn)(new DiffOut)
   }
 
   class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
@@ -667,9 +667,9 @@ object VecRegionModule {
     }
   }
 
-  class DebugBundle(implicit p: Parameters) extends XSBundle {
-    val debug          = new xiangshan.DebugBundle
-    val perfDebugInfo  = new PerfDebugInfo()
+  class SimBundle(implicit p: Parameters) extends XSBundle {
+    val sim          = new xiangshan.SimBundle
+    val perfSimInfo  = new PerfSimInfo()
     val seqNum         = InstSeqNum()
   }
 }

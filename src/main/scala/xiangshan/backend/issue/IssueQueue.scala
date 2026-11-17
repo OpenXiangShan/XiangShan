@@ -59,8 +59,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val fuTypeVec = Output(Vec(params.numEntries, FuType()))
   val canIssueVec = Output(Vec(params.numEntries, Bool()))
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
-  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
-  val debugRobIdxVec =  Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr())))
+  val topdownIQInfoVec = Option.when(backendParams.simEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
+  val simRobIdxVec =  Option.when(backendParams.simEn)(Output(Vec(params.numEntries, new RobPtr())))
 
   val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
   val deqOg1Payload: MixedVec[IssueQueueDeqOg1Payload] = params.genIssueDeqOg1PayloadBundle
@@ -96,7 +96,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   lazy val io = IO(new IssueQueueIO())
 
   io.enq.foreach { case enq =>
-    enq.bits.debug.foreach(x => PerfCCT.updateInstPos(x.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
+    enq.bits.sim.foreach(x => PerfCCT.updateInstPos(x.sim_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset))
   }
 
   // Modules
@@ -227,13 +227,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   io.issuedVec := issuedVec
   io.canIssueVec := canIssueVec
   io.srcReadyVec := srcReadyVec
-  io.debugRobIdxVec.foreach(_ := entries.io.debugRobIdxVec.get)
+  io.simRobIdxVec.foreach(_ := entries.io.simRobIdxVec.get)
   io.topdownIQInfoVec.foreach{ case infoVec =>
-    val cancelSourceVec = entries.io.debugCancelSourceVec.get
-    val debugSrcReadyVec = entries.io.debugSrcReadyVec.get
-    val robIdxVec = entries.io.debugRobIdxVec.get
+    val cancelSourceVec = entries.io.simCancelSourceVec.get
+    val simSrcReadyVec = entries.io.simSrcReadyVec.get
+    val robIdxVec = entries.io.simRobIdxVec.get
     infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec)
-      .zip(debugSrcReadyVec).zip(fuTypeVec).zip(issuedVec).foreach{
+      .zip(simSrcReadyVec).zip(fuTypeVec).zip(issuedVec).foreach{
       case ((((((sink, cancel),valid),robIdx), srcReady), fuType), issued) =>{
         sink.valid := valid
         sink.bits.robIdx := robIdx
@@ -353,7 +353,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // dirty code, for uopidx and lastUop's assign
       enq.bits.payload.og1Payload.uopIdx.foreach(_              := s0_enqBits(enqIdx).uopIdx.get)
       enq.bits.payload.og1Payload.lastUop.foreach(_             := s0_enqBits(enqIdx).lastUop.get)
-      enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
+      enq.bits.payload.simLastIssueCancelSource.foreach(_     := IQCancelSource.none)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp
@@ -881,10 +881,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
     deq.bits.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
     deq.bits.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset.get)
-    deq.bits.perfDebugInfo.foreach(_ := deqEntryVec(i).bits.payload.debug.get.perfDebugInfo)
-    deq.bits.debug_seqNum.foreach(_ := deqEntryVec(i).bits.payload.debug.get.debug_seqNum)
-    deq.bits.perfDebugInfo.foreach(_.selectTime := GTimer())
-    deq.bits.perfDebugInfo.foreach(_.issueTime := GTimer() + 1.U)
+    deq.bits.perfSimInfo.foreach(_ := deqEntryVec(i).bits.payload.sim.get.perfSimInfo)
+    deq.bits.sim_seqNum.foreach(_ := deqEntryVec(i).bits.payload.sim.get.sim_seqNum)
+    deq.bits.perfSimInfo.foreach(_.selectTime := GTimer())
+    deq.bits.perfSimInfo.foreach(_.issueTime := GTimer() + 1.U)
   }
 
   val busyTableI2F = RegInit(0.U(3.W))
@@ -923,7 +923,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     sink.bits := source.bits
   }
   io.deqOg1Payload := entries.io.deqOg1Payload
-  if(backendParams.debugEn) {
+  if(backendParams.simEn) {
     dontTouch(deqDelay)
     dontTouch(io.deqDelay)
     dontTouch(deqBeforeDly)

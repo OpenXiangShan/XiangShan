@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug}
+import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug => XSSim}
 import utility.sram.SRAMTemplate
 
 import scala.math.max
@@ -129,7 +129,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         data = getECCFromRow(io.write.bits.data(r)),
         waymask = io.write.bits.way_en
       )
-      XSDebug(ecc_array.io.w.req.valid,
+      XSSim(ecc_array.io.w.req.valid,
         p"write in ecc sram ${j.U} row ${r.U}: setIdx=${Hexadecimal(ecc_array.io.w.req.bits.setIdx)} ecc(0)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(0))} ecc(1)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(1))} waymask=${Hexadecimal(io.write.bits.way_en)}\n")
       ecc_array.io.r.req.valid := io.read(j).valid && rmask(r)
       ecc_array.io.r.req.bits.apply(setIdx = raddr)

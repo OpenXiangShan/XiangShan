@@ -19,7 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{XSDebug, XSInfo}
+import utility.{XSDebug => XSSim, XSInfo}
 import xiangshan._
 import xiangshan.mem.Bundles._
 import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants, DCacheWordReqWithVaddr}
@@ -50,7 +50,7 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
 
   val req = Reg(new DCacheWordReqWithVaddr)
 
-  XSDebug("state: %d\n", state)
+  XSSim("state: %d\n", state)
 
   io.in(0).ready := state === s_invalid
 

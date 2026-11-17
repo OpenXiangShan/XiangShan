@@ -154,7 +154,7 @@ class LoadPipeBundle(
   val writebackDependOnTail = Option.when(param.hasS4PreProcess)(Bool())
   val shouldRarViolation = Option.when(param.hasS4PreProcess)(Bool())
 
-  // debug info and top-down
+  // sim info and top-down
   // TODO: use Option
   val hasROBEntry = Bool()
   val missDbUpdated = Bool()

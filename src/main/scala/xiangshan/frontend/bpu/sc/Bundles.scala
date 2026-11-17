@@ -78,20 +78,20 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val useScPred:       Vec[Bool] = Vec(NumBtbResultEntries, Bool())
   val sumAboveThres:   Vec[Bool] = Vec(NumBtbResultEntries, Bool())
 
-  // for debug
-  val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
-  val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
-  val debug_scBWTakenVec:     Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
-  val debug_scImliTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
-  val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
-  val debug_predPathIdx: Option[MixedVec[UInt]] =
+  // for sim
+  val sim_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
+  val sim_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
+  val sim_scBWTakenVec:     Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
+  val sim_scImliTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
+  val sim_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
+  val sim_predPathIdx: Option[MixedVec[UInt]] =
     Some(MixedVec(PathTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
-  val debug_predGlobalIdx: Option[MixedVec[UInt]] =
+  val sim_predGlobalIdx: Option[MixedVec[UInt]] =
     Some(MixedVec(GlobalTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
-  val debug_predBWIdx: Option[MixedVec[UInt]] =
+  val sim_predBWIdx: Option[MixedVec[UInt]] =
     Some(MixedVec(BackwardTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
-  val debug_predImliIdx: Option[UInt] = Some(UInt(log2Ceil(ImliTableInfo.NumSets).W))
-  val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableInfo.NumSets).W))
+  val sim_predImliIdx: Option[UInt] = Some(UInt(log2Ceil(ImliTableInfo.NumSets).W))
+  val sim_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableInfo.NumSets).W))
 }
 
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {

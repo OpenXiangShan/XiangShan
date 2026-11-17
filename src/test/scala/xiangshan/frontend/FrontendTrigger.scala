@@ -6,7 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
-import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
+import xiangshan.{SimOptionsKey, XSCoreParameters, XSCoreParamsKey}
 import xiangshan.frontend.PcInit
 
 
@@ -15,10 +15,10 @@ class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
     case LogUtilsOptionsKey => LogUtilsOptions(
-      here(DebugOptionsKey).EnableDebug,
-      here(DebugOptionsKey).EnablePerfDebug,
-      here(DebugOptionsKey).FPGAPlatform,
-      here(DebugOptionsKey).EnableXMR
+      here(SimOptionsKey).EnableSimLog,
+      here(SimOptionsKey).EnableSimPerf,
+      here(SimOptionsKey).FPGAPlatform,
+      here(SimOptionsKey).EnableXMR
     )
   })
 
