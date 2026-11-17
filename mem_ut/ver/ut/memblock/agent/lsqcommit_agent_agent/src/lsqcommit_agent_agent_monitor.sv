@@ -43,6 +43,7 @@ task lsqcommit_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_lsqio_pendingst;
     logic [3:0] io_ooo_to_mem_lsqio_scommit;
     logic io_ooo_to_mem_isStoreException;
+    longint unsigned sample_seq;
     lsqcommit_agent_agent_xaction  mon_tr;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
@@ -63,6 +64,22 @@ task lsqcommit_agent_agent_monitor::mon_data();
                 `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_isStoreException,io_ooo_to_mem_isStoreException,1);
             `endif
 
+        end
+        if (this.vif.rst_n === 1'b1 && memblock_sync_pkg::reset_backend_done === 1'b1 &&
+            !memblock_sync_pkg::l2tlb_reset_active()) begin
+            memblock_sync_pkg::backend_cycle_input_t raw;
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+            raw = '{default:'0};
+            raw.reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            raw.sample_seq = sample_seq;
+            raw.value.pending_flag = io_ooo_to_mem_lsqio_pendingPtr_flag;
+            raw.value.pending_value = io_ooo_to_mem_lsqio_pendingPtr_value;
+            raw.value.pending_st = io_ooo_to_mem_lsqio_pendingst;
+            raw.value.pending_mmio = io_ooo_to_mem_lsqio_pendingMMIOld;
+            raw.value.store_exception = io_ooo_to_mem_isStoreException;
+            raw.value.scommit = io_ooo_to_mem_lsqio_scommit;
+            memblock_sync_pkg::backend_lsq_sample_time = $time;
+            memblock_sync_pkg::publish_backend_input(0, raw);
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = lsqcommit_agent_agent_xaction::type_id::create("mon_tr");

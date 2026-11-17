@@ -15,6 +15,7 @@ class redirect_agent_agent_driver  extends tcnt_driver_base#(virtual redirect_ag
     extern function new(string name, uvm_component parent);
     extern virtual function void build_phase(uvm_phase phase);
     extern virtual task reset_phase(uvm_phase phase);
+    extern task drive_backend_item(redirect_agent_agent_xaction tr);
     extern task main_phase(uvm_phase phase);
     extern task send_pkt(redirect_agent_agent_xaction tr);
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
@@ -53,7 +54,11 @@ task redirect_agent_agent_driver::main_phase(uvm_phase phase);
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
             seq_item_port.try_next_item(req);
-            if(req!=null) begin
+            if(req!=null && req.backend_sync) begin
+                drive_backend_item(req);
+                seq_item_port.item_done();
+            end
+            else if(req!=null) begin
                 repeat(req.pre_pkt_gap) begin
                     @this.vif.drv_mp.drv_cb;
                     this.drive_idle(this.cfg.drv_mode);
@@ -134,5 +139,60 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     end
 
 endtask:drive_idle
+
+// 抽象职责：保留一个完整发布单元，逐物理边沿服务准备、取消、主帧和紧邻尾拍。
+// 主帧回执不依赖item_done；等待期间仍逐拍输出idle并合成独立flushSb。
+task redirect_agent_agent_driver::drive_backend_item(redirect_agent_agent_xaction tr);
+    memblock_sync_pkg::backend_cycle_release_t release_state;
+    memblock_sync_pkg::backend_cycle_projection_t projection;
+    redirect_agent_agent_xaction pkt;
+    longint unsigned edge_sample;
+    bit main_driven;
+    bit tail;
+
+    main_driven = 0;
+    pkt = redirect_agent_agent_xaction::type_id::create("backend_projection");
+    memblock_sync_pkg::acknowledge_backend_ready(tr.backend_cycle.frame_id, 1);
+    forever begin
+        @this.vif.drv_mp.drv_cb;
+        if (vif.rst_n !== 1'b1 || memblock_sync_pkg::l2tlb_reset_active()) begin
+            this.drive_idle(tcnt_dec_base::DRV_0);
+            if (memblock_sync_pkg::backend_release_by_id.exists(tr.backend_cycle.frame_id))
+                memblock_sync_pkg::backend_release_by_id[tr.backend_cycle.frame_id].finished[1] = 1;
+            return;
+        end
+        memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, edge_sample);
+        release_state = memblock_sync_pkg::get_backend_release(tr.backend_cycle.frame_id);
+        if (!release_state.valid || release_state.canceled ||
+            tr.backend_cycle.reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch()) begin
+            this.drive_idle(tcnt_dec_base::DRV_0);
+            if (memblock_sync_pkg::backend_release_by_id.exists(tr.backend_cycle.frame_id))
+                memblock_sync_pkg::backend_release_by_id[tr.backend_cycle.frame_id].finished[1] = 1;
+            return;
+        end
+        tail = main_driven && tr.backend_cycle.has_tail;
+        if (release_state.committed && edge_sample == release_state.edge_sample + (tail ? 1 : 0)) begin
+            projection = tail ? tr.backend_cycle.tail : tr.backend_cycle.head;
+            pkt.io_redirect_valid = projection.redirect_valid;
+            pkt.io_redirect_bits_level = projection.redirect_level;
+            pkt.io_redirect_bits_isVlsException = projection.redirect_vls;
+            pkt.io_redirect_bits_robIdx_flag = projection.redirect_flag;
+            pkt.io_redirect_bits_robIdx_value = projection.redirect_value;
+            this.send_pkt(pkt);
+            memblock_sync_pkg::acknowledge_backend_drive(tr.backend_cycle.frame_id, 1, tail, edge_sample);
+            if (tail || !tr.backend_cycle.has_tail) begin
+                if (memblock_sync_pkg::backend_release_by_id.exists(tr.backend_cycle.frame_id))
+                memblock_sync_pkg::backend_release_by_id[tr.backend_cycle.frame_id].finished[1] = 1;
+                return;
+            end
+            main_driven = 1;
+        end else begin
+            if (release_state.committed && edge_sample > release_state.edge_sample + (tail ? 1 : 0)) begin
+                `uvm_fatal("BACKEND_FRAME", "committed backend projection missed its physical edge")
+            end
+            this.drive_idle(tcnt_dec_base::DRV_0);
+        end
+    end
+endtask
 
 `endif

@@ -1,668 +1,452 @@
-# Fault / Exception Flow
+# V2 Fault / Exception Flow
 
-本文按通用 flow 文档规则整理 mem_ut 中 real writeback fault 之后的处理。关键结论：**fault 状态先在 `writeback_status_handler::handle_real_writeback_event()` 中通过 `mark_target_fault()` 落表；随后 fault event 进入 `push_feedback_event()`，由 `handle_fault_event()` 消费，但不重复 mark fault。**
+更新日期：2026-11-17。本文描述当前第一项实现中的真实scheduler调用链；专项验收仍以implementation review的证据与待办为准。虚拟化激励与RM快照功能分别由后续方案实现。
 
-fault 到达 modeled ROB head 后，`lsq_commit_handler`还会生成独立的
-`io_ooo_to_mem_isStoreException` level sideband：load fault驱动0，scalar store/CBO fault驱动1；
-该值不产生fault，只决定DUT选择LQ还是SQ异常地址来源。
+## 1. 术语与抽象功能说明
 
-V2 scalar STA fault writeback 在严格模式下还必须先观察到同一 current issue 的 STA IQ
-feedback success；否则 `handle_real_writeback_event()` 以 `WB_STATUS_STA_ORDER` fail-fast。
-STA IQ 的 SQ-only 反查、同拍 IQ/WB 顺序和 ctrl deq 延后规则见
-[`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+| 术语 | 本流程中的含义 | 代码落点 | 示例 |
+|---|---|---|---|
+| UID、ROB key | 主表逻辑编号、完整ROB环形编号 | `status_transaction`及主表 | UID11重发时仍是11，ROB归属需独立核对 |
+| dynamic epoch、issue epoch、replay sequence | 动态实例代次、目标发射代次、重试编号 | `dynamic_epoch/load_issue_epoch/sta_issue_epoch/replay_seq` | 旧发射结果不能归属新重试 |
+| reset epoch、sample | 复位代次、全DUT公共物理采样编号 | `memblock_sync_pkg` | 相同sample数字也不能跨reset使用 |
+| batch、semantic batch | 正常提交UID列表、同拍WB/IQ/违例语义事件组 | `commit_uids`、`events` | 一组正常Store可形成非零scommit |
+| frame、projection | 一次完整后端发布对象、其中实际端口值 | `memblock_backend_cycle_frame_t/transport.head/tail` | rollback主帧与下一拍尾帧同item预装 |
+| reservation、ready、COMMITTED | 未生效的准备预占、两driver已经持有item、最终确认未来边沿 | `backend_redirect_reserved/backend_release_by_id` | 准备时不递增flush epoch |
+| E、S、S+2 | driver输出边沿、DUT实际输入采样、普通LSQ异常地址目标拍 | `edge_sample/input_sample/target_sample` | E11输出，S12采样，14采异常地址 |
+| sampled-applied | 两路实际输入匹配后业务状态已记账 | `frame.applied` | 准备与finish_item都不开放RM比较 |
+| owner、active map | 唯一恢复拥有者、ROB/LQ/SQ反查活跃UID的索引 | `active_redirect`及`uid_by_active_rob`等 | 恢复继续使用原cancel record |
+| cursor、watermark、prefix | 提交游标、生产完成水位、连续终态进度 | `commit_cursor_uid/backend_*_watermark/terminal_done_uid` | 不每拍扫描历史主表 |
+| fault head、fault token、terminal | 故障ROB队首、故障恢复私有记录、指令最终收口 | `fault_head_waiting`及终态状态 | fault的rob_commit并非正常退休 |
+| rollback、reissue、cancel | 访存违例冲刷、重发旧UID、取消旧执行实例 | 原redirect恢复路径 | 违例指令无需成为fault head |
+| sideband、level、pulse | 随附控制信号、保持值、单拍脉冲 | 类别/pending与scommit/flushSb | 清fault token不撤销异常类别保持值 |
+| raw、bounded history、FIFO | 原始采样、固定容量历史、按序队列 | `backend_*_by_sample`、运输队列 | 同值和零地址仍连续记录 |
+| LSQ、LQ、SQ、STA、STD、WB、IQ | 访存队列、读/写队列、Store地址/数据目标、写回、发射反馈 | 原agent与handler | Store fault保持STA/STD真实WB屏障 |
+| AF、PF、GPF、AMO、CMO、VLS | 访问/页/Guest页错误、原子、缓存块操作、向量访存 | `exception_vec/op_class` | AMO类别沿既有load-like规则 |
+| flushSb、CSR | StoreBuffer排空请求、访问控制上下文 | 原flush请求、`issue_csr` | flushSb不随异常自动置1 |
 
-software-only fault smoke也遵守这条既有合同：它在构造STA fault writeback前，使用同一SQ key推入synthetic
-STA IQ-hit并由`collect_monitor_event_batch()`完成既有adapter/handler处理；这只是testcase激励前置条件，
-不改变fault、writeback或`isStoreException`的主流程。
+抽象功能职责：原WB路径记录访问结果，scheduler协调真实后端输入边界，原提交与恢复路径完成状态和资源收口；monitor只保存事实。`backend_cycle_mode=0`的software-only及旧入口保持原兼容路径。
 
-software-only fault smoke在注入fault writeback后还会调用既有`exception_redirect_replay_task()`消费
-`exception_event_q`中的fault recovery event。该调用只复用`handle_fault_event()`的队列消费职责，不重复
-`mark_target_fault()`，避免测试结束时把合法已提交的fault event遗留在runtime drain检查中。
-
-## 0.1 STA/STD 双真实写回异常屏障（2026-09-22）
-
-普通 scalar store 的 STA/STD fault 不再在单个 target fault 到达时立即进入 fault ROB 生命周期。
-writeback handler 先把 target writeback 和异常证据保存到 pending record；只有同一 UID、同一动态实例的
-`sta_writeback && std_writeback` 同时成立后，`finalize_pending_store_faults()` 才设置
-`sta_fault/std_fault/fault/exception_pending`。随后 fault candidate、ROB commit、terminal 和 redirect
-按原有顺序继续。
-
-real dispatch 中，DUT fault sideband redirect 仍由既有 recovery queue 单飞仲裁；它不能绕过 fault token，
-但不是 STA/STD 双写回屏障的状态真源。
-
-SQ deq 释放 store owner 时删除尚未 fire 的 STD，并清除 `queued_std`。没有 `active_sq_mapped` 时不允许重新 route 或发射。
-pending store fault 在双 real-WB 前只存在于 `pending_store_fault_by_uid`，不再保留 barrier STD。
-
-更老 redirect 覆盖尚未 `rob_commit` 的 UID 时，双 real-WB 前走普通 reissue。`clear_uid_dispatch_result()` 删除该 UID 的 pending 草稿；普通路径仅在实际删除后、`dynamic_epoch` 增加前打印 `PENDING_FAULT_DRAFT`。正式 fault 位已置位时走方案 A：active 分支只释放活映射，随后无论 active 与否都调用 `remove_uid_from_issue_queues()`，再由 `reset_uid_after_older_redirect()` 重置。finalize 已经删过 LOAD 和 STA，STD 也已在 real-WB 前出队，因此到达方案 A 时三个队列通常为空。已 `rob_commit` 的 fault head 仍由 `preserve_fault_uid_during_redirect()` 保留。
-
-## 术语与抽象功能说明
-
-| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
-| --- | --- | --- | --- |
-| `fault token` | fault head 已发送 lsqcommit commit 语义后，到 terminal recovery 完成前的 handler 私有状态。 | `fault_head_waiting`、UID、dynamic epoch 和 ROB anchor。 | UID5 等待其 SQ deq。 |
-| `fault terminal` | fault 已被既有 retire 收口的非成功终态。 | `consume_fault_retire()`。 | `success=0`、`terminal_done=1`、`active=0`。 |
-| `stable ROB anchor` | 建立 fault token 时保存的完整 ROB key；不能由之后移动的 commit cursor 推导。 | `fault_head_rob_key`。 | UID5 始终使用 `0/5` 发 redirect。 |
-| `level=1 redirect` | scalar exception 发送给 DUT 的 flush 类 redirect 等级。 | `request_fault_head_redirect()` payload。 | `level=1`、`is_vls_exception=0`。 |
-| `terminal skip` | redirect 扫描遇到已 terminal 的 fault 时不重新建立动态实例的既有规则。 | `apply_redirect_flush_range()`。 | UID5 被扫描跳过。 |
-| `re-admission` | younger 旧动态实例被 cancel 后，既有 admission 路径重新构造同一 UID。 | `prepare_uid_for_redirect_reissue()`。 | UID6 是第一个重新 admission UID。 |
-| `active redirect` | 已取得 cancel record、正在 drive/anchor/apply 的唯一 recovery owner。 | `data.active_redirect`。 | fault token 不能与其并发申请新 record。 |
-| `pending fault draft` | 双 real-WB 前按 UID 暂存的 store 异常证据；旧实例被 redirect 作废时由普通 reissue 删除。 | `pending_store_fault_by_uid`。 | STA fault 已见、STD real-WB 未到。 |
-
-抽象功能描述：fault 状态、RM compare 和 fault terminal 仍由原有路径负责；本 flow 仅在 real dispatch topology 中把已 terminal 的 fault head 转为一次 `level=1` redirect。既有 redirect owner 负责 driver、monitor anchor、LSQ cancel 和 younger UID re-admission，fault UID 只作为 terminal skip，不会再次发射。
-
-## 1. 函数调用 Flow 图
+## 2. 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
-    A[service_monitor_once] --> B[collect_monitor_event_batch]
-    B --> C[collect_writeback_events_batch]
-    C --> D[convert_raw_int_wb]
-    D --> E[real_wb_valid + has_exception]
-    E --> F[process_monitor_event_batch]
-    F --> G[normalize_event_batch]
-    G --> H[normalize_feedback_event]
-    H --> I[resolve_uid_for_event]
-    F --> J{redirect-first covered?}
-    J -->|covered| X[drop fault event, no mark]
-    J -->|not covered| K[process_allowed_non_redirect_event]
-    K --> L[handle_real_writeback_event]
-    L --> M[event_has_fault]
-    M --> N[mark_target_fault]
-    N --> O[conditional_set_target_status_field target_writeback]
-    N --> P[capture_pending_store_fault or target_fault]
-    O --> Q[target_dispatched / target_replay_seq_match / set_status_field]
-    P --> Q
-    P --> R{scalar store dual real-WB complete?}
-    R -->|yes| S[finalize_pending_store_fault]
-    R -->|no| T[keep pending fault draft only]
-    S --> U[status.fault/exception_pending set]
-    U --> V[push_feedback_event]
-    V --> W[normalize_feedback_event again]
-    W --> X[exception_event_q]
-    X --> Y[process_pending_events]
-    Y --> Z{oldest redirect exists?}
-    Z -->|yes| AA[redirect-first: request_redirect_flush / requeue or drop]
-    Z -->|no| AB[handle_fault_event]
-    AB --> AC[resolve_uid_for_event]
-    AB --> AD[get_event_issue_epoch/get_event_replay_seq]
-    AD --> AE[consume only, no mark_target_fault]
-    U --> AF[select_fault_head_candidate]
-    AF --> AG[fault_uid_is_store_exception]
-    AG --> AH[lsqcommit driver sends sideband]
-    AH --> AI[mark_fault_rob_commit_uid latches type and token]
-    AI --> AJ[wait LQ or SQ deq]
-    AJ --> AK[consume_fault_retire]
-    AK --> AL[sync_modeled_head_after_fault_terminal]
-    AL --> AM{real dispatch topology?}
-    AM -->|no| AN[finish fault terminal and rebase]
-    AM -->|yes| AO{pending or active redirect?}
-    AO -->|yes| AP[defer or record covered redirect]
-    AO -->|no| AQ[request_fault_head_redirect]
-    AQ --> AR[request_redirect_flush and push_redirect_drive]
-    AR --> AS[redirect driver plus monitor anchor]
-    AS --> AT[apply_redirect_flush_range]
-    AT --> AU[skip terminal fault and re-admit UID6+]
+ A[service_monitor_once] --> B[collect_monitor_event_batch]
+ B --> C[collect_writeback_events_batch / collect_ctrl_redirect_events_batch]
+ C --> D[process_monitor_event_batch: normalize / redirect-first]
+ D --> E[handle_real_writeback_event]
+ E --> F[mark_target_fault / pending Store draft]
+ F --> G[exception_event_q]
+ B --> H[service_backend_cycle_samples]
+ H --> I[apply_sampled_backend_cycle]
+ I --> J[apply_deferred_ctrl_updates_batch]
+ A --> K[finalize_pending_store_faults]
+ K --> L[prepare_fault_candidate]
+ L --> M[process_pending_events: oldest redirect reservation]
+ G --> M
+ M --> N[service_frame_publish / build_cycle_frame]
+ N --> O[LSQ and redirect transport queues]
+ O --> P[two drive_backend_item / ready]
+ P --> Q[final eligibility / COMMITTED / request_redirect_flush]
+ Q --> R[E: two drivers output]
+ R --> S[S: two input monitors]
+ S --> H
+ I --> T[advance_active_redirect: original recovery]
+ I --> U[backend_address_wait_q]
+ U --> V[S+2: service_backend_fault_address_samples]
+ V --> W[finish_fault_head_terminal]
+ T --> W
 ```
 
-## 1.1 函数调用 Flow 图整体文字伪代码
+**函数调用 Flow 图整体文字伪代码：**
 
 ```text
-Fault / Exception 主流程：
-
-1. raw writeback 采集和转换：
-   service_monitor_once 调用 collect_monitor_event_batch；
-   collect_writeback_events_batch 从 raw int writeback queue 出队；
-   convert_raw_int_wb 根据 exception_vec!=0 生成 fault 语义 memblock_wb_event_t，并补 ROB/LQ/SQ key。
-
-2. batch 级 redirect-first 仲裁：
-   process_monitor_event_batch 先调用 normalize_event_batch；
-   normalize_feedback_event 通过 active ROB/LQ/SQ map 解析 uid，并补齐 issue_epoch/replay_seq；
-   如果 active redirect 或同批 oldest redirect 覆盖该 fault，直接 drop，不允许 mark fault；
-   如果未覆盖，进入 process_allowed_non_redirect_event。
-
-3. fault 状态落表：
-   handle_real_writeback_event 判断 event_has_fault；
-   scalar store 的 mark_target_fault 先设置 target writeback 并保存 pending fault，不能立即设置 UID fault；
-   同一动态实例的 STA/STD real WB 都完成后，finalize_pending_store_faults 设置 status.fault/exception_pending；
-   pending 期间不保留 barrier STD；SQ deq 删除尚未 fire 的 STD。后续 recovery handler 不重复写 fault。
-
-4. recovery queue 消费：
-   fault event 在目标证据记录后调用 push_feedback_event；
-   push_feedback_event 再次 normalize，成功后写入 exception_event_q；
-   process_pending_events 出队后如果没有 redirect 抢占，调用 handle_fault_event；
-   handle_fault_event 只解析 uid/issue_epoch/replay_seq 并消费事件，不重新调用 mark_target_fault。
-
-5. fault head commit与异常地址类型：
-   lsq_commit_handler只在fault到达modeled ROB head时选择该uid；
-   fault_uid_is_store_exception从主表统一operation behavior派生store bit并写入本拍lsqcommit transaction；
-   driver发送后，mark_fault_rob_commit_uid建立fault token并锁存同一bit；
-   后续idle、normal commit、deq和redirect保持该level值，直到新的fault transaction覆盖；
-   fault uid同时等待ROB commit和真实LQ/SQ mapping释放，再由consume_fault_retire进入非成功终态。
-
-6. fault terminal redirect recovery：
-   sync_modeled_head_after_fault_terminal 只在 token 仍是同一动态实例且已 terminal 时继续；
-   software-only topology 直接完成旧 cursor rebase，不创建 redirect；
-   real topology 先让 pending monitor redirect 或 active redirect 完成；active redirect 覆盖 fault anchor 时只记录覆盖事实；
-   无冲突时 request_fault_head_redirect 创建 `level=1`、`flush_itself=1`、`is_vls_exception=0` 的 payload，并交给既有 drive FIFO；
-   monitor anchor 后 apply_redirect_flush_range 跳过 terminal fault，cancel/reissue UID6 及更年轻的 active 实例。
+1. service_monitor_once在原唯一服务循环内收集本拍WB/IQ/访存违例；原batch先完成身份归属和redirect-first选择。
+2. 未被覆盖的真实fault由writeback handler落目标状态并送recovery队列；scalar Store先保存pending证据，双真实WB齐后才提升UID故障。
+3. 同一collect_monitor_event_batch先处理已经实际采样的后端帧，再释放deferred deq/cancel；本拍准备的新帧尚不记账。
+4. prepare_fault_candidate只选合法ROB故障队首，保存准备身份并提交原intent；process_pending_events仍按最老优先仲裁，选中只保存reservation。
+5. service_frame_publish为两worker预装同一完整运输对象；等待双ready时观察和flushSb继续服务。
+6. 双ready后最终核验身份与资格，固定未来E/S，才一次激活原redirect owner和accepted；两个driver在E输出，普通fault同S采样正确类别、指针、零提交和redirect。
+7. 输入monitor连续保存事实；service_backend_cycle_samples在S样本完整匹配后才调用apply更新fault rob_commit、token与恢复放行标志。
+8. 原恢复按drive回执、实际sampled-applied和真实cancel证据推进；S+2地址单独收集。fault最终收口等待必需地址完成，但不等待RM比较通过。
+9. 访存违例保留原冲刷与重发范围，R主帧可带合法older提交，R+1预装阻塞尾拍；它不建立fault token，也不要求违例UID成为故障队首。
 ```
 
-## 2. `convert_raw_int_wb()` fault event 生成
+## 3. 真实故障证据：`handle_real_writeback_event()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv`。
+
+**抽象功能描述：** 原batch确认本拍事件可消费后，由该函数把真实故障写入对应目标状态并送恢复队列。它不驱动异常redirect或修改提交游标。
 
 真实逻辑摘要：
 
 ```systemverilog
-wb_event.real_wb_valid = 1'b1;
-wb_event.has_exception = raw.exception_vec != '0;
-wb_event.exception_vec = raw.exception_vec;
-wb_event.has_rob = raw_rob_to_key(...);
-case (raw.port_id)
-    0,1,2: target = LOAD;
-    3,4:   target = STA;
-    5,6:   target = STD;
-endcase
+if (!data.mark_target_fault(uid, wb_event.target, issue_epoch, replay_seq, wb_event.exception_vec, wb_event.cycle)) begin
+                `uvm_info("WB_STATUS", $sformatf("drop stale fault uid=%0d target=%0d", uid, wb_event.target), UVM_LOW)
+                return 1'b0;
+            end
+            data.push_feedback_event(wb_event);
+            return 1'b1;
 ```
 
-功能解释：
-
-fault 来源于真实 writeback 端口的 `exception_vec != 0`。adapter 只设置 `has_exception/exception_vec` 和 target/key，不在这里写 fault 状态。
-
-输入/输出：
-
-- 输入：raw int writeback。
-- 输出：带 `has_exception=1` 的 `memblock_wb_event_t` 进入 batch。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-pop raw int writeback；
-调用 convert_raw_int_wb：设置 real_wb_valid=1；
-根据 exception_vec 是否非 0 设置 has_exception；
-根据 port_id 设置 LOAD/STA/STD target；
-填 ROB/LQ/SQ key；
-把 event 放入 batch，等待 redirect-first 仲裁。
+本段承担真实fault证据落表。先把UID、target及已归属的issue/replay身份交mark_target_fault；该函数拒绝旧实例时只记录drop并返回，不能推高新实例fault。
+成功后push_feedback_event再次规范事件并写exception_event_q，然后返回成功。
+mark_target_fault负责目标写回与故障证据；Store可先进入pending草稿，UID故障由原finalize在同实例双真实WB屏障后形成。
 ```
 
-内部子调用：
+原normal STA路径的IQ成功前置条件、STD value-only双flag反查与迟到raw身份仍以[IQ/WB流程](iq_feedback_replay_v2_flow.md)为准。单侧Store故障不提前建立阻塞缺侧dispatch的fault准备。
 
-- `raw_rob_to_key()` / `raw_lq_to_key()` / `raw_sq_to_key()`：提供 uid 反查依据。
+## 4. 同拍消费顺序：`collect_monitor_event_batch()`
 
-## 3. batch handler 对 fault 的 redirect-first 防护
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`。
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_batch_handler.sv`
+**抽象功能描述：** 该服务将已采样WB与后端输入按固定先后写入软件状态，确保deq/cancel释放资源前应用同拍提交。它仍由原dispatch服务调用。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (select_oldest_redirect(normalized_events, selected_redirect_event)) begin
-    selected_redirect = redirect_from_event(selected_redirect_event);
-    data.push_feedback_event(selected_redirect_event);
-    foreach (normalized_events[idx]) begin
-        if (event_covered_by_redirect(normalized_events[idx], selected_redirect)) continue;
-        else void'(process_allowed_non_redirect_event(normalized_events[idx]));
-    end
-end else begin
-    foreach (normalized_events[idx]) void'(process_allowed_non_redirect_event(normalized_events[idx]));
-end
+monitor_adapter.collect_writeback_events_batch(events, sample_cycle, sample_cycle_valid);
+    monitor_adapter.collect_ctrl_redirect_events_batch(events,
+                                                       deferred_ctrl,
+                                                       sample_cycle,
+                                                       sample_cycle_valid);
+    monitor_batch_handler.process_monitor_event_batch(events);
+    if (memblock_sync_pkg::backend_cycle_mode)
+        memblock_backend_cycle_scheduler::get().service_backend_cycle_samples();
+    // 中文注释：semantic batch 已完成 redirect-first/feedback 处理后，才释放本拍
+    // ctrl/deq 对应的 LQ/SQ mapping；失败的队首 raw 保留到后续 service tick 重试。
+    monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);
+    // STD late tombstone 只保存短时 redirect 前流水线残留的身份；每个 service
+    // sample 清理有限关联表，避免 ROB wrap 后旧 key 长期遮蔽新实例。
+    data.service_std_late_raw_tombstones();
 ```
 
-功能解释：
-
-fault 只有在未被 active/same-batch redirect 覆盖时才允许落表。如果 older redirect 覆盖了该 fault，batch handler 直接 drop，避免旧动态实例 fault 污染 redirect 后状态。
-
-输入/输出：
-
-- 输入：normalized fault event。
-- 输出：未覆盖时进入 writeback handler；覆盖时 drop。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-调用 normalize_event_batch：fault event 需要先 resolve uid 和补齐 issue_epoch/replay_seq；
-如果 active_redirect 存在，调用 event_covered_by_redirect，覆盖则 drop；
-如果同 batch 有 redirect，调用 select_oldest_redirect 选最老 redirect；
-调用 event_covered_by_redirect 判断 fault 是否被 oldest redirect 覆盖；
-覆盖则 drop，不调用 mark_target_fault；
-未覆盖则调用 process_allowed_non_redirect_event，进入 handle_real_writeback_event。
+先收集WB/IQ及ctrl中的违例事件，ctrl deq只暂存不立即释放。
+process_monitor_event_batch完成本拍语义规范化、redirect-first和目标状态更新。
+backend_cycle_mode开启时，service_backend_cycle_samples只消费已经真实采到的两侧输入并应用批准状态。
+随后apply_deferred_ctrl_updates_batch按原匹配规则释放LQ/SQ或处理cancel；最后清理有限STD迟到身份表。
+adapter负责原事件运输，batch handler负责可消费事件选择，scheduler不替换它们的归属规则。
 ```
 
-内部子调用：
 
-- `normalize_feedback_event()`：fault 落表前规范化。
-- `event_covered_by_redirect()`：调用 `rob_order_util::rob_need_flush()`。
-- `process_allowed_non_redirect_event()`：分派到 `handle_real_writeback_event()`。
 
-## 4. `handle_real_writeback_event()` fault 分支
+## 5. 故障准备：`prepare_fault_candidate()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv:79`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_backend_cycle_scheduler.sv`。
+
+**抽象功能描述：** 真实故障到达合法ROB前沿后，该函数预先建立候选与原redirect intent，使异常类别与redirect可以在同一未来输入边界发布。准备本身不提交指令。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (event_has_fault(wb_event)) begin
-    if (!data.mark_target_fault(uid, wb_event.target,
-                                issue_epoch, replay_seq,
-                                wb_event.exception_vec, wb_event.cycle)) begin
-        return 1'b0;
-    end
-    data.push_feedback_event(wb_event);
-    return 1'b1;
-end
+if (!commits.select_fault_head_candidate(uid)) return;
+        data.backend_fault_prepared = 1;
+        data.backend_prepared_fault_uid = uid;
+        data.backend_prepared_fault_key = data.get_status(uid).get_rob_key();
+        data.backend_prepared_fault_epoch = data.get_status(uid).dynamic_epoch;
+        redirect = '{default:'0};
+        redirect.valid = 1;
+        redirect.rob_key = data.backend_prepared_fault_key;
+        redirect.flush_itself = 1;
+        redirect.level = 1;
+        if (!data.submit_redirect_intent(uid, redirect, auto_fault_intent_id)) begin
+            `uvm_fatal("BACKEND_FRAME", "fault head could not prepare its redirect intent")
+        end
 ```
 
-功能解释：
-
-fault 分支先落表，再入 recovery queue。这样 status 立即阻塞后续 pass/success；后续 recovery handler 只是消费 fault event，不再写 fault 状态。
-
-输入/输出：
-
-- 输入：未被 redirect 覆盖的 fault event。
-- 输出：target fault/status fault 落表，event 入 `exception_event_q`。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-调用 event_has_fault：检查 has_exception 或 exception_vec 非 0；
-如果是 fault：
-  调用 mark_target_fault：写 target writeback/fault，设置 uid fault/exception_pending；
-  如果 mark_target_fault 返回 false，说明 event stale，drop；
-  mark 成功后调用 push_feedback_event：把 fault event 放入 recovery queue；
-  返回 1；
-normal pass 分支不会执行。
+本函数只在周期模式且当前无在途帧时准备。已有准备若dynamic改变或被kill/flush则撤销auto intent与标志，然后返回。
+无准备时调用select_fault_head_candidate：只有真实fault、合法head和Store双真实WB等前提满足才返回UID。
+保存UID、完整ROB key和dynamic，构造level1、flush-itself的异常redirect，交submit_redirect_intent沿原公共队列参与后续最老仲裁。
+无法提交必要intent属于协议错误并fatal；该阶段不修改rob_commit、不调用request_redirect_flush、不递增flush epoch。
 ```
 
-内部子调用：
 
-- `event_has_fault()`：fault 判断。
-- `mark_target_fault()`：fault 唯一落表点。
-- `push_feedback_event()`：fault 后续 recovery 消费入口。
 
-## 5. `mark_target_fault()`
+## 6. 原仲裁中的准备预占：`process_pending_events()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv:612`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`。
+
+**抽象功能描述：** 原恢复handler继续选择最老redirect；周期模式将选中结果保存为准备预占，交scheduler最终激活。新的更老请求在准备期间仍可重新参与选择。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (!conditional_set_target_status_field(uid, target_writeback_field(target), 1'b1, target, issue_epoch, replay_seq)) return 1'b0;
-if (!conditional_set_target_status_field(uid, target_fault_field(target), 1'b1, target, issue_epoch, replay_seq)) return 1'b0;
-status = get_status(uid);
-status.fault = 1'b1;
-status.exception_pending = 1'b1;
-status.exception_vec = exception_vec;
-status.pass = 1'b0;
-status.success = 1'b0;
-status.last_event_cycle = cycle;
+if (memblock_sync_pkg::backend_cycle_mode) begin
+                // 中文注释：仲裁仍在原handler，reservation阶段不分配真实cancel owner。
+                data.backend_redirect_reserved = 1;
+                data.backend_reserved_redirect = redirect_event;
+                requeue_events_not_flushed_by_redirect(events, redirect);
+                return;
+            end
 ```
 
-功能解释：
-
-这是 fault 的唯一状态落表点。它先用同 normal pass 一样的 epoch/replay 防护写 target writeback/fault，再设置 uid 级 fault/exception pending。`exception_pending` 会阻塞 normal pass 成功路径，但 fault uid 后续到达 ROB commit/deq 前沿后，会通过 `consume_fault_retire()` 作为非成功终态退休。
-
-输入/输出：
-
-- 输入：uid、target、issue_epoch、replay_seq、exception_vec、cycle。
-- 输出：target fault 和 uid fault 状态。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-调用 conditional_set_target_status_field 写 target_writeback：检查 active、未 issue_killed、target_dispatched、issue_epoch 和 replay_seq；
-如果失败，返回 false；
-调用 conditional_set_target_status_field 写 target_fault：使用同样 stale event 防护；
-如果失败，返回 false；
-调用 get_status 获取 status；
-设置 status.fault=1；
-设置 status.exception_pending=1；
-保存 exception_vec；
-清 status.pass/status.success/status.terminal_done，防止 fault uid 在 commit 前被当作成功或终态；
-更新 last_event_cycle；
-返回 true。
+先推进原PTW等待和active redirect；已有active或旧owner窗口则返回，避免第二owner。
+把已有reservation与新反馈一起参与原最老选择，过滤旧reset和未到eligible周期的intent。Store故障若尚无匹配prepared资格仍按原规则等待。
+周期模式选中后保存backend_reserved_redirect并置backend_redirect_reserved；requeue_events_not_flushed_by_redirect将未被本次范围覆盖的事件放回，随后返回。
+该预占使原pending检测和issue门禁看见待冲刷边界，但不分配cancel record；最终owner只在service_frame_publish中创建。
 ```
 
-内部子调用：
 
-- `target_writeback_field()`：target 到 `load/sta/std_writeback` 字段映射。
-- `target_fault_field()`：target 到 `load/sta/std_fault` 字段映射。
-- `conditional_set_target_status_field()`：epoch/replay 防护状态写入口。
 
-## 6. fault 如何阻塞 normal pass 并等待 commit terminal retire
+## 7. 主帧构造：`build_cycle_frame()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_backend_cycle_scheduler.sv`。
+
+**抽象功能描述：** 该函数把原提交候选和获选redirect冻结为主帧，故障帧携带准确的异常地址选择类别。它也为rollback一次生成紧邻尾拍。
 
 真实逻辑摘要：
 
 ```systemverilog
-// mark_target_normal_pass
-if (status.fault || status.exception_pending || status.redirect_pending ||
-    target_entry_done(status, target)) return 1'b0;
-...
-if (required_targets_done(uid) && !status.fault && !status.exception_pending &&
-    !status.replay_pending && !status.redirect_pending) begin
-    status.writeback = 1'b1;
-    status.pass = 1'b1;
-end
+if (frame.has_fault) begin
+                frame.commit_uids.delete();
+                frame.transport.head.scommit = 0;
+                frame.transport.head.pending_st = 0;
+                frame.transport.head.pending_mmio = 0;
+                frame.transport.head.pending_flag = data.backend_prepared_fault_key.flag;
+                frame.transport.head.pending_value = data.backend_prepared_fault_key.value;
+                frame.transport.head.store_exception = commits.fault_uid_is_store_exception(frame.uid);
+            end
 ```
 
-功能解释：
-
-fault 落表后，后续同 uid/target 的 normal pass 会被 `status.fault/exception_pending` 拦住。即使其它 target 已完成，uid 总体 `pass` 也不会置高。该阻塞只是不允许 fault 被误当作 normal pass；当该 uid 到达 commit/deq 前沿时，`try_retire_committed_uid()` 会识别 fault/exception，并调用 `consume_fault_retire()` 设置 `success=0 && terminal_done=1`。
-
-输入/输出：
-
-- 输入：fault 后的 status。
-- 输出：阻塞后续 normal pass；等待 commit/deq 后进入 fault terminal retire。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-后续如果迟到 normal pass 进入 mark_target_normal_pass：
-  首先检查 status.fault 或 exception_pending；
-  如果为 1，直接返回 false；
-  不会写 target pass；
-required_targets_done 即使返回 true，也还要检查 !status.fault 和 !status.exception_pending；
-因此 fault uid 不会变成总体 pass/success；
-后续 commit/deq 完成后，try_retire_committed_uid 会把 fault uid 转成非成功终态 terminal_done。
+先调用原build_lsqcommit_xaction获得候选、指针和pending值，再结合唯一reserved redirect。
+fault匹配prepared UID和ROB且不属于memoryViolation时，清空正常提交列表、scommit与pending，指针固定fault head，类别按fault_uid_is_store_exception派生。
+随后保存ROB/dynamic/issue/replay/exception与issue CSR；普通标量设置LSQ地址必需，AMO独立来源保留范围外标记。
+rollback只保留仍合法且不在冲刷范围的older列表，tail复用主帧身份并清提交/pending/redirect，使用冻结后的真实next-head key。
+frame_id和reset建立运输身份，不代表该帧已经被DUT采样。
 ```
 
-内部子调用：
+`fault_uid_is_store_exception()`沿统一行为：普通Load为0，scalar Store/CMO为1，AMO继续既有load-like类别；不能按异常cause猜类别。
 
-- `mark_target_normal_pass()`：fault 后会拒绝 pass。
-- `required_targets_done()`：被 fault/pending 条件共同约束。
-- `try_retire_committed_uid()`：commit/deq 后识别 fault 并进入 terminal retire。
-- `consume_fault_retire()`：清 exception_pending，设置 success=0、terminal_done=1 并释放 active uid。
+## 8. 最终确认：`service_frame_publish()`
 
-### 6.1 `fault_uid_is_store_exception()` 与 fault sideband
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_backend_cycle_scheduler.sv`。
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
-
-抽象功能描述：该helper只根据fault UID的权威主表操作分类生成ROB exception store bit；
-`build_lsqcommit_xaction()`把结果放入本拍transaction，`mark_fault_rob_commit_uid()`在发送后提交到
-`latched_is_store_exception`。它不修改fault判定、pass/fail或LSQ资源。
+**抽象功能描述：** 该函数在原服务周期内等待两侧准备完成并批准共同未来边沿，只在这一步激活原恢复owner。它不会等待driver而阻塞观察服务。
 
 真实逻辑摘要：
 
 ```systemverilog
-behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(uid));
-return memblock_op_behavior_util::is_scalar_rob_store_commit(behavior);
-
-if (has_fault_head)
-    tr.io_ooo_to_mem_isStoreException = fault_uid_is_store_exception(fault_uid);
-...
-latched_is_store_exception = fault_is_store_exception;
+if (frame.has_redirect) begin
+                data.request_redirect_flush(frame.redirect_event.redirect);
+                data.backend_redirect_sampled_applied = 0;
+                data.backend_redirect_reserved = 0;
+                if (frame.redirect_event.source == MEMBLOCK_WB_EVENT_SOURCE_REDIRECT) begin
+                    data.mark_redirect_intent_accepted(frame.redirect_event.redirect_intent_id);
+                    if (auto_fault_intent_id == frame.redirect_event.redirect_intent_id) begin
+                        void'(data.consume_redirect_intent_accepted(auto_fault_intent_id));
+                        auto_fault_intent_id = 0;
+                    end
+                end
+            end
+            frame.approved = 1;
 ```
 
-文字伪代码：
+**中文伪代码：**
 
 ```text
-检查main table已ready且uid在有效范围；
-读取该uid的main transaction，并调用统一operation behavior helper；
-普通scalar store和STU CBO返回1，load/atomic返回0，vector或非法编码沿用统一helper的fatal；
-构造fault transaction时只预览结果，不提前更新handler latch；
-transaction发送后，mark_fault_rob_commit_uid完成既有fault token状态更新，再把同一结果写入latch；
-后续clear_lsqcommit_xaction从latch恢复level值，因此普通周期不会自动清0。
+每次先服务flushSb并推进物理来源槽；无帧时构造一次并入两条运输队列。
+已有帧先处理取消回执；未COMMITTED时检查当前获选intent及冻结UID资格，失效则取消整单，等待两worker退出后重建。
+双ready未齐即返回；齐后要求worker在线且两monitor属于同一当前sample。
+带redirect时调用request_redirect_flush一次分配原cancel owner和flush epoch，随后accepted只按原intent来源登记，清reservation。
+批准后固定input_sample=C+2、输出边沿E=C+1、LSQ来源S-1；rollback来源S，故障同源使用S-1。预装地址目标S+2后发布committed。
+check_backend_cycle_commit_eligibility保持发布前纯检查，apply不再执行能撤销已发scommit的资格重选。
 ```
 
-`pendingst`仍表示normal active ROB head是scalar store；fault head必须保持`pendingst=0`。
-因此`pendingst`和`isStoreException`不能互相替代，也不能用前者推导后者。
 
-### 6.2 `consume_fault_retire()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+## 9. 两侧真实驱动：`drive_backend_item()`
+
+源码位置：`mem_ut/ver/ut/memblock/agent/lsqcommit_agent_agent/src/lsqcommit_agent_agent_driver.sv`。
+
+**抽象功能描述：** LSQ driver持有整个主尾运输单元，在约定边沿写原LSQ端口；redirect driver按同一运输身份写原redirect端口。两者各自保持单写者。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (!status.fault && !status.exception_pending &&
-    !status.load_fault && !status.sta_fault && !status.std_fault) begin
-    `uvm_fatal("COMMON_DATA", ...)
-end
-status.exception_pending = 1'b0;
-set_status_field(uid, MEMBLOCK_STATUS_SUCCESS, 1'b0);
-set_status_field(uid, MEMBLOCK_STATUS_TERMINAL_DONE, 1'b1);
-retire_active_uid(uid);
+tail = main_driven && tr.backend_cycle.has_tail;
+        if (release_state.committed && edge_sample == release_state.edge_sample + (tail ? 1 : 0)) begin
+            projection = tail ? tr.backend_cycle.tail : tr.backend_cycle.head;
+            pkt.io_ooo_to_mem_lsqio_pendingPtr_flag = projection.pending_flag;
+            pkt.io_ooo_to_mem_lsqio_pendingPtr_value = projection.pending_value;
+            pkt.io_ooo_to_mem_lsqio_pendingst = projection.pending_st;
+            pkt.io_ooo_to_mem_lsqio_pendingMMIOld = projection.pending_mmio;
+            pkt.io_ooo_to_mem_lsqio_scommit = projection.scommit;
+            pkt.io_ooo_to_mem_isStoreException = projection.store_exception;
+            this.send_pkt(pkt);
+            memblock_sync_pkg::acknowledge_backend_drive(tr.backend_cycle.frame_id, 0, tail, edge_sample);
 ```
 
-功能解释：
-
-这是 fault/exception 从 pending 状态进入最终终态的收口。它不把 fault 当成 normal success，而是设置 `success=0`、`terminal_done=1`，让完成前缀可以越过合法 fault，同时保留非成功结果供后续 checker 或日志区分。
-
-输入/输出：
-
-- 输入：已经完成 ROB commit 且 LQ/SQ active map 已释放的 fault uid。
-- 输出：清 `exception_pending`，设置 `terminal_done=1`，释放 active uid。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-读取 uid status；
-如果 uid 没有 fault、exception_pending 或 target fault：
-  fatal，说明该函数被错误调用；
-清 exception_pending：
-  fault 已经被 commit retire 消费，不再作为 pending 中间态；
-设置 success=0：
-  表示该 uid 不是 normal pass；
-设置 terminal_done=1：
-  表示该 uid 生命周期已结束，并推进 terminal_done_uid；
-调用 retire_active_uid：
-  删除 active ROB/LQ/SQ map，清 active 状态。
+driver接到完整item先登记本侧ready，然后逐drv_cb边沿服务。reset、取消或运输身份失效时输出安全idle并登记finished返回。
+正常等待期间每拍drive_active_idle保持pending/类别电平、清scommit；flushSb仍由本侧独立合成。
+当公共边沿等于最终批准E时，选择主projection，写pending/head/category/scommit并登记driven；有tail时下一边沿直接选tail，不重新取item或等待ready。
+redirect侧采用同样边沿合同只写redirect字段。错过已批准边沿属于运输错误，立即fatal。
+两个monitor在下一实际输入拍S分别记录本侧字段；item_done或driven回执本身均不等价于输入已消费。
 ```
 
-内部子调用：
 
-- `set_status_field(MEMBLOCK_STATUS_SUCCESS, 0)`：记录非成功结果。
-- `set_status_field(MEMBLOCK_STATUS_TERMINAL_DONE, 1)`：推进 completion 前缀。
-- `retire_active_uid()`：释放 active 生命周期。
 
-### 6.3 `sync_modeled_head_after_fault_terminal()` 与 fault redirect
+## 10. 实际输入确认：`service_backend_cycle_samples()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_backend_cycle_scheduler.sv`。
 
-抽象功能描述：该 handler 在 fault token 已经 non-success terminal 后仲裁 software-only 兼容路径、已有 redirect 和新的 scalar-fault redirect。它不直接删除 LQ/SQ map 或写 DUT interface；既有 common-data redirect owner 仍拥有 cancel record、drive queue 和 active-window flush。
+**抽象功能描述：** 该函数配对同一S的两路monitor值，匹配冻结projection后才调用提交handler应用业务状态。它同时推进独立地址采集。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
-    finish_fault_head_terminal();
-    return 1'b1;
-end
-if (has_pending_monitor_redirect()) return 1'b0;
-if (data.active_redirect.valid) begin
-    if (rob_order_util::rob_need_flush(fault_head_rob_key, data.active_redirect))
-        fault_head_redirect_covered = 1'b1;
-    return 1'b0;
-end
-if (!fault_head_redirect_covered && request_fault_head_redirect())
-    finish_fault_head_terminal();
+actual = memblock_sync_pkg::backend_lsq_input_by_sample[sample_seq].value |
+                 memblock_sync_pkg::backend_redirect_input_by_sample[sample_seq].value;
+        expected = is_tail ? frame.transport.tail : frame.transport.head;
+        if (actual !== expected ||
+            memblock_sync_pkg::backend_lsq_input_by_sample[sample_seq].reset_epoch != frame.transport.reset_epoch ||
+            memblock_sync_pkg::backend_redirect_input_by_sample[sample_seq].reset_epoch != frame.transport.reset_epoch) begin
+            `uvm_fatal("BACKEND_FRAME", $sformatf("backend input mismatch frame=%0d tail=%0d sample=%0d actual=%h expected=%h", frame.transport.frame_id, is_tail, sample_seq, actual, expected))
+        end
+        if (!frame.applied) begin
+            commits.apply_sampled_backend_cycle(frame);
 ```
 
-文字伪代码：
+**中文伪代码：**
 
 ```text
-先验证 token 的 dynamic epoch、rob_commit 和 terminal/deq 状态；旧实例已被 redirect 杀掉时只清 token，并保持 cursor 等待同 UID 的既有 re-admission。
-software-only topology 没有 redirect driver/monitor，因此立即把 cursor 推到 fault_uid+1 并清 token，保持历史 directed test 行为。
-real topology 中，has_pending_monitor_redirect 扫描 recovery queue 中尚未仲裁的真实 redirect；存在时返回，避免两个 owner 同时申请 cancel record。
-如果 active_redirect 存在，使用 rob_need_flush 判断其是否覆盖 stable ROB anchor；覆盖时记录 covered 标记，任何 active redirect 都先等待其 apply 完成。
-已覆盖的 token 在 flush 完成后只完成 cursor rebase；不重复产生 fault redirect。
-无冲突时 request_fault_head_redirect 固定 payload 的 level=1、flush_itself=1、is_vls_exception=0，调用 request_redirect_flush 创建 owner，再用 push_redirect_drive 交给 responder。
-申请成功后 finish_fault_head_terminal 把 cursor 置为 fault_uid+1 并清 token；global flush 阻止 admission/issue，直到 monitor anchor 后的 apply_redirect_flush 完成。
+先消费到齐的required地址；当前无frame或尚未committed则返回。两driver主driven齐后仅一次mark_redirect_drive_done，保留原anchor/deadline合同。
+目标样本为主S或已经应用主帧后的S+1尾拍；两路watermark未到目标则等待，到水位却缺历史就fatal。
+把两侧互斥字段合成actual，严格比较expected和reset epoch；不一致立即fatal，不推进提交。
+主样本匹配后调用apply_sampled_backend_cycle一次记账并保存保持projection；有tail则保护下一目标继续等待。
+tail采样匹配且两侧finished后删除release、清输入保护水位和在途frame。地址历史可继续保留到S+2独立消费。
 ```
 
-`apply_redirect_flush_range()` 首先跳过 `terminal_done` 的 UID5，所以 `flush_itself=1` 不会重新发射 fault；对仍 active 的 UID6 及更年轻实例调用 `prepare_uid_for_redirect_reissue()`，由既有 admission 恢复。尚未正式 fault 的 pending 草稿在这条普通 reissue 中删除。已经正式 fault 且尚未 `rob_commit` 的实例进入方案 A，重置前删除该 UID 的旧发射项。
 
-## 7. `push_feedback_event()` 后 fault 入队
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+## 11. 故障记账：`apply_sampled_backend_cycle()`
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`。
+
+**抽象功能描述：** 已批准且实际采样确认的fault在这里开放原RM门槛并建立故障token，随后原恢复可以继续。它不把fault当作正常Store提交。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (!normalize_feedback_event(wb_event, normalized_event)) return;
-exception_event_q.push_back(normalized_event);
+if (frame.has_fault) begin
+            status = data.get_status(frame.uid);
+            // 第三项RM方案在此rob_commit写入前接入值型参考快照；本项只保留实际身份。
+            data.backend_fault_address_by_uid[frame.uid] = frame;
+            if (frame.address_required) data.backend_address_wait_q.push_back(frame.uid);
+            status.rob_commit = 1;
+            status.last_event_cycle = $time;
+            data.quiesce_fault_uid_pending_work(frame.uid, 0);
+            fault_head_waiting = 1;
+            fault_head_uid = frame.uid;
+            fault_head_dynamic_epoch = frame.dynamic_epoch;
+            fault_head_rob_key = frame.rob_key;
+            fault_head_redirect_covered = 1;
+            data.backend_fault_prepared = 0;
+            data.try_retire_committed_uid(frame.uid);
+        end
 ```
 
-功能解释：
-
-fault 状态已经落表，但 event 仍进入 recovery queue，目的是让 recovery handler 统一消费 fault/replay/redirect 队列，保留后续扩展或调试上下文。入队前仍做 normalize，过滤已失效事件。
-
-输入/输出：
-
-- 输入：fault event。
-- 输出：`exception_event_q` 中的 normalized fault event。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-调用 normalize_feedback_event：再次解析 active uid、补齐 replay_seq，检查非 redirect target 合法；
-如果 replay 后缺 issue_epoch/replay_seq snapshot，drop；
-如果 normalize 成功，把 fault event push_back 到 exception_event_q；
-等待 process_pending_events 消费。
+本函数要求approved；已applied直接返回，保证重复服务不重复记账。正常批准列表和control先按各自原退休规则处理。
+fault分支先保存完整frame到按UID地址记录，required时写等待队列，再置status.rob_commit并保持真实fault异常。
+quiesce_fault_uid_pending_work只关闭本故障不再合法的待办；保存fault token完整身份并标记此redirect已覆盖，清prepared。
+try_retire_committed_uid继续依赖真实资源条件；最后更新类别保持值、applied和backend_redirect_sampled_applied。
+本项在rob_commit之前留有第三项RM值型快照接入位置；当前未宣称已经实现该后续快照。
 ```
 
-内部子调用：
 
-- `normalize_feedback_event()`：fault 入队前二次防线。
-- `resolve_uid_for_event()`：确认 fault event 仍属于 active uid。
 
-## 8. `process_pending_events()` / `handle_fault_event()`
+## 12. S+2地址归属：`service_backend_fault_address_samples()`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`。
+
+**抽象功能描述：** 该函数从连续raw历史提取已确认fault帧的指定地址sample，保留整组VA/GPA/VS非叶标记。地址数值本身不承担有效性或UID识别职责。
 
 真实逻辑摘要：
 
 ```systemverilog
-foreach (events[idx]) begin
-    if (event_is_redirect(events[idx])) continue;
-    if (event_is_replay(events[idx])) handle_replay_event(events[idx]);
-    else if (event_is_fault(events[idx])) handle_fault_event(events[idx]);
-end
-
-function void handle_fault_event(input memblock_wb_event_t wb_event);
-    if (!data.resolve_uid_for_event(wb_event, uid)) return;
-    issue_epoch = data.get_event_issue_epoch(wb_event, uid);
-    replay_seq  = data.get_event_replay_seq(wb_event, uid);
-    `uvm_info(...);
-endfunction
+target_sample = frame.target_sample;
+            if (memblock_sync_pkg::backend_address_watermark < target_sample) return;
+            if (!memblock_sync_pkg::backend_address_by_sample.exists(target_sample)) begin
+                frame.address_status = memblock_backend_cycle_frame_t::ERROR_MISSING_SAMPLE;
+                `uvm_fatal("BACKEND_ADDRESS", $sformatf("missing fault address uid=%0d frame=%0d sample=%0d", uid, frame.transport.frame_id, target_sample))
+            end
+            frame.address = memblock_sync_pkg::backend_address_by_sample[target_sample];
+            if (frame.address.reset_epoch != frame.transport.reset_epoch) begin
+                `uvm_fatal("BACKEND_ADDRESS", "fault address crossed reset epoch")
+            end
+            frame.address_captured = 1;
+            frame.address_status = memblock_backend_cycle_frame_t::CAPTURED;
 ```
 
-功能解释：
-
-`handle_fault_event()` 只是 fault recovery event 的消费点。它不调用 `mark_target_fault()`，因为 fault 已经在 writeback handler 中落表。它重新解析 uid/epoch/replay_seq，用于过滤失效事件和保留调试信息。
-
-输入/输出：
-
-- 输入：`exception_event_q` 中的 fault event。
-- 输出：消费完成；不改变 target fault 状态。
-
-文字伪代码：
+**中文伪代码：**
 
 ```text
-process_pending_events 先处理 service_ptw_wait_replay 和 advance_active_redirect；
-如果存在 active_redirect，暂停消费 fault；
-pop exception_event_q 到本地 events；
-如果 recovery events 中有 redirect，redirect 优先，fault 被覆盖则 drop，未覆盖则 push_front 回 exception_event_q；
-如果没有 redirect，遍历 events：
-  调用 event_is_fault 判断 fault；
-  调用 handle_fault_event；
-handle_fault_event 内部：
-  调用 resolve_uid_for_event：确认 fault event 仍属于 active uid；
-  调用 get_event_issue_epoch：读取 event 快照或 status target issue epoch；
-  调用 get_event_replay_seq：读取 event 快照或 status replay_seq；
-  打印 consume fault recovery event；
-  不调用 mark_target_fault，不重复设置 fault。
+只处理未完成地址队列的队首，目标来自最终确认时的S+2。
+生产watermark未到目标就返回；已到却无该sample则标记ERROR_MISSING_SAMPLE并fatal。
+读取该sample的完整地址组，核对reset epoch，随后置captured/CAPTURED并出队，再把历史保护水位改为下一等待目标。
+ctrl monitor每有效公共sample发布raw，因此零地址、重复同值不被丢弃；归属依赖冻结frame的UID/ROB/dynamic/issue/replay与指定sample，不能取latest。
+固定64拍历史覆盖未消费目标前必须报错，不能静默覆盖或无限等待。
 ```
 
-内部子调用：
 
-- `event_is_fault()`：判断 `has_exception || exception_vec != 0`。
-- `resolve_uid_for_event()`：过滤失效 uid。
-- `get_event_issue_epoch()` / `get_event_replay_seq()`：读取调试和过滤上下文。
 
-## 9. 端到端行为总结
+## 13. 原恢复与最终收口
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`。
+
+**抽象功能描述：** advance_active_redirect保持原驱动/anchor/cancel生命周期，并加入真实输入已记账的必要门槛。故障最终游标推进仍由原提交handler完成。
+
+真实逻辑摘要：
+
+```systemverilog
+if (data.backend_redirect_recovery_eligible() &&
+            data.redirect_drive_done_for(redirect) &&
+            data.cancel_redirect_scan_ready(redirect)) begin
+            if (!data.apply_redirect_flush(redirect)) begin
+                return;
+            end
+```
+
+**中文伪代码：**
 
 ```text
-real writeback fault 未被 redirect 覆盖：
-  raw int writeback exception_vec!=0
-  -> convert_raw_int_wb(has_exception=1)
-  -> process_monitor_event_batch
-  -> normalize_event_batch / normalize_feedback_event / resolve_uid_for_event
-  -> redirect-first 仲裁确认未被覆盖
-  -> process_allowed_non_redirect_event
-  -> handle_real_writeback_event
-  -> event_has_fault
-  -> mark_target_fault
-  -> conditional_set_target_status_field(target_writeback)
-  -> conditional_set_target_status_field(target_fault)
-  -> status.fault=1 / exception_pending=1 / pass=0 / success=0 / terminal_done=0
-  -> push_feedback_event
-  -> normalize_feedback_event 二次规范化
-  -> exception_event_q
-  -> process_pending_events
-  -> handle_fault_event
-  -> resolve_uid_for_event / get_event_issue_epoch / get_event_replay_seq
-  -> consume only，不重复 mark_target_fault
-  -> fault到达ROB head后，fault_uid_is_store_exception生成异常地址store bit
-  -> lsqcommit transaction驱动DUT，mark_fault_rob_commit_uid锁存该bit并建立fault token
-  -> 后续 ROB commit 且 LQ/SQ deq 完成
-  -> try_retire_committed_uid
-  -> consume_fault_retire
-  -> success=0 / terminal_done=1 / active=0
-  -> sync_modeled_head_after_fault_terminal
-  -> real topology: request level=1 / flush_itself=1 redirect
-  -> redirect driver + monitor anchor + apply_redirect_flush_range
-  -> UID5 terminal skip；UID6+ cancel/re-admission
-
-fault 被 older redirect 覆盖：
-  raw int writeback fault 与 older redirect 同 batch 或 active redirect 覆盖
-  -> process_monitor_event_batch
-  -> event_covered_by_redirect
-  -> drop fault event
-  -> 不调用 mark_target_fault，不调用 push_feedback_event
-
-fault 后迟到 normal pass：
-  status.fault=1 或 exception_pending=1
-  -> mark_target_normal_pass 开头检查失败
-  -> 拒绝 target pass 和 uid pass
-  -> fault 阻塞 normal success，但不阻塞后续 terminal_done retire
+已有active redirect时，先要求本帧backend_redirect_sampled_applied，再要求原drive_done及cancel_scan_ready。
+三者满足才调用apply_redirect_flush沿原范围冲刷和重发；未满足则继续等待，原timeout只告警而非成功结束。
+finish_fault_head_terminal另外检查backend_fault_address_ready，required地址未采完不推进fault游标；到齐后完成故障资源token、推进cursor并清私有fault token。
+clear_fault_head_token只清私有生命周期，不撤销最近已发布的isStoreException保持值；新的fault或reset负责覆盖它。
 ```
 
-端到端文字伪代码描述：
+reset_runtime取消运输、未完成地址、prepared intent及来源槽；原reset合法性约束仍有效。独立AMO来源不伪造成普通LSQ地址检查；segment在主表validate和公共behavior入口均被拒绝，当前不能通过合法生产路径到达scheduler，ADDRESS_SEGMENT仅预留。
 
-```text
-real writeback fault 未被 redirect 覆盖：
-  当真实 int writeback 的 exception_vec 非 0 时，adapter 生成 has_exception 的 wb_event；
-  batch handler normalize 并做 redirect-first 检查，确认该 fault 不属于被 flush 的旧动态实例；
-  handle_real_writeback_event 识别 event_has_fault，先调用 mark_target_fault；
-  mark_target_fault 通过 conditional_set_target_status_field 写 target_writeback 和 target_fault；
-  条件写入会检查 active、target_dispatched、issue_epoch 和 replay_seq，避免旧 fault 污染新实例；
-  target fault 写入成功后，uid 级 fault/exception_pending 置位，pass/success/terminal_done 清零；
-  fault event 随后进入 push_feedback_event，用于 recovery queue 统一消费和调试追踪；
-  process_pending_events 中没有 redirect 抢占时，handle_fault_event 只解析 uid/epoch/replay_seq 并消费 event；
-  handle_fault_event 不再调用 mark_target_fault，避免 fault 状态重复写入。
-  当fault到达modeled ROB head时，lsq_commit_handler根据主表operation behavior生成isStoreException；
-  load fault为0，scalar store/CBO fault为1；driver发送后才更新level latch，普通周期不清零；
-  当该 uid 后续完成 ROB commit 且 LQ/SQ active map 都释放后：
-    try_retire_committed_uid 识别 fault/exception；
-    调用 consume_fault_retire；
-    清 exception_pending，设置 success=0 和 terminal_done=1；
-    retire_active_uid 释放 active 状态；
-    terminal_done_uid 可以越过该 fault uid；
-  real dispatch topology 随后用保存的 fault ROB anchor 申请 level=1、flush_itself=1 redirect；
-  redirect owner 的 monitor anchor 完成后扫描 active window，UID5 已 terminal 因而跳过，UID6 及更年轻 UID 通过既有 cancel/re-admission 重建；
-  software-only topology 不申请 redirect，保持 terminal 后直接 rebase 的兼容流程。
+## 14. 兼容路径、性能与后续接口
 
-fault 被 older redirect 覆盖：
-  如果同 batch 或 active redirect 覆盖该 fault 的 ROB，batch handler 直接 drop fault event；
-  drop 后不会调用 mark_target_fault，因此不会设置 fault/exception_pending；
-  该 uid 后续由 redirect flush/reissue 流程重新生成动态实例。
+`backend_cycle_mode=0`时，旧LSQ/redirect sequence继续原finish_item后标记路径，供既有software-only与legacy使用；其行为不代表真实新周期帧的采样时序。真实auto-build主流程启动时要求两个worker和输入monitor启用，否则立即报配置错误。
 
-fault 后迟到 normal pass：
-  fault 已落表后，如果同 uid 后续又收到迟到 pass；
-  mark_target_normal_pass 首先检查 status.fault/exception_pending；
-  检查失败后直接返回 false；
-  因此 target pass 和 uid pass 都不会被重新置高，fault 会阻塞 normal success；
-  fault 最终仍可在 commit/deq 前沿进入 success=0、terminal_done=1 的非成功终态。
-```
+每拍只处理一个在途帧、有限提交宽度、当前事件组及最多64拍采样历史；地址等待队列只保存尚未完成的故障，不扫描run级历史。正常结束继续使用原terminal前缀和runtime drain，新帧、运输队列、reservation及required地址均纳入排空。
+
+后续RM方案将在实际apply且恢复前冻结参考输入，消费本项地址事实；本项不推导VA/GPA expected、不写trap CSR、不新增第二套恢复或TLB失效owner。
+
+## 当前实现验证边界（2026-11-17）
+
+当前`compile_backend12.log`成功，`run_backend_transport.log`的两真实driver/monitor专项81项通过，生产helper、两正常Store及真Store PF分别由`run_backend_helpers_final.log`、`run_backend_normal_final.log`、`run_backend_final_storepf_wave.log`通过，均UVM_ERROR/FATAL=0。日志位于`~/.tmp/memblock_virtualization_impl_20261117`。
+
+运输自测无LSQ入队且scommit/pending为0，只证明共同E/S、紧邻尾拍、同值与准备取消；合法older业务前缀由生产helper验证，不能据此宣称真实访存违例端到端完成。波形检查由主代理继续，reset主尾/flushSb准备窗口等未另实测部分保留证据边界。详见[实现评审](../plan/test_framework/review_doc/undo/memblock_v2_backend_cycle_frame_implementation_review_20261117.md)。

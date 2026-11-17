@@ -50,6 +50,10 @@ class exception_redirect_replay_handler extends uvm_object;
             return 1'b0;
         end
         status = data.get_status(wb_event.uid);
+        if (data.backend_fault_prepared && data.backend_prepared_fault_uid == wb_event.uid &&
+            data.backend_prepared_fault_key == wb_event.redirect.rob_key &&
+            data.backend_prepared_fault_epoch == status.dynamic_epoch &&
+            !data.store_fault_real_wb_pending(wb_event.uid)) return 0;
         return status.active && !status.rob_commit && !status.terminal_done &&
                (status.fault || status.exception_pending);
     endfunction:store_redirect_waits_fault_commit
@@ -239,7 +243,8 @@ class exception_redirect_replay_handler extends uvm_object;
             return;
         end
         redirect = data.active_redirect;
-        if (data.redirect_drive_done_for(redirect) &&
+        if (data.backend_redirect_recovery_eligible() &&
+            data.redirect_drive_done_for(redirect) &&
             data.cancel_redirect_scan_ready(redirect)) begin
             if (!data.apply_redirect_flush(redirect)) begin
                 return;
@@ -274,6 +279,9 @@ class exception_redirect_replay_handler extends uvm_object;
             return;
         end
 
+        if (memblock_sync_pkg::backend_cycle_mode && data.backend_redirect_reserved) begin
+            events.push_back(data.backend_reserved_redirect);
+        end
         while (data.pop_feedback_event(wb_event)) begin
             if (event_is_redirect(wb_event)) begin
                 longint unsigned current_reset_epoch;
@@ -327,6 +335,13 @@ class exception_redirect_replay_handler extends uvm_object;
                 !seq_csr_common::get_redirect_seq_en()) begin
                 `uvm_fatal("EXC_REDIRECT",
                            "redirect event requires MEMBLOCK_REDIRECT_SEQ_EN=1 so recovery payload can be driven")
+            end
+            if (memblock_sync_pkg::backend_cycle_mode) begin
+                // 中文注释：仲裁仍在原handler，reservation阶段不分配真实cancel owner。
+                data.backend_redirect_reserved = 1;
+                data.backend_reserved_redirect = redirect_event;
+                requeue_events_not_flushed_by_redirect(events, redirect);
+                return;
             end
             if (!data.active_redirect.valid) begin
                 data.request_redirect_flush(redirect);

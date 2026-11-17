@@ -60,11 +60,22 @@ task redirect_agent_agent_monitor::mon_data();
 
         end
         if(this.vif.rst_n===1'b1 && memblock_sync_pkg::reset_backend_done===1'b1 &&
-           !memblock_sync_pkg::l2tlb_reset_active() &&
-           io_redirect_valid===1'b1) begin
+           !memblock_sync_pkg::l2tlb_reset_active()) begin
             memblock_sync_pkg::dispatch_raw_redirect_anchor_t anchor;
+            memblock_sync_pkg::backend_cycle_input_t raw;
 
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+
+            raw = '{default:'0};
+            raw.reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            raw.sample_seq = sample_seq;
+            raw.value.redirect_valid = io_redirect_valid;
+            raw.value.redirect_level = io_redirect_bits_level;
+            raw.value.redirect_vls = io_redirect_bits_isVlsException;
+            raw.value.redirect_flag = io_redirect_bits_robIdx_flag;
+            raw.value.redirect_value = io_redirect_bits_robIdx_value;
+            memblock_sync_pkg::backend_redirect_sample_time = $time;
+            memblock_sync_pkg::publish_backend_input(1, raw);
 
             // 中文伪代码：只记录顶层 redirect 真正被 monitor sample 到的 payload/序号，
             // 不调用 recovery handler，也不写 status/pass/fail/terminal。
@@ -76,7 +87,7 @@ task redirect_agent_agent_monitor::mon_data();
             anchor.rob_value = io_redirect_bits_robIdx_value;
             anchor.sample_seq = sample_seq;
             anchor.cycle = $time;
-            memblock_sync_pkg::push_raw_redirect_anchor(anchor);
+            if (io_redirect_valid === 1'b1) memblock_sync_pkg::push_raw_redirect_anchor(anchor);
         end
         // io_redirect_* is a DUT input driven by redirect sequences. Do not
         // feed monitor samples back into dispatch recovery; recovery is sourced

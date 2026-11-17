@@ -1,0 +1,5 @@
+test_type,testcase_name,entry,cfg,purpose,expected_result,status
+real_dut,two_ready_head_tail,basicTest/memblock_backend_transport_selftest_vseq,default,两真实driver先ready后共同未来E发布且S与S+1连续采到主尾,所有断言通过,通过 2026-11-17 seed6111740 checks81 UVM_ERROR/FATAL=0
+real_dut,identical_payload_frames,basicTest/memblock_backend_transport_selftest_vseq,default,相同投影的两个frame按独立sample确认,所有断言通过,通过 2026-11-17 seed6111740 checks81 UVM_ERROR/FATAL=0
+real_dut,cancel_prepared,basicTest/memblock_backend_transport_selftest_vseq,default,准备取消时无驱动回执且真实端口保持旧值,所有断言通过,通过 2026-11-17 seed6111740 checks81 UVM_ERROR/FATAL=0
+real_dut,terminal_idle,basicTest/memblock_backend_transport_selftest_vseq,default,结束空闲投影和运输槽清理,所有断言通过,通过 2026-11-17 seed6111740 checks81 UVM_ERROR/FATAL=0

@@ -75,6 +75,11 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::body();
                              topology_mode))
     end
     build_main_table();
+    if (!seq_csr_common::get_lsqcommit_seq_en() || !seq_csr_common::get_redirect_seq_en()) begin
+        `uvm_fatal("BACKEND_FRAME", "real dispatch requires LSQ commit and redirect transport workers")
+    end
+    memblock_backend_cycle_scheduler::get().check_topology();
+    memblock_sync_pkg::backend_cycle_mode = 1;
     `uvm_info(get_type_name(),
               $sformatf("real dispatch smoke main table ready: main_trans_num=%0d",
                         data.main_trans_num),
@@ -109,6 +114,7 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
             memblock_sync_pkg::reset_backend_done !== 1'b1) begin
             // prepare 的 time stamp 只属于当前 reset epoch；若不清除，reset 后的
             // 首次 terminal/drain 会把 reset 前已经经过的 1us 错当作静默窗口。
+            memblock_backend_cycle_scheduler::get().reset_runtime();
             data.reset_global_stop_prepare();
             data.reset_active_atomic_after_physical_reset("MemBlock/backend reset");
             if (monitor_commit_handler != null) begin
@@ -198,6 +204,7 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     monitor_adapter.service_l2tlb_sfence_events();
     if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
         memblock_sync_pkg::l2tlb_reset_active()) begin
+        memblock_backend_cycle_scheduler::get().reset_runtime();
         // 中文注释：L2TLB runtime reset 也会在此 early-return 前穿过 control
         // reset gate。若任一 UID 已 admission，service 会按首版约束直接 fatal；
         // 否则由下一 epoch 的 driver/monitor handshake 重建可消费 baseline。
@@ -230,7 +237,9 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     // 中文注释：STA/STD real-WB 都已由本拍 batch 记录后，才把 pending store fault
     // 正式提升为 UID 级异常，随后 exception handler 才能看到 fault candidate。
     data.finalize_pending_store_faults();
+    memblock_backend_cycle_scheduler::get().prepare_fault_candidate();
     exception_redirect_replay_task();
+    memblock_backend_cycle_scheduler::get().service_frame_publish();
     // redirect scan 可能在 exception handler 中刚刚 finalize software count；
     // 再 drain 一次可收集处理期间到达的 sideband；同一 service tick 只在此处
     // 执行一次 reconcile，避免一拍两次推进 deadline/record 生命周期。

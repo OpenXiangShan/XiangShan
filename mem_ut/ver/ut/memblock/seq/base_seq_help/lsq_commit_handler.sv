@@ -107,7 +107,7 @@ class lsq_commit_handler extends uvm_object;
     endfunction:reset_lsqcommit_runtime_state
 
     // 只清 fault token 私有生命周期，不改 status、cursor 或LQ/SQ状态。
-    // isStoreException是该token拥有的level sideband，必须在token真正清除时同步撤销。
+    // 类别是ROB最后已发布异常的保持值，清token时不能撤销。
     function void clear_fault_head_token();
         if (fault_head_redirect_intent_pending) begin
             if (data == null) begin
@@ -122,7 +122,6 @@ class lsq_commit_handler extends uvm_object;
         fault_head_redirect_covered = 1'b0;
         fault_head_redirect_intent_pending = 1'b0;
         fault_head_redirect_intent_id = 0;
-        latched_is_store_exception = 1'b0;
     endfunction:clear_fault_head_token
 
     // 抽象职责：commit cursor 的唯一推进入口，同时发布公共 ROB admission frontier。
@@ -158,6 +157,7 @@ class lsq_commit_handler extends uvm_object;
     // 先由 exception handler 按 oldest 规则仲裁，避免与 fault redirect 竞争 cancel record。
     function bit has_pending_monitor_redirect();
         ensure_handles();
+        if (data.backend_redirect_reserved) return 1'b1;
         foreach (data.exception_event_q[idx]) begin
             if (data.feedback_event_is_redirect(data.exception_event_q[idx])) begin
                 return 1'b1;
@@ -225,6 +225,7 @@ class lsq_commit_handler extends uvm_object;
     function void finish_fault_head_terminal();
         bit atomic_fault;
 
+        if (!data.backend_fault_address_ready(fault_head_uid)) return;
         atomic_fault = data.is_atomic_uid(fault_head_uid);
         if (atomic_fault && memblock_sync_pkg::dispatch_real_smoke_active &&
             !data.redirect_recovery_complete()) begin
@@ -1100,6 +1101,91 @@ class lsq_commit_handler extends uvm_object;
         fault_head_redirect_covered = 1'b1;
         return 1'b0;
     endfunction:sync_modeled_head_after_fault_terminal
+
+    // 抽象职责：最终发布前只读检查冻结的UID/ROB/代次及原真实完成资格。
+    function bit check_backend_cycle_commit_eligibility(input memblock_backend_cycle_frame_t frame);
+        if (frame.transport.reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch()) return 0;
+        if (frame.has_fault || frame.has_control) begin
+            if (frame.uid != commit_cursor_uid || fault_head_waiting ||
+                data.get_status(frame.uid).get_rob_key() != frame.rob_key ||
+                data.get_status(frame.uid).dynamic_epoch != frame.dynamic_epoch) return 0;
+            if (frame.has_fault && (!uid_is_fault_terminal_candidate(frame.uid) ||
+                data.get_status(frame.uid).replay_seq != frame.replay_seq ||
+                (data.is_scalar_store_uid(frame.uid) ? data.get_status(frame.uid).sta_issue_epoch :
+                    data.get_status(frame.uid).load_issue_epoch) != frame.issue_epoch ||
+                data.get_status(frame.uid).exception_vec != frame.exception_vec)) return 0;
+            if (frame.has_control && !uid_is_control_commit_candidate(frame.uid)) return 0;
+        end
+        foreach (frame.commit_uids[idx]) begin
+            memblock_uid_t uid;
+            uid = frame.commit_uids[idx];
+            if (uid != commit_cursor_uid + idx || !uid_is_normal_commit_candidate(uid) ||
+                data.get_status(uid).get_rob_key() != frame.commit_keys[idx] ||
+                data.get_status(uid).dynamic_epoch != frame.commit_epochs[idx] ||
+                data.get_status(uid).load_issue_epoch != frame.commit_instances[idx].load_issue ||
+                data.get_status(uid).sta_issue_epoch != frame.commit_instances[idx].sta_issue ||
+                data.get_status(uid).std_issue_epoch != frame.commit_instances[idx].std_issue ||
+                data.get_status(uid).replay_seq != frame.commit_instances[idx].replay_seq) return 0;
+            if (frame.has_redirect && rob_order_util::rob_need_flush(frame.commit_keys[idx], frame.redirect_event.redirect)) return 0;
+        end
+        return 1;
+    endfunction
+
+    // 抽象职责：actual同拍输入确认后应用已批准列表，不再次执行可取消的preflight。
+    function void apply_sampled_backend_cycle(input memblock_backend_cycle_frame_t frame);
+        status_transaction status;
+        if (!frame.approved) begin
+            `uvm_fatal("BACKEND_FRAME", "sample application requires an approved frame")
+        end
+        if (frame.applied) return;
+        foreach (frame.commit_uids[idx]) begin
+            memblock_uid_t uid;
+            uid = frame.commit_uids[idx];
+            status = data.get_status(uid);
+            status.rob_commit = 1;
+            status.last_event_cycle = $time;
+            if (!status.active_lq_mapped && !status.active_sq_mapped) status.lsq_deq = 1;
+            data.try_retire_committed_uid(uid);
+            if (data.is_atomic_uid(uid) && status.terminal_done && !status.active)
+                data.release_atomic_barrier_after_terminal(uid);
+        end
+        if (frame.commit_uids.size() != 0) begin
+            committed_rob_watermark = frame.commit_keys[frame.commit_keys.size()-1];
+            committed_rob_watermark_valid = 1;
+            set_commit_cursor_uid(frame.commit_uids[frame.commit_uids.size()-1]+1, "backend_sample");
+            rebase_framework_head_from_commit_cursor();
+        end
+        if (frame.has_control) begin
+            status = data.get_status(frame.uid);
+            status.rob_commit = 1;
+            status.lsq_deq = 1;
+            status.last_event_cycle = $time;
+            data.try_retire_control_committed_uid(frame.uid);
+            committed_rob_watermark = frame.rob_key;
+            committed_rob_watermark_valid = 1;
+            set_commit_cursor_uid(frame.uid+1, "backend_control_sample");
+            rebase_framework_head_from_commit_cursor();
+        end
+        if (frame.has_fault) begin
+            status = data.get_status(frame.uid);
+            // 第三项RM方案在此rob_commit写入前接入值型参考快照；本项只保留实际身份。
+            data.backend_fault_address_by_uid[frame.uid] = frame;
+            if (frame.address_required) data.backend_address_wait_q.push_back(frame.uid);
+            status.rob_commit = 1;
+            status.last_event_cycle = $time;
+            data.quiesce_fault_uid_pending_work(frame.uid, 0);
+            fault_head_waiting = 1;
+            fault_head_uid = frame.uid;
+            fault_head_dynamic_epoch = frame.dynamic_epoch;
+            fault_head_rob_key = frame.rob_key;
+            fault_head_redirect_covered = 1;
+            data.backend_fault_prepared = 0;
+            data.try_retire_committed_uid(frame.uid);
+        end
+        latched_is_store_exception = frame.transport.head.store_exception;
+        frame.applied = 1;
+        if (frame.has_redirect) data.backend_redirect_sampled_applied = 1;
+    endfunction
 
     function memblock_lq_key_t lq_deq_start_key(input memblock_lq_key_t deq_ptr,
                                                 input int unsigned count,

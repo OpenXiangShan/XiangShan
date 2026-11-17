@@ -19,7 +19,53 @@ class memblock_pma_pmp_replay_ticket;
     pma_pmp_csr_replay_ticket model_ticket;
 endclass:memblock_pma_pmp_replay_ticket
 
+// 抽象职责：保存一次不可变的后端发布决定及其动态身份。准备不更新commit，
+// actual采样后由唯一service应用；普通地址记录在资源owner回收后仍独立存活。
+class memblock_backend_cycle_frame_t;
+    memblock_sync_pkg::backend_cycle_transport_t transport;
+    memblock_uid_t commit_uids[$];
+    memblock_rob_key_t commit_keys[$];
+    int unsigned commit_epochs[$];
+    typedef struct packed {
+        int unsigned load_issue, sta_issue, std_issue, replay_seq;
+    } commit_issue_identity_t;
+    commit_issue_identity_t commit_instances[$];
+    bit has_control, has_fault, rollback, approved, applied, drive_acknowledged;
+    memblock_uid_t uid;
+    memblock_rob_key_t rob_key;
+    int unsigned dynamic_epoch, issue_epoch, replay_seq;
+    bit [23:0] exception_vec;
+    memblock_wb_event_t redirect_event;
+    bit has_redirect;
+    longint unsigned lsq_source_seq, redirect_source_seq, input_sample;
+    longint unsigned last_source_sample;
+    typedef enum int {WAITING, CAPTURED, CANCELLED_RESET, CANCELLED_COVERED,
+        ERROR_MISSING_SAMPLE, NOT_CAPTURED_BY_THIS_PLAN} address_record_status_e;
+    address_record_status_e address_status;
+    typedef enum int {ADDRESS_LSQ, ADDRESS_ATOMIC, ADDRESS_SEGMENT,
+        ADDRESS_UNKNOWN} address_source_e;
+    address_source_e address_source = ADDRESS_UNKNOWN;
+    longint unsigned target_sample;
+    bit address_required, address_captured;
+    memblock_sync_pkg::backend_fault_address_raw_t address;
+    mmu_csr_runtime_state issue_csr;
+endclass
+
 class common_data_transaction extends uvm_object;
+    // 中文注释：准备reservation仅阻止越过待冲刷边界；COMMITTED之前不拥有cancel record。
+    memblock_backend_cycle_frame_t backend_frame;
+    memblock_backend_cycle_frame_t backend_fault_address_by_uid[memblock_uid_t];
+    memblock_sync_pkg::backend_cycle_transport_t backend_lsq_transport_q[$];
+    memblock_sync_pkg::backend_cycle_transport_t backend_redirect_transport_q[$];
+    memblock_uid_t backend_address_wait_q[$];
+    bit backend_redirect_reserved;
+    memblock_wb_event_t backend_reserved_redirect;
+    bit backend_fault_prepared;
+    memblock_uid_t backend_prepared_fault_uid;
+    memblock_rob_key_t backend_prepared_fault_key;
+    int unsigned backend_prepared_fault_epoch;
+    bit backend_redirect_sampled_applied;
+
 
     typedef enum int unsigned {
         MEMBLOCK_CONTROL_AUDIT_CREATION,
@@ -506,6 +552,15 @@ class common_data_transaction extends uvm_object;
             return;
         end
 
+        backend_frame = null;
+        backend_fault_address_by_uid.delete();
+        backend_address_wait_q.delete();
+        backend_lsq_transport_q.delete();
+        backend_redirect_transport_q.delete();
+        backend_redirect_reserved = 0;
+        backend_fault_prepared = 0;
+        backend_redirect_sampled_applied = 0;
+        memblock_sync_pkg::reset_backend_cycle_transport();
         main_trans_num      = main_trans_num_i;
         next_uid            = 0;
         main_table_ready    = 1'b0;
@@ -2219,7 +2274,13 @@ class common_data_transaction extends uvm_object;
     // recovery、LSQ cancel、flushSb 以及 active topology 的 worker shutdown 生命周期
     // 都收敛后才返回 1。
     function bit runtime_drain_complete();
-        return memblock_sync_pkg::raw_monitor_queue_size() == 0 &&
+        return backend_frame == null &&
+               backend_lsq_transport_q.size() == 0 &&
+               backend_redirect_transport_q.size() == 0 &&
+               !backend_redirect_reserved &&
+               !backend_fault_prepared &&
+               !backend_fault_address_pending() &&
+               memblock_sync_pkg::raw_monitor_queue_size() == 0 &&
                exception_event_q.size() == 0 &&
                load_issue_q.size() == 0 &&
                sta_issue_q.size() == 0 &&
@@ -6097,8 +6158,53 @@ class common_data_transaction extends uvm_object;
         redirect_drive_inflight_payload = '{default:'0};
     endfunction:clear_redirect_drive_queue
 
+    // 抽象职责：恢复仅等待该redirect帧的真实输入记账；soft/legacy维持原合同。
+    function bit backend_redirect_recovery_eligible();
+        return !memblock_sync_pkg::backend_cycle_mode || backend_redirect_sampled_applied;
+    endfunction
+
+    function bit backend_fault_address_ready(input memblock_uid_t uid);
+        return !backend_fault_address_by_uid.exists(uid) ||
+               !backend_fault_address_by_uid[uid].address_required ||
+               backend_fault_address_by_uid[uid].address_captured ||
+               backend_fault_address_by_uid[uid].address_status inside {
+                   memblock_backend_cycle_frame_t::CANCELLED_RESET,
+                   memblock_backend_cycle_frame_t::CANCELLED_COVERED};
+    endfunction
+
+    function bit backend_fault_address_pending();
+        return backend_address_wait_q.size() != 0;
+    endfunction
+
+    // 抽象职责：单飞fault的等待队列只保存未完成地址，不扫描run级已完成历史。
+    function void service_backend_fault_address_samples();
+        while (backend_address_wait_q.size() != 0) begin
+            memblock_uid_t uid;
+            memblock_backend_cycle_frame_t frame;
+            longint unsigned target_sample;
+            uid = backend_address_wait_q[0];
+            frame = backend_fault_address_by_uid[uid];
+            target_sample = frame.target_sample;
+            if (memblock_sync_pkg::backend_address_watermark < target_sample) return;
+            if (!memblock_sync_pkg::backend_address_by_sample.exists(target_sample)) begin
+                frame.address_status = memblock_backend_cycle_frame_t::ERROR_MISSING_SAMPLE;
+                `uvm_fatal("BACKEND_ADDRESS", $sformatf("missing fault address uid=%0d frame=%0d sample=%0d", uid, frame.transport.frame_id, target_sample))
+            end
+            frame.address = memblock_sync_pkg::backend_address_by_sample[target_sample];
+            if (frame.address.reset_epoch != frame.transport.reset_epoch) begin
+                `uvm_fatal("BACKEND_ADDRESS", "fault address crossed reset epoch")
+            end
+            frame.address_captured = 1;
+            frame.address_status = memblock_backend_cycle_frame_t::CAPTURED;
+            void'(backend_address_wait_q.pop_front());
+            memblock_sync_pkg::backend_address_required_sample = backend_address_wait_q.size() == 0 ? 0 :
+                backend_fault_address_by_uid[backend_address_wait_q[0]].input_sample + 2;
+        end
+    endfunction
+
     function bit issue_blocked_by_global_flush();
-        return flush_in_progress ||
+        return backend_redirect_reserved ||
+               flush_in_progress ||
                active_redirect.valid ||
                issue_freeze_ack ||
                has_pending_redirect_drive() ||

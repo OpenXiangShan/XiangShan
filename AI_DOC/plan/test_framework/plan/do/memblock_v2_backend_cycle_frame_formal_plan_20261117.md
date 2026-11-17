@@ -3,11 +3,11 @@
 - 正式稿创建日期：2026-11-17；初稿日期：2026-11-16。
 - 更新日期：2026-11-17。
 - 适用分支：`mem_ut_uvm_v2`，使用 V2 profile。
-- 状态：正式可 coding 方案；2026-11-17 独立复审及主代理最终自查通过，无必须修改项。未实施，未运行仿真。
-- 本轮授权：完善方案和独立评审；不修改源码、配置或 RTL。
+- 状态：本项 coding、文档同步、必要专项验证及独立 review 已完成；2026-11-17归档。未穷举的交错见末章验证边界，全 basicTest 回归在三项完成后统一执行。
+- 本轮授权：用户明确要求顺序执行三方案 coding、分项本地提交及专项和 basicTest 回归；本项不修改 RTL。
 - 定位：在现有公共框架中模拟后端各来源级数对应的周期 ROB 控制和 redirect 输出，并记录其实际输入和异常地址消费边界。
 - 文件入口：新建正式版本；原初稿保留供对照。
-- 关联方案：[MemBlock V2 虚拟化指令公共测试框架支持方案](memblock_virtualization_framework_support_formal_plan_20261117.md)。
+- 关联方案：[MemBlock V2 虚拟化指令公共测试框架支持方案](../undo/memblock_virtualization_framework_support_formal_plan_20261117.md)。
 
 - 评审记录：[独立评审闭环记录](../../review_doc/undo/memblock_v2_virtualization_backend_formal_plan_review_20261117.md)。
 
@@ -868,3 +868,59 @@ fault frame确认S: 冻结身份，插入target=S+2等待槽
 修改driver前：收到item按gap发送并item_done，独立路径可提前改变类别。修改后：先保留投影和ready，每拍合成唯一输出，等共同未来边沿发布；有尾拍连续发，结束后一次item_done。保留原两个agent和端口归属，不把source-offer/admission改造成提交通道。
 
 `service_fault_address_samples()` 的抽象职责是精确采样关联，添加原因是raw地址无UID/valid。详细中文伪代码：连续入队带reset/sample的raw；对已采样fault保存target=S+2；目标未到返回等待，目标到达后一次复制整组，目标水位越过仍缺失则报错；合法取消独立记录；实际值供后续RM读取，不计算期望。原故障收尾改为等待此记录与恢复双收口，RM结果不阻塞恢复。
+
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### 1. 有界来源槽与准备候选分开保存
+
+[IMPLEMENTATION_DELTA]
+
+来源：coding 中对照现有唯一 service 与双边运输等待，减少重复业务状态。
+
+原 plan：来源槽同时列出 head、提交 UID 列表、control UID 与基础投影；完整 frame 名义上置于 dispatch types。
+
+实现调整：完整 `memblock_backend_cycle_frame_t` 置于 `common_data_transaction.sv` 前，复用既有 CSR class 可见顺序。来源槽仅保存有效位、消费位、来源 sample、reset、reservation 和投影；未绑定 older 列表保存在 `reserved_older_decision` 引用的 frame。准备等待不声明历史决定已发生；双 ready 且最终资格成立后固定未来 E/S，再绑定 LSQ=S−1、rollback redirect=S 的来源位置并恰好消费一次。原已发布提交不会再次进入 older 候选。
+
+原因：agent 基础包只需要固定宽度运输对象，不能依赖复杂 CSR/主表类型；同一在途 frame 已保存完整业务身份，来源槽再存一份会重复维护。允许空拍和运输等待导致的保守少提交，不模拟整个 ROB 内部流水。
+
+影响范围：scheduler、common data、review 及 flow。生产 helper 检查 older 前缀、主尾和幂等应用；真实 driver 专项检查未来 E、实际 S、紧邻尾拍及准备取消。来源编号本身不构成验证证据。
+
+### 2. 异常地址记录复用不可变 frame
+
+[IMPLEMENTATION_DELTA]
+
+原 plan：新增独立 `memblock_fault_address_event_t` 保存完整故障身份及地址。
+
+实现调整：`backend_fault_address_by_uid` 保存已批准 frame；frame 内具备原计划全部身份、输入 sample、target sample、来源、状态、CSR 副本和整组 raw 地址。与运输中 `backend_frame` 指针分离，清运输不删除已保存记录，reset 明确取消等待。
+
+原因：完整身份和冻结 CSR 已在 frame，不额外复制同义事件；后续 RM 通过该独立保存点读取 actual，expected 仍须独立冻结和计算。
+
+影响范围：common data 的地址等待及 fault terminal 收口。当前普通标量包含非对齐路径必须采 S+2；AMO 标为独立来源，本项不新增其地址检查。主表与公共行为入口当前拒绝所有 vector/segment，故 `ADDRESS_SEGMENT` 为不可达预留，不新增向量功能。
+
+### 3. normal 最终执行身份冻结
+
+[IMPLEMENTATION_DELTA]
+
+原 plan：规定核对 UID/ROB/动态及执行代次，未展开正常批次的逐目标字段布局。
+
+实现调整：正常批次同步冻结 load/STA/STD issue epoch 和 replay sequence，最终批准及 rollback older 前缀重建逐项核对。fault 保留独立 issue/replay/exception 核对。
+
+原因：准备等待期间若 replay 完整重试且再次正常完成，正常提交本身可以安全选择当前结果，但严格冻结执行身份可避免旧准备对象承接新 attempt；失配只在输出前取消并重建，不撤销已经输出的 scommit。
+
+影响范围：frame、scheduler、LSQ handler、helper 自测；未引入历史 attempt 账本或新调度 owner。
+
+
+## 本项实施验证记录（2026-11-17）
+
+源码基线在独立 worktree `codex/memblock-virtualization-20261117`。`compile_backend12.log` 完整编译成功，mode=`backend_transport_20261117`，KDB 0 errors。
+
+- 生产 helper：seed6111742，rollback older 前缀/尾拍、幂等 apply、normal/fault 旧执行身份拒绝、精确 S+2 零VA及非叶标记关联、reset取消通过。
+- 真实双 driver：seed6111740，81项断言通过，覆盖共同未来E、S=E+1、紧邻尾拍、prepared取消、两帧同值、结束idle；不生成非零scommit，不冒充真实违例根因测试。
+- 真实正常双 Store：seed6111743，两条 exception=0，RM compare PASS。
+- 真实 Store PF：seed6111741，真实STA/STD WB，exception=0x8000，RM compare PASS。
+- 真实 flushSb：seed6111744；基础 virtual_base_sequence：seed6111745。均 TEST_PASS，UVM_ERROR/FATAL=0。
+
+波形依据：Store PF 的 `U_MEMBLOCK.io_ooo_to_mem_isStoreException` 与 `U_MEMBLOCK.io_redirect_valid` 同在1030.850ns驱动边沿E变为1，redirect在1035.600ns下个驱动边沿清零。DUT输入采样S为1035.600ns边沿前；地址输出在1040.350ns边沿后成为0x8e711a80，因此1045.100ns边沿前S+2连续raw可见。类别保持为1。注意top_tb同名reg在force连接下不是DUT实际值，波形必须看U_MEMBLOCK真实端口；本轮已按真实端口核对。
+
+证据边界：没有宣称穷举全部交错。真实违例产生且带非零older Store提交、reset发生于主尾中间、flushSb逐个等待窗口及标量misalign端到端均需后续回归继续扩展；当前用生产helper与真实运输分层验证共同合同。全basicTest回归按用户要求在三项完成后统一执行。

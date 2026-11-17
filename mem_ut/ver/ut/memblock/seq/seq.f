@@ -46,6 +46,7 @@ seq_pkg.sv
 // ./base_seq_help/dispatch_monitor_batch_handler.sv
 // ./base_seq_help/exception_redirect_replay_handler.sv
 // ./base_seq_help/lsq_commit_handler.sv
+// ./base_seq_help/memblock_backend_cycle_scheduler.sv
 // ./base_seq_help/memblock_control_barrier_service.sv
 // ./base_seq_help/dispatch_monitor_event_adapter.sv
 // ./base_seq_help/memblock_dispatch_base_sequence.sv
@@ -99,3 +100,5 @@ seq_pkg.sv
 // ./base_seq/memblock_main_dispatch_routed_ppn_sequence.sv
 // ./virtual_sequence/soft_test/memblock_l2tlb_routed_ppn_soft_vseq.sv
 // ./virtual_sequence/memblock_l2tlb_routed_ppn_vseq.sv
+
+// soft_test_memblock_backend_cycle_sequence.sv and memblock_backend_cycle_selftest_vseq.sv are included by seq_pkg.sv.

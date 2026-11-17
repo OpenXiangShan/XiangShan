@@ -1,0 +1,2 @@
+test_type,testcase_name,entry,cfg,purpose,expected_result,status
+soft_framework,backend_cycle_helpers,basicTest/memblock_backend_cycle_selftest_vseq,default,生产建帧的older前缀与尾拍及fault实例与S+2归属及reset取消,所有检查通过,通过 2026-11-17 seed6111742 UVM_ERROR/FATAL=0

@@ -8,7 +8,7 @@
 - 范围：公共测试框架的激励生成、CSR 配置、调度、驱动、响应建模、事件记录和异常恢复。
 - 不包含：定向 testcase/vseq、专用场景 preset、RM/checker/scoreboard 算法、功能覆盖率模型、RTL 修改。
 - 授权边界：本轮仅完善方案与评审；后续源码修改仍须明确 coding 授权。
-- 公共控制依赖：[MemBlock V2 后端周期快照同步驱动与异常地址采样方案](memblock_v2_backend_cycle_frame_formal_plan_20261117.md)。该方案负责双 agent 同边沿发布、实际输入采样和恢复门槛，本方案负责特殊访存属性及 Guest 上下文接入。
+- 公共控制依赖：[MemBlock V2 后端周期快照同步驱动与异常地址采样方案](../do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md)。该方案负责双 agent 同边沿发布、实际输入采样和恢复门槛，本方案负责特殊访存属性及 Guest 上下文接入。
 
 - 评审记录：[独立评审闭环记录](../../review_doc/undo/memblock_v2_virtualization_backend_formal_plan_review_20261117.md)。
 
@@ -508,7 +508,7 @@ monitor 记录实际事件和上下文
 
 ## 10. 异常地址采样、记录与恢复
 
-本章依赖[后端周期快照同步驱动与异常地址采样方案](memblock_v2_backend_cycle_frame_formal_plan_20261117.md)的公共发布合同。正常提交、control、AF/PF/GPF fault 和访存违例各自保留原语义；本方案只补特殊访存与 Guest 上下文，不复制 scheduler、redirect owner 或 LSQ allocator。
+本章依赖[后端周期快照同步驱动与异常地址采样方案](../do/memblock_v2_backend_cycle_frame_formal_plan_20261117.md)的公共发布合同。正常提交、control、AF/PF/GPF fault 和访存违例各自保留原语义；本方案只补特殊访存与 Guest 上下文，不复制 scheduler、redirect owner 或 LSQ allocator。
 
 ### 10.1 公共事件记录与字段责任
 

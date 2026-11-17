@@ -11,6 +11,10 @@
 `include "memblock_compile_params.svh"
 
 class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
+    // 中文注释：同步运输身份默认关闭。帧路径携带不可变主/尾投影，
+    // copy/compare/print统一由UVM字段宏覆盖，不进入DUT端口。
+    bit backend_sync;
+    memblock_sync_pkg::backend_cycle_transport_t backend_cycle;
     // 中文注释：pendingPtr来自ROB提交侧，当前由LSQ commit sequence按软件commit cursor驱动。
     // value宽度跟随DUT版本宏；V2默认8 bit/RobSize=160，V3可编译期覆盖。
     rand bit io_ooo_to_mem_lsqio_pendingPtr_flag;
@@ -34,6 +38,8 @@ class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
     extern function bit compare(uvm_object rhs, uvm_comparer comparer=null);
 
     `uvm_object_utils_begin(lsqcommit_agent_agent_xaction)
+        `uvm_field_int(backend_sync, UVM_ALL_ON);
+        `uvm_field_int(backend_cycle, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_lsqio_pendingPtr_flag, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_lsqio_pendingPtr_value, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_flushSb, UVM_ALL_ON);
@@ -60,6 +66,8 @@ constraint lsqcommit_agent_agent_xaction::default_io_ooo_to_mem_flushSb_cons{
 
 function lsqcommit_agent_agent_xaction::new(string name = "lsqcommit_agent_agent_xaction");
     super.new();
+    backend_sync = 0;
+    backend_cycle = '{default:'0};
     io_ooo_to_mem_isStoreException = 1'b0;
 endfunction:new
 

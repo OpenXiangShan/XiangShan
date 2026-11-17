@@ -14,6 +14,131 @@ package memblock_sync_pkg;
 
     import uvm_pkg::*;
 
+    // 中文注释：后端周期发布只保留一个在途单元；主/尾投影先共同准备，
+    // 唯一 dispatch service 最终确认未来边沿。两个 agent 仍各自写原端口。
+    typedef struct packed {
+        logic pending_flag;
+        logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] pending_value;
+        logic pending_st, pending_mmio, store_exception;
+        logic [3:0] scommit;
+        logic redirect_valid, redirect_level, redirect_vls, redirect_flag;
+        logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] redirect_value;
+    } backend_cycle_projection_t;
+
+    typedef struct packed {
+        longint unsigned frame_id, tail_id, reset_epoch;
+        bit has_tail;
+        backend_cycle_projection_t head, tail;
+    } backend_cycle_transport_t;
+
+    typedef struct packed {
+        bit valid, committed, canceled;
+        bit [1:0] ready, driven, tail_driven, finished;
+        longint unsigned edge_sample;
+    } backend_cycle_release_t;
+
+    typedef struct packed {
+        longint unsigned reset_epoch, sample_seq;
+        backend_cycle_projection_t value;
+    } backend_cycle_input_t;
+
+    typedef struct packed {
+        longint unsigned reset_epoch, sample_seq;
+        logic [63:0] vaddr, gpaddr;
+        logic is_for_vs_non_leaf;
+    } backend_fault_address_raw_t;
+
+    backend_cycle_release_t backend_release_by_id[longint unsigned];
+    backend_cycle_input_t backend_lsq_input_by_sample[longint unsigned];
+    backend_cycle_input_t backend_redirect_input_by_sample[longint unsigned];
+    backend_fault_address_raw_t backend_address_by_sample[longint unsigned];
+    longint unsigned backend_lsq_watermark, backend_redirect_watermark, backend_address_watermark;
+    // 中文注释：只保护尚未消费的最早目标；固定容量耗尽时报错，禁止静默覆盖。
+    longint unsigned backend_input_required_sample, backend_address_required_sample;
+    longint unsigned backend_lsq_sample_time, backend_redirect_sample_time;
+    bit backend_cycle_mode;
+    bit backend_lsq_worker_online, backend_redirect_worker_online;
+    bit backend_flushsb_requested, backend_flushsb_driven;
+
+    // 抽象职责：清除测试轮次/复位前的运输身份与连续原始样本；不改变业务表。
+    function void reset_backend_cycle_transport(input bit disable_mode = 1);
+        backend_release_by_id.delete();
+        backend_lsq_input_by_sample.delete();
+        backend_redirect_input_by_sample.delete();
+        backend_address_by_sample.delete();
+        backend_input_required_sample = 0;
+        backend_address_required_sample = 0;
+        backend_lsq_sample_time = 0;
+        backend_redirect_sample_time = 0;
+        backend_lsq_watermark = 0;
+        backend_redirect_watermark = 0;
+        backend_address_watermark = 0;
+        if (disable_mode) backend_cycle_mode = 0;
+        backend_lsq_worker_online = 0;
+        backend_redirect_worker_online = 0;
+        backend_flushsb_requested = 0;
+        backend_flushsb_driven = 0;
+    endfunction
+
+    function void prepare_backend_transport(input longint unsigned id);
+        backend_release_by_id[id] = '{default:'0};
+        backend_release_by_id[id].valid = 1;
+    endfunction
+
+    function backend_cycle_release_t get_backend_release(input longint unsigned id);
+        if (!backend_release_by_id.exists(id)) return '{default:'0};
+        return backend_release_by_id[id];
+    endfunction
+
+    function void acknowledge_backend_ready(input longint unsigned id, input int side);
+        if (backend_release_by_id.exists(id)) backend_release_by_id[id].ready[side] = 1;
+    endfunction
+
+    function void acknowledge_backend_drive(input longint unsigned id, input int side,
+                                             input bit tail, input longint unsigned edge_sample);
+        if (!backend_release_by_id.exists(id) || !backend_release_by_id[id].committed ||
+            edge_sample != backend_release_by_id[id].edge_sample + (tail ? 1 : 0)) begin
+            `uvm_fatal("BACKEND_FRAME", "driver missed committed backend edge or identity")
+        end
+        if (tail) backend_release_by_id[id].tail_driven[side] = 1;
+        else backend_release_by_id[id].driven[side] = 1;
+    endfunction
+
+    // 抽象职责：两路输入和ctrl地址的独立完成水位及64拍历史。消费者精确按
+    // sample查找；历史溢出时禁止覆盖在途帧可能依赖的数据。
+    function void publish_backend_input(input int side, input backend_cycle_input_t raw);
+        longint unsigned oldest;
+        if (side == 0) begin
+            backend_lsq_input_by_sample[raw.sample_seq] = raw;
+            backend_lsq_watermark = raw.sample_seq;
+            if (raw.sample_seq > 64) begin
+                oldest = raw.sample_seq - 64;
+                if (backend_input_required_sample != 0 && oldest >= backend_input_required_sample)
+                    `uvm_fatal("BACKEND_HISTORY", "unconsumed LSQ input exceeded bounded transport history")
+                backend_lsq_input_by_sample.delete(oldest);
+            end
+        end else begin
+            backend_redirect_input_by_sample[raw.sample_seq] = raw;
+            backend_redirect_watermark = raw.sample_seq;
+            if (raw.sample_seq > 64) begin
+                oldest = raw.sample_seq - 64;
+                if (backend_input_required_sample != 0 && oldest >= backend_input_required_sample)
+                    `uvm_fatal("BACKEND_HISTORY", "unconsumed redirect input exceeded bounded transport history")
+                backend_redirect_input_by_sample.delete(oldest);
+            end
+        end
+    endfunction
+
+    function void publish_backend_fault_address(input backend_fault_address_raw_t raw);
+        backend_address_by_sample[raw.sample_seq] = raw;
+        backend_address_watermark = raw.sample_seq;
+        if (raw.sample_seq > 64) begin
+            if (backend_address_required_sample != 0 && raw.sample_seq - 64 >= backend_address_required_sample)
+                `uvm_fatal("BACKEND_HISTORY", "unconsumed fault address exceeded bounded transport history")
+            backend_address_by_sample.delete(raw.sample_seq - 64);
+        end
+    endfunction
+
     // 抽象职责：保存每个真实DUT采样的错误控制输入；RM按消费时间读取，
     // 不从最终异常反推门控。CSR monitor是唯一发布者，复位清除当前代记录。
     typedef struct packed {
@@ -3869,6 +3994,7 @@ package memblock_sync_pkg;
     endfunction:initialize_l2tlb_sample_coordinator
 
     function void clear_raw_monitor_queues();
+        reset_backend_cycle_transport(1'b0);
         raw_int_wb_q.delete();
         raw_iq_feedback_q.delete();
         raw_ctrl_q.delete();

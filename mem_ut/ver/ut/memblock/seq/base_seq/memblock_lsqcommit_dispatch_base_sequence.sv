@@ -113,6 +113,26 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     bit                           has_flushsb_progress;
     bit                           commit_batch_applied;
 
+    if (memblock_sync_pkg::backend_cycle_mode) begin
+        memblock_sync_pkg::backend_cycle_transport_t transport;
+        memblock_sync_pkg::backend_lsq_worker_online = 1;
+        has_progress = 0;
+        terminal_idle_published = 0;
+        if (data.backend_lsq_transport_q.size() != 0) begin
+            transport = data.backend_lsq_transport_q.pop_front();
+            tr = lsqcommit_agent_agent_xaction::type_id::create("backend_lsq_transport");
+            tr.backend_sync = 1;
+            tr.backend_cycle = transport;
+            start_item(tr);
+            finish_item(tr);
+            has_progress = 1;
+        end else begin
+            wait_clock_tick();
+            terminal_idle_published = data.is_global_stop_requested() && data.backend_frame == null;
+        end
+        return;
+    end
+
     has_commit = 1'b0;
     has_fault_head = 1'b0;
     fault_uid = 0;

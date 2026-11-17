@@ -11,6 +11,10 @@
 `include "memblock_compile_params.svh"
 
 class redirect_agent_agent_xaction  extends tcnt_data_base;
+    // 中文注释：同步运输身份默认关闭。帧路径携带不可变主/尾投影，
+    // copy/compare/print统一由UVM字段宏覆盖，不进入DUT端口。
+    bit backend_sync;
+    memblock_sync_pkg::backend_cycle_transport_t backend_cycle;
     // Redirect is an input control interface to MemBlock. `level` follows
     // RedirectLevel in Scala: flushAfter=0, flush=1.
     rand bit io_redirect_valid         ;
@@ -34,6 +38,8 @@ class redirect_agent_agent_xaction  extends tcnt_data_base;
     extern function bit compare(uvm_object rhs, uvm_comparer comparer=null);
 
     `uvm_object_utils_begin(redirect_agent_agent_xaction)
+        `uvm_field_int(backend_sync, UVM_ALL_ON);
+        `uvm_field_int(backend_cycle, UVM_ALL_ON);
         `uvm_field_int(io_redirect_valid, UVM_ALL_ON);
         `uvm_field_int(io_redirect_bits_level, UVM_ALL_ON);
         `uvm_field_int(io_redirect_bits_isVlsException, UVM_ALL_ON);
@@ -61,6 +67,8 @@ constraint redirect_agent_agent_xaction::default_io_redirect_bits_robIdx_value_c
 
 function redirect_agent_agent_xaction::new(string name = "redirect_agent_agent_xaction");
     super.new();
+    backend_sync = 0;
+    backend_cycle = '{default:'0};
 endfunction:new
 
 function void redirect_agent_agent_xaction::pack();

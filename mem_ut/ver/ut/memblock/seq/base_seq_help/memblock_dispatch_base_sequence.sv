@@ -741,6 +741,8 @@ task memblock_dispatch_base_sequence::collect_monitor_event_batch();
                                                        sample_cycle,
                                                        sample_cycle_valid);
     monitor_batch_handler.process_monitor_event_batch(events);
+    if (memblock_sync_pkg::backend_cycle_mode)
+        memblock_backend_cycle_scheduler::get().service_backend_cycle_samples();
     // 中文注释：semantic batch 已完成 redirect-first/feedback 处理后，才释放本拍
     // ctrl/deq 对应的 LQ/SQ mapping；失败的队首 raw 保留到后续 service tick 重试。
     monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);

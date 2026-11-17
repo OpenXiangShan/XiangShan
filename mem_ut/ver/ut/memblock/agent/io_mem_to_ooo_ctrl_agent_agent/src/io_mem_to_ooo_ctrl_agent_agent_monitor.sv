@@ -639,6 +639,16 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             // anchored after the shared reset boundary has closed.
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
+            begin
+                memblock_sync_pkg::backend_fault_address_raw_t address_raw;
+                address_raw.reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+                address_raw.sample_seq = sample_seq;
+                address_raw.vaddr = io_mem_to_ooo_lsqio_vaddr;
+                address_raw.gpaddr = io_mem_to_ooo_lsqio_gpaddr;
+                address_raw.is_for_vs_non_leaf = io_mem_to_ooo_lsqio_isForVSnonLeafPTE;
+                memblock_sync_pkg::publish_backend_fault_address(address_raw);
+            end
+
             rollback_input = memblock_sync_pkg::make_empty_raw_ctrl();
             sample_rollback_diagnostics(rollback_input);
             if (rollback_input.rollback_diag_valid &&

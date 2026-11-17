@@ -68,6 +68,21 @@ task memblock_redirect_dispatch_base_sequence::body();
             break;
         end
 
+        if (memblock_sync_pkg::backend_cycle_mode) begin
+            memblock_sync_pkg::backend_redirect_worker_online = 1;
+            if (data.backend_redirect_transport_q.size() != 0) begin
+                redirect_agent_agent_xaction tr;
+                tr = redirect_agent_agent_xaction::type_id::create("backend_redirect_transport");
+                tr.backend_sync = 1;
+                tr.backend_cycle = data.backend_redirect_transport_q.pop_front();
+                start_item(tr);
+                finish_item(tr);
+            end else begin
+                drive_idle_once("backend_redirect_idle");
+            end
+            continue;
+        end
+
         if (data.try_pop_redirect_drive(payload)) begin
             drive_redirect_payload(payload);
             idle_count = 0;
