@@ -60,6 +60,7 @@ case class XSCoreParameters
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
+  // H_EXT_CTRL(hasHext): [CONFIG] 此处已有参数同时控制地址位宽、VMID 字段和仲裁端口；后续 HPTW 开关与位宽裁剪需区分处理。
   HasHExtension: Boolean = true,
   HasDiv: Boolean = true,
   HasDCache: Boolean = true,
@@ -296,6 +297,7 @@ case class XSCoreParameters
 
   def ISABase = "rv64i"
   def ISAExtensions = {
+    // H_EXT_CTRL(hasHext): [ISA] 关闭 H 时同步调整对外声明中的 h、sha/sh* 能力；译码表保留，由 NewCSR 的指令权限输出禁止 H 指令。
     // Keep the device-tree extension list canonical, but only advertise Zicfiss
     // when the corresponding hardware is present.
     val zicfiss = if (HasShadowStack) Seq("zicfiss") else Seq.empty[String]

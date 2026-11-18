@@ -76,6 +76,8 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
 
   lazy val module = new CtrlBlockImp(this)(p, params)
 
+  // H_EXT_CTRL(hasHext): [GPAMEM] H 专用取指 GPA 存储实例，可随 H 关闭；同步处理下方 module 引用及 IFU 写/ROB 读接线。
+  // H_EXT_CTRL(hasHext): 保留普通 PC/异常通路，关闭时 GPA/non-leaf-PTE 返回 0/false；无需删除整个前后端接口。
   val gpaMem = LazyModule(new GPAMem())
 }
 

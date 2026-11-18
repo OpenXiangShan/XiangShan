@@ -19,6 +19,8 @@ class GPAMem(implicit p: Parameters) extends LazyModule {
 class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {
   val io = IO(new GPAMemIO)
 
+  // H_EXT_CTRL(hasHext): [GPAMEM] 整块仅保存取指 guest-fault GPA；主存储为 FtqSize*(PAddrBitsMax+1)，默认 64*57=3648 个声明位。
+  // H_EXT_CTRL(hasHext): 后续可连同下方读写选择及 GPA 加法器一起裁剪；实例开关在 CtrlBlock，公共异常接口可先保留并返回 0。
   private val mem = Module (new SyncDataModuleTemplate(new GPAMemEntry, FtqSize, numRead = 1, numWrite = 1, hasRen = true))
 
   mem.io.wen.head := io.fromIFU.gpAddrMem.wen

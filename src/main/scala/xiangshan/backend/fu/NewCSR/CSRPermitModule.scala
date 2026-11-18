@@ -100,6 +100,8 @@ class CSRPermitModule(implicit val p: Parameters) extends Module with HasXSParam
   val directPermitIllegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI ||
     vPermit_EX_II || vPermit_EX_VI || ssp_EX_II || ssp_EX_VI
 
+  // H_EXT_CTRL(hasHext): [CSR] 统一拒绝关闭 H 时的 H/VS 专用 CSR 读写，含 VS AIA/间接 CSR；共享 CSR 中的 H 字段另做只读 0。
+  // H_EXT_CTRL(hasHext): 拒绝条件须进入 EX_II，联动下方 hasLegalWen 和 NewCSR.asyncAccess，禁止别名写、IMSIC 请求及 claim 副作用。
   val csrAccess_EX_II = csrAccess && (
     (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II || ssp_EX_II) ||
     (!directPermitIllegal && indirectPermit_EX_II)

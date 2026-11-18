@@ -38,6 +38,8 @@ class TLBFA(
   io.r.req.map(_.ready := true.B)
 
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
+  // H_EXT_CTRL(hasHext): [L1TLB] H 元数据按 nWays 复制到此寄存器阵列；默认四组 48-way ITLB/DTLB 合计 5184 个声明位，非综合面积。
+  // H_EXT_CTRL(hasHext): 后面的多端口 VMID/stage 比较和 G 权限/PBMT 选择也纳入 H 裁剪；保留普通命中、替换与 refill。
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
@@ -148,6 +150,7 @@ class TLBFA(
     }
   }
 
+  // H_EXT_CTRL(hasHext): [L1TLB] 下方 VVMA/GVMA 的 VMID/stage 并行比较和失效网络可随 H 关闭，保留普通 SFENCE 和模式切换处理。
   val hfencev_valid = sfence.valid && sfence.bits.hv
   val hfenceg_valid = sfence.valid && sfence.bits.hg
   val hfencev = io.sfence

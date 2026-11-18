@@ -364,6 +364,7 @@ class DcsrBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   val STOPCOUNT =           RW(    10).withReset(0.U).withDescription("Stop architectural counters while in Debug Mode.")
   val STOPTIME  =           RW(     9).withReset(0.U).withDescription("Stop the time counter while in Debug Mode.")
   val CAUSE     =    DcsrCause( 8,  6).withReset(DcsrCause.None).withDescription("Cause of the most recent entry into Debug Mode.")
+  // H_EXT_CTRL(hasHext): [STATE] 关闭 H 时 dcsr.V 对软件只读且内部恒为 0，包含 debug-entry 更新，避免 DRET 恢复虚拟态。
   val V         =     VirtMode(     5).withReset(VirtMode.Off).withDescription("Virtualization mode active before entering Debug Mode.")
   val MPRVEN    =           RW(     4).withReset(0.U).withDescription("Allow mstatus.MPRV to apply while in Debug Mode.")
   val NMIP      =           RO(     3).withReset(0.U).withDescription("Indicates pending non-maskable interrupt state while in Debug Mode.")

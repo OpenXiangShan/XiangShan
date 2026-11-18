@@ -16,6 +16,8 @@ import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap
 
+// H_EXT_CTRL(hasHext): [STATE] 保留 H CSR bank 的结构，软件访问由 CSRPermitModule 拒绝；使影响运行的 H 控制状态保持无效。
+// H_EXT_CTRL(hasHext): 重点是 hstatus.SPV/SPVP/HU/VGEIN、hgatp 及 guest IRQ 控制；隔离硬件更新/别名输出，不只屏蔽 rdata。
 trait HypervisorLevel { self: NewCSR =>
 
   val hstatus = Module(new HstatusModule)

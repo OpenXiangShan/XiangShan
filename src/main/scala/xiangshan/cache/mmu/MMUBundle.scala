@@ -115,6 +115,8 @@ class TlbPermBundle(hasV: Boolean = true)(implicit p: Parameters) extends TlbBun
   }
 }
 
+// H_EXT_CTRL(hasHext): [L1TLB] H 元数据是本类 g_perm、g_pbmt、vmid、s2xlate，默认共 9+2+14+2=27 bit/entry。
+// H_EXT_CTRL(hasHext): 后续可随 H 固定或裁剪，并同步 hit/wbhit/apply；普通 tag/ASID/PPN/权限和表项数量保留。
 class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) extends TlbBundle {
   require(pageNormal && pageSuper)
 

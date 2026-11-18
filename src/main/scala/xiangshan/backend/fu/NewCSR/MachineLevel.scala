@@ -606,6 +606,8 @@ class MstatusBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64).withDescription("Effective XLEN for S-mode.")
   val SBE  = CSRROField     (36).withReset(0.U).withDescription("S-mode endianness selector.")
   val MBE  = CSRROField     (37).withReset(0.U).withDescription("M-mode endianness selector.")
+  // H_EXT_CTRL(hasHext): [STATE] 关闭 H 时 mstatus.GVA/MPV 对软件只读 0，内部有效值也固定 0，包含 CSR/别名/trap/xRET 更新。
+  // H_EXT_CTRL(hasHext): 保留 MPRV/MPP 及普通 S 状态；mstatus.VS 是向量上下文状态，不属于这里的 H 开关。
   val GVA  = CSRRWField     (38).withReset(0.U).withDescription("Indicates that trap information was derived from a guest virtual address.")
   val MPV  = VirtMode       (39).withReset(0.U).withDescription("Saved virtualization mode from before trap entry to M-mode.")
   val MPELP = CSRROField    (41).withReset(0.U).withDescription("Saved landing-pad state for traps into M-mode.")
@@ -688,6 +690,7 @@ class MstatusModule(hasZicfilp: Boolean)(implicit override val p: Parameters)
 
 class MnstatusBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   val NMIE   = CSRRWField  (3).withReset(0.U).withDescription("Enable non-maskable interrupt handling.")
+  // H_EXT_CTRL(hasHext): [STATE] 关闭 H 时 MNPV 只读且内部恒为 0，避免 MNRET 恢复虚拟态；保留普通 NMI 状态。
   val MNPV   = VirtMode    (7).withReset(0.U).withDescription("Saved virtualization mode for resumable NMI handling.")
   val MNPELP = RO          (9).withReset(0.U).withDescription("Saved landing-pad state for resumable NMI handling.")
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U).withDescription("Saved privilege level for resumable NMI handling.")
@@ -706,6 +709,7 @@ class MisaBundle extends CSRBundle {
   val E = RO( 4).withReset(0.U).withDescription("Embedded base ISA (RV32E/RV64E) supported.")
   val F = RO( 5).withReset(1.U).withDescription("Single-precision floating-point extension supported.")
   val G = RO( 6).withReset(0.U).withDescription("Reserved aggregate ISA bit.")
+  // H_EXT_CTRL(hasHext): [ISA] 后续使 misa.H 随功能开关取值：关闭时只读 0，开启时维持当前只读 1。
   val H = RO( 7).withReset(1.U).withDescription("Hypervisor extension supported.")
   val I = RO( 8).withReset(1.U).withDescription("Integer base ISA (RV32I/RV64I/RV128I) supported.")
   val J = RO( 9).withReset(0.U).withDescription("Reserved extension bit J.")
@@ -736,6 +740,7 @@ class MedelegBundle extends ExceptionBundle {
   this.EX_DBLTRP.setRO().withReset(0.U)// double trap is not delegatable
 }
 
+// H_EXT_CTRL(hasHext): [IRQ] 关闭 H 时位 2/6/10/12 应读为 0；下方 getVS/SGEI 当前固定为 1，需要随开关调整。
 class MidelegBundle extends InterruptBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   // Don't delegate Machine level interrupts
@@ -751,6 +756,8 @@ class MidelegBundle extends InterruptBundle {
   this.LCOFI.setRW().withReset(0.U)
 }
 
+// H_EXT_CTRL(hasHext): [IRQ] 关闭 H 时 mie/mip 的 VS 和 SGE 位只读 0；同时约束上方模块的内部别名写及外部 pending 覆盖。
+// H_EXT_CTRL(hasHext): 保留 M/S、LCOFI 和其它独立 AIA 中断行为，不能将整个中断寄存器清零。
 class MieBundle extends InterruptEnableBundle {
   this.getNonLocal.foreach(_.setRW().withReset(0.U))
   this.LCOFIE.setRW().withReset(0.U)

@@ -146,6 +146,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s_mem_req = RegInit(true.B)
   val s_llptw_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
+  // H_EXT_CTRL(hasHext): [PTW] 普通 PTW 中的嵌套 G-stage 子流程：本组 s/w_hptw、last_hptw 标志及后续 GPA/GPF/响应寄存器。
+  // H_EXT_CTRL(hasHext): 关闭 H 时请求为 noS2xlate，跳过两次 HPTW 请求/等待；普通 S-stage 页表遍历仍需保留。
   val s_hptw_req = RegInit(true.B)
   val w_hptw_resp = RegInit(true.B)
   val s_last_hptw_req = RegInit(true.B)
@@ -785,6 +787,8 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val ppn = UInt(ptePPNLen.W)
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
+  // H_EXT_CTRL(hasHext): [PTW] LLPTWEntry 中的 H 结果及 first_s2xlate_fault，会按 llptwsize 复制到下面的 entries 寄存器阵列。
+  // H_EXT_CTRL(hasHext): 后续可将这些 guest 状态固定无效，或单独裁剪；不要删除整个普通 leaf-walker entry。
   val hptw_resp = new HptwResp()
   val first_s2xlate_fault = Output(Bool())
   val cf = Bool()
@@ -806,6 +810,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virtChanged || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
+  // H_EXT_CTRL(hasHext): [PTW] 共享 LLPTW 状态机中的 hptw_req/resp 和 last_hptw_req/resp 四类状态属于 H 子流程。
+  // H_EXT_CTRL(hasHext): 关闭 H 时禁止进入这些状态，并处理后续 G-stage 结果/地址选择，保留普通访存、cache、MPT/bitmap 状态。
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: state_bitmap_check :: state_bitmap_resp :: stage_mpt_req ::stage_mpt_resp :: Nil = Enum(14)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
 
@@ -851,6 +857,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   // process hptw requests in serial
+  // H_EXT_CTRL(hasHext): [HPTW] 本块 hyper_arb1/hyper_arb2 按 llptwsize 仲裁首次和末次 G-stage 请求，是 LLPTW 中可裁剪的 H 硬件。
+  // H_EXT_CTRL(hasHext): 同步处理后面 hptw_req_arb 和 io.hptw 的请求/响应接线；普通 mem_arb 保留。
   val hyper_arb1 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb1.io.in(i).bits := entries(i)
@@ -1384,6 +1392,8 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
   })
 }
 
+// H_EXT_CTRL(hasHext): [HPTW] 整个类是独立 G-stage walker：HGATP/x4 地址生成、遍历状态机、PTE/GPF 检查和访存结果寄存器。
+// H_EXT_CTRL(hasHext): 这是本轮重点标注的 H 专用硬件，优先在 L2TLB 的实例化处接开关；HPTWIO 类型可先保留。
 class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new HPTWIO)
   val hgatp = io.csr.hgatp

@@ -15,6 +15,8 @@ import xiangshan.backend.decode.isa.CSRs
 
 import scala.collection.immutable.SeqMap
 
+// H_EXT_CTRL(hasHext): [STATE] 保留 VS CSR bank 的结构，软件访问由 CSRPermitModule 拒绝；使 VSATP 和 guest IRQ 控制保持无效。
+// H_EXT_CTRL(hasHext): 隔离 VS 状态更新及中断别名副作用，保留普通 supervisor CSR；无需改各级前后端异常接口。
 trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with HypervisorLevel =>
 
   val vsstatus = Module(

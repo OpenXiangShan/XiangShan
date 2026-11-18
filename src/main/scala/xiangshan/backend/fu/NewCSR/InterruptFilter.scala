@@ -108,6 +108,8 @@ class InterruptFilter extends Module {
       iprio.prioNum := 0.U
     }
   }
+  // H_EXT_CTRL(hasHext): [VSIRQ] VS 专用优先级通路：hvipriosSort、后面的 8x8 分组选择、hvipriosReg 和最终选择树可随 H 关闭。
+  // H_EXT_CTRL(hasHext): M/HS 优先级树和共用 helper 保留；常量隔离后是否消除硬件需检查综合结果及 dontTouch 保留点。
   val hvipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
   hvipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
     iprio.idx := i.U
@@ -278,6 +280,8 @@ class InterruptFilter extends Module {
   )
 
   // refactor this code & has some problem
+  // H_EXT_CTRL(hasHext): [VSIRQ] 下方 Candidate1..5、流水寄存器及 IID/IPRIO 组合是 VS 外部中断/hvictl 注入选择，可整体按 H 控制。
+  // H_EXT_CTRL(hasHext): 与上方 VS 优先级树一起处理，关闭时 vstopi/irToVS/注入结果无效；保留普通 M/HS 中断选择。
   val Candidate1: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
   val Candidate2: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
   val Candidate3: Bool = vsip.SEIP && vsie.SEIE && !Candidate1 && !Candidate2

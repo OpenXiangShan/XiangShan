@@ -47,6 +47,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolea
 {
   val io = IO(new TlbIO(Width, nRespDups, q, hasCboAccess))
 
+  // H_EXT_CTRL(hasHext): [TLB] 关闭 H 时在请求入口屏蔽 hyperinst/hlvx，预检查、req_out 锁存、PMP、PTW replay 和 difftest 共用该请求视图。
+  // H_EXT_CTRL(hasHext): 结合 CSR 提供的 V=0、VSATP/HGATP=0，使 stage 恒为 noS2xlate；保留普通 SATP 翻译和现有总线位宽。
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
@@ -687,6 +689,8 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
 }
 
 // Prepare request addresses and check pre-faults in S0
+// H_EXT_CTRL(hasHext): [TLB] S0 预检查同步采用屏蔽后的 hyperinst/hlvx 和非虚拟 CSR 控制；与主 TLB 的权限/stage 选择一致。
+// H_EXT_CTRL(hasHext): 此处也选择 premode/MXR/PMM；保持普通地址检查和 pointer masking，确保不产生 guest fault。
 class TlbRequestPrepare(q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbModule with HasCSRConst {
   val io = IO(new Bundle {
     val req = Input(ValidIO(new TlbReq(hasCboAccess)))

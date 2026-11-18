@@ -251,6 +251,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l3v = if (EnableSv48) Some(RegInit(0.U(l2tlbParams.l3Size.W))) else None
   val l3g = if (EnableSv48) Some(Reg(UInt(l2tlbParams.l3Size.W))) else None
   val l3asids = if (EnableSv48) Some(l3.get.map(_.asid)) else None
+  // H_EXT_CTRL(hasHext): [L2CACHE] 本段 l3/l2 和后面的 sp 保存 VMID 与 H-stage 标签；相应比较、refill 更新属于共享缓存中的 H 部分。
+  // H_EXT_CTRL(hasHext): 关闭 H 可固定这些元数据或后续裁剪字段；普通页表缓存容量、ASID 和有效位仍需保留。
   val l3vmids = if (EnableSv48) Some(l3.get.map(_.vmid)) else None
   val l3h = if (EnableSv48) Some(Reg(Vec(l2tlbParams.l3Size, UInt(2.W)))) else None
 
@@ -277,6 +279,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val mbistPlL1 = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipePtwL1", hasMbist)
   val l1v = RegInit(0.U((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
   val l1g = Reg(UInt((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
+  // H_EXT_CTRL(hasHext): [L2CACHE] l1h/l1vmids 及后面的 l0h/l0vmids 是按 set×way 复制的 H 标签/VMID 阵列，是另一处硬件裁剪候选。
+  // H_EXT_CTRL(hasHext): 连同 lookup、refill、flush 中的使用一起处理；l0/l1 的 PTE SRAM 是普通翻译共用的，不能整块关掉。
   val l1h = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(2.W))))
   val l1asids = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(l2tlbParams.hashAsidWidth.W))))
   val l1vmids = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(l2tlbParams.hashAsidWidth.W))))
@@ -683,6 +687,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   )
 
   // stageResp bypass to hptw
+  // H_EXT_CTRL(hasHext): [L2CACHE] 本块 G-stage bypass、allStage/onlyStage2 选择及 toHptw 响应生成配合 HPTW 开关关闭。
+  // H_EXT_CTRL(hasHext): 保留共享 PTE 命中和 stage1 普通响应；无 H 时进入本缓存的请求阶段应为 noS2xlate。
   val hptw_bypassed = if (EnableSv48) Wire(Vec(4, Bool())) else Wire(Vec(3, Bool()))
   hptw_bypassed.indices.foreach(i =>
     hptw_bypassed(i) := stageResp.bits.bypassed(i) ||
@@ -1135,6 +1141,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
   }
 
+  // H_EXT_CTRL(hasHext): [L2CACHE] 这里及后面的 HFENCE.GVMA、L3 对应分支包含 VMID/H-stage 并行比较与失效网络，可随 H 关闭。
+  // H_EXT_CTRL(hasHext): 保留普通 SFENCE、ECC flush 和 refill；元数据裁剪时也要同步处理这些引用。
   val hfencev_valid = sfence_dup(0).valid && sfence_dup(0).bits.hv
   when (hfencev_valid) {
     val l0hashVmid = XORFold(io.csr_dup(0).hgatp.vmid, l2tlbParams.hashAsidWidth)

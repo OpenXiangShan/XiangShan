@@ -369,6 +369,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val wenLegalReg = GatedValidRegNext(wenLegal)
 
+  // H_EXT_CTRL(hasHext): [CSR] 保留寄存器实例、映射及接口，在 CSRPermitModule 统一拒绝 H/VS 专用地址并禁止写副作用。
+  // H_EXT_CTRL(hasHext): 地址分类含 H/VS bank、AIA/CSRIND 的 VS 项和 mtinst；mtval2 还用于双重异常，需保留该用途。
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
     supervisorLevelCSRMap ++
@@ -413,6 +415,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   nmip.NMI_43 := nonMaskableIRP.NMI_43
   nmip.NMI_31 := nonMaskableIRP.NMI_31
 
+  // H_EXT_CTRL(hasHext): [IRQ] 关闭 H 时隔离传给中断过滤器的 guest pending/enable、hideleg/hvictl 等输入，保留普通 M/S 中断。
+  // H_EXT_CTRL(hasHext): 同时处理 mie/mip/mideleg 的 H 位及下面 AIA/定时器来源；仅清 V 不能屏蔽送往 HS 的 guest 中断。
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
   intrMod.io.in.mstatusMIE := mstatus.regOut.MIE.asBool
@@ -1008,6 +1012,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   )
 
+  // H_EXT_CTRL(hasHext): [STATE] 关闭 H 时内部 V 恒为 Off，统一阻止 trap/xRET 恢复 V；仅复位为 0 或屏蔽读回值不够。
+  // H_EXT_CTRL(hasHext): MPV、SPV、MNPV、dcsr.V 的有效值也须为 0，包含硬件事件更新，保证返回目标/地址翻译选择一致。
   nextV := MuxCase(
     V,
     events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
@@ -1644,12 +1650,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   toAIA.wdata.valid := imsicWdataValid
   toAIA.wdata.bits.op := RegNext(io.in.bits.op)
   toAIA.wdata.bits.data := RegNext(io.in.bits.src)
+  // H_EXT_CTRL(hasHext): [IRQ] 关闭 H 时 VGEIN、guest 地址 V 和 vsClaim 保持 0；M/S IMSIC 保留，guest files 裁剪见 wrapper/CSR.scala。
   toAIA.vgein := hstatus.regOut.VGEIN.asUInt
   toAIA.mClaim  := mtopei.w.wen
   toAIA.sClaim  := stopei.w.wen
   toAIA.vsClaim := vstopei.w.wen
 
   // tlb
+  // H_EXT_CTRL(hasHext): [TLB] 本组 CSR→MMU 输出是统一控制入口：关闭 H 时清 vsatp/hgatp、对应 changed、virt/dvirt、vmxr/vsum、spvp。
+  // H_EXT_CTRL(hasHext): 同步约束 hPBMTE、H PMM；保留 satp、普通 MPRV/MPP、MXR/SUM、M/S PMM、MPT/bitmap 和全部位宽。
   io.tlb.satpASIDChanged  := GatedValidRegNext(satp.w.wen  && satp .regOut.ASID =/=  satp.w.wdataFields.ASID)
   io.tlb.vsatpASIDChanged := GatedValidRegNext(vsatp.w.wen && vsatp.regOut.ASID =/= vsatp.w.wdataFields.ASID)
   io.tlb.hgatpVMIDChanged := GatedValidRegNext(hgatp.w.wen && hgatp.regOut.VMID =/= hgatp.w.wdataFields.VMID)
@@ -1716,6 +1725,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU
   io.toDecode.illegalInst.sfencePart := isModeHU
   io.toDecode.virtualInst.sfencePart := isModeVU
+  // H_EXT_CTRL(hasHext): [DECODE] 关闭 H 时 hfenceGVMA、hfenceVVMA、hlsv 三个非法指令信号恒为 true；对应 virtualInst 信号保持 false。
+  // H_EXT_CTRL(hasHext): 现有译码同时覆盖 HLV/HLVX/HSV、HFENCE/HINVAL，可保留译码表；不要禁止普通 SFENCE/SINVAL。
   io.toDecode.illegalInst.hfenceGVMA := isModeHS && mstatus.regOut.TVM || isModeHU
   io.toDecode.illegalInst.hfenceVVMA := isModeHU
   io.toDecode.virtualInst.hfence     := isModeVS || isModeVU

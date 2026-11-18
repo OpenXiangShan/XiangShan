@@ -227,6 +227,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   satpFlushMod.in.vsatp.bits  := csrMod.io.status.vsatp.bits
   satpFlushMod.in.privState   := csrMod.io.status.privState
 
+  // H_EXT_CTRL(hasHext): [IMSIC] 面积入口：ChiselAIA/IMSIC.scala 为每个 guest file 实例化 EIP/EIE 存储、控制寄存器和优先级选择。
+  // H_EXT_CTRL(hasHext): 关闭 H 可裁剪 guest IntFile，保留 M/S files；VGEIN=0 本身不等于删除硬件。
+  // H_EXT_CTRL(hasHext): 同时处理 guest pending 切片、topei/claim、MSI 编码及地址配置；不能仅把 geilen 改成 0。
   val imsic = Module(new aia.IMSIC_WRAP(soc.IMSICParams))
   imsic.fromCSR.addr.valid := csrMod.toAIA.addr.valid
   imsic.fromCSR.addr.bits.addr := csrMod.toAIA.addr.bits.addr

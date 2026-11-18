@@ -150,10 +150,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
   val ptw = Module(new PTW)
+  // H_EXT_CTRL(hasHext): [HPTW] 优先加开关的 H 专用实例；整个模块见 PageTableWalker.HPTW，关闭时可不实例化。
+  // H_EXT_CTRL(hasHext): 整组处理 cache.req/resp.ready、CSR/flush、访存/PMP、MPT/bitmap、响应和 refill 引用；共享模块保留。
+  // H_EXT_CTRL(hasHext): H 响应置无效，PTW/LLPTW 跳过 H 请求/等待；包含 cache-hit 直接返回，避免只切断 HPTW 导致死锁。
   val hptw = Module(new HPTW)
   val llptw = Module(new LLPTW)
   val blockmq = Module(new BlockHelper(3))
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
+  // H_EXT_CTRL(hasHext): [L2TLB] 共享 page-cache 请求仲裁：端口数量已依赖 HasHExtension，但 InArbHPTWPort 及其它编号仍固定。
+  // H_EXT_CTRL(hasHext): 去掉 HPTW 时可先保留无效占位端口；若缩减端口数量，必须同步编号、接线和后续循环边界。
   val arb2 = Module(new Arbiter(new L2TlbWithHptwIdBundle, ((if (l2tlbParams.enablePrefetch) 4 else 3) + (if (HasHExtension) 1 else 0))))
 
   val mpt_arb = Option.when (HasMptCheck) (Module(new Arbiter(new MptReqBundle, 4+PtwWidth)))
@@ -172,6 +177,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mptc.get.io.req.bits.mptOnly :=  mpt_arb.get.io.out.bits.mptOnly && mpt_arb.get.io.out.valid
   }
 
+  // H_EXT_CTRL(hasHext): [HPTW] 本块 req/resp 两个仲裁器只服务 G-stage 请求；关闭 H 可随 HPTW 一起裁剪。
+  // H_EXT_CTRL(hasHext): 下面 PTW/LLPTW 请求接入和后面的 cache/HPTW 响应分发也需同步处理，避免无驱动或等待死锁。
   val hptw_req_arb = Module(new Arbiter(new Bundle {
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val source = UInt(bSourceWidth.W)
@@ -187,6 +194,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val s2 = new HptwResp()
     val mpt = Option.when (HasMptCheck) (new MptTlbRespBundle())
   }, 1)).io)
+  // H_EXT_CTRL(hasHext): [L2TLB] 共享 S1/S2 结果合并通路：关闭 H 保留普通 S1，s2xlate 固定 noS2xlate，S2 返回置为无效。
+  // H_EXT_CTRL(hasHext): 与后面 cache/PTW/LLPTW 的合并接线一致；本轮不要求缩窄响应 Bundle 或改前后端异常接口。
   val mergeArb = (0 until PtwWidth).map(i => Module(new Arbiter(new Bundle {
     val s2xlate = UInt(2.W)
     val s1 = new PtwMergeResp()
@@ -487,6 +496,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   def from_ptw(id: UInt) = {
     id === l2tlbParams.llptwsize.U
   }
+  // H_EXT_CTRL(hasHext): [L2TLB] HPTW 访存源 ID 为 llptwsize+1；对应 waiting_resp/flush_latch、PTE 缓冲和 refill 来源判断。
+  // H_EXT_CTRL(hasHext): 可先保留空闲 ID 槽；若缩减，需同步 MMUConst 的 MemReqWidth/HptwReqId 及 MPT/bitmap ID。
   def from_hptw(id: UInt) = {
     id === l2tlbParams.llptwsize.U + 1.U
   }
@@ -520,6 +531,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   if (HasMptCheck) { mptc.get.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize + 2) }
+  // H_EXT_CTRL(hasHext): [HPTW] 访存仲裁的 in(2) 专用于 HPTW；去掉实例时禁用或移除此端口，并同步后面的内存返回路由。
+  // H_EXT_CTRL(hasHext): 普通 PTW/LLPTW 及可选 MPT/bitmap 端口继续保留。
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), if (HasBitmapCheck || HasMptCheck) 4 else 3))
   mem_arb.io.in(0) <> ptw.io.mem.req
   mem_arb.io.in(1) <> llptw_mem.req
@@ -731,6 +744,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.pmp(0).resp <> pmp_check(1).resp
   pmp_check(2).req <> llptw.io.pmp(1).req
   llptw.io.pmp(1).resp <> pmp_check(2).resp
+  // H_EXT_CTRL(hasHext): [HPTW] 第 3 号 PMPChecker 专用于 HPTW，可随实例一起裁剪；上方 checker 创建数组和固定编号需同步。
+  // H_EXT_CTRL(hasHext): 若先保留 checker 占位，明确禁用其请求；保留其它 walker 和 MPT/bitmap 的 PMP 检查。
   pmp_check(3).req <> hptw.io.pmp.req
   hptw.io.pmp.resp <> pmp_check(3).resp
   if (HasBitmapCheck) {
