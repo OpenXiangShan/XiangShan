@@ -259,7 +259,7 @@ class WriteBuffer[T <: WriteReqBundle](
     io.read(nRows).valid := !emptyVec(nRows)
     io.read(nRows).bits  := entries(nRows)(readIdx)
 
-    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
+    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows)
     replacerWay(nRows) := replacer.way
     replacer.access(touchWays)
     when(flush) {
