@@ -79,10 +79,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Banked ROB Entries
    */
+  val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
   private val enqBanking = new RobBanking(RobSize, RenameWidth)
   private val deqBanking = new RobBanking(RobSize, CommitWidth)
   require(isPow2(CommitWidth), "ROB commit rows require a power-of-two CommitWidth")
-  val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
   // Per-slot functional state used by exception handling and performance
   // accounting.
   // TODO: move slotUopBuf back to RoB entries
@@ -118,25 +118,36 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   in.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.in.canEnq && vtypeBuffer.in.canEnq && !in.fromVecExcpMod.busy
   in.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.in.canEnqForDispatch && vtypeBuffer.in.canEnqForDispatch && !in.fromVecExcpMod.busy
   in.enq.resp := allocatePtrVec
+
   val uopCanEnqueue = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   val canEnqueue = VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop && in.enq.canAccept))
 
-  // Share enqueue payload selection using a view sized for the allocation bandwidth.
-  val entryHeadUops = enqBanking.selectEnqueue(canEnqueue.toSeq, allocatePtrVec.map(_.value), in.enq.req.map(_.bits))
+  // Share the bank decode with the payload selector, which does not need the row decode.
+  val allocBankOH = allocatePtrVec.map(ptr => UIntToOH(enqBanking.bankIndex(ptr.value), enqBanking.bankNum))
+  val enqRowOH = canEnqueue.zip(allocatePtrVec).map { case (enable, ptr) =>
+    Mux(enable, enqBanking.rowSelect(ptr.value), 0.U)
+  }
+  // Per-entry enqueue enables, with one bit per dispatch lane.
+  val enqEnableVec = (0 until RobSize).map { entry =>
+    val bank = entry % enqBanking.bankNum
+    val row = entry / enqBanking.bankNum
+    allocBankOH.zip(enqRowOH).map { case (banks, rows) => banks(bank) && rows(row) }
+  }
+  val entryEnqEnableVec = VecInit(enqEnableVec.map(ParallelOR(_)))
+  val enqBankSelectUops = enqBanking.bankEnqSelect(allocBankOH, canEnqueue, in.enq.req.map(_.bits))
 
   for (i <- 0 until RobSize) {
-    val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
+    assert(PopCount(enqEnableVec(i)) < 2.U, s"robEntries$i enqueue enables are not one-hot")
     val entryEnqValid = uopCanEnqueue.zip(in.enq.req).map { case (valid, req) =>
       valid && req.bits.robIdx.value === i.U
     }
-    assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
-    when(enqOH.asUInt.orR && !in.redirect.valid){
-      val entryHeadUop = entryHeadUops(i)
-      robEntries(i).connectEnq(entryHeadUop)
+
+    when(entryEnqEnableVec(i) && !in.redirect.valid) {
+      robEntries(i).connectEnq(enqBankSelectUops(i))
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, in.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
-      robEntries(i).formerTraceBlockInPipe.iretire := entryHeadUop.formerTraceIretire
+      robEntries(i).formerTraceBlockInPipe.iretire := enqBankSelectUops(i).formerTraceIretire
       val formerEntryEnqValid = entryEnqValid.zip(in.enq.req).map { case (valid, req) =>
         valid && req.bits.robIdx.isFormer
       }
@@ -958,15 +969,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // update robEntries valid
-  val enqOHByEntry = (0 until RobSize).map { i =>
-    VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map {
-      case (valid, ptrMatch) => valid && ptrMatch
-    })
-  }
   for (i <- 0 until RobSize) {
-    val enqOH = enqOHByEntry(i)
     val commitCond = out.commits.isCommit && out.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
-    assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     // TODO: fix the needFlush logic for CROB
     // redirectBegin is still valid, but redirectBegin+1 is invalid
     val needFlush = redirectValidReg && (Mux(
@@ -976,7 +980,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ) || redirectAll)
     when(commitCond) {
       robEntries(i).valid := false.B
-    }.elsewhen(enqOH.asUInt.orR && !in.redirect.valid) {
+    }.elsewhen(entryEnqEnableVec(i) && !in.redirect.valid) {
       robEntries(i).valid := true.B
     }.elsewhen(needFlush){
       robEntries(i).valid := false.B
@@ -1079,10 +1083,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until RobSize) {
 
-    val enqOH = enqOHByEntry(i)
+    val enqOH = enqEnableVec(i)
     val robIdxMatchSeq = in.enq.req.map(_.bits.robIdx.value === i.U)
     val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
-    val instCanEnqFlag = enqOH.asUInt.orR
+    val instCanEnqFlag = entryEnqEnableVec(i)
     val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
     val entryPairType = robEntries(i).entryPairType
