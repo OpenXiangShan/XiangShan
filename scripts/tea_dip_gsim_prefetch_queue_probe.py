@@ -33,9 +33,13 @@ def add_capture(root, header, cpp, *, standalone=False):
         assert 'overwriteWhen.map(_(io.enq.bits, queue(headPtr))).getOrElse(true.B)' in queue_text
         assert 'io.enq.ready := !full || io.deq.ready || overwriteAllowed' in queue_text
         assert 'def generatedInL2(req: PrefetchReq): Bool =\n    req.isBOP || req.isPBOP || req.isTP || req.isNL || req.isCDP' in prefetch_text
-        assert '!generatedInL2(incoming) && generatedInL2(oldest)' in prefetch_text
+        if '!generatedInL2(incoming) && oldest.isCDP' in prefetch_text:
+            assert 'def isCDP:Bool = pfSource === MemReqSource.Prefetch2L2CDP.id.U' in prefetch_text
+            policy = 'cdp_victim_only'
+        else:
+            assert '!generatedInL2(incoming) && generatedInL2(oldest)' in prefetch_text
+            policy = 'l1_protection'
         assert 'req.ready := (0 until banks).map(i => selectOH(i)(j)).reduce(_ || _)' in prefetch_text
-        policy = 'l1_protection'
     elif 'allowOverwrite = false' in prefetch_text:
         assert 'io.enq.ready := (if (allowOverwrite) true.B else !full || io.deq.ready)' in queue_text
         propagated = 'req.ready := (0 until banks).map(i => selectOH(i)(j) && pftQueue(i).io.enq.ready).reduce(_ || _)'
@@ -87,9 +91,10 @@ def add_capture(root, header, cpp, *, standalone=False):
                     get('source', 8), get('pfSource', 5), get('needT', 1)]
         incoming = payload(parent + f'_pftQueue_{bank}_io_enq_bits_T_16__DOT__')
         current_head = payload(queue + 'queue__DOT__', head)
-        if policy == 'l1_protection':
+        if policy in ['l1_protection', 'cdp_victim_only']:
             engine = lambda value: '(' + ' || '.join(f'{value}=={source}' for source in [8, 9, 13, 15, 16]) + ')'
-            replace = f'(!{engine(incoming[2])} && {engine(current_head[2])})'
+            victim = engine(current_head[2]) if policy == 'l1_protection' else f'({current_head[2]}==16)'
+            replace = f'(!{engine(incoming[2])} && {victim})'
             enqueue = f'({raw_enqueue} && (!({head}=={tail} && {full_flag}) || {pipe_ready} || {replace}))'
         current_pipe = payload(pipe + 'ram__DOT__')
         next_pipe = payload(pipe + 'ram__DOT__', following=True)
@@ -98,8 +103,8 @@ def add_capture(root, header, cpp, *, standalone=False):
                       [('headPtr',5), ('tailPtr',5), ('maybe_full',1)]]
         next_state.append(field(pipe + 'maybe_full$NEXT'))
         overwrite = (f'({field(queue + "full")} && {field(queue + "do_enq")} && !{field(queue + "do_deq")})'
-                     if policy == 'l1_protection' else field(queue + 'overwriteHappens'))
-        admission_check = f'assert(row[3]=={field(queue + "do_enq")});' if policy == 'l1_protection' else ''
+                     if policy in ['l1_protection', 'cdp_victim_only'] else field(queue + 'overwriteHappens'))
+        admission_check = f'assert(row[3]=={field(queue + "do_enq")});' if policy in ['l1_protection', 'cdp_victim_only'] else ''
         values = [head, tail, full_flag, enqueue, pipe_ready,
                   field(queue + 'flowHappens'), overwrite,
                   pipe_valid, port_ready, reqbuf_ready, a_valid,
