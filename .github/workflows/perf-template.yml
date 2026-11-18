@@ -276,6 +276,7 @@ jobs:
       - name: Build EMU with DRAMsim3
         env:
           WITH_TEA: ${{ inputs.enable_tea && '1' || '0' }}
+          DISABLE_XMR: ${{ inputs.emulator == 'gsim' && '1' || '0' }}
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
