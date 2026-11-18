@@ -502,7 +502,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(backendRedirect.valid && backendRedirect.bits.attribute.isNone) {
     val redirectFtqIdx = backendRedirect.bits.ftqIdx.value
     val newNonCfiInfo  = Wire(new NonCfiInfo)
-    newNonCfiInfo.fromRedirect(backendRedirect.bits)
+    newNonCfiInfo.hasRedirect := true.B
+    newNonCfiInfo.cfiPosition :=
+      getAlignedPosition(GuardedPcInit(backendRedirect.bits.pc), backendRedirect.bits.ftqOffset)._1
     when(
       !s3PerfQueue(redirectFtqIdx).nonCfiInfo.hasRedirect ||
         newNonCfiInfo.cfiPosition < s3PerfQueue(redirectFtqIdx).nonCfiInfo.cfiPosition

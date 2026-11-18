@@ -106,14 +106,9 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   val startPc: GuardedPc = Output(GuardedPc())
 }
 
-class NonCfiInfo(implicit p: Parameters) extends FtqBundle with HalfAlignHelper {
+class NonCfiInfo(implicit p: Parameters) extends FtqBundle {
   val hasRedirect: Bool = Bool()
   val cfiPosition: UInt = UInt(CfiPositionWidth.W)
-
-  def fromRedirect(redirect: Redirect): Unit = {
-    this.hasRedirect := redirect.attribute.isNone
-    this.cfiPosition := getAlignedPosition(GuardedPcInit(redirect.pc), redirect.ftqOffset)._1
-  }
 }
 
 class PerfMeta(implicit p: Parameters) extends FtqBundle {
