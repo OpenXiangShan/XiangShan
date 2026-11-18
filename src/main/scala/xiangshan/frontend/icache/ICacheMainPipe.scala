@@ -470,6 +470,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_valid          = ValidHold(s1_fire, false.B, s2_flush)
   private val s2_wayLookupEntry = RegEnable(s1_wayLookupEntry, s1_fire)
   private val s2_pTag           = RegEnable(s1_pTag, s1_fire)
+  private val s2_reqValid       = RegEnable(VecInit(s1_req.map(_.valid)), s1_fire)
   private val s2_wayMask        = RegEnable(s1_wayMask, s1_fire)
   private val s2_vAddr          = RegEnable(VecInit(s1_req.map(_.vAddr)), s1_fire)
   private val s2_sramDatas      = RegEnable(s1_sramDatas, s1_fire)
@@ -494,14 +495,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       VecInit(s2_wayLookupEntry(reqIdx).maybeRvcMap.map(rvc => ICacheMetadata(s2_pTag, rvc))),
       s2_wayLookupEntry(reqIdx).metaCodes,
       s2_wayMask(reqIdx),
-      eccEnable,
+      eccEnable && s2_reqValid(reqIdx),
       s2_isCrossLine(reqIdx)
     )
 
     val dataCorrupt = checkDataEcc(
       s2_sramDatas(reqIdx),
       s2_sramCodes(reqIdx),
-      eccEnable,
+      eccEnable && s2_reqValid(reqIdx),
       getBankSel(s2_offset(reqIdx), s2_blkEndOffset(reqIdx), s2_isCrossLine(reqIdx)),
       s2_bankSramValid(reqIdx),
       s2_sramHits(reqIdx)
