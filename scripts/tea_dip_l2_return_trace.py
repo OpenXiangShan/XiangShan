@@ -155,7 +155,7 @@ def analyze(folder, receipt):
         lo,hi=phase['begin_core_exclusive']+1,phase['end_core_inclusive']+1
         counts=[]
         for bank in range(4):
-            histogram=Counter(r['mshr']for r in allocations if r['bank']==bank and lo<=r['core_cycle']+1<hi)
+            histogram=Counter(r['mshr']for r in allocations if r['bank']==bank and not r['clean'] and lo<=r['core_cycle']+1<hi)
             for slot in range(16):
                 suffix=f'.l2cache.slices_{bank}.mshrCtl.mshr_alloc_{slot}_{slot+1}'
                 values,=[value for name,value in blocks[phase['native_dump']].items()if name.endswith(suffix)]
@@ -170,7 +170,7 @@ def analyze(folder, receipt):
                   L2_native_allocation_marginals=native_marginals,
                   L2_TXREQ_without_matching_request_owner=unmatched,L2_pending_TXREQ={str(k):v for k,v in pending.items()},
                   L2_owners=[o for entries in records.values()for o in entries],
-                  L2_scope='Actual per-bank allocation/RXDAT owners and FIFO TXREQ handshakes. Nonmatching/release/pipeline addresses stay unmatched. Stage records do not identify DRAM alone, retirement, or exclusive CPU loss; cross-L1 source binding is separate.')
+                  L2_scope='Native histogram increments exclude perfClean cycles, while all actual allocation events and owner generations remain retained. Actual per-bank allocation/RXDAT owners and FIFO TXREQ handshakes. Nonmatching/release/pipeline addresses stay unmatched. Stage records do not identify DRAM alone, retirement, or exclusive CPU loss; cross-L1 source binding is separate.')
     censored = [row for row in allocations if row.get('valid_edge_right_censored')]
     if censored:
         result['L2_valid_edge_right_censored_allocations'] = censored
