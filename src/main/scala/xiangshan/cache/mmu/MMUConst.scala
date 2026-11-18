@@ -222,6 +222,31 @@ trait HasTlbConst extends HasXSParameter {
     addr(offLen-1, 0)
   }
 
+  def vpnTagMatches(vpn: UInt, tag: UInt, napot: Bool, tagOffset: Int = 0, maxLevel: Int = Level): Vec[Bool] = {
+    val matches = Wire(Vec(maxLevel + 1, Bool()))
+    matches(0) := Mux(napot,
+      tag(vpnnLen - tagOffset - 1, pteNapotBits - tagOffset) === vpn(vpnnLen - 1, pteNapotBits),
+      tag(vpnnLen - tagOffset - 1, 0) === vpn(vpnnLen - 1, tagOffset)
+    )
+    for (i <- 1 until maxLevel) {
+      val low = vpnnLen * i
+      val high = low + vpnnLen - 1
+      matches(i) := tag(high - tagOffset, low - tagOffset) === vpn(high, low)
+    }
+    val top = vpnnLen * maxLevel
+    matches(maxLevel) := tag(tag.getWidth - 1, top - tagOffset) === vpn(tag.getWidth + tagOffset - 1, top)
+    matches
+  }
+
+  def levelHit(matches: Vec[Bool], level: UInt): Bool = {
+    MuxLookup(level, false.B)(Seq(
+      3.U -> matches(3),
+      2.U -> (matches(3) && matches(2)),
+      1.U -> (matches(3) && matches(2) && matches(1)),
+      0.U -> (matches(3) && matches(2) && matches(1) && matches(0))
+    ))
+  }
+
   def getVpnn(vpn: UInt, idx: UInt): UInt = {
     MuxLookup(idx, 0.U)(Seq(
       0.U -> vpn(vpnnLen - 1, 0),
