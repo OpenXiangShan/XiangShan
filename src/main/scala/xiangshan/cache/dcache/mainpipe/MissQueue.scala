@@ -1671,9 +1671,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     XSPerfAccumulate(s"spec_fabric_commit_$w", io.spec_fabric.committed(w))
   }
 
-  // Reserve a suffix for speculative candidates after ordinary allocation candidates.
-  // Count only new-allocation leaders, excluding merges, followers and existing reservations.
-  // This bound is independent of the final ordinary ready/fire and fabric ready paths.
+  // Reserve a suffix of the free-entry ranks for speculative candidates. Every
+  // valid ordinary query is counted conservatively so its allocation always
+  // has priority, without feeding the ordinary allocation result into this path.
   val occupied_blocks = entries.map(e =>
     e.io.req_addr.valid -> get_block(e.io.req_addr.bits)
   ) ++ active_pipe_regs.map(preg =>
@@ -1689,7 +1689,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val spec_choices = SpecMissReservationLogic.allocate(
     initial_free,
     free_count_before,
-    needs_allocate,
+    query_valid,
     spec_requests,
     occupied_blocks
   )
