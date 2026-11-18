@@ -117,7 +117,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   in.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.in.canEnq && vtypeBuffer.in.canEnq && !in.fromVecExcpMod.busy
   in.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.in.canEnqForDispatch && vtypeBuffer.in.canEnqForDispatch && !in.fromVecExcpMod.busy
-  in.enq.resp := allocatePtrVec
 
   val uopCanEnqueue = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   val canEnqueue = VecInit(in.enq.req.map(req => req.valid && req.bits.firstUop && in.enq.canAccept))
@@ -2851,9 +2850,6 @@ object Rob {
 
     // Enqueue uops.
     val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
-
-    // Assigned ROB pointers.
-    val resp = Vec(RenameWidth, Output(new RobPtr))
   }
 
   class RobCoreTopDownIO(implicit p: Parameters) extends XSBundle {
