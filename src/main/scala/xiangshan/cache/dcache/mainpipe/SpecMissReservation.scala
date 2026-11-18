@@ -28,7 +28,7 @@ private[cache] object SpecMissReservationLogic {
   def allocate(
     initialFree: Seq[Bool],
     freeCountBefore: Seq[UInt],
-    normalValid: Seq[Bool],
+    normalAllocCandidates: Seq[Bool],
     requests: Seq[(Bool, UInt)],
     occupiedBlocks: Seq[(Bool, UInt)]
   ): Seq[SpecMissReservationChoice] = {
@@ -37,8 +37,8 @@ private[cache] object SpecMissReservationLogic {
 
     val nEntries = initialFree.length
     val idWidth = log2Up(nEntries)
-    val rankWidth = log2Ceil(nEntries + normalValid.length + requests.length + 1)
-    val normalBound = PopCount(VecInit(normalValid))
+    val rankWidth = log2Ceil(nEntries + normalAllocCandidates.length + requests.length + 1)
+    val normalBound = PopCount(VecInit(normalAllocCandidates))
 
     // Decode and encode every possible suffix rank before the late S1 request
     // valids arrive. They select already encoded IDs, rather than feeding an
