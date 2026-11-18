@@ -215,7 +215,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val merge_level = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.level.getOrElse(0.U),
-      allStage -> (item.s1.entry.level.getOrElse(0.U) min item.s2.entry.level.getOrElse(0.U)),
+      allStage -> item.allStageLevel,
       noS2xlate -> item.s1.entry.level.getOrElse(0.U)
     ))
     /* In previous design, the smaller value between the stage1 and stage2 levels was always written back into
@@ -293,18 +293,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s2ppn_low = VecInit(Seq.fill(tlbcontiguous)(s2ppn_tmp(sectortlbwidth - 1, 0)))
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.ppn_low := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn_low, s2ppn_low)
-    // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
-    // n is valid (represents a 64KB page) when:
-    // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
-    // 2. s2 is napot(64KB) and s1 is superpage(greater than or equal to 2MB)
-    // 3. s1 is napot(64KB) and s2 is also napot(64KB)
-    val allStage_n = (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (item.s2.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.n.getOrElse(0.U) =/= 0.U)
     val inner_n = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.n.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.n.getOrElse(0.U),
-      allStage -> allStage_n,
+      allStage -> item.allStageNapot,
       noS2xlate -> item.s1.entry.n.getOrElse(0.U)
     ))
     
@@ -1321,20 +1313,32 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     this.s2xlate === onlyStage2
   }
 
+  def allStageLevel: UInt = s1.entry.level.get min s2.entry.level.get
+
+  // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
+  // n is valid (represents a 64KB page) when:
+  // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
+  // 2. s2 is napot(64KB) and s1 is superpage(greater than or equal to 2MB)
+  // 3. s1 is napot(64KB) and s2 is also napot(64KB)
+  def allStageNapot: Bool = {
+    val s1Napot = s1.entry.n.get.asBool
+    val s2Napot = s2.entry.n.get.asBool
+    (s1Napot && s2.entry.level.get =/= 0.U) ||
+      (s2Napot && s1.entry.level.get =/= 0.U) ||
+      (s1Napot && s2Napot)
+  }
+
   def getVpn(vpn: UInt): UInt = {
     val level = MuxLookup(s2xlate, 0.U)(Seq(
       onlyStage1 -> s1.entry.level.getOrElse(0.U),
       onlyStage2 -> s2.entry.level.getOrElse(0.U),
-      allStage -> (s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)),
+      allStage -> allStageLevel,
       noS2xlate -> s1.entry.level.getOrElse(0.U)
     ))
-    val allStage_n = (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
     val inner_n = MuxLookup(s2xlate, 2.U)(Seq(
       onlyStage1 -> s1.entry.n.getOrElse(0.U),
       onlyStage2 -> s2.entry.n.getOrElse(0.U),
-      allStage -> allStage_n,
+      allStage -> allStageNapot,
       noS2xlate -> s1.entry.n.getOrElse(0.U)
     ))
 
@@ -1366,23 +1370,14 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
                   s1.entry.level.getOrElse(0.U),
                   // when allStage, level is the smaller one of stage1 and stage2
                   // e.g. stage1 is 1GB page, stage2 is 2MB page，then level is 2MB
-                  s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U))
-    // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
-    // n is valid (represents a 64KB page) when:
-    // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
-    // 2. s2 is napot(64KB) and s1 is superpage(greater than or equal to 2MB)
-    // 3. s1 is napot(64KB) and s2 is also napot(64KB)
-    val allStage_n = (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
-    
-    val mptNapot = Option.when(HasMptCheck) (mpt_merge_n(level, allStage_n, mpt.get.mptLevel, mpt.get.permIsNAPOT))
+                  allStageLevel)
+    val mptNapot = Option.when(HasMptCheck) (mpt_merge_n(level, allStageNapot, mpt.get.mptLevel, mpt.get.permIsNAPOT))
     val mptNapot_onlys1 = Option.when(HasMptCheck) (
       mpt_merge_n(s1.entry.level.getOrElse(0.U), s1.entry.n.getOrElse(0.U), mpt.get.mptLevel, mpt.get.permIsNAPOT)
     )
     val mpt_level = Option.when(HasMptCheck) (level min mpt.get.mptLevel)  
     val n = if (HasMptCheck) (Mux(this.s2xlate === onlyStage1, mptNapot_onlys1.get,mptNapot.get)) else
-      (Mux(this.s2xlate === onlyStage1, s1.entry.n.getOrElse(0.U), allStage_n))
+      (Mux(this.s2xlate === onlyStage1, s1.entry.n.getOrElse(0.U), allStageNapot))
 
     val matches = vpnTagMatches(vpn, s1vpn, n =/= 0.U)
     val vpn_hit = levelHit(matches, if (HasMptCheck) mpt_level.getOrElse(0.U) else level)
