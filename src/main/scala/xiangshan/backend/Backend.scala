@@ -476,6 +476,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
+  dataPath.io.robPendingPtr := io.mem.robLsqIO.pendingPtr
+  dataPath.io.robHeadIsStore := io.mem.robLsqIO.pendingst
 
   dataPath.io.fromIntIQ <> intScheduler.io.toDataPathAfterDelay
   dataPath.io.fromFpIQ <> fpScheduler.io.toDataPathAfterDelay
