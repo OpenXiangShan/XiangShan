@@ -96,6 +96,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     else
       csrCtrl
 
+  // Experiment: disable SC even when CSR/Constantin requests it.
+  private val enableSc = false
+
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := ctrl.abtbEnable
   uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
@@ -103,7 +106,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
   tage.io.enable        := ctrl.tageEnable && ctrl.mbtbEnable
-  sc.io.enable          := ctrl.scEnable && ctrl.mbtbEnable
+  sc.io.enable          := enableSc.B && ctrl.scEnable && ctrl.mbtbEnable
   ittage.io.enable      := ctrl.ittageEnable && ctrl.mbtbEnable
   ras.io.enable         := ctrl.rasEnable && ctrl.mbtbEnable
   // For some reason s0 stalled, usually FTQ Full
@@ -524,7 +527,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
   s3_resolveMeta.mbtb     := RegEnable(mbtb.io.meta, s2_fire)
   s3_resolveMeta.tage     := RegEnable(tage.io.meta, s2_fire)
-  s3_resolveMeta.sc       := sc.io.meta
+  s3_resolveMeta.sc       := (if (enableSc) sc.io.meta else 0.U.asTypeOf(sc.io.meta))
   s3_resolveMeta.commonHR := commonHR.io.s3ResolveMeta
   s3_resolveMeta.ittage   := ittage.io.meta
   s3_resolveMeta.phr      := s3_phrMeta
