@@ -158,6 +158,9 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
   beu_local_int_source_buffer := beu_local_int_source
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
+    // Intent (zy-pf-obs): retain a Scala reference for tile-level read-only probes.
+    var prefetchObservationL2: Option[L2Top] = None
+
     val io = IO(new Bundle {
       val beu_errors = Input(chiselTypeOf(beu.module.io.errors))
       val reset_vector = new Bundle {
@@ -342,6 +345,7 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         case key: Field[_] if p.lift(key).isDefined => p(key)
       })
       val oceanusL2 = Module(new L2Top(l2cfg)(l2Parameters))
+      if (oceanus.l2.L2PrefetchObservation.enabled) prefetchObservationL2 = Some(oceanusL2)
 
       if (coreParams.oceanusPrefetch.cdp) {
         // Observation only, outside the pinned XSCache submodule. Existing

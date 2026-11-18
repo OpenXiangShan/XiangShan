@@ -144,9 +144,56 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
     l2top.module.io.beu_errors.uncache <> core.module.io.beu_errors.uncache
 
+    // Intent (zy-pf-obs): attach read-only L1 FIFO and L2 observation after wiring.
     l2top.module.io.dcache_cchi <> core.module.io.dcache_cchi
     l2top.module.io.icache_cchi <> core.module.io.icache_cchi
     l2top.module.io.ptw_cchi <> core.module.io.ptw_cchi
+
+    if (oceanus.l2.L2PrefetchObservation.enabled) {
+      l2top.inner.module.prefetchObservationL2.foreach { observedL2 =>
+        val arrivals = memBlock.dcache.module.io.cchi.toSeq.map { port =>
+          val fire = oceanus.l2.L2PrefetchObservation.read(port.upREQ.valid) &&
+            oceanus.l2.L2PrefetchObservation.read(port.upREQ.ready)
+          val source = cache.DCacheREQ.train(port.upREQ.bits).map(_.reqSource).getOrElse(0.U(5.W))
+          // Intent (zy-pf-obs): BtoT is encoded as ReadUnique on CCHI.
+          // Observe its original selected producer; never infer it from hit/miss.
+          val mq = memBlock.dcache.dcache.module.missQueue
+          val txn = oceanus.l2.L2PrefetchObservation.read(port.upREQ.bits.TxnID)
+          val entryUpgrade = mq.entries.map { entry =>
+            oceanus.l2.L2PrefetchObservation.read(entry.io.txreq.valid) &&
+              oceanus.l2.L2PrefetchObservation.read(entry.io.txreq.ready) &&
+              oceanus.l2.L2PrefetchObservation.read(entry.io.txreq.bits.TxnID) === txn &&
+              oceanus.l2.L2PrefetchObservation.read(entry.io.req_isBtoT)
+          }
+          val pipeUpgrade = mq.acquire_from_pipereg_vec.zipWithIndex.map { case (req, i) =>
+            oceanus.l2.L2PrefetchObservation.read(req.valid) &&
+              oceanus.l2.L2PrefetchObservation.read(req.ready) &&
+              oceanus.l2.L2PrefetchObservation.read(req.bits.TxnID) === txn &&
+              oceanus.l2.L2PrefetchObservation.read(mq.parallel_pipe_regs(i).req.isBtoT)
+          }
+          oceanus.l2.L2ObservationArrival(fire, port.upREQ.bits, source,
+            Some((entryUpgrade ++ pipeUpgrade).reduce(_ || _)))
+        }
+        // Intent (zy-pf-obs): cover every physical source FIFO. I-cache has
+        // two stages of two entries; D-cache and PTW each have one stage.
+        val dataFifos = arrivals.zipWithIndex.map { case (a, lane) =>
+          val port = observedL2.io.t1p(lane).UpREQ
+          oceanus.l2.L2ObservationFifo(a.fire, a.request.Addr,
+            oceanus.l2.L2PrefetchObservation.read(port.valid) && oceanus.l2.L2PrefetchObservation.read(port.ready),
+            observedL2.config.upstream.type1(lane).nid)
+        }
+        val readPorts = Seq(memBlock.module.io.inner_icache_cchi.upREQ, memBlock.ptw.module.io.cchi.upREQ)
+        val readFifos = readPorts.zipWithIndex.map { case (port, lane) =>
+          val out = observedL2.io.t4p(lane).UpREQ
+          oceanus.l2.L2ObservationFifo(
+            oceanus.l2.L2PrefetchObservation.read(port.valid) && oceanus.l2.L2PrefetchObservation.read(port.ready),
+            port.bits.Addr,
+            oceanus.l2.L2PrefetchObservation.read(out.valid) && oceanus.l2.L2PrefetchObservation.read(out.ready),
+            observedL2.config.upstream.type4(lane).nid, if (lane == 0) 2 else 1)
+        }
+        oceanus.l2.L2PrefetchObservation(observedL2, arrivals, dataFifos ++ readFifos)(observedL2.p)
+      }
+    }
 
     l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
