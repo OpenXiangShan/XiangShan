@@ -37,7 +37,7 @@ import chisel3.util._
  * }}}
  *
  * A window of up to `accessWidth` consecutive entries uses each bank at most
- * once. [[bankEnqSelect]] uses this property to share one payload selector
+ * once. [[bankWriteSelect]] uses this property to share one payload selector
  * among the entries in each bank.
  *
  * A retirement window can straddle a row boundary. [[readRows]] uses a shared
@@ -69,28 +69,27 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
   def nextRowSelect(select: UInt): UInt = Mux(select.head(1) === 1.U, 1.U, select << 1)
 
   /**
-   * Selects one enqueue payload per bank. An allocation window of up to
-   * `accessWidth` consecutive entries uses each bank at most once.
+   * Selects one enqueue payload per bank from the allocation pointers.
+   * Enabled allocation indices must span at most `accessWidth` consecutive
+   * ROB entries, so each bank has at most one enabled lane.
    *
-   * @param allocBankOH One-hot bank decode of each write port's allocation pointer.
-   * @param canEnqueue Whether each write port allocates an entry.
-   * @param data Enqueue payload for each write port.
+   * @param valid Whether each allocation lane enqueues an entry.
+   * @param indices ROB entry index allocated to each lane.
+   * @param data Enqueue payload for each allocation lane.
    * @return One reference per ROB entry to the selected payload for its bank.
    */
-  def bankEnqSelect[T <: Data](allocBankOH: Seq[UInt], canEnqueue: Seq[Bool], data: Seq[T]): Seq[T] = {
-    require(data.nonEmpty && data.length <= accessWidth)
-    require(allocBankOH.length == data.length && canEnqueue.length == data.length)
-    require(allocBankOH.forall(_.getWidth == bankNum))
-
-    val bankPayloads = (0 until bankNum).map { bank =>
-      val laneEnables = VecInit(allocBankOH.zip(canEnqueue).map { case (banks, enable) =>
-        enable && banks(bank)
+  def bankWriteSelect[T <: Data](valid: Seq[Bool], indices: Seq[UInt], data: Seq[T]): Seq[T] = {
+    require(valid.nonEmpty && valid.length <= accessWidth)
+    require(valid.length == indices.length && valid.length == data.length)
+    val selected = (0 until bankNum).map { bank =>
+      val hits = VecInit(valid.zip(indices).map { case (enabled, index) =>
+        enabled && bankIndex(index) === bank.U
       })
-      Mux1H(laneEnables, data)
+      Mux1H(hits, data)
     }
 
     // Each entry references its bank's result without adding a hardware mux.
-    (0 until Size).map(entry => bankPayloads(entry % bankNum))
+    (0 until Size).map(entry => selected(entry % bankNum))
   }
 
   // Both rows retain bank order. The second row wraps from the last row to row zero.
