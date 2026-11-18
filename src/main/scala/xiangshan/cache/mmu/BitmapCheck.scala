@@ -500,7 +500,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
   val bcVictimWayOH = UIntToOH(bcVictimWay).asUInt.suggestName(s"bc_victimWayOH")
   val bcRfvOH = UIntToOH(Cat(bcRefillIdx, bcVictimWay)).suggestName(s"bc_rfvOH")
 
-  when (io.refill.valid) {
+  when (!flush && io.refill.valid) {
     bitmapcache.io.w.apply(
       valid = true.B,
       setIdx = bcRefillIdx,
