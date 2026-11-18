@@ -27,9 +27,10 @@ case class TageParameters(
       new TageTableInfo(4096, 2, 4),
       new TageTableInfo(4096, 2, 9),
       new TageTableInfo(4096, 2, 17),
-      new TageTableInfo(4096, 2, 29),
-      new TageTableInfo(4096, 2, 56),
-      new TageTableInfo(4096, 2, 109),
+      // Add half a 4096-entry table to T3 and one table each to T4/T5.
+      new TageTableInfo(6144, 3, 29),
+      new TageTableInfo(8192, 2, 56),
+      new TageTableInfo(8192, 2, 109),
       new TageTableInfo(4096, 2, 211),
       new TageTableInfo(4096, 2, 397)
     ),

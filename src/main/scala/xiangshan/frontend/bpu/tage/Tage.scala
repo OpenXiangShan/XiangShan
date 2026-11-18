@@ -92,7 +92,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  // Tables can have different set counts and way counts.
+  private val s1_readResp = DataHoldBypass(MixedVecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
   private val s1_tags = VecInit(io.fromMainBtb.s1_positions.map { position =>
     VecInit(tables.zip(s1_foldedHist).map { case (table, hist) =>
@@ -133,7 +134,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val hitWayMask   = s2_hits(i)(tableIdx)
+      val hitWayMask   = s2_hits(i)(tableIdx)(TableInfos(tableIdx).NumWays - 1, 0)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
       val result = Wire(new PredictTagMatchResult)
@@ -324,7 +325,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
+  private val t1_readResp = MixedVecInit(tables.map(_.io.readResp(1)))
 
   /* --------------------------------------------------------------------------------------------------------------
     train pipeline stage 2
