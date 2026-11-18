@@ -30,9 +30,16 @@ def analyze(folder, receipt_path, retired_step):
     receipt = json.loads(receipt_path.read_text())
     assert receipt['ready'] and not receipt['original_process_live'] and receipt['point'] == folder.name
     verify(folder, receipt['files'])
-    result = json.loads((folder / 'result.json').read_text())
-    assert result['original_process_closed'] and result['difftest_passed'] and result['exitcode'] == 0
-    assert result['source'] == receipt['source'] and retired_step > 0
+    if 'runner_success_lines' in receipt:
+        assert receipt['run_id'] > 0 and any(
+            re.search(r'(?<!\S)' + re.escape(folder.name) + r' succeeded\b', line)
+            for line in receipt['runner_success_lines']), 'Missing successful CI point evidence'
+    else:
+        assert 'result.json' in receipt['files'], 'Manual result must be bound to the closure receipt'
+        result = json.loads((folder / 'result.json').read_text())
+        assert result['original_process_closed'] and result['difftest_passed'] and result['exitcode'] == 0
+        assert result['source'] == receipt['source']
+    assert retired_step > 0
     stdout = (folder / 'simulator_out.txt').read_text()
     assert 'Difftest enabled' in stdout
     for name in ['enableTea0', 'enableDip0']:
