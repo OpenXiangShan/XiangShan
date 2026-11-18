@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.HasCircularQueuePtrHelper
-import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
@@ -38,7 +37,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     val toMainPipe:   DecoupledIO[WayLookupToMainPipeBundle] = DecoupledIO(new WayLookupToMainPipeBundle)
     val fromMainPipe: MainPipeToWayLookupBundle              = Input(new MainPipeToWayLookupBundle)
 
-    val write: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, Flipped(DecoupledIO(new WayLookupWriteBundle)))
+    val write: DecoupledIO[WayLookupWriteBundle] = Flipped(DecoupledIO(new WayLookupWriteBundle))
 
     val update: Valid[MissRespBundle] = Flipped(ValidIO(new MissRespBundle))
 
@@ -77,14 +76,19 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   private val bpuS3FlushValid = io.flushFromBpu.shouldFlushByStage3(tailFtqIdx, true.B)
   private val bpuS3FlushPtr   = writePtr - 1.U
 
+  // the first fetch block of a write request is always valid (blocks.head.valid is not read here),
+  // the second one (if FetchPorts == 2) is valid only for 2-prefetch
+  private val writeBlocks = io.write.bits.blocks
+  private val writeTwo    = if (FetchPorts > 1) writeBlocks.last.valid else false.B
+
   when(io.flush) {
     writePtr.value := 0.U
     writePtr.flag  := false.B
   }.elsewhen(bpuS3FlushValid && !empty) {
     writePtr := bpuS3FlushPtr
-  }.elsewhen(io.write.head.fire) {
-    // FetchPorts must be 1 or 2, and last.fire is depend on head.fire
-    val enqCnt = Mux(io.write.last.fire, FetchPorts.U, 1.U)
+  }.elsewhen(io.write.fire) {
+    // FetchPorts must be 1 or 2
+    val enqCnt = Mux(writeTwo, FetchPorts.U, 1.U)
     writePtr := writePtr + enqCnt
   }
 
@@ -99,8 +103,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   when(io.flush) {
     tailFtqIdx.value := 0.U
     tailFtqIdx.flag  := false.B
-  }.elsewhen(io.write.head.fire) {
-    tailFtqIdx := Mux(io.write.last.fire, io.write.last.bits.ftqIdx, io.write.head.bits.ftqIdx)
+  }.elsewhen(io.write.fire) {
+    tailFtqIdx := Mux(writeTwo, writeBlocks.last.bits.ftqIdx, writeBlocks.head.bits.ftqIdx)
   }
 
   // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
@@ -159,23 +163,21 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // stall write if there is an exceptions to save power (i.e. wait for flush)
   // this will stall the prefetch pipe
   // also we disallow only 1 ready, to simplify PrefetchPipe
-  io.write.foreach(_.ready := numFreeEntries >= FetchPorts.U && !exceptionEntry.valid)
-  when(io.write.head.fire) {
-    entries(writePtr.value) := io.write.head.bits.entry
+  io.write.ready := numFreeEntries >= FetchPorts.U && !exceptionEntry.valid
+  when(io.write.fire) {
+    entries(writePtr.value) := writeBlocks.head.bits.entry
     if (FetchPorts > 1) {
-      when(io.write.last.fire) {
-        entries(writePtr.value + 1.U) := io.write.last.bits.entry
+      when(writeBlocks.last.valid) {
+        entries(writePtr.value + 1.U) := writeBlocks.last.bits.entry
       }
     }
-    // ftq/prefetchPipe ensure fetch blocks has the same exception, here we can consider only .head
-    when(io.write.head.bits.itlbException.hasException) {
+    // ftq/prefetchPipe ensure fetch blocks has the same exception, so there is only one exception entry
+    when(io.write.bits.exceptionEntry.itlbException.hasException) {
       exceptionEntry.valid := true.B
-      exceptionEntry.bits  := io.write.head.bits.exceptionEntry
+      exceptionEntry.bits  := io.write.bits.exceptionEntry
       exceptionPtr         := writePtr
     }
   }
-  // the second port (if FetchPorts == 2) must fire together with the first port
-  XSError(io.write.last.fire && !io.write.head.fire, "2-prefetch port fire without first port fire")
 
   /* *** perf *** */
   // tell ICache top if queue is empty
@@ -190,8 +192,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     0,
     PrefetchDepth
   )
-  XSPerfAccumulate("write", io.write.head.fire)
-  XSPerfAccumulate("empty_when_write", empty && io.write.head.fire)
+  XSPerfAccumulate("write", io.write.fire)
+  XSPerfAccumulate("empty_when_write", empty && io.write.fire)
   // exception stall cycles
   XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
   XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
