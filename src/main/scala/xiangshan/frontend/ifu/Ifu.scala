@@ -393,7 +393,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val frontendTriggerEnabled = io.frontendTrigger.tEnableVec.reduce(_ || _)
   private val s0_maybeFastFetch = !frontendTriggerEnabled &&
     !s0_icacheMeta(0).exception.hasException && !s0_icacheMeta(0).isUncache &&
-    !s0_icacheMeta(0).isBackendException && !s0_icacheMeta(0).hasSatpFlush
+    !s0_icacheMeta(0).isBackendException && !s0_icacheMeta(0).hasSatpFlush && !s0_prevEndIsHalfRvi
   private val s1_fastFetchHasEccError = ExceptionType.fromEcc(
     io.fromICache.corrupt(0).reduce(_ || _),
     s1_valid
@@ -403,9 +403,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_fastInst              = genFastInst(s1_rawFirstData, s1_fastFetchInfo)
   private val s1_fastUnexcepted        = Wire(Vec(FastFetchMaxNum, Bool()))
   private val backendRedirectWaitFetch = RegInit(false.B)
-  private val s1_useFastFetch =
-    backendRedirectWaitFetch && s1_maybeFastFetch && !s1_fastFetchHasEccError &&
-      !s1_fastFetchInfo.hasUnexcepted && !s1_fastUnexcepted.reduce(_ || _)
+  private val s1_useFastFetch = s1_maybeFastFetch && !s1_fastFetchHasEccError &&
+    !s1_fastFetchInfo.hasUnexcepted && !s1_fastUnexcepted.reduce(_ || _)
   // The paired normal fetch must arrive in the next cycle, so the group must
   // actually advance to s2 (!s1_flush) and s2 must be empty (!s2_valid).
   private val s1_fastFetchValid =
@@ -443,11 +442,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
     fastEntry.debug_seqNum     := 0.U.asTypeOf(new InstSeqNum)
     fastEntry.instrEndOffset   := endOffset
   }
-  private val s1_fastFetchMask = Mux(
-    s1_fastFetchValid,
-    s1_fastFetchInfo.realInstrValid,
-    0.U(FastFetchMaxNum.W)
-  )
+  // private val s1_fastFetchMask = Mux(
+  //   s1_fastFetchValid,
+  //   s1_fastFetchInfo.realInstrValid,
+  //   0.U(FastFetchMaxNum.W)
+  // )
 
   when(backendRedirect) {
     backendRedirectWaitFetch := true.B
@@ -482,7 +481,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
   private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
   private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
-  private val s2_fastFetchMask        = RegEnable(s1_fastFetchMask, s1_fire)
+  // private val s2_fastFetchMask        = RegEnable(s1_fastFetchMask, s1_fire)
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 
@@ -785,7 +784,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheRedirect.halfRviInfo.valid     := uncacheNeedResend
   uncacheRedirect.halfRviInfo.bits.pc   := uncachePc
   uncacheRedirect.halfRviInfo.bits.data := uncacheData(15, 0)
-  private val cancelPredCheck = (~s2_fixedInstrValid & s2_fastFetchMask.pad(IBufferEnqueueWidth)).orR
+  // private val cancelPredCheck = (~s2_fixedInstrValid & s2_fastFetchMask.pad(IBufferEnqueueWidth)).orR
   /* *****************************************************************************
    * IFU Write-back Stage
    * - write back preDecode information to Ftq to update
@@ -802,7 +801,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val wbFirstEndHalfRvi = RegEnable(s2_firstEndHalfRvi, wbEnable)
   private val wbTotalEndHalfRvi = RegEnable(s2_totalEndHalfRvi, wbEnable)
-  private val wbCancelPredCheck = RegEnable(cancelPredCheck, wbEnable)
+  // private val wbCancelPredCheck = RegEnable(cancelPredCheck, wbEnable)
 
   s2_wbNotFlush := wbAlignFetchBlock(0).ftqIdx === s2_fetchBlock(0).ftqIdx && s2_valid && wbValid
 
@@ -815,7 +814,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val attribute = checkerRedirect.bits.attribute
     val canTrain = attribute.isDirect || attribute.isReturn ||
       checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken
-    b.valid          := wbValid && checkerRedirect.valid && !wbCancelPredCheck
+    // b.valid          := wbValid && checkerRedirect.valid && !wbCancelPredCheck
+    b.valid          := wbValid && checkerRedirect.valid
     b.bits.canTrain  := canTrain
     b.bits.ftqIdx    := Mux(select, ftqIdx(1), ftqIdx(0))
     b.bits.pc        := Mux(select, startAddr(1), startAddr(0))
@@ -835,7 +835,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     wbTotalEndHalfRvi
   )
 
-  wbRedirect.valid             := checkFlushWb.valid && !wbCancelPredCheck
+  // wbRedirect.valid             := checkFlushWb.valid && !wbCancelPredCheck
+  wbRedirect.valid             := checkFlushWb.valid
   wbRedirect.instrCount        := wbInstrCount
   wbRedirect.prevIBufEnqPtr    := wbPrevIBufEnqPtr
   wbRedirect.halfRviInfo       := wbSelectedEndHalfRvi
