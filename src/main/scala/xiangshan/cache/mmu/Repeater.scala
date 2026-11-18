@@ -146,12 +146,12 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
   val ptwResp_EntryMatchVec = vpn.zip(v).zip(s2xlate).map { case ((entryVpn, valid), entryStage) =>
     valid && io.ptw.resp.bits.hit(entryVpn, entryStage,
-      io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
+      io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid)
   }
   val ptwResp_EntryMatchFirst = firstValidIndex(ptwResp_EntryMatchVec, true.B)
   val ptwResp_ReqMatchVec = io.tlb.req.map { request =>
     io.ptw.resp.valid && io.ptw.resp.bits.hit(request.bits.vpn, request.bits.s2xlate,
-      io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
+      io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid)
   }
 
   io.refill := Cat(ptwResp_EntryMatchVec).orR && io.ptw.resp.fire

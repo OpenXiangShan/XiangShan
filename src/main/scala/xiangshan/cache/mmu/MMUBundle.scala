@@ -156,7 +156,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     levelMatches.asUInt.andR
   }
 
-  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
+  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
     val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid || perm.g))
     val addr_low_hit = valididx(vpn(2, 0))
     val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
@@ -166,7 +166,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     asid_hit && tagHit(vpn) && addr_low_hit && vmid_hit && pteidx_hit
   }
 
-  def wbhit(data: PtwRespS2, asid: UInt, vmid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, s2xlate: UInt): Bool = {
+  def wbhit(data: PtwRespS2, asid: UInt, vmid: UInt, s2xlate: UInt): Bool = {
     val s1vpn = data.s1.entry.tag
     val s2vpn = data.s2.entry.tag(vpnLen - 1, sectortlbwidth)
     val wb_vpn = Mux(s2xlate === onlyStage2, s2vpn, s1vpn)
@@ -174,7 +174,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val hasS2xlate = this.s2xlate =/= noS2xlate
     val onlyS1 = this.s2xlate === onlyStage1
     val onlyS2 = this.s2xlate === onlyStage2
-    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid || data.s1.entry.perm.get.g))
+    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, this.asid === asid || data.s1.entry.perm.get.g)
     val index_hit = Wire(Vec(tlbcontiguous, Bool()))
     val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
     val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
@@ -312,10 +312,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       RegEnable(ppn_res, valid)
     else
       ppn_res
-  }
-
-  def hasS2xlate(): Bool = {
-    this.s2xlate =/= noS2xlate
   }
 
   override def toPrintable: Printable = {
@@ -1072,9 +1068,6 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
   def hasS2xlate(): Bool = {
     this.s2xlate =/= noS2xlate
   }
-  def isOnlyStage2: Bool = {
-    this.s2xlate === onlyStage2
-  }
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)}"
   }
@@ -1084,29 +1077,6 @@ class PtwReqWithGpa(implicit p: Parameters) extends PtwReq {
   val getGpa = Bool() // this req is to get gpa when having guest page fault
   // True only when this PTW request is sourced solely from hardware prefetch
   val fromHwPrefetch = Bool()
-}
-
-class PtwResp(implicit p: Parameters) extends PtwBundle {
-  val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
-  val pf = Bool()
-  val af = Bool()
-
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
-    this.entry.level.map(_ := level)
-    this.entry.tag := vpn
-    this.entry.perm.map(_ := pte.getPerm())
-    this.entry.ppn := pte.ppn
-    this.entry.pbmt := pte.pbmt
-    this.entry.prefetch := DontCare
-    this.entry.asid := asid
-    this.entry.v := !pf
-    this.pf := pf
-    this.af := af
-  }
-
-  override def toPrintable: Printable = {
-    p"entry:${entry} pf:${pf} af:${af}"
-  }
 }
 
 class HptwResp(implicit p: Parameters) extends PtwBundle {
@@ -1204,10 +1174,9 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     !pf && !entry.v && !af
   }
 
-  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, mptIgnoreAsid: Bool = false.B,
+  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false, mptIgnoreAsid: Bool = false.B,
     mergeMptLevel: Boolean = false, mptTlbResp:MptTlbRespBundle = 0.U.asTypeOf(new MptTlbRespBundle)): Bool = {
     require(vpn.getWidth == vpnLen)
-    require(allType)
     // require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (HasMptCheck) (Mux(mptIgnoreAsid, true.B, if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))) else 
       (if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))
@@ -1273,14 +1242,6 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2 = new HptwResp()
   val mpt = Option.when(HasMptCheck) (new MptTlbRespBundle())
 
-  def hasS2xlate: Bool = {
-    this.s2xlate =/= noS2xlate
-  }
-
-  def isOnlyStage2: Bool = {
-    this.s2xlate === onlyStage2
-  }
-
   def allStageLevel: UInt = s1.entry.level.get min s2.entry.level.get
 
   // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
@@ -1317,9 +1278,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 
   def hit(vpn: UInt, requestStage: UInt, asid: UInt, vasid: UInt, vmid: UInt,
-    allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
+    ignoreAsid: Boolean = false): Bool = {
     val stage_hit = requestStage === s2xlate
-    val noS2_hit = s1.hit(vpn, asid, vmid, allType, ignoreAsid, 
+    val noS2_hit = s1.hit(vpn, asid, ignoreAsid,
       (if (HasMptCheck) (this.mpt.get.mptOnly) else false.B), HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
     val onlyS2_hit = s2.hit(vpn, vmid, HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
     // allstage and onlys1 hit

@@ -334,14 +334,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 
-  def ptwTranVec(flushMask: UInt): Vec[Bool] = {
-    val vec = Wire(Vec(tlbcontiguous, Bool()))
-    for (i <- 0 until tlbcontiguous) {
-      vec(i) := flushMask(i)
-    }
-    vec
-  }
-
   def dupBitmapPPN(ppn1: UInt, ppn2: UInt) : Bool = {
     ppn1(ppnLen-1, log2Up(XLEN)-1) === ppn2(ppnLen-1, log2Up(XLEN)-1)
   }
@@ -360,10 +352,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def genPtwL0Idx(vpn: UInt) = {
     vpn(PtwL0IdxLen - 1, 0)
-  }
-
-  def genPtwL0SectorIdx(vpn: UInt) = {
-    genPtwL0Idx(vpn)(PtwL0SectorIdxLen - 1, 0)
   }
 
   def dropL0SectorBits(vpn: UInt) = {
@@ -406,10 +394,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def get_next_line(vpn: UInt) = {
     Cat(dropL0SectorBits(vpn) + 1.U, 0.U(PtwL0SectorIdxLen.W))
-  }
-
-  def same_l1entry(vpn1: UInt, vpn2: UInt) = {
-    vpn1(vpnLen-1, vpnnLen) === vpn2(vpnLen-1, vpnnLen)
   }
 
   def from_pre(source: UInt) = {

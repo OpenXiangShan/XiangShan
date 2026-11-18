@@ -385,11 +385,11 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val req_vpn = get_pn(req_out(idx).vaddr)
 
     val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(req_vpn, req_s2xlate,
-      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
     val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && ptw_resp_bits_reg.hit(req_vpn, req_s2xlate,
-      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid)
     val ptw_getGpa = req_need_gpa && hitVec(idx)
     val need_gpa_req_match = need_gpa_vpn === req_vpn && need_gpa_s2xlate === req_s2xlate
 
@@ -426,7 +426,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val s2xlate = query.s2xlate
     val onlyS2 = s2xlate === onlyStage2
     result.hitFast := io.ptw.resp.fire && ptw.resp.bits.hit(vpn, s2xlate,
-      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid)
     result.hit := GatedValidRegNext(result.hitFast)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)(ppnLen - 1, 0)
     val gvpn = Mux(onlyS2, vpn, ppn_s1)
