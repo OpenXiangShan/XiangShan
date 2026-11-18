@@ -179,7 +179,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s0_secondStartIndex :=
     io.fromICache.req.bits.info(1).startVAddr(log2Ceil(ICacheLineBytes / instBytes), instOffsetBits)
 
-  private val s0_fastFetchInfo    = genFastInfo(io.fromICache.req.bits)
+  private val s0_fastFetchInfo = genFastInfo(io.fromICache.req.bits)
   /* --------------------------------------------------------------------------------------------------------------
      stage 1
      - cat half rvi instruction
@@ -389,49 +389,54 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   // ---------------------- Fast Fetch ----------------------
-  private val frontendTriggerEnabled   = io.frontendTrigger.tEnableVec.reduce(_ || _)
+  private val s2_valid               = WireInit(false.B)
+  private val frontendTriggerEnabled = io.frontendTrigger.tEnableVec.reduce(_ || _)
   private val s0_maybeFastFetch = !frontendTriggerEnabled &&
     !s0_icacheMeta(0).exception.hasException && !s0_icacheMeta(0).isUncache &&
     !s0_icacheMeta(0).isBackendException && !s0_icacheMeta(0).hasSatpFlush
-  private val s1_fastFetchHasEccError  = ExceptionType.fromEcc(
+  private val s1_fastFetchHasEccError = ExceptionType.fromEcc(
     io.fromICache.corrupt(0).reduce(_ || _),
     s1_valid
   ).hasException
-  private val s1_maybeFastFetch  = RegEnable(s0_maybeFastFetch, s0_fire)
-  private val s1_fastFetchInfo   = RegEnable(s0_fastFetchInfo, s0_fire)
-  private val s1_fastInst        = genFastInst(s1_rawFirstData, s1_fastFetchInfo)
-  private val s1_fastUnexcepted  = Wire(Vec(FastFetchMaxNum, Bool()))
+  private val s1_maybeFastFetch        = RegEnable(s0_maybeFastFetch, s0_fire)
+  private val s1_fastFetchInfo         = RegEnable(s0_fastFetchInfo, s0_fire)
+  private val s1_fastInst              = genFastInst(s1_rawFirstData, s1_fastFetchInfo)
+  private val s1_fastUnexcepted        = Wire(Vec(FastFetchMaxNum, Bool()))
   private val backendRedirectWaitFetch = RegInit(false.B)
   private val s1_useFastFetch =
     backendRedirectWaitFetch && s1_maybeFastFetch && !s1_fastFetchHasEccError &&
-     !s1_fastFetchInfo.hasUnexcepted && !s1_fastUnexcepted.reduce(_ || _)
+      !s1_fastFetchInfo.hasUnexcepted && !s1_fastUnexcepted.reduce(_ || _)
+  // The paired normal fetch must arrive in the next cycle, so the group must
+  // actually advance to s2 (!s1_flush) and s2 must be empty (!s2_valid).
+  private val s1_fastFetchValid =
+    s1_valid && s1_useFastFetch && !s2_valid && !s1_flush
 
-  io.toIBuffer.fastFetch.valid         := s1_valid && s1_useFastFetch
+  io.toIBuffer.fastFetch.valid         := s1_fastFetchValid
   io.toIBuffer.fastFetch.bits.instrNum := s1_fastFetchInfo.instrNum
   io.toIBuffer.fastFetch.bits.entries.zipWithIndex.map { case (fastEntry, i) =>
-    val fastRvcExpander = Module(new RvcExpander)
-    val info            = s1_fastFetchInfo
-    val rawEndOffset = info.rawIsRvC.zipWithIndex.map { case (isRvc, i) => Mux(isRvc, i.U, (i + 1).U) }
-    val pc               = Mux1H(info.validMaskOH(i), info.rawPc)
-    val foldpc           = Mux1H(info.validMaskOH(i), info.rawFoldedPC)
-    val isRvc            = Mux1H(info.validMaskOH(i), info.rawIsRvC)
-    val isPredTaken      = Mux1H(info.validMaskOH(i), info.rawIsPredTaken)
-    val isLastInFtqEntry = Mux1H(info.validMaskOH(i), info.rawIsLastInFtqEntry)
-    val endOffset        = Mux1H(info.validMaskOH(i), rawEndOffset)
+    val fastRvcExpander  = Module(new RvcExpander)
+    val info             = s1_fastFetchInfo
+    val pc               = genFastPc(info.startOffset(i), s1_fetchBlock(0))
+    val foldpc           = XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)
+    val endOffset        = Mux(info.isRvC(i), info.startOffset(i), info.startOffset(i) + 1.U)
+    val isPredTaken      = info.isLastInFtqEntry(i) && s1_fetchBlock(0).takenCfiOffset.valid
+    val isLastInFtqEntry = info.isLastInFtqEntry(i)
     fastRvcExpander.io.in      := s1_fastInst(i)
     fastRvcExpander.io.fsIsOff := io.csrFsIsOff
     val ill          = fastRvcExpander.io.ill
     val expandedInst = Mux(ill, s1_fastInst(i), fastRvcExpander.io.out.bits)
-    val attribute    = BranchAttribute.decode(s1_fastInst(i), true.B)
-    s1_fastUnexcepted(i) := (attribute.isDirect || attribute.isIndirect) && !isPredTaken && info.realInstrValid(i)
 
-    fastEntry.valid         := info.realInstrValid(i)
+    val attribute = BranchAttribute.decode(s1_fastInst(i), true.B)
+    s1_fastUnexcepted(i) := (((attribute.isDirect || attribute.isIndirect) && !isPredTaken) ||
+      (attribute.isNone && isPredTaken)) && info.realInstrValid(i)
+
+    fastEntry.valid            := info.realInstrValid(i)
     fastEntry.inst             := expandedInst
     fastEntry.pc               := pc.unGuard
     fastEntry.foldpc           := foldpc
-    fastEntry.isRvc            := isRvc
+    fastEntry.isRvc            := info.isRvC(i)
     fastEntry.predTaken        := isPredTaken
-    fastEntry.ftqPtr           := info.ftqPtr
+    fastEntry.ftqPtr           := s1_fetchBlock(0).ftqIdx
     fastEntry.exceptionType    := ExceptionType.fromRvcExpander(ill)
     fastEntry.triggered        := TriggerAction.None
     fastEntry.isLastInFtqEntry := isLastInFtqEntry
@@ -439,7 +444,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     fastEntry.instrEndOffset   := endOffset
   }
   private val s1_fastFetchMask = Mux(
-    s1_useFastFetch,
+    s1_fastFetchValid,
     s1_fastFetchInfo.realInstrValid,
     0.U(FastFetchMaxNum.W)
   )
@@ -459,7 +464,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
      -------------------------------------------------------------------------------------------------------------- */
 
   // assign later
-  private val s2_valid       = WireInit(false.B)
   private val s2_firstValid  = ValidHold(s1_fire && !s1_flush && s1_fetchBlock(0).valid, s2_fire, s2_flush)
   private val s2_secondValid = ValidHold(s1_fire && !s1_flush && s1_fetchBlock(1).valid, s2_fire, s2_flush)
   private val s2_fetchBlock  = RegEnable(s1_fetchBlock, s1_fire)

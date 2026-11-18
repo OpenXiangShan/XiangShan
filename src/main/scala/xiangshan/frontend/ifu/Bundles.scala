@@ -199,17 +199,13 @@ class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
 }
 
 class FastFetchInfo(implicit p: Parameters) extends IfuBundle {
-  val realInstrValid:      UInt           = UInt(FastFetchMaxNum.W)
-  val rawIsPredTaken:      Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val rawIsRvC:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val rawPc:               Vec[GuardedPc] = Vec(FastFetchWidth, new GuardedPc)
-  val rawFoldedPC:         Vec[UInt]      = Vec(FastFetchWidth, UInt(MemPredPCWidth.W))
-  val instrNum:            UInt           = UInt(log2Ceil(FastFetchMaxNum + 1).W)
-  val validMaskOH:         Vec[UInt]      = Vec(FastFetchMaxNum, UInt(FastFetchWidth.W))
-  val rawIsLastInFtqEntry: Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val ftqPtr:              FtqPtr         = new FtqPtr
-  val hasUnexcepted:       Bool           = Bool()
-  val index:               Vec[UInt]      = Vec(FastFetchMaxNum, UInt((log2Ceil(ICacheLineBytes) - 1).W))
+  val realInstrValid:   UInt      = UInt(FastFetchMaxNum.W)
+  val instrNum:         UInt      = UInt(log2Ceil(FastFetchMaxNum + 1).W)
+  val hasUnexcepted:    Bool      = Bool()
+  val index:            Vec[UInt] = Vec(FastFetchMaxNum, UInt((log2Ceil(ICacheLineBytes) - 1).W))
+  val startOffset:      Vec[UInt] = Vec(FastFetchMaxNum, UInt(log2Ceil(FastFetchWidth).W))
+  val isRvC:            Vec[Bool] = Vec(FastFetchMaxNum, Bool())
+  val isLastInFtqEntry: Vec[Bool] = Vec(FastFetchMaxNum, Bool())
 }
 
 class FastFetchEntry(implicit p: Parameters) extends IfuBundle {

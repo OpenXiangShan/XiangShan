@@ -212,90 +212,76 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     Mux1H(UIntToOH(shamt), Seq(s0, s1, s2, s3))
   }
 
-  def genFastInst(firstData: Vec[UInt], info: FastFetchInfo): Vec[UInt] = {
-    VecInit((0 until FastFetchMaxNum).map { i =>
-      firstData(info.index(i))
-    })
-  }
+  def genFastInst(firstData: Vec[UInt], info: FastFetchInfo): Vec[UInt] =
+    VecInit((0 until FastFetchMaxNum).map(i => firstData(info.index(i))))
 
   def genFastInfo(req: MainPipeToIfuReq): FastFetchInfo = {
-    val maybeRvcMap = req.maybeRvcMap
-    val firstRange  = req.firstRange
-    val startVAddr  = req.info(0).startVAddr.toUInt
-    val predTaken   = req.info(0).takenCfiOffset.valid
-    val takenCfiIdx = req.info(0).takenCfiOffset.bits
+    val maybeRvcMap    = req.maybeRvcMap
+    val firstRange     = req.firstRange
+    val startVAddr     = req.info(0).startVAddr.toUInt
+    val predTaken      = req.info(0).takenCfiOffset.valid
+    val takenCfiIdx    = req.info(0).takenCfiOffset.bits
     val altTakenCfiIdx = req.info(0).takenCfiOffset.bits - 1.U
-    val ftqPtr      = req.info(0).ftqIdx
 
-    val validMaskOH         = Wire(Vec(FastFetchMaxNum, UInt(FastFetchWidth.W)))
-    val rawIsRvC            = Wire(Vec(FastFetchWidth, Bool()))
-    val rawPredTaken        = Wire(Vec(FastFetchWidth, Bool()))
-    val rawPc               = Wire(Vec(FastFetchWidth, new GuardedPc))
-    val rawEndMask          = Wire(Vec(FastFetchWidth, Bool()))
-    val rawInstrValid       = Wire(Vec(FastFetchWidth + 1, Bool()))
-    val rawIsRvI            = Wire(Vec(FastFetchWidth + 1, Bool()))
-    val fixedMask           = Wire(Vec(FastFetchWidth + 1, Bool()))
-
-    // Determine the valid instruction positions in the fastFetch window
+    val index         = Wire(Vec(FastFetchMaxNum, UInt((log2Ceil(ICacheLineBytes) - 1).W)))
+    val startOffset   = Wire(Vec(FastFetchMaxNum, UInt(log2Ceil(FastFetchWidth).W)))
+    val isRvC         = Wire(Vec(FastFetchMaxNum, Bool()))
+    val hasHalfRvi    = Wire(Vec(FastFetchMaxNum, Bool()))
+    val rawHasHalfRvi = Wire(Vec(FastFetchWidth, Bool()))
+    val rawEndMask    = Wire(Vec(FastFetchWidth, Bool()))
+    val rawInstrValid = Wire(Vec(FastFetchWidth, Bool()))
+    val rawIsRvC      = Wire(Vec(FastFetchWidth, Bool()))
+    val rawIsRvI      = Wire(Vec(FastFetchWidth, Bool()))
+    // Determine the valid instruction position in the fastFetch window
     for (i <- 0 until FastFetchWidth) {
       rawInstrValid(i) := (if (i == 0) true.B else !rawInstrValid(i - 1) || maybeRvcMap(i - 1))
       rawIsRvI(i)      := rawInstrValid(i) && !maybeRvcMap(i)
       rawIsRvC(i)      := rawInstrValid(i) && maybeRvcMap(i)
-      rawEndMask(i)    := !rawInstrValid(i) || rawIsRvC(i)
-      fixedMask(i)     := (takenCfiIdx === i.U) && rawIsRvI(i)
-      rawPredTaken(i)  := predTaken &&
-        (((takenCfiIdx === i.U) && rawIsRvC(i)) || ((altTakenCfiIdx === i.U) && rawIsRvI(i)))
-      rawPc(i)         := GuardedPcInit(startVAddr + (2 * i).U)
+      rawHasHalfRvi(i) := rawIsRvI(i) && firstRange(i) && !firstRange(i + 1)
+      // Mark the 2-byte slot where each instruction ends.
+      rawEndMask(i) := !rawInstrValid(i) || rawIsRvC(i)
     }
 
-    // Trim the extra half instruction of the predicted block
-    rawInstrValid(FastFetchWidth) := !rawInstrValid(FastFetchWidth - 1) || maybeRvcMap(FastFetchWidth - 1)
-    rawIsRvI(FastFetchWidth)      := rawInstrValid(FastFetchWidth) && !maybeRvcMap(FastFetchWidth)
-    fixedMask(FastFetchWidth)     := (takenCfiIdx === FastFetchWidth.U) && rawIsRvI(FastFetchWidth)
-
-    // Determine whether the end of the predicted block is within the fastFetch window, and its position
-    val fixedRange  = firstRange(FastFetchWidth, 0) & ~(fixedMask.asUInt(FastFetchWidth, 0))
-    val blockEndsInFastFetch = !fixedRange(FastFetchWidth)
-    val lastSlotOH           = fixedRange & ~(fixedRange >> 1)
-    val rawIndex             = VecInit((0 until FastFetchWidth).map { i =>
-      startVAddr(log2Ceil(ICacheLineBytes) - 1, 1) + i.U
+    val rank = VecInit((0 until FastFetchWidth).map { i =>
+      if (i == 0) 0.U
+      else PopCount(rawInstrValid.take(i))
     })
 
-    // Based on the instruction layout, compute the MaskOH for the corresponding valid instructions
-    validMaskOH(0) := "b0001".U
-    validMaskOH(1) := Mux(rawIsRvI(0), "b0100".U, "b0010".U)
-    validMaskOH(2) := Mux(
-      rawIsRvI(0),
-      Mux(rawIsRvI(2), "b0000".U, "b1000".U),
-      Mux(rawIsRvI(1), "b1000".U, "b0100".U)
-    )
-    val index = VecInit((0 until FastFetchMaxNum).map { i =>
-      Mux1H(validMaskOH(i), rawIndex)
-    })
+    val rawStartOffset = VecInit((0 until FastFetchWidth).map(i => i.U))
+    for (idx <- 0 until FastFetchMaxNum) {
+      val instrRange = idx until Math.min(2 * idx + 2, FastFetchWidth)
+      val validOH = instrRange.map {
+        i => rawInstrValid(i) && (rank(i) === idx.U) && firstRange(i)
+      }
+      val candidateOffset     = instrRange.map(rawStartOffset(_))
+      val candidateIsRvC      = instrRange.map(rawIsRvC(_))
+      val candidateHasHalfRvI = instrRange.map(rawHasHalfRvi(_))
+      startOffset(idx) := Mux1H(validOH, candidateOffset)
+      isRvC(idx)       := Mux1H(validOH, candidateIsRvC)
+      hasHalfRvi(idx)  := Mux1H(validOH, candidateHasHalfRvI)
+      index(idx)       := startVAddr(log2Ceil(ICacheLineBytes) - 1, 1) + startOffset(idx)
+    }
 
     val info = Wire(new FastFetchInfo)
     // Compute the maximum number of valid instructions within the fastFetch window
-    val instrCount = PopCount(VecInit((0 until FastFetchWidth).map(i => rawEndMask(i) && fixedRange(i))))
-    // Using IBuffer's write-bank rules, fastFetch is allowed to fetch at most NumWriteBank - 1 instructions
-    info.realInstrValid := UIntToMask(instrCount, FastFetchMaxNum)
-    info.rawIsPredTaken := rawPredTaken
-    info.rawIsRvC       := rawIsRvC
-    info.rawPc          := rawPc
-    info.rawFoldedPC    := rawPc.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth))
-    info.instrNum       := Mux(instrCount > FastFetchMaxNum.U, FastFetchMaxNum.U, instrCount)
-    info.validMaskOH    := validMaskOH
-    info.ftqPtr         := ftqPtr
-    info.hasUnexcepted  := fixedMask.reduce(_ || _)
+    val instrCount = PopCount(VecInit((0 until FastFetchWidth).map(i => rawEndMask(i) && firstRange(i))))
+    // Fast fetch can never deliver more than the fast window or DecodeWidth instructions.
+    val maxFastNum   = Math.min(FastFetchMaxNum, DecodeWidth)
+    val realInstrNum = Mux(instrCount > maxFastNum.U, maxFastNum.U, instrCount)
+    info.realInstrValid := UIntToMask(realInstrNum, FastFetchMaxNum)
     info.index          := index
-    // An instruction is the last one in its FTQ entry iff the FTQ entry ends
-    // inside the fast window and this is its final slot. For RVC the final slot
-    // is the instruction slot itself; for RVI it is the next (upper) slot.
-    info.rawIsLastInFtqEntry := VecInit((0 until FastFetchWidth).map { i =>
-      blockEndsInFastFetch && (
-        (rawIsRvC(i) && lastSlotOH(i)) ||
-          (if (i < FastFetchWidth - 1) rawIsRvI(i) && lastSlotOH(i + 1) else false.B)
-      )
+    info.isRvC          := isRvC
+    info.startOffset    := startOffset
+    info.hasUnexcepted  := hasHalfRvi.reduce(_ || _) && predTaken
+    info.instrNum       := realInstrNum
+    info.isLastInFtqEntry := VecInit((0 until FastFetchMaxNum).map { i =>
+      Mux(isRvC(i), startOffset(i) === takenCfiIdx, startOffset(i) === altTakenCfiIdx)
     })
     info
+  }
+
+  def genFastPc(startOffset: UInt, fetchBlock: FetchBlock): GuardedPc = {
+    val pcLower = Cat(0.U(1.W), fetchBlock.startVAddr(PcCutPoint - 1, 0)) + (startOffset << 1)
+    catPC(pcLower, fetchBlock.pcUpperBits, fetchBlock.pcUpperBitsPlus1)
   }
 }

@@ -37,7 +37,6 @@ import xiangshan.backend.decode.VTypeGen
 import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
-import xiangshan.frontend.ifu.FastFetchEntry
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -95,16 +94,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val fastReady = !io.flush && !resumingVType && !fastHasVSet && io.empty
   private val fastFire  = fastValid && fastReady
 
-  private val hasFastFetch  = RegNext(fastFire, init = false.B)
-  private val fastFetchMask = RegInit(0.U(NumWriteBank.W))
-  fastFetchMask := Mux(
-    fastFire,
-    UIntToMask(fastNum.pad(log2Ceil(NumWriteBank)), NumWriteBank),
-    0.U(NumWriteBank.W)
-  )
-  private val normalLaneValid     = normalBits.valid & ~fastFetchMask.pad(IBufferEnqueueWidth)
-  private val normalLaneEnqEnable = normalBits.enqEnable & ~fastFetchMask.pad(IBufferEnqueueWidth)
+  private val hasFastFetch = RegNext(fastFire && !io.flush, init = false.B)
+  private val fastFetchNum = RegNext(fastNum)
+  // Fast entries are delivered unconditionally in the cycle after fastFire, but their
+  // bookkeeping (skipping the duplicated normal enqueue) only applies when the paired
+  // normal fetch actually fires. A backend/wb redirect may cancel that normal fetch in
+  // this very cycle; the fast entries are then wrong-path and are dropped by the
+  // following flush, so they must not advance the dequeue pointers.
+  private val fastPaired = hasFastFetch && normalFire
 
+  private val normalLaneValid     = normalBits.valid
+  private val normalLaneEnqEnable = normalBits.enqEnable
   // IBuffer is organized as raw registers
   // This is due to IBuffer is a huge queue, read & write port logic should be precisely controlled
   //                             . + + E E E - .
@@ -157,7 +157,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   )
 
   XSError(
-    normalValid && normalBits.prevIBufEnqPtr =/= enqPtr && !hasFastFetch,
+    normalValid && normalBits.prevIBufEnqPtr =/= enqPtr,
     "The enqueueing behavior of the IBuffer does not match expectations."
   )
 
@@ -174,22 +174,22 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       }.reduce(_ || _)
 
   private val normalNumEnq = Mux(normalFire, PopCount(normalLaneEnqEnable), 0.U)
-  private val totalEnqNum  = Mux(fastFire, fastNum, normalNumEnq)
 
   // empty and decode can accept insts
   private val normalBypass =
-    normalFire && enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet
+    normalFire && enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet && !hasFastFetch
 
-  // Number of normal-path instructions accepted into outputEntries this cycle.
-  // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
+  // Number of instructions consumed from outputEntries this cycle.
   private val normalNumDeq = Wire(UInt(DecodeWidth.U.getWidth.W))
-  private val totalDeqNum  = Mux(fastFire, fastNum, normalNumDeq)
+  // Number of entries the dequeue pointers should advance. Fast entries are delivered
+  // directly through outputEntries; their duplicated normal-path entries are still
+  // enqueued into ibuf, so the dequeue side skips them in the same cycle.
+  private val deqAdvanceNum = Wire(UInt(DecodeWidth.U.getWidth.W))
 
   // counter current number of valid
   private val numValid = distanceBetween(enqPtr, deqPtr)
   // counter next number of valid
-  // Fast fetch enqueues and dequeues the same number of entries in one cycle.
-  private val nextNumValid = numValid + normalNumEnq - normalNumDeq
+  private val nextNumValid = numValid + normalNumEnq - deqAdvanceNum
 
   // TODO: Use ParallelAdder to calculate the sum of Seq(Size.U, -numValid, -totalEnqNum, normalNumDeq)
   private val nextNumInvalid = Size.U - nextNumValid
@@ -226,7 +226,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val enqExceptionIndex = PriorityEncoder(normalBits.exceptionMask)
 
   private val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
-  private val normalNumBypass        = Wire(UInt(DecodeWidth.U.getWidth.W))
+
+  private val normalNumBypass = Wire(UInt(DecodeWidth.U.getWidth.W))
   // when using normal bypass, bypassed entries do not enqueue
   // Timing optimization: only count enqEnable up to MaxNormalBypassNum.
   // - Higher-index enqEnable bits arrive later (longer datapath).
@@ -245,16 +246,30 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   when(resumingVType) {
     normalNumDeq := 0.U
   }.elsewhen(decodeCanAccept) {
-    normalNumDeq := Mux(normalBypass, normalNumBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
+    normalNumDeq := Mux(
+      fastPaired,
+      0.U,
+      Mux(normalBypass, normalNumBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
+    )
   }.elsewhen(outputEntriesIsNotFull) {
     normalNumDeq := Mux(
-      numValid >= DecodeWidth.U - outputEntriesValidNum,
-      DecodeWidth.U - outputEntriesValidNum,
-      numValid
+      fastPaired,
+      0.U,
+      Mux(
+        numValid >= DecodeWidth.U - outputEntriesValidNum,
+        DecodeWidth.U - outputEntriesValidNum,
+        numValid
+      )
     )
   }.otherwise {
     normalNumDeq := 0.U
   }
+
+  // In the cycle following fast fetch, the paired normal fetch enqueues the same
+  // instructions. Skip exactly those entries on the dequeue side so that they are
+  // never read out of ibuf again. If the normal fetch is canceled, do nothing here;
+  // the fast entries are wrong-path and the flush clears them.
+  deqAdvanceNum := Mux(fastPaired, fastFetchNum, normalNumDeq)
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Normal bypass
@@ -449,11 +464,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // low-bit bank cycle is preserved across wrap-around.
   private val baseAlignedPtr = Wire(new IBufPtr)
   private val alignedMask    = (~(NumWriteBank - 1).U(log2Ceil(Size).W)).asUInt
-  baseAlignedPtr       := (enqPtrDup(1) + totalEnqNum)
-  baseAlignedPtr.value := (enqPtrDup(1) + totalEnqNum).value & alignedMask
-  when((normalFire || fastFire) && !io.flush) {
-    enqPtrVec := VecInit(enqPtrVec.map(_ + totalEnqNum))
-    enqPtrDup.map(_ := enqPtrDup(1) + totalEnqNum)
+  baseAlignedPtr       := (enqPtrDup(1) + normalNumEnq)
+  baseAlignedPtr.value := (enqPtrDup(1) + normalNumEnq).value & alignedMask
+  when(normalFire && !io.flush) {
+    enqPtrVec := VecInit(enqPtrVec.map(_ + normalNumEnq))
+    enqPtrDup.map(_ := enqPtrDup(1) + normalNumEnq)
     ifuAlignedEnqPtrVec := VecInit((0 until EnqueueWidth).map(i => baseAlignedPtr + i.U))
   }
 
@@ -482,25 +497,25 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   for (i <- 0 until DecodeWidth) {
     // Genuine dequeue validity: only the normalNumDeq entries actually consumed this cycle are valid.
     // Under normal bypass no real data is read from ibuf, so the deq read window is invalid.
-    deqEntries(i).valid := (i.U < normalNumDeq) && !normalBypass && !fastFire
+    deqEntries(i).valid := (i.U < normalNumDeq) && !normalBypass && !fastFire && !fastPaired
     deqEntries(i).bits  := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
-  deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + totalDeqNum))
-  deqPtrVecNext     := VecInit(deqPtrVec.map(_ + totalDeqNum))
+  deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + deqAdvanceNum))
+  deqPtrVecNext     := VecInit(deqPtrVec.map(_ + deqAdvanceNum))
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach { case ((ptrNext, ptr), idx) =>
     // bank n holds the (n - deqBankPtr mod NumReadBank)-th dequeued entry;
-    // it advances iff that entry is within the totalDeqNum consumed this cycle
+    // it advances iff that entry is within the deqAdvanceNum consumed this cycle
     val validIdx = Mux(
       idx.asUInt >= deqBankPtr.value,
       idx.asUInt - deqBankPtr.value,
       ((idx + NumReadBank).asUInt - deqBankPtr.value)(DecodeWidth.U.getWidth - 1, 0)
     )(DecodeWidth.U.getWidth - 1, 0)
-    val bankAdvance = totalDeqNum > validIdx
+    val bankAdvance = deqAdvanceNum > validIdx
     ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
   }
 
-  // Register the first encountered exceptions into the IBuffer.
+  // Register the first encountered exception into the IBuffer.
   private val receiveExceptionFire = normalFire && !io.flush && !firstException.valid
   private val nextFirstHasException =
     currentException.exceptionType.hasException &&
@@ -537,6 +552,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     "exception not dequeue, cannot use normal bypass"
   )
   XSError(PopCount(deqHasExceptionOH) > 1.U, "exception cannot multiHit")
+  // If the paired normal fetch is canceled by a redirect in this cycle, the fast
+  // entries are wrong-path and the following flush drops them. Only a normal fetch
+  // that is actually present but does not fire / enqueues fewer instructions is an
+  // error.
+  XSError(
+    hasFastFetch && !io.flush && normalValid && !normalFire,
+    "fast fetch must be paired with the normal fetch in the next cycle"
+  )
+  XSError(
+    hasFastFetch && !io.flush && normalValid && normalNumEnq < fastFetchNum,
+    "fast fetch delivered more instructions than the paired normal fetch enqueues"
+  )
 
   // Flush
   when(io.flush) {
@@ -618,8 +645,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   XSDebug(p"numValid: ${numValid}\n")
-  XSDebug(p"EnqNum: ${totalEnqNum}\n")
-  XSDebug(p"DeqNum: ${totalDeqNum}\n")
+  XSDebug(p"EnqNum: ${normalNumEnq}\n")
+  XSDebug(p"DeqNum: ${normalNumDeq}\n")
 
   private val perf_afterInit  = RegInit(false.B)
   private val perf_headBubble = RegInit(false.B)
