@@ -129,8 +129,11 @@ class PerfQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
   // appear to validate the original BPU prediction. canTrain is not a correction-valid flag.
   private val observedEntries = WireInit(recoveredEntries)
   private val ifuIdx          = io.ifuRedirect.bits.ftqIdx.value
+  // Explicit read muxes avoid stale index dependencies in GSIM's array alias optimization.
+  private val ifuIdxOH = UIntToOH(ifuIdx, FtqSize)
+  private val ifuEntry = Mux1H(ifuIdxOH, recoveredEntries)
   private val ifuPosition = getAlignedPosition(
-    recoveredEntries(ifuIdx).bpuPerf.startPc,
+    ifuEntry.bpuPerf.startPc,
     io.ifuRedirect.bits.ftqOffset
   )._1
   private val ifuFlushed = recentRedirects.map { redirect =>
@@ -139,14 +142,15 @@ class PerfQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
       (io.ifuRedirect.bits.ftqOffset > redirect.bits.ftqOffset ||
         io.ifuRedirect.bits.ftqOffset === redirect.bits.ftqOffset && redirect.bits.flushItself()))
   }.reduce(_ || _)
-  when(io.ifuRedirect.valid && recoveredValid(ifuIdx) && nextPtr(ifuIdx) === io.ifuRedirect.bits.ftqIdx &&
-    recoveredAllowed(ifuIdx)(ifuPosition) && !ifuFlushed) {
-    when(!recoveredEntries(ifuIdx).ifuRedirect.valid || ifuPosition < recoveredEntries(ifuIdx).ifuRedirect.bits) {
+  when(io.ifuRedirect.valid && Mux1H(ifuIdxOH, recoveredValid) &&
+    Mux1H(ifuIdxOH, nextPtr) === io.ifuRedirect.bits.ftqIdx &&
+    Mux1H(ifuIdxOH, recoveredAllowed)(ifuPosition) && !ifuFlushed) {
+    when(!ifuEntry.ifuRedirect.valid || ifuPosition < ifuEntry.ifuRedirect.bits) {
       observedEntries(ifuIdx).ifuRedirect.valid := true.B
       observedEntries(ifuIdx).ifuRedirect.bits  := ifuPosition
     }
     when(io.ifuCorrection &&
-      (!recoveredEntries(ifuIdx).ifuCorrection.valid || ifuPosition < recoveredEntries(ifuIdx).ifuCorrection.bits)) {
+      (!ifuEntry.ifuCorrection.valid || ifuPosition < ifuEntry.ifuCorrection.bits)) {
       observedEntries(ifuIdx).ifuCorrection.valid := true.B
       observedEntries(ifuIdx).ifuCorrection.bits  := ifuPosition
     }
