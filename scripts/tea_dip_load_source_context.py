@@ -24,6 +24,7 @@ def measure(rows, finals, identity, profile):
     phases = profile['phases']
     boundaries = [p['begin']['cycle'] for p in phases] + [phases[-1]['end']['cycle']]
     counts = [Counter() for _ in phases]
+    entry_counts = [Counter() for _ in phases]
     keys = [defaultdict(set) for _ in phases]
     examples, seen = [], set()
     for row in rows:
@@ -39,7 +40,7 @@ def measure(rows, finals, identity, profile):
                      else -1 if final['CANCELLED'] else final['MEMBER_PSV'])
         phase = bisect_right(boundaries, cycle) - 1
         assert 0 <= phase < len(phases)
-        stage, owner = 'no_qualified_WB', 'no_qualified_WB'
+        stage, owner, entry_owner = 'no_qualified_WB', 'no_qualified_WB', 'no_qualified_WB'
         if resolution == 'matched':
             assert pc == record['architectural_PC']
             stage = ('WB_not_after_sample' if record['WB'] <= cycle else
@@ -50,6 +51,10 @@ def measure(rows, finals, identity, profile):
                 member['rob_index'], member['rob_flag'], member['rob_former'])
             owner = ('head_invalid' if not row['CONTEXT_HEADVALID'] else
                      'same_full_head_pointer' if same_head else 'different_full_head_pointer')
+            same_entry = (row['CONTEXT_HEAD_VALUE'], row['CONTEXT_HEAD_FLAG']) == (
+                member['rob_index'], member['rob_flag'])
+            entry_owner = ('head_invalid' if not row['CONTEXT_HEADVALID'] else
+                           'same_entry' if same_entry else 'different_entry')
             if owner == 'same_full_head_pointer' and record['first_S2'] < cycle:
                 examples.append(dict(sample_cycle=cycle, architectural_PC=hex(pc), final_PSV=signature,
                                      first_S2=record['first_S2'], WB=record['WB'], identity=member,
@@ -59,11 +64,12 @@ def measure(rows, finals, identity, profile):
         key = (pc, signature, row['CONTEXT_COMMITBLOCKMASK'], row['CONTEXT_HEADVALID'], row['CONTEXT_HEADREADY'],
                row['CONTEXT_HEADREASONVALID'], row['CONTEXT_HEADREASON'], resolution, stage, owner)
         counts[phase][key] += 1
+        entry_counts[phase][pc, signature, resolution, stage, entry_owner, owner] += 1
         if resolution == 'matched':
             keys[phase][key].add(tuple(record['identity'][name] for name in KEY))
     assert seen == records.keys(), 'Missing TEA source contexts'
     output = []
-    for phase, groups, unique in zip(phases, counts, keys):
+    for phase, groups, unique, entries in zip(phases, counts, keys, entry_counts):
         rows = [dict(architectural_PC='unknown' if pc is None else hex(pc), final_PSV=signature,
                      commitBlockMask=mask, head_valid=valid, head_ready=ready,
                      head_reason_valid=reason_valid, head_reason_id=reason, resolution=resolution,
@@ -81,7 +87,14 @@ def measure(rows, finals, identity, profile):
         assert projection.keys() == expected.keys()
         for key, count in projection.items():
             assert abs(count / sum(p['sampled_cycles'] for p in phases) * profile['native_CPI'] - expected[key]) < 1e-12
-        output.append(dict(index=phase['index'], begin=phase['begin'], end=phase['end'], groups=rows))
+        entry_rows = [dict(architectural_PC='unknown' if pc is None else hex(pc), final_PSV=signature,
+                           resolution=resolution, qualified_service_stage=stage,
+                           qualified_WB_head_entry_relation=entry_owner,
+                           qualified_WB_head_relation=owner, samples=count)
+                      for (pc, signature, resolution, stage, entry_owner, owner), count in entries.items()]
+        assert sum(r['samples'] for r in entry_rows) == sum(r['samples'] for r in rows)
+        output.append(dict(index=phase['index'], begin=phase['begin'], end=phase['end'], groups=rows,
+                           head_entry_groups=entry_rows))
     return output, examples
 
 
@@ -115,6 +128,7 @@ def analyze(folder, receipt_path, retired_service_path):
                       'Every Stalled PC/PSV phase margin is retained, including unknown and cancelled targets. '
                       'Raw head-reason IDs require the actual producer enum; they are ROB-entry context, not per-member causes. '
                       'Full head-pointer agreement uses WB flag/former/index but does not restore missing target allocation flags. '
+                      'Separate entry relations use RobPtr.isSameEntry value/flag, preserving former/latter differences in the full-pointer relation. '
                       'Same-cycle S2 is separate from earlier S2; no issue-state correctness, unique critical path or saved cycles inferred.')
 
 
