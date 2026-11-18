@@ -39,18 +39,24 @@ def placement(pid, start_ticks):
                               numa_nodes=sorted(int(p.name[4:]) for p in path.glob('node[0-9]*')),
                               instantaneous_scaling_kHz=int(frequency.read_text()) if frequency.exists() else None)
     numa_bytes = {}
+    backing_bytes = {name: {} for name in ['executable_file', 'other_file', 'non_file']}
+    executable = os.readlink(root / 'exe')
     for line in (root / 'numa_maps').read_text().splitlines():
         fields = dict(token.split('=', 1) for token in line.split() if '=' in token)
         nodes = {key[1:]: int(value) for key, value in fields.items() if key.startswith('N') and key[1:].isdigit()}
         if nodes:
             page_bytes = int(fields['kernelpagesize_kB']) * 1024
+            backing = backing_bytes['executable_file' if fields.get('file') == executable else
+                                    'other_file' if 'file' in fields else 'non_file']
             for node, pages in nodes.items():
                 numa_bytes[node] = numa_bytes.get(node, 0) + pages * page_bytes
+                backing[node] = backing.get(node, 0) + pages * page_bytes
     assert (root / 'stat').read_text().rsplit(')', 1)[1].split()[19] == start_ticks
     return dict(begin_monotonic_ns=begin, end_monotonic_ns=time.monotonic_ns(),
                 last_cpu=int(stat[36]), affinity=affinity, cpu_topology_and_frequency=cpus,
                 mapped_resident_bytes_by_NUMA_node=numa_bytes,
-                scope='Instantaneous kernel placement/frequency and mapped resident memory, not effective GHz, total RSS or proof of remote-memory traffic. Reads are sequential. No historical state is inferred.')
+                mapped_resident_bytes_by_backing_and_NUMA_node=backing_bytes,
+                scope='Instantaneous kernel placement/frequency and mapped resident memory, not effective GHz, total RSS or proof of remote-memory traffic. Executable-file bytes include all its mappings, not just instruction pages or hot accesses. Reads are sequential. No historical state is inferred.')
 
 
 def parse_perf(text):
