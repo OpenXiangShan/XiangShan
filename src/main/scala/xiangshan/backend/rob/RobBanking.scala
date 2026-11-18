@@ -20,42 +20,84 @@ package xiangshan.backend.rob
 import chisel3._
 import chisel3.util._
 
-// A combinational banking view; the caller owns all storage and pipeline registers.
-private[rob] final class RobBanking(entryCount: Int, accessWidth: Int) {
-  require(accessWidth > 0 && accessWidth <= entryCount)
-  private val bankBits = log2Ceil(accessWidth)
-  private val bankCount = 1 << bankBits
-  require(entryCount % bankCount == 0, "ROB size must be divisible by the rounded banking width")
-  private val rowCount = entryCount / bankCount
+/**
+ * A combinational view of the ROB's interleaved entry registers. The banks
+ * are logical groups of registers, not physical SRAM banks. The caller owns
+ * all storage and pipeline registers.
+ *
+ * The low bits of an entry index select the bank. The high bits select the row
+ * within that bank. For example, 160 entries span eight banks as follows:
+ *
+ * {{{
+ * Bank 0: 0, 8, 16, 24, ...
+ * Bank 1: 1, 9, 17, 25, ...
+ * Bank 2: 2, 10, 18, 26, ...
+ * ...
+ * Bank 7: 7, 15, 23, 31, ...
+ * }}}
+ *
+ * A window of up to `accessWidth` consecutive entries uses each bank at most
+ * once. [[bankEnqSelect]] uses this property to share one payload selector
+ * among the entries in each bank.
+ *
+ * A retirement window can straddle a row boundary. [[readRows]] uses a shared
+ * one-hot selector to read the current row and the next row across all banks.
+ * The next row wraps to row zero at the end of the ROB.
+ *
+ * TODO: Select a row independently for each bank to avoid reading two full rows
+ * and improve timing.
+ *
+ * @param Size Total number of ROB entries.
+ * @param accessWidth Maximum number of consecutive entries accessed at once.
+ */
+private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
+  require(accessWidth > 0 && accessWidth <= Size)
 
-  private def bankIndex(index: UInt): UInt = if (bankBits == 0) 0.U else index(bankBits - 1, 0)
-  private def rowIndex(index: UInt): UInt = index >> bankBits
+  // Round the access width up to a power of two so the bank and row can be
+  // decoded directly from the index bits.
+  private val bankBits = log2Ceil(accessWidth)
+  val bankNum = 1 << bankBits
+  val rowCount = Size / bankNum
+
+  require(Size % bankNum == 0, "ROB size must be divisible by the rounded banking width")
+
+  def bankIndex(index: UInt): UInt = if (bankBits == 0) 0.U else index(bankBits - 1, 0)
+  def rowIndex(index: UInt): UInt = index >> bankBits
 
   def firstRowSelect: UInt = 1.U(rowCount.W)
-
   def rowSelect(index: UInt): UInt = UIntToOH(rowIndex(index), rowCount)
-
   def nextRowSelect(select: UInt): UInt = Mux(select.head(1) === 1.U, 1.U, select << 1)
 
-  // Allocation addresses must be consecutive and span at most accessWidth entries.
-  // Return aliases for every entry so callers need no knowledge of bank numbering.
-  def selectEnqueue[T <: Data](valid: Seq[Bool], indices: Seq[UInt], data: Seq[T]): Seq[T] = {
-    require(valid.nonEmpty && valid.length <= accessWidth)
-    require(valid.length == indices.length && valid.length == data.length)
-    val selected = (0 until bankCount).map { bank =>
-      val hits = VecInit(valid.zip(indices).map { case (enabled, index) =>
-        enabled && bankIndex(index) === bank.U
+  /**
+   * Selects one enqueue payload per bank. An allocation window of up to
+   * `accessWidth` consecutive entries uses each bank at most once.
+   *
+   * @param allocBankOH One-hot bank decode of each write port's allocation pointer.
+   * @param canEnqueue Whether each write port allocates an entry.
+   * @param data Enqueue payload for each write port.
+   * @return One reference per ROB entry to the selected payload for its bank.
+   */
+  def bankEnqSelect[T <: Data](allocBankOH: Seq[UInt], canEnqueue: Seq[Bool], data: Seq[T]): Seq[T] = {
+    require(data.nonEmpty && data.length <= accessWidth)
+    require(allocBankOH.length == data.length && canEnqueue.length == data.length)
+    require(allocBankOH.forall(_.getWidth == bankNum))
+
+    val bankPayloads = (0 until bankNum).map { bank =>
+      val laneEnables = VecInit(allocBankOH.zip(canEnqueue).map { case (banks, enable) =>
+        enable && banks(bank)
       })
-      Mux1H(hits, data)
+      Mux1H(laneEnables, data)
     }
-    (0 until entryCount).map(index => selected(index % bankCount))
+
+    // Each entry references its bank's result without adding a hardware mux.
+    (0 until Size).map(entry => bankPayloads(entry % bankNum))
   }
 
   // Both rows retain bank order. The second row wraps from the last row to row zero.
   def readRows[T <: Data](entries: Seq[T], select: UInt, keepDebug: Boolean): (Vec[T], Vec[T]) = {
-    require(entries.length == entryCount && select.getWidth == rowCount)
-    val banks = VecInit((0 until bankCount).map { bank =>
-      VecInit((0 until rowCount).map(row => entries(row * bankCount + bank)))
+    require(entries.length == Size && select.getWidth == rowCount)
+    val banks = VecInit((0 until bankNum).map { bank =>
+      VecInit((0 until rowCount).map(row => entries(row * bankNum + bank)))
     })
     if (keepDebug) {
       dontTouch(banks)
@@ -70,7 +112,7 @@ private[rob] final class RobBanking(entryCount: Int, accessWidth: Int) {
     val current = rowIndex(index)
     val next = Mux(current === (rowCount - 1).U, 0.U, current + 1.U)
     VecInit(Seq(current, next).flatMap { row =>
-      (0 until bankCount).map { bank =>
+      (0 until bankNum).map { bank =>
         if (bankBits == 0) row else Cat(row, bank.U(bankBits.W))
       }
     })
