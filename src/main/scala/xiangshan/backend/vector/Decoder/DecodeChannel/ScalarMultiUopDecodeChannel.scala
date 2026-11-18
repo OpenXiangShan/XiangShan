@@ -152,7 +152,7 @@ object ScalarMultiUopDecodeChannel {
       (PrivExceptionCause.mfence,     fromCSR.illegalInst.mfence.getOrElse(false.B), false.B),
       (PrivExceptionCause.hlsv,       fromCSR.illegalInst.hlsv,                   fromCSR.virtualInst.hlsv),
       (PrivExceptionCause.wfi,        fromCSR.illegalInst.wfi,                    fromCSR.virtualInst.wfi),
-      (PrivExceptionCause.wrsNto,     fromCSR.illegalInst.wrs_nto,                fromCSR.virtualInst.wrs_nto),
+      (PrivExceptionCause.wrsNto,     fromCSR.illegalInst.wrsNto,                fromCSR.virtualInst.wrsNto),
       (PrivExceptionCause.cboZ,       !hasCMO.B || fromCSR.illegalInst.cboZ,      fromCSR.virtualInst.cboZ),
       (PrivExceptionCause.cboCF,      !hasCMO.B || fromCSR.illegalInst.cboCF,     fromCSR.virtualInst.cboCF),
       (PrivExceptionCause.cboI,       !hasCMO.B || fromCSR.illegalInst.cboI,      fromCSR.virtualInst.cboI),

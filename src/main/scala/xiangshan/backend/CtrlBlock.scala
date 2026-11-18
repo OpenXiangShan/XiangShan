@@ -443,7 +443,7 @@ class CtrlBlockImp(
 
   // Zicfilp architectural ELP follows only instructions that actually commit.
   // LPAD 阅读：提交侧接线。isCommit 排除 ROB walk；Decode/执行完成都不能直接更新架构 ELP。
-  // 先读 archZicfilp.scala 的一位状态，再沿 rob.io.ZicfilpELP 到 Rob.scala 看 trap 快照。
+  // 先读 archZicfilp.scala 的一位状态，再沿 rob.in.ZicfilpELP 到 Rob.scala 看 trap 快照。
   val archZicfilp = Option.when(HasZicfilp)(Module(new ArchZicfilp))
   archZicfilp.foreach { arch =>
     for (i <- 0 until CommitWidth) {

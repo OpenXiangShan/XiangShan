@@ -460,7 +460,7 @@ trait PMPCheckMethod extends PMPConst with HasXSParameter {
     require(num == NumPMPReal)
 
     val passThrough = if (pmpEntries.isEmpty) true.B else
-      Option.when(HasEpmp)(!(mmwp || (TlbCmd.isExec(cmd) && mml))).getOrElse(true.B) && (mode > 1.U)
+      Option.when(HasEpmp)(!(mmwp || ((TlbCmd.isExec(cmd) || TlbCmd.isReadExec(cmd)) && mml))).getOrElse(true.B) && (mode > 1.U)
       // matching region not found result
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
     pmpDefault.cfg.r := passThrough
