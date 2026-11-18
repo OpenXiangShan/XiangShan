@@ -20,6 +20,7 @@ from tests.py.support.backend_fault_recovery import (
     _scenario,
     _run_backend_fault_redirect_recovery,
 )
+from tests.py.zhaoxinran.support.translation import backend_fault_entry, randomize_permission_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -416,6 +417,7 @@ def test_instruction_fetch_permission_boundary(
     scenario: TranslationScenario,
     expected_fault: str,
 ) -> None:
+    scenario = randomize_permission_entry(env, scenario)
     scenario = _randomize_ptw_response_timing(
         env,
         scenario,
@@ -459,11 +461,14 @@ def test_backend_fault_redirect_recovery(
     fault_bit: int,
     redirect_faults: dict[str, int],
 ) -> None:
+    entry = backend_fault_entry(env, f"zhaoxinran/translation/backend-fault-recovery/{fault_kind}/pc")
     return _run_backend_fault_redirect_recovery(
         env,
         fault_kind=fault_kind,
         fault_bit=fault_bit,
         redirect_faults=redirect_faults,
+        va=entry.va,
+        pa=entry.pa,
     )
 
 
@@ -514,6 +519,7 @@ def test_pmp_lock_mode(env, scenario: TranslationScenario) -> None:
     expected_fault = (
         "instruction_access_fault" if scenario.expected_path == "fault" else None
     )
+    scenario = randomize_permission_entry(env, scenario)
     scenario = _randomize_ptw_response_timing(
         env,
         scenario,

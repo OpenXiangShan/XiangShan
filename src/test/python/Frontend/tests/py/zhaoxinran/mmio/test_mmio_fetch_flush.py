@@ -8,6 +8,12 @@ from env.support import record_scenario, require_sig, scenario_rng
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
+from tests.py.zhaoxinran.support.mmio import (
+    prepare_mmio_cnop_stream,
+    prepare_mmio_cross_beat_stream,
+    prepare_mmio_page_tail_stream,
+)
+
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
@@ -20,9 +26,9 @@ def _random_flush_parameters(
 ) -> tuple[int, int, int, int]:
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(int(latency_min), int(latency_max))
-    target_pc = uncache._MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    target_offset = rng.randrange(0x40, 0x100, 8)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    return base_seed, seed, latency, target_pc
+    return base_seed, seed, latency, target_offset
 
 
 def _flush_snapshot(env) -> dict[str, int]:
@@ -86,36 +92,38 @@ def _redirect_before_unaccepted_request(env, *, pending_addr: int, target_pc: in
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_flush_cancels_unaccepted_8b_resend(env):
     scenario_key = "zhaoxinran/mmio/flush/unaccepted-8b-resend"
-    base_seed, seed, latency, target_pc = _random_flush_parameters(
+    base_seed, seed, latency, target_offset = _random_flush_parameters(
         env,
         scenario_key,
     )
+    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = first_beat + target_offset
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "redirect_target": target_pc,
             "expected_path": "flush_cancels_unaccepted_resend",
         },
     )
-    uncache._prepare_cross_beat_rvi_stream(env)
     snapshots = _register_flush_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
     env.uncache_agent.set_a_ready(0)
     assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     _redirect_before_unaccepted_request(
         env,
-        pending_addr=uncache._MMIO_BASE + uncache._UNCACHE_BEAT_BYTES,
+        pending_addr=first_beat + uncache._UNCACHE_BEAT_BYTES,
         target_pc=target_pc,
     )
     assert not any(
-        int(item.pc) == uncache._CROSS_BEAT_PC for item in env.monitor.observations
+        int(item.pc) == pc for item in env.monitor.observations
     )
     assert any(
         sample["entry_resending"] == 1 and sample["ifu_flush"] == 1
@@ -133,34 +141,36 @@ def test_mmio_flush_cancels_unaccepted_8b_resend(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_flush_cancels_unaccepted_page_half_recheck(env):
     scenario_key = "zhaoxinran/mmio/flush/unaccepted-page-half-recheck"
-    base_seed, seed, latency, target_pc = _random_flush_parameters(
+    base_seed, seed, latency, target_offset = _random_flush_parameters(
         env,
         scenario_key,
     )
+    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = uncache._page_align_down(pc) + target_offset
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "redirect_target": target_pc,
             "expected_path": "flush_cancels_page_half_recheck",
         },
     )
-    uncache._prepare_cross_page_rvi_stream(env)
     snapshots = _register_flush_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = uncache._CROSS_PAGE_PC & ~(uncache._UNCACHE_BEAT_BYTES - 1)
-    next_page = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE
+    first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    next_page = pc + 2
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
     env.uncache_agent.set_a_ready(0)
     assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     _redirect_before_unaccepted_request(env, pending_addr=next_page, target_pc=target_pc)
     assert not any(
-        int(item.pc) == uncache._CROSS_PAGE_PC for item in env.monitor.observations
+        int(item.pc) == pc for item in env.monitor.observations
     )
     assert any(
         sample["prev_end_half"] == 1 and sample["ifu_flush"] == 1
@@ -179,28 +189,30 @@ def test_mmio_flush_cancels_unaccepted_page_half_recheck(env):
 def test_mmio_d_response_coincides_with_ifu_flush(env):
     """Deliver TL-D on the cycle a redirect flushes the pending MMIO."""
     scenario_key = "zhaoxinran/mmio/flush/d-response-coincides"
-    base_seed, seed, latency, target_pc = _random_flush_parameters(
+    base_seed, seed, latency, target_offset = _random_flush_parameters(
         env,
         scenario_key,
         latency_min=24,
         latency_max=48,
     )
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = pc + target_offset
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "redirect_target": target_pc,
             "expected_path": "d_response_coincides_with_ifu_flush",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     snapshots = _register_flush_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_request_addr(env, pc, max_cycles=8000)
     assert env.uncache_agent.pending
     response_cycle = int(env.uncache_agent.pending[0].ready_cycle)
     while int(env.current_cycle) < response_cycle - 2:
@@ -220,5 +232,5 @@ def test_mmio_d_response_coincides_with_ifu_flush(env):
     }
     assert uncache._wait_for_request_addr(env, target_pc, max_cycles=8000)
     assert uncache._wait_for_observed_pc(env, target_pc, max_cycles=8000)
-    assert not any(int(item.pc) == uncache._MMIO_BASE for item in env.monitor.observations)
+    assert not any(int(item.pc) == pc for item in env.monitor.observations)
     assert not env.monitor.get_errors()

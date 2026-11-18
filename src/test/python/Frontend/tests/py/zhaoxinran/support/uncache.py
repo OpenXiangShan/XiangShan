@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
+import random
 from typing import Sequence
 
+from env.support import PcMapping, RandomPc, random_pc
 from tests.py.support.dut_support import _assert_observed_instrs, _wait_for_resp_delta
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
-    _CROSS_PAGE_PC,
     _FETCH_BLOCK_SIZE,
     _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS,
     _JAL_X0_PLUS_4,
-    _MMIO_BASE,
     _NORMAL_BASE,
     _NORMAL_PHYS_BASE,
+    _PBMT_NC,
     _SV39_PAGE_SIZE,
     _UNCACHE_BEAT_BYTES,
+    Sv39Mapping,
     _configure_exec_cacheable_pma_4k,
     _configure_exec_pmp_4k,
     _force_redirect_to,
     _initialize_mmio_fetch,
     _initialize_sv39_fetch,
     _pending_uncache_samples,
-    _prepare_cross_page_rvi_stream,
+    _prepare_sv39_dual_nc_cacheable_stream,
     _prepare_sv39_mapped_pbmt_nc_cfi_stream,
     _register_prev_half_rvi_observer,
     _require_first_dut_signal,
@@ -32,6 +34,29 @@ from tests.py.support.uncache_scenarios import (
     _wait_for_resp_count,
     _wait_for_uncache_a_valid_addr,
 )
+
+
+def sv39_layout_entry(rng: random.Random) -> RandomPc:
+    # Move by whole eight-page groups to keep sector lanes and PMP/PMA alignment.
+    span = 0x10_0000
+    return random_pc(
+        rng,
+        mappings=(PcMapping(_NORMAL_BASE, _NORMAL_PHYS_BASE, span),),
+        entry_offsets=tuple(range(0, span, 8 * _SV39_PAGE_SIZE)),
+    )
+
+
+def prepare_sv39_dual_stream(env, entry: RandomPc):
+    return _prepare_sv39_dual_nc_cacheable_stream(env, vaddr=entry.va, paddr=entry.pa)
+
+
+def prepare_sv39_cfi_stream(
+    env, rng: random.Random, *, pbmt: int = _PBMT_NC, instr_count: int = 256,
+) -> tuple[list[tuple[int, int, bool]], Sv39Mapping]:
+    placement = sv39_layout_entry(rng)
+    return _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env, vaddr=placement.va, paddr=placement.pa, pbmt=pbmt, instr_count=instr_count,
+    )
 
 
 def _half_rvi_state_is_quiescent(sample: dict) -> bool:
@@ -67,12 +92,8 @@ def _wait_for_first_active_s1_after(
     return None
 
 
-def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
-    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-    )
+def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env, rng: random.Random):
+    expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     expected_block_pcs = [pc for pc, _, _ in expected_block]
     cfi_pc = mapping.vaddr + 0x10
     _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
@@ -119,26 +140,26 @@ def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
 def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
     env,
     *,
+    pc: int,
+    redirect_target: int,
     second_latency: int = 16,
-    redirect_target: int = _MMIO_BASE + 0x40,
 ):
-    _prepare_cross_page_rvi_stream(env)
     # Keep the second-page response outstanding long enough to observe the
     # retimed half-RVI state, rather than proving only the final cfVec result.
     env.uncache_agent.configure(latency=2, mmio_latency=second_latency)
     prev_half_samples = _register_prev_half_rvi_observer(env)
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
-    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    first_beat = pc & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = pc + 2
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000), env.uncache_agent.get_stats()
     assert _wait_for_request_addr(env, next_page, max_cycles=5000), env.uncache_agent.get_stats()
-    assert _wait_for_observed_pc(env, _CROSS_PAGE_PC, max_cycles=8000), {
+    assert _wait_for_observed_pc(env, pc, max_cycles=8000), {
         "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
         "uncache": env.uncache_agent.get_stats(),
     }
     stats = env.uncache_agent.get_stats()
-    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == _CROSS_PAGE_PC)
+    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == pc)
 
     assert stats.get("request_addrs", []).count(first_beat) == 1
     assert stats.get("request_addrs", []).count(next_page) == 1
@@ -147,7 +168,7 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
 
     recovery_samples = list(prev_half_samples)
     expected_half_data = _ADDI_X0_X0_0 & 0xFFFF
-    expected_half_pc = _CROSS_PAGE_PC >> 1
+    expected_half_pc = pc >> 1
     pending_samples = _pending_uncache_samples(recovery_samples, next_page)
     assert len(pending_samples) >= 2, {
         "reason": "no multi-cycle next-page response stall was observed",
@@ -262,7 +283,7 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
         "sample": first_recovery_s1,
     }
     assert not any(
-        int(obs.pc) == _CROSS_PAGE_PC
+        int(obs.pc) == pc
         for obs in env.monitor.observations[observations_before_redirect:]
     )
     assert not env.monitor.get_errors()

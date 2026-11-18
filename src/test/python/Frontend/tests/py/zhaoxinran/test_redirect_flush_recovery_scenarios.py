@@ -15,7 +15,7 @@ from env.core.transactions import BackendRedirectClass, RedirectTxn, ProgramImag
 from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.funcov.py.ifu.mmio_nc_owner_funcov import read_instr_uncache_response_valid
-from env.support import record_scenario, scenario_rng
+from env.support import RandomPc, random_pc, record_scenario, scenario_rng
 from tests.py.support.main_fetch import (
     register_main_fetch_observer as _register_main_fetch_observer,
     wait_for_three_main_fetches_after_redirect as _wait_for_three_main_fetches_after_redirect,
@@ -30,6 +30,14 @@ from tests.py.zhaoxinran.support import translation as context_switch
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x8000_0000
+
+
+def _cacheable_entry(scenario_key: str, *, slot_size: int = 0x1000) -> int:
+    region = (_BASE, _BASE + 0x10_0000)
+    return random_pc(
+        scenario_rng(f"{scenario_key}/pc")[2],
+        va_range=region, pa_range=region, slot_size=slot_size, offsets=(0,), same_address=True,
+    ).pc
 
 
 def _wait_for_pc(env, pc: int, *, max_cycles: int = 8000) -> None:
@@ -99,19 +107,19 @@ def _cross_block_rvi_head_payload() -> bytes:
     return bytes(payload)
 
 
-def _load_boundary_stream(env, *, is_rvc: bool, ftq_offset: int) -> None:
+def _load_boundary_stream(env, *, base: int, is_rvc: bool, ftq_offset: int) -> None:
     """Create a real CFI whose cfVec identity has the requested FTQ offset."""
     if not is_rvc and int(ftq_offset) == 0:
         payload = _cross_block_rvi_head_payload()
     else:
         payload = _boundary_loop_payload(is_rvc=is_rvc, ftq_offset=ftq_offset)
     LoadProgramSequence(
-        image=ProgramImage(payload=payload, base_addr=_BASE),
+        image=ProgramImage(payload=payload, base_addr=base),
         step_cycles=0,
     ).run(env)
-    initialize_frontend(env, FrontendInitConfig(reset_vector=_BASE, bare_mode=True, reset_cycles=20))
+    initialize_frontend(env, FrontendInitConfig(reset_vector=base, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
-    env.monitor.set_expected_pc(_BASE)
+    env.monitor.set_expected_pc(base)
 
 
 def _find_live_cfi(env, *, is_rvc: bool, ftq_offset: int):
@@ -218,11 +226,12 @@ def _wait_for_monitor_taken_prediction(env, pc: int, *, max_cycles: int = 6000) 
 def _run_late_uncache_response_after_redirect(
     env,
     *,
+    entry: RandomPc,
     uncache_latency: int = 96,
     icache_latency: int = 1,
     agent_seed: int = 17,
 ) -> None:
-    nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
+    nc_expected, cacheable_pcs = uncache_tests.prepare_sv39_dual_stream(env, entry)
     target_pc = int(cacheable_pcs[0])
     expected_instr = int(nc_expected[0][1])
     redirect_samples = _register_uncache_redirect_observer(env, target_pc=target_pc)
@@ -236,12 +245,12 @@ def _run_late_uncache_response_after_redirect(
         miss_rate=0.0,
         seed=agent_seed,
     )
-    uncache._initialize_sv39_fetch(env, reset_vector=uncache._NORMAL_BASE)
-    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
-    uncache._force_redirect_to(env, uncache._NORMAL_BASE)
+    uncache._initialize_sv39_fetch(env, reset_vector=entry.va)
+    uncache._configure_exec_attrs_16k(env, base_addr=entry.pa & ~0x3FFF)
+    uncache._force_redirect_to(env, entry.va)
 
     assert uncache._wait_for_request_addr(
-        env, uncache._NORMAL_PHYS_BASE, max_cycles=6000
+        env, entry.pa, max_cycles=6000
     ), env.uncache_agent.get_stats()
     assert env.uncache_agent.pending
     request_cycle = int(env.current_cycle)
@@ -323,6 +332,7 @@ def test_rfr_s01_fault_redirect_recovery_three_fetches(
     env, fault_kind: str, fault_bit: int, redirect_faults: dict[str, int]
 ) -> None:
     """Deliver a backend fetch fault and observe three recovery fetches."""
+    entry = context_switch.backend_fault_entry(env, f"zhaoxinran/rfr/s01/{fault_kind}/pc")
     main_fetch_samples = _register_main_fetch_observer(env)
     faults._run_backend_fault_redirect_recovery(
         env,
@@ -330,6 +340,8 @@ def test_rfr_s01_fault_redirect_recovery_three_fetches(
         fault_bit=fault_bit,
         redirect_faults=redirect_faults,
         complete_recovery=True,
+        va=entry.va,
+        pa=entry.pa,
     )
     _wait_for_three_main_fetches_after_redirect(env, main_fetch_samples)
     assert not env.monitor.get_errors()
@@ -342,14 +354,15 @@ def test_rfr_s02_memory_violation_redirect_cancels_mmio(env) -> None:
     scenario_key = "zhaoxinran/rfr/s02-memory-violation-mmio"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    target_pc = uncache._MMIO_BASE + rng.choice((0x40, 0x60, 0x80, 0xA0))
+    pc = mmio.prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = pc + rng.choice((0x40, 0x60, 0x80, 0xA0))
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "source_pc": uncache._MMIO_BASE,
+            "source_pc": pc,
             "target_pc": target_pc,
             "latency": latency,
             "redirect_class": "memory_violation",
@@ -358,6 +371,7 @@ def test_rfr_s02_memory_violation_redirect_cancels_mmio(env) -> None:
     )
     mmio._run_mmio_redirect_cancels_wait_last_commit_before_request(
         env,
+        pc=pc,
         target_pc=target_pc,
         latency=latency,
     )
@@ -385,6 +399,7 @@ def test_rfr_s03_source_bound_ahead_match_and_boundaries(
     """Hit one missing range/offset cross with a matching live cfVec source."""
     scenario_key = f"zhaoxinran/rfr/s03/{int(is_rvc)}/{ftq_offset}/{level}"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    base = _cacheable_entry(scenario_key)
     latency = rng.randint(1, 12)
     env.icache_agent.configure(
         hit_latency=latency,
@@ -399,13 +414,14 @@ def test_rfr_s03_source_bound_ahead_match_and_boundaries(
         seed=seed,
         parameters={
             "is_rvc": is_rvc,
+            "pc": base,
             "ftq_offset": ftq_offset,
             "level": level,
             "icache_latency": latency,
             "expected_path": "source_bound_ahead_boundary_match",
         },
     )
-    _load_boundary_stream(env, is_rvc=is_rvc, ftq_offset=ftq_offset)
+    _load_boundary_stream(env, base=base, is_rvc=is_rvc, ftq_offset=ftq_offset)
     source = _find_live_cfi(env, is_rvc=is_rvc, ftq_offset=ftq_offset)
     assert bool(source.is_rvc) is bool(is_rvc)
     assert int(source.ftq_offset) == int(ftq_offset)
@@ -451,6 +467,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
     """Cover delayed-old and natural cross-page/sequential uncache redirects."""
     scenario_key = f"zhaoxinran/rfr/s04/{path}"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    pc_rng = scenario_rng(f"{scenario_key}/pc")[2]
     uncache_latency = rng.randint(80, 112) if path == "late-old-response" else rng.randint(8, 24)
     icache_latency = rng.randint(1, 8)
     record_scenario(
@@ -468,6 +485,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
     if path == "late-old-response":
         _run_late_uncache_response_after_redirect(
             env,
+            entry=uncache_tests.sv39_layout_entry(pc_rng),
             uncache_latency=uncache_latency,
             icache_latency=icache_latency,
             agent_seed=seed,
@@ -475,8 +493,11 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
     else:
         samples = _register_uncache_redirect_observer(env)
         if path == "cross-page-resend":
+            pc = mmio.prepare_mmio_page_tail_stream(env, pc_rng)
             uncache_tests._run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
                 env,
+                pc=pc,
+                redirect_target=uncache._page_align_down(pc) + 0x40,
                 second_latency=uncache_latency,
             )
             matches = [
@@ -493,7 +514,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
                 latency=uncache_latency,
                 mmio_latency=uncache_latency,
             )
-            uncache_tests._run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
+            uncache_tests._run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env, pc_rng)
             matches = [
                 sample
                 for sample in samples
@@ -513,7 +534,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
 def test_rfr_s06_fencei_with_cache_state_restarts_fetch(env, flush: str) -> None:
     """Exercise both architectural frontend flush inputs on live DUT state."""
     if flush == "fencei":
-        base = 0x8004_0000
+        base = _cacheable_entry("zhaoxinran/rfr/s06/fencei", slot_size=0x8000)
         target = base + 0x400
         env.load_program((0x0000_0013).to_bytes(4, "little") * 8192, base)
         env.icache_agent.configure(hit_latency=96, miss_latency=96, miss_rate=1.0, seed=11)
@@ -581,6 +602,7 @@ def test_rfr_s07_predchecker_not_cfi_and_invalid_taken(env, stream: str) -> None
     """Run each natural PredChecker redirect stream in an isolated DUT run."""
     scenario_key = f"zhaoxinran/rfr/s07/{stream}"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    base = _cacheable_entry(scenario_key)
     latency = rng.randint(1, 12)
     env.icache_agent.configure(
         hit_latency=latency,
@@ -595,25 +617,26 @@ def test_rfr_s07_predchecker_not_cfi_and_invalid_taken(env, stream: str) -> None
         seed=seed,
         parameters={
             "stream": stream,
+            "pc": base,
             "icache_latency": latency,
             "expected_path": "predchecker_natural_redirect",
         },
     )
     if stream == "not-cfi":
-        predchecker._load_and_reset(env, branch_halfword=13, rvi_jal=True)
-        source_pc = _BASE + 26
+        predchecker._load_and_reset(env, branch_halfword=13, rvi_jal=True, base=base)
+        source_pc = base + 26
         _wait_for_monitor_taken_prediction(env, source_pc)
         env.memory.write_u32(source_pc, predchecker._ADDI_X0_X0_0)
         group, name = "ifu_predchecker_v3_fault", "not_cfi_taken"
     else:
-        predchecker._load_and_reset(env)
-        source_pc = _BASE + 30
+        predchecker._load_and_reset(env, base=base)
+        source_pc = base + 30
         _wait_for_monitor_taken_prediction(env, source_pc)
         env.memory.write_u32(source_pc, predchecker._BRANCH_SAME_TARGET)
         group, name = "ifu_predchecker_v3_fault", "invalid_taken"
     predchecker._pulse_fencei(env)
     env.monitor.clear()
-    env.backend_model.inject_redirect(_BASE, f"rfr-s07-{stream}", delay_cycles=1)
+    env.backend_model.inject_redirect(base, f"rfr-s07-{stream}", delay_cycles=1)
     predchecker._run_until_bin(env, group, name, max_cycles=2048, debug_pc=source_pc)
     if stream == "invalid-taken":
         env.step(1)

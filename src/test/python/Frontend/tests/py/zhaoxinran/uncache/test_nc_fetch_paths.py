@@ -21,7 +21,7 @@ from env.runtime.frontend_init import (
     PrepareTranslationScenario,
     initialize_frontend,
 )
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import PmpPmaConfig, RandomPc, record_scenario, scenario_rng
 from tests.py.support import translation_faults
 from tests.py.support.instructions import encode_jal_x0 as _encode_jal_x0
 from tests.py.support.dut_support import (
@@ -30,6 +30,11 @@ from tests.py.support.dut_support import (
     _wait_for_resp_delta,
 )
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.support.uncache import (
+    prepare_sv39_cfi_stream,
+    prepare_sv39_dual_stream,
+    sv39_layout_entry,
+)
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -265,6 +270,7 @@ def _record_nc_scenario(
 
 def _nc_cross_page_fault_scenario(
     *,
+    entry: RandomPc,
     s2xlate: int,
     response_field: str,
     expected_result: str,
@@ -273,12 +279,12 @@ def _nc_cross_page_fault_scenario(
     # End on PTE sector lane 7 so the second page requires a new PTW response.
     page_pair_offset = 2 * int(scenario_index) * uncache._SV39_PAGE_SIZE
     cross_page_va = (
-        uncache._NORMAL_BASE
+        entry.va
         + (8 + 8 * int(scenario_index)) * uncache._SV39_PAGE_SIZE
         - 2
     )
     cross_page_pa = (
-        uncache._NORMAL_PHYS_BASE
+        entry.pa
         + page_pair_offset
         + uncache._SV39_PAGE_SIZE
         - 2
@@ -327,7 +333,7 @@ def _nc_cross_page_fault_scenario(
         )
     elif s2xlate == 3:
         gpa = (
-            uncache._NORMAL_PHYS_BASE
+            entry.pa
             + 0x20000
             + page_pair_offset
             + uncache._SV39_PAGE_SIZE
@@ -957,6 +963,7 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 24)
     scenario, cross_page_va, cross_page_pa = _nc_cross_page_fault_scenario(
+        entry=sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2]),
         s2xlate=s2xlate,
         response_field=response_field,
         expected_result=expected_result,
@@ -1075,6 +1082,7 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
 @pytest.mark.funcov_bins("BIN-1127")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/nc/cross-page-fault-matrix/pc")[2])
     fault_matrix = (
         (0, "s1_pf", "page_fault", "instruction_page_fault"),
         (3, "s2_gpf", "guest_fault", "instruction_guest_page_fault"),
@@ -1082,6 +1090,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
     )
     scenarios = [
         _nc_cross_page_fault_scenario(
+            entry=entry,
             s2xlate=s2xlate,
             response_field=response_field,
             expected_result=expected_result,
@@ -1187,10 +1196,11 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
     scenario_key = "zhaoxinran/nc/pmp-execute-denied-exact-iaf"
     base_seed, seed, rng = scenario_rng(scenario_key)
     ptw_latency = rng.randint(1, 8)
+    entry = sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2])
     scenario = TranslationScenario(
         scenario_id="nc-pbmt-nc-pmp-execute-denied",
-        va=uncache._NORMAL_BASE,
-        pa=uncache._NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(uncache._CNOP).to_bytes(2, "little") * 32,
         s1_pte=TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
@@ -1203,7 +1213,7 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
                 config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=False
                 ),
-                addr=uncache._NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=uncache._SV39_PAGE_SIZE,
             ),
         ),
@@ -1219,7 +1229,7 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
                     cacheable=True,
                     atomic=True,
                 ),
-                addr=uncache._NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=uncache._SV39_PAGE_SIZE,
             ),
         ),
@@ -1278,13 +1288,7 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(24, 48)
     hold_cycles = rng.randint(latency + 4, latency + 24)
-    _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=uncache._NORMAL_BASE,
-        paddr=uncache._NORMAL_PHYS_BASE,
-        pbmt=uncache._PBMT_NC,
-        instr_count=64,
-    )
+    _expected_block, mapping = prepare_sv39_cfi_stream(env, rng, instr_count=64)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     _record_nc_scenario(
         env,
@@ -1347,7 +1351,8 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     uncache_latency = rng.randint(40, 64)
     icache_latency = rng.randint(4, 12)
-    nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
+    entry = sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2])
+    nc_expected, cacheable_pcs = prepare_sv39_dual_stream(env, entry)
     cacheable_target = int(cacheable_pcs[0])
     expected_instr = int(nc_expected[0][1])
     expected_is_rvc = bool(nc_expected[0][2])
@@ -1364,20 +1369,20 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "source_pc": uncache._NORMAL_BASE,
+            "source_pc": entry.va,
             "target_pc": cacheable_target,
             "uncache_latency": uncache_latency,
             "icache_latency": icache_latency,
             "expected_path": "coincident_response_redirect_to_cacheable",
         },
     )
-    uncache._initialize_sv39_fetch(env, reset_vector=uncache._NORMAL_BASE)
-    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    uncache._initialize_sv39_fetch(env, reset_vector=entry.va)
+    uncache._configure_exec_attrs_16k(env, base_addr=entry.pa & ~0x3FFF)
     timing_samples = _register_nc_timing_observer(env)
-    uncache._force_redirect_to(env, uncache._NORMAL_BASE)
+    uncache._force_redirect_to(env, entry.va)
 
     assert uncache._wait_for_request_addr(
-        env, uncache._NORMAL_PHYS_BASE, max_cycles=6000
+        env, entry.pa, max_cycles=6000
     ), env.uncache_agent.get_stats()
     assert env.uncache_agent.pending
     ready_cycle = int(env.uncache_agent.pending[0].ready_cycle)
@@ -1456,7 +1461,7 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     assert int(observed.instr) == expected_instr
     assert bool(observed.is_rvc) is expected_is_rvc
     assert not any(
-        int(obs.pc) == int(uncache._NORMAL_BASE)
+        int(obs.pc) == entry.va
         for obs in env.monitor.observations[observations_before_redirect:]
     )
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0

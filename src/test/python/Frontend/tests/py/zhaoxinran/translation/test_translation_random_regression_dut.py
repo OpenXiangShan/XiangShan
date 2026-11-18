@@ -16,6 +16,7 @@ from env.sequences import (
     TranslationScenarioSequence,
 )
 from env.support import PmpPmaConfig, record_scenario
+from tests.py.zhaoxinran.support.translation import randomize_permission_entry, randomize_translation_layout
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -121,8 +122,12 @@ def test_translation_constrained_random_stream_dut(env) -> None:
     phase_results = []
     for ordinal in range(start_ordinal, start_ordinal + count):
         generated = TranslationScenarioRandomizer(seed).next(ordinal)
-        scenario = generated.scenario
         kind = TranslationScenarioRandomizer.kind_for_ordinal(ordinal)
+        scenario = randomize_translation_layout(
+            env, generated.scenario,
+            scenario_key=f"zhaoxinran/translation/random/{generated.scenario.scenario_id}/pc",
+            stride=0x20_0000 if kind == "superpage" else 0x8000,
+        )
         scenario_parameters = {
             "scenario_id": scenario.scenario_id,
             "mode": scenario.mode,
@@ -220,6 +225,7 @@ def test_translation_constrained_random_stream_dut(env) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_translation_normal_cross_page_stream_dut(env) -> None:
     for scenario in _normal_cross_page_scenarios():
+        scenario = randomize_permission_entry(env, scenario)
         sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario),))
         sequence.initialize_first_phase(env)
         phase_results = [record for record in sequence.run(env) if record["kind"] == "phase"]

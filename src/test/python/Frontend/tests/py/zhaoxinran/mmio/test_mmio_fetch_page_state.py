@@ -7,6 +7,8 @@ import pytest
 from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
+from tests.py.zhaoxinran.support.mmio import prepare_mmio_page_tail_stream
+
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
@@ -16,6 +18,7 @@ def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 24)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    pc = prepare_mmio_page_tail_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -23,22 +26,21 @@ def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
         seed=seed,
         parameters={
             "latency": latency,
-            "pc": uncache._CROSS_PAGE_PC,
+            "pc": pc,
             "expected_path": "page_tail_half_state_preserved",
         },
     )
-    uncache._prepare_cross_page_rvi_stream(env)
     samples = uncache._register_prev_half_rvi_observer(env)
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = uncache._CROSS_PAGE_PC & ~(uncache._UNCACHE_BEAT_BYTES - 1)
-    next_page = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE
+    first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    next_page = pc + 2
     expected_half_data = uncache._ADDI_X0_X0_0 & 0xFFFF
-    expected_half_pc = uncache._CROSS_PAGE_PC >> 1
+    expected_half_pc = pc >> 1
 
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
     assert uncache._wait_for_request_addr(env, next_page, max_cycles=8000)
-    assert uncache._wait_for_observed_pc(env, uncache._CROSS_PAGE_PC, max_cycles=8000)
+    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
 
     first_page_resend = [
         sample

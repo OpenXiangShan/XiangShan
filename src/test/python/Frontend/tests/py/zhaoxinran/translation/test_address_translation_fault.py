@@ -17,7 +17,7 @@ from tests.py.support.translation_faults import (
     _capture_gpaddr_writes,
     run_cacheable_cross_page_second_page_fault,
 )
-from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
+from tests.py.support.translation_scenarios import FAULT_NOP_PAYLOAD, randomize_translation_fault_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -25,7 +25,6 @@ _VA = 0x8020_0F00
 _PA = 0x8040_0F00
 _GPA = 0x8060_0F00
 _PAGE_SIZE = 0x1000
-_PAYLOAD = b"\x13\x00\x00\x00" * 512
 pytestmark = pytest.mark.parametrize(
     "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
 )
@@ -36,7 +35,7 @@ def _scenario(scenario_id: str, **kwargs) -> TranslationScenario:
         scenario_id=scenario_id,
         va=_VA,
         pa=_PA,
-        payload=_PAYLOAD,
+        payload=FAULT_NOP_PAYLOAD,
         page_count=2,
         expected_path="fault",
         **kwargs,
@@ -210,15 +209,11 @@ _FAULT_CASES = (
 @pytest.mark.parametrize("scenario,expected_fault", _FAULT_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_address_translation_fault(env, frontend_init_config, scenario: TranslationScenario, expected_fault: str) -> None:
-    scenario = _randomize_ptw_response_timing(
+    scenario = randomize_translation_fault_entry(
         env,
         scenario,
         scenario_key=f"zhaoxinran/translation/fault/{scenario.scenario_id}",
-        parameters={
-            "page_count": scenario.page_count,
-            "expected_path": "fault",
-            "expected_fault": expected_fault,
-        },
+        expected_fault=expected_fault,
     )
     initialize_frontend(
         env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)

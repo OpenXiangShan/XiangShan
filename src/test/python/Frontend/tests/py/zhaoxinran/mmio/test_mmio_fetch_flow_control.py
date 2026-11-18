@@ -7,6 +7,8 @@ import pytest
 from env.support import record_scenario, require_sig, scenario_rng
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.support.mmio import prepare_mmio_cnop_stream
+from tests.py.zhaoxinran.support.uncache import prepare_sv39_cfi_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -76,21 +78,22 @@ def _register_flow_snapshot_observer(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     scenario_key = "zhaoxinran/mmio/flow/wait-last-commit-ibuffer-nonempty"
-    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    base_seed, seed, rng, latency = _configure_random_latency(env, scenario_key)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "wait_last_commit_holds_request",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
     snapshots = _register_flow_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -135,22 +138,23 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
 def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_empty(env):
     """Construct WAIT_LAST_COMMIT with backend work visible but an empty IBuffer."""
     scenario_key = "zhaoxinran/mmio/flow/backend-nonempty-ibuffer-empty"
-    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    base_seed, seed, rng, latency = _configure_random_latency(env, scenario_key)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "backend_nonempty_keeps_wait_last_commit",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
     env.backend_model.backend_empty_for_dut = lambda: 0
     snapshots = _register_flow_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -182,22 +186,23 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
 def test_mmio_empty_release_enters_send_req_before_tl_a(env):
     """Release WAIT_LAST_COMMIT with both queues empty before TL-A starts."""
     scenario_key = "zhaoxinran/mmio/flow/empty-release-send-req-before-tl-a"
-    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    base_seed, seed, rng, latency = _configure_random_latency(env, scenario_key)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "send_req_precedes_tl_a",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
     env.backend_model.backend_empty_for_dut = lambda: 1
     snapshots = _register_flow_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -238,21 +243,22 @@ def test_mmio_empty_release_enters_send_req_before_tl_a(env):
 def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
     """Raise backend acceptance only after a pending MMIO has produced cfVec."""
     scenario_key = "zhaoxinran/mmio/flow/backend-accept-rise-with-cfvec"
-    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    base_seed, seed, rng, latency = _configure_random_latency(env, scenario_key)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "backend_accept_rise_with_cfvec",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
     snapshots = _register_flow_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -291,26 +297,27 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
 def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     """Drop backend acceptance while a pending MMIO has no visible cfVec."""
     scenario_key = "zhaoxinran/mmio/flow/backend-accept-fall-without-cfvec"
-    base_seed, seed, _, latency = _configure_random_latency(
+    base_seed, seed, rng, latency = _configure_random_latency(
         env,
         scenario_key,
         minimum=24,
         maximum=48,
     )
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "backend_accept_fall_without_cfvec",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
     snapshots = _register_flow_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     for _ in range(512):
@@ -355,13 +362,8 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
 def test_mmio_send_req_ibuffer_stall_suppresses_tl_a(env):
     """Use a legal PBMT.NC request to hold SEND_REQ under IBuffer stall."""
     scenario_key = "zhaoxinran/mmio/flow/send-req-ibuffer-stall"
-    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
-    expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=uncache._NORMAL_BASE,
-        paddr=uncache._NORMAL_PHYS_BASE,
-        instr_count=4096,
-    )
+    base_seed, seed, rng, latency = _configure_random_latency(env, scenario_key)
+    expected, mapping = prepare_sv39_cfi_stream(env, rng, instr_count=4096)
     record_scenario(
         env,
         scenario_key,
@@ -376,7 +378,7 @@ def test_mmio_send_req_ibuffer_stall_suppresses_tl_a(env):
     )
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
-    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    uncache._configure_exec_attrs_16k(env, base_addr=mapping.paddr & ~0x3FFF)
     env.backend_model.set_can_accept(0)
     uncache._force_redirect_to(env, mapping.vaddr)
 

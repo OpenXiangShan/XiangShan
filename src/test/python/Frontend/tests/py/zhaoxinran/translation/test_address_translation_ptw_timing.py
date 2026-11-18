@@ -14,6 +14,7 @@ from env.sequences import (
     TranslationSectorLane,
 )
 from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
+from tests.py.support.translation_context_switch import _context_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -31,6 +32,8 @@ def _randomize_ptw_timing(
 ) -> TranslationScenario:
     scenario_key = f"zhaoxinran/translation/ptw-timing/{scenario.scenario_id}"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    entry, _, _ = _context_entry(scenario_key)
+    pa_delta = entry.pa - scenario.pa
     latency = rng.randint(1, 4)
     latency_max = (
         rng.randint(latency, 8)
@@ -44,6 +47,13 @@ def _randomize_ptw_timing(
         ready_low_cycles = rng.randint(1, 4)
     randomized = replace(
         scenario,
+        va=entry.va,
+        pa=entry.pa,
+        gpa=scenario.gpa + entry.va - scenario.va if scenario.gpa is not None else None,
+        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
+        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
+        s1_sector_lanes=tuple(replace(lane, ppn=lane.ppn + (pa_delta >> 12))
+                              for lane in scenario.s1_sector_lanes),
         ptw_response_latency=latency,
         ptw_response_latency_max=latency_max,
         ptw_response_seed=seed,
@@ -57,8 +67,9 @@ def _randomize_ptw_timing(
         seed=seed,
         parameters={
             "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
+            "va": randomized.va,
+            "pa": randomized.pa,
+            "gpa": randomized.gpa,
             "translation_mode": scenario.mode,
             "stage2_mode": scenario.stage2_mode,
             "s2xlate": scenario.s2xlate,

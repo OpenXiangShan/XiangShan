@@ -6,7 +6,7 @@ import pytest
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationScenarioBuilder
 from env.support import PmpPmaConfig
-from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
+from tests.py.support.translation_scenarios import FAULT_NOP_PAYLOAD, randomize_translation_fault_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -20,7 +20,6 @@ pytestmark = pytest.mark.parametrize(
 _VA = 0x8020_0F00
 _PA = 0x8040_0F00
 _GPA = 0x8060_0F00
-_PAYLOAD = b"\x13\x00\x00\x00" * 512
 
 
 def _s1_scenario(
@@ -34,7 +33,7 @@ def _s1_scenario(
         scenario_id=scenario_id,
         va=_VA,
         pa=_PA,
-        payload=_PAYLOAD,
+        payload=FAULT_NOP_PAYLOAD,
         page_count=2,
         mode="sv39",
         s1_pte=pte,
@@ -50,7 +49,7 @@ def _s2_scenario(scenario_id: str, *, pte: TranslationPte, all_stage: bool) -> T
         "scenario_id": scenario_id,
         "va": _VA,
         "pa": _PA,
-        "payload": _PAYLOAD,
+        "payload": FAULT_NOP_PAYLOAD,
         "page_count": 2,
         "stage2_mode": "sv39",
         "priv_virt": 1,
@@ -148,15 +147,11 @@ _PTE_PERMISSION_CASES = (
 @pytest.mark.parametrize("scenario,expected_fault", _PTE_PERMISSION_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_address_translation_pte_permission(env, scenario: TranslationScenario, expected_fault: str) -> None:
-    scenario = _randomize_ptw_response_timing(
+    scenario = randomize_translation_fault_entry(
         env,
         scenario,
         scenario_key=f"zhaoxinran/translation/pte-permission/{scenario.scenario_id}",
-        parameters={
-            "s2xlate": scenario.s2xlate,
-            "expected_path": "fault",
-            "expected_fault": expected_fault,
-        },
+        expected_fault=expected_fault,
     )
     initialize_frontend(
         env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)

@@ -8,6 +8,7 @@ from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.support.mmio import prepare_mmio_cnop_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -29,17 +30,18 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "a_fire_enters_wait_resp_once",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.set_a_ready(0)
     snapshots: list[dict[str, int | None]] = []
 
@@ -48,9 +50,9 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
         snapshots.append(sample)
 
     env.register_cycle_observer(capture)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_uncache_a_valid_addr(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_uncache_a_valid_addr(env, pc, max_cycles=8000)
     stalled = [
         sample
         for sample in snapshots
@@ -60,7 +62,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     assert stalled, {"snapshots": snapshots[-32:]}
 
     env.uncache_agent.set_a_ready(None)
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_request_addr(env, pc, max_cycles=8000)
     assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     fire_cycle = min(
@@ -68,7 +70,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
         for sample in snapshots
         if sample["tl_a_valid"] == 1
         and sample["tl_a_ready"] == 1
-        and sample["tl_a_addr"] == uncache._MMIO_BASE
+        and sample["tl_a_addr"] == pc
     )
     first_d_cycle = min(
         sample["cycle"] for sample in snapshots if sample["tl_d_valid"] == 1
@@ -86,17 +88,18 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "ibuffer_ready_drives_tl_a",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     snapshots: list[dict[str, int | None]] = []
 
     def capture(cycle: int, active_env) -> None:
@@ -104,9 +107,9 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
         snapshots.append(sample)
 
     env.register_cycle_observer(capture)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_uncache_a_valid_addr(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_uncache_a_valid_addr(env, pc, max_cycles=8000)
     assert any(
         sample["ifu_stall"] == 0
         and sample["tl_a_valid"] == 1
@@ -114,5 +117,5 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
         for sample in snapshots
     ), {"snapshots": snapshots[-32:]}
     assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
-    assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
     assert not env.monitor.get_errors()

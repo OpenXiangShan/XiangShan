@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from env.support import PC_MEMORY, PcBoundary, random_pc, scenario_rng
+from env.support import PC_MEMORY, PcBoundary, PcMapping, PcMemory, random_pc, scenario_rng
 
 
 _VA = (0x80000000, 0x80080000)
@@ -72,11 +72,55 @@ def test_random_pc_selects_an_instruction_inside_preloaded_mmio_image() -> None:
         assert placed.memory.mark_mmio
 
 
+def test_random_pc_uses_real_noncontiguous_page_mappings() -> None:
+    mappings = (
+        PcMapping(0x80000000, 0x80400000, 0x1000),
+        PcMapping(0x80001000, 0x80600000, 0x1000),
+    )
+    addresses = {
+        random_pc(random.Random(seed), mappings=mappings, entry_offsets=(0xFFE,),
+                  boundaries=(PcBoundary(0x1000),), instruction_bytes=4)
+        for seed in range(30)
+    }
+    assert {(item.va, item.pa) for item in addresses} == {
+        (0x80000FFE, 0x80400FFE), (0x80001FFE, 0x80600FFE),
+    }
+
+
+def test_random_pc_selects_only_declared_entries_in_a_narrow_window() -> None:
+    mapping = PcMapping(0x80000040, 0x80400040, 0x20)
+    memory = PcMemory(pbmt=2, pma_cacheable=True, mark_mmio=False)
+    addresses = {
+        random_pc(random.Random(seed), mappings=(mapping,), entry_offsets=(0, 4, 14),
+                  loaded_pa_range=(0x80400040, 0x80400050), instruction_bytes=4,
+                  memory=memory).pa
+        for seed in range(30)
+    }
+    assert addresses == {0x80400040, 0x80400044}
+
+
+def test_random_pc_checks_va_and_pa_boundaries_independently() -> None:
+    placement = random_pc(
+        random.Random(1), mappings=(PcMapping(0x80000000, 0x80401000, 0x1000),),
+        entry_offsets=(0xFFE,),
+        boundaries=(PcBoundary(0x1000), PcBoundary(0x2000, address="pa")),
+    )
+    assert (placement.va, placement.pa) == (0x80000FFE, 0x80401FFE)
+
+
+def test_random_pc_checks_non_dividing_boundary_on_actual_slot_address() -> None:
+    placement = random_pc(
+        random.Random(1), va_range=_VA, pa_range=_PA,
+        boundaries=(PcBoundary(24),),
+    )
+    assert placement.pc % 24 == 22
+
+
 @pytest.mark.parametrize("options", [
     {"boundaries": (PcBoundary(0x1000), PcBoundary(0x1000, relation="start"))},
     {"offsets": (0xFFF,), "alignment": 2},
-    {"boundaries": (PcBoundary(24),)},
     {"boundaries": (PcBoundary(64, width=65),)},
+    {"boundaries": (PcBoundary(64, address="gpa"),)},
     {"pa_range": (0x80400001, 0x80401000)},
     {"same_address": True},
     {"loaded_pa_range": (0x80400000, 0x80400001), "instruction_bytes": 4},
@@ -86,3 +130,19 @@ def test_random_pc_selects_an_instruction_inside_preloaded_mmio_image() -> None:
 def test_random_pc_rejects_invalid_or_unsatisfiable_constraints(options) -> None:
     with pytest.raises(ValueError):
         random_pc(random.Random(1), **{"va_range": _VA, "pa_range": _PA, **options})
+
+
+@pytest.mark.parametrize("options", [
+    {"mappings": ()},
+    {"mappings": (PcMapping(0, 0, 16),)},
+    {"mappings": (PcMapping(-1, 0, 16),)},
+    {"mappings": (PcMapping(0, 1, 16),)},
+    {"mappings": (PcMapping(0, 2, 16),)},
+    {"mappings": (PcMapping(0, 0, 16),), "entry_offsets": (20,)},
+    {"mappings": (PcMapping(0, 0, 16),), "loaded_pa_range": (16, 32)},
+    {"mappings": (PcMapping(0, 0, 16),), "offsets": (0,)},
+    {"mappings": (PcMapping(0, 0x1000, 16),), "same_address": True},
+])
+def test_random_pc_rejects_invalid_mapped_entry_constraints(options) -> None:
+    with pytest.raises(ValueError):
+        random_pc(random.Random(1), **options)

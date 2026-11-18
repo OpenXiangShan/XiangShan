@@ -8,14 +8,18 @@ import pytest
 
 from env.sequences import CheckPcSequence, LoadProgramSequence, RunUntilCommitSequence
 from env.core.transactions import CommitTarget, PcSequenceExpectation, ProgramImage
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.support import record_scenario, scenario_rng
+from tests.py.zhaoxinran.support.branch import initialize_branch_entry, jal_forward_program
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 logger = logging.getLogger(__name__)
 
 NOP = 0x00000013
-BASE = 0x80000000
+pytestmark = pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True,
+)
 
 
 def _jal(rd: int, offset: int) -> int:
@@ -67,7 +71,7 @@ def _instructions_to_bytes(instructions: Iterable[int]) -> bytes:
     return bytes(buf)
 
 
-def _program_image(instructions: Iterable[int], base_addr: int = BASE) -> ProgramImage:
+def _program_image(instructions: Iterable[int], base_addr: int) -> ProgramImage:
     return ProgramImage(payload=_instructions_to_bytes(instructions), base_addr=base_addr)
 
 
@@ -84,28 +88,28 @@ def _rand_resolve_delays(rng: Random, env) -> tuple:
 def test_jal_forward_jump_observes_target_pc(env):
     scenario_key = "zhaoxinran/multi-branch/jal-forward-target"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    target_index = rng.randint(2, 16)
-    prog = [NOP] * 64
-    prog[0] = _jal(0, target_index * 4)
-    payload = _instructions_to_bytes(prog)
+    placement, payload, target_pc = jal_forward_program(rng)
+    pc = placement.pc
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "source_pc": BASE,
-            "target_pc": BASE + target_index * 4,
+            "source_pc": pc,
+            "target_pc": target_pc,
             "payload_sha256": hashlib.sha256(payload).hexdigest(),
             "expected_path": "forward_jal_target_observed",
         },
     )
 
-    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=BASE), step_cycles=1).run(env)
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=placement.pa)).run(env)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=pc, bare_mode=True, reset_cycles=20))
+    env.monitor.set_expected_pc(pc)
 
     assert CheckPcSequence(
         expectation=PcSequenceExpectation(
-            expected_pcs=(BASE, BASE + target_index * 4),
+            expected_pcs=(pc, target_pc),
             max_cycles=600,
         ),
     ).run(env)
@@ -115,6 +119,7 @@ def test_jal_forward_jump_observes_target_pc(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_jal_resolve_drains_pending_queue(env):
     scenario_key = "zhaoxinran/multi-branch/jal-resolve-drain"
+    base = initialize_branch_entry(env, scenario_key)
     base_seed, seed, rng = scenario_rng(scenario_key)
     min_delay, max_delay = _rand_resolve_delays(rng, env)
 
@@ -127,8 +132,9 @@ def test_jal_resolve_drains_pending_queue(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "jal_pc": BASE + 8 * 4,
-            "target_pc": BASE + 10 * 4,
+            "pc": base,
+            "jal_pc": base + 8 * 4,
+            "target_pc": base + 10 * 4,
             "resolve_min_delay": min_delay,
             "resolve_max_delay": max_delay,
             "payload_sha256": hashlib.sha256(payload).hexdigest(),
@@ -136,7 +142,7 @@ def test_jal_resolve_drains_pending_queue(env):
         },
     )
 
-    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=BASE), step_cycles=1).run(env)
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=base), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=3000)).run(env)
 
     assert commits >= 6
@@ -156,6 +162,7 @@ def test_multi_branch_random_positions(env):
     Randomized: prog_size, stride, branch type at each slot, resolve delays.
     """
     scenario_key = "zhaoxinran/multi-branch/random-positions"
+    base = initialize_branch_entry(env, scenario_key)
     base_seed, seed, rng = scenario_rng(scenario_key)
     prog_size = rng.choice([64, 96, 128])
     stride = rng.randint(2, 5)
@@ -184,6 +191,7 @@ def test_multi_branch_random_positions(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": base,
             "prog_size": prog_size,
             "stride": stride,
             "positions": positions,
@@ -201,7 +209,7 @@ def test_multi_branch_random_positions(env):
         seed, prog_size, stride, positions, n_jal, n_beq, min_d, max_d, target_commits,
     )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog, base), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(
         target=CommitTarget(target_count=target_commits, max_cycles=5000),
     ).run(env)
@@ -233,9 +241,10 @@ def test_multi_cfi_per_ftq_entry(env):
     This ensures:
       - Multiple CFIs per FTQ entry (>= 2 BEQs dispatched from the same block).
       - At least one CFI target per block crosses a fetch-block boundary.
-      - Each FTQ entry has a distinct start_addr (0x80000040, 0x80000080, ...).
+      - Each FTQ entry has a distinct start_addr (base + 0x40, base + 0x80, ...).
     """
     scenario_key = "zhaoxinran/multi-branch/multi-cfi-per-ftq-entry"
+    base = initialize_branch_entry(env, scenario_key)
     base_seed, seed, rng = scenario_rng(scenario_key)
 
     BLOCK_SIZE = 16       # 16 × 4 B = 64-byte fetch block
@@ -263,8 +272,7 @@ def test_multi_cfi_per_ftq_entry(env):
             prog[pos] = _beq(0, 0, offset_bytes)
             n_beq += 1
 
-    # Backward JAL to a non-BASE block boundary so steady-state loop never
-    # resets to 0x80000000.
+    # Backward JAL to a noninitial block boundary.
     loop_target_block = rng.randint(1, block_count - 2)
     loop_target_pos   = loop_target_block * BLOCK_SIZE
     jal_pos           = prog_size - 1
@@ -277,6 +285,7 @@ def test_multi_cfi_per_ftq_entry(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": base,
             "block_count": block_count,
             "beqs_per_block": beqs_per_block,
             "loop_target_block": loop_target_block,
@@ -293,7 +302,7 @@ def test_multi_cfi_per_ftq_entry(env):
         min_d, max_d, target_commits,
     )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog, base), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(
         target=CommitTarget(target_count=target_commits, max_cycles=8000),
     ).run(env)
@@ -324,6 +333,7 @@ def test_multi_branch_dense_loop(env):
     Randomized: loop_size, beq_stride, target_commits, resolve delays.
     """
     scenario_key = "zhaoxinran/multi-branch/dense-loop"
+    base = initialize_branch_entry(env, scenario_key)
     base_seed, seed, rng = scenario_rng(scenario_key)
 
     loop_size = rng.randint(8, 16)
@@ -349,6 +359,7 @@ def test_multi_branch_dense_loop(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": base,
             "loop_size": loop_size,
             "beq_stride": beq_stride,
             "beq_positions": beq_positions,
@@ -364,7 +375,7 @@ def test_multi_branch_dense_loop(env):
         seed, loop_size, beq_stride, beq_positions, n_beq, min_d, max_d, target_commits,
     )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog, base), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(
         target=CommitTarget(target_count=target_commits, max_cycles=6000),
     ).run(env)
@@ -394,6 +405,7 @@ def test_large_loop_multi_segment(env):
       - branch count >= 1 if any BEQ/BNE was placed
     """
     scenario_key = "zhaoxinran/multi-branch/large-loop-multi-segment"
+    base = initialize_branch_entry(env, scenario_key)
     base_seed, seed, rng = scenario_rng(scenario_key)
 
     prog_size = rng.choice([1024, 1280, 1536])
@@ -448,6 +460,7 @@ def test_large_loop_multi_segment(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": base,
             "prog_size": prog_size,
             "segment_count": N_SEG,
             "segment_length": seg_len,
@@ -467,7 +480,7 @@ def test_large_loop_multi_segment(env):
         min_d, max_d, target_commits,
     )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog, base), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(
         target=CommitTarget(target_count=target_commits, max_cycles=30000),
     ).run(env)

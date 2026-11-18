@@ -13,6 +13,7 @@ from tests.py.support.gstage_provenance import (
     scenario as _scenario,
     run_gstage_provenance,
 )
+from tests.py.zhaoxinran.support.translation import randomize_gstage_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -88,7 +89,7 @@ def test_address_translation_gstage_provenance(
     scenario: TranslationScenario,
     expected_fault: str,
 ) -> None:
-    run_gstage_provenance(env, scenario, expected_fault)
+    run_gstage_provenance(env, randomize_gstage_entry(env, scenario), expected_fault)
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -131,4 +132,6 @@ def test_nonleaf_pte_gpf_frontend_gpaddr(env) -> None:
             ),
         ),
     )
+    # Preserve VPN[0] so the nonleaf fault still refers to the same PTE slot.
+    scenario = randomize_gstage_entry(env, scenario, stride=0x20_0000)
     run_gstage_provenance(env, scenario, "instruction_guest_page_fault")

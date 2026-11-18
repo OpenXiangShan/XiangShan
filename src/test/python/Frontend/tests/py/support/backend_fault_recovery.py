@@ -125,14 +125,16 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
     return records
 
 
-def _backend_fault_recovery_scenarios(fault_kind: str) -> tuple[TranslationScenario, TranslationScenario]:
-    region_base = _PA & ~0x3FFF
-    second_page_va = (_VA & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
-    second_page_pa = (_PA & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
+def _backend_fault_recovery_scenarios(
+    fault_kind: str, *, va: int = _VA, pa: int = _PA,
+) -> tuple[TranslationScenario, TranslationScenario]:
+    region_base = pa & ~0x3FFF
+    second_page_va = (va & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
+    second_page_pa = (pa & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
     normal = _scenario(
         f"backend-{fault_kind}-redirect-recovery-target",
-        va=_VA,
-        pa=_PA,
+        va=va,
+        pa=pa,
         payload=_CROSS_PAGE_PAYLOAD,
         page_count=2,
         pmp_entries=(
@@ -148,7 +150,7 @@ def _backend_fault_recovery_scenarios(fault_kind: str) -> tuple[TranslationScena
             normal,
             scenario_id="backend-iaf-redirect-source",
             pmp_entries=(
-                _entry("pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), _PA & ~(_PAGE_SIZE - 1), _PAGE_SIZE),
+                _entry("pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), pa & ~(_PAGE_SIZE - 1), _PAGE_SIZE),
                 _entry("pmp", 1, PmpPmaConfig(match="napot", read=True, execute=False), second_page_pa, _PAGE_SIZE),
             ),
             expected_path="fault",
@@ -201,8 +203,10 @@ def _run_backend_fault_redirect_recovery(
     redirect_faults: dict[str, int],
     *,
     complete_recovery: bool = False,
+    va: int = _VA,
+    pa: int = _PA,
 ) -> None:
-    fault, normal = _backend_fault_recovery_scenarios(fault_kind)
+    fault, normal = _backend_fault_recovery_scenarios(fault_kind, va=va, pa=pa)
     fault_pc = (fault.va & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
     builder = TranslationScenarioBuilder(env)
     records = _capture_backend_fault_recovery(env)

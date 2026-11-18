@@ -11,7 +11,9 @@ from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.support.instructions import encode_jal_x0
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import PmpPmaConfig, random_pc, record_scenario, scenario_rng
+
+from tests.py.zhaoxinran.support.mmio import prepare_mmio_cnop_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -33,6 +35,7 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     scenario_key = "zhaoxinran/mmio/handoff/reserved-ibuffer-slot"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 24)
+    pc = prepare_mmio_cnop_stream(env, rng)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -40,14 +43,14 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "expected_path": "reserved_ibuffer_slot_under_pressure",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
     snapshots = _register_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -72,7 +75,7 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
         for sample in snapshots
     ), {"snapshots": snapshots[-32:]}
     env.backend_model.set_can_accept(1)
-    assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
     assert not env.monitor.get_errors()
 
 
@@ -81,7 +84,9 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     scenario_key = "zhaoxinran/mmio/handoff/backend-redirect-wins"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(24, 48)
-    target_pc = uncache._MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    target_offset = rng.randrange(0x40, 0x100, 8)
+    pc = prepare_mmio_cnop_stream(env, rng)
+    target_pc = pc + target_offset
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -89,14 +94,14 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
+            "pc": pc,
             "latency": latency,
             "redirect_target": target_pc,
             "expected_path": "backend_redirect_wins_response",
         },
     )
-    uncache._prepare_mmio_cnop_stream(env)
     snapshots = _register_snapshot_observer(env)
-    uncache._initialize_mmio_fetch(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert env.uncache_agent.pending
@@ -147,7 +152,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     redirect_cycle = min(int(sample["cycle"]) for sample in overlap)
     assert uncache._wait_for_observed_pc(env, target_pc, max_cycles=8000)
     assert not any(
-        int(item.cycle) >= redirect_cycle and int(item.pc) == uncache._MMIO_BASE
+        int(item.cycle) >= redirect_cycle and int(item.pc) == pc
         for item in env.monitor.observations
     )
     assert not env.monitor.get_errors()
@@ -157,7 +162,12 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
 @pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(env):
     """An older JAL redirect cancels a younger MMIO request before TL-A."""
-    source_page = uncache._NORMAL_BASE
+    _, _, rng = scenario_rng("zhaoxinran/mmio/natural-predchecker-redirect/pc")
+    region = (uncache._NORMAL_BASE, uncache._NORMAL_BASE + 0x10_0000)
+    source_page = random_pc(
+        rng, va_range=region, pa_range=region, slot_size=0x4000,
+        offsets=(0,), same_address=True,
+    ).pc
     mmio_page = source_page + uncache._SV39_PAGE_SIZE
     recovery_page = mmio_page + uncache._SV39_PAGE_SIZE
     cacheable_start = mmio_page - uncache._FETCH_BLOCK_SIZE

@@ -8,6 +8,7 @@ from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.support.uncache import prepare_sv39_cfi_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -18,12 +19,7 @@ def test_pbmt_nc_non_mmio_enters_uncache_send_path(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=uncache._NORMAL_BASE,
-        paddr=uncache._NORMAL_PHYS_BASE,
-        pbmt=uncache._PBMT_NC,
-    )
+    expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -56,12 +52,7 @@ def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
     latency = rng.randint(1, 16)
     blocked_cycles = rng.randint(48, 80)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=uncache._NORMAL_BASE,
-        paddr=uncache._NORMAL_PHYS_BASE,
-        pbmt=uncache._PBMT_NC,
-    )
+    _expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     record_scenario(
         env,
         scenario_key,

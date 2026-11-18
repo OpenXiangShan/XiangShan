@@ -5,10 +5,8 @@ from dataclasses import replace
 
 import pytest
 
-from env.core.transactions import ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import (
-    LoadProgramSequence,
     TranslationPmpPmaEntry,
     TranslationPte,
     TranslationPtwResponseOverride,
@@ -19,6 +17,8 @@ from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
 from tests.py.support import translation_faults
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+
+from tests.py.zhaoxinran.support.mmio import prepare_sv39_mmio_page_tail
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -60,21 +60,6 @@ def _randomize_mmio_fault_timing(
     return randomized
 
 
-def _prepare_cross_page_mmio_rvi(env) -> tuple[int, int, bytes]:
-    cross_page_va = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
-    cross_page_pa = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE - 2
-    payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
-    payload += int(uncache._CNOP).to_bytes(2, "little") * 8
-    env.memory.mmio_ranges.append(
-        (uncache._MMIO_BASE, uncache._MMIO_BASE + 2 * uncache._SV39_PAGE_SIZE)
-    )
-    LoadProgramSequence(
-        image=ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE - 2),
-        step_cycles=0,
-    ).run(env)
-    return cross_page_va, cross_page_pa, payload
-
-
 def _cross_page_fault_scenario(
     *,
     case_id: str,
@@ -114,7 +99,7 @@ def _cross_page_fault_scenario(
     if s2xlate == 3:
         translation.update(
             {
-                "gpa": uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE - 2,
+                "gpa": va + (uncache._NORMAL_PHYS_BASE - uncache._NORMAL_BASE),
                 "s1_pte": TranslationPte(asid=5, vmid=7),
                 "s2_pte": TranslationPte(vmid=7),
                 "vsatp_asid": 5,
@@ -166,7 +151,9 @@ def test_mmio_cross_page_second_page_translation_fault(
     expected_result: str,
     expected_fault: str,
 ):
-    cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
+    cross_page_va, cross_page_pa, payload = prepare_sv39_mmio_page_tail(
+        env, scenario_rng(f"zhaoxinran/mmio/pc/cross-page-second/{s2xlate}/{response_field}")[2],
+    )
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
     gpaddr_writes = translation_faults._capture_gpaddr_writes(env)
     cfvec_deliveries = translation_faults._capture_cfvec_deliveries(env)
@@ -253,7 +240,9 @@ def test_mmio_cross_page_second_page_translation_fault(
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
     """A first-page MMIO PMP execute denial must be IAF, never illegal."""
-    cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
+    cross_page_va, cross_page_pa, payload = prepare_sv39_mmio_page_tail(
+        env, scenario_rng("zhaoxinran/mmio/pc/page-tail-first-pmp")[2],
+    )
     first_page_pa = cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)
     scenario = TranslationScenario(
         scenario_id="mmio-page-tail-first-page-pmp-execute-fault",
@@ -371,7 +360,9 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
 @pytest.mark.funcov_bins("BIN-1126")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
-    cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
+    cross_page_va, cross_page_pa, payload = prepare_sv39_mmio_page_tail(
+        env, scenario_rng("zhaoxinran/mmio/pc/cross-page-second-pmp")[2],
+    )
     first_page_pa = cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)
     next_page_pa = first_page_pa + uncache._SV39_PAGE_SIZE
     scenario = TranslationScenario(

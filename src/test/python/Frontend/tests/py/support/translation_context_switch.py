@@ -11,7 +11,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until
 
 
@@ -66,8 +66,8 @@ def randomize_context_timing(
     return randomized
 
 
-def permissions() -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
-    region_base = OLD_PA & ~0x3FFF
+def permissions(*, pa: int = OLD_PA) -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
+    region_base = pa & ~0x3FFF
     return (
         (
             TranslationPmpPmaEntry(
@@ -94,7 +94,7 @@ def scenario(
     page_count: int = 2,
     **kwargs,
 ) -> TranslationScenario:
-    pmp_entries, pma_entries = permissions()
+    pmp_entries, pma_entries = permissions(pa=pa)
     return TranslationScenario(
         scenario_id=scenario_id,
         va=va,
@@ -124,12 +124,57 @@ def translation_complete(env) -> bool:
     )
 
 
+def _context_entry(scenario_key: str):
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    entry = random_pc(
+        rng,
+        mappings=(PcMapping(OLD_VA & ~0x1F_FFFF, OLD_PA & ~0x1F_FFFF, 0x20_0000),),
+        entry_offsets=tuple(slot * 0x4000 + 0xF00 for slot in range(128)),
+        instruction_bytes=4,
+    )
+    return entry, base_seed, seed
+
+
+def satp_switch_scenarios(env) -> tuple[TranslationScenario, TranslationScenario]:
+    scenario_key = "zhaoxinran/translation/context/satp-switch-placement"
+    entry, base_seed, seed = _context_entry(scenario_key)
+    old = scenario("translation-context-switch-old", va=entry.va, pa=entry.pa, asid=3)
+    new = scenario("translation-context-switch-new", va=entry.va + 0x2000, pa=entry.pa + 0x2000, asid=9)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={"va": old.va, "pa": old.pa, "new_va": new.va, "new_pa": new.pa},
+    )
+    return old, new
+
+
+def same_vpn_context_scenarios(env) -> tuple[TranslationScenario, TranslationScenario]:
+    scenario_key = "zhaoxinran/translation/context/same-vpn-placement"
+    entry, base_seed, seed = _context_entry(scenario_key)
+    old = replace(
+        scenario("translation-context-csr-signature-old", va=entry.va, pa=entry.pa, asid=3),
+        s1_pte=TranslationPte(asid=3, pbmt=0),
+    )
+    new = replace(
+        scenario("translation-context-csr-signature-new", va=entry.va, pa=entry.pa, asid=9),
+        s1_pte=TranslationPte(asid=9, pbmt=1),
+    )
+    record_scenario(
+        env, scenario_key, base_seed=base_seed, seed=seed,
+        parameters={"va": old.va, "pa": old.pa, "old_asid": old.satp_asid, "new_asid": new.satp_asid},
+    )
+    return old, new
+
+
 def run_satp_asid_switch(env) -> None:
+    old_scenario, new_scenario = satp_switch_scenarios(env)
     old = randomize_context_timing(
-        env, scenario("translation-context-switch-old", va=OLD_VA, pa=OLD_PA, asid=3)
+        env, old_scenario
     )
     new = randomize_context_timing(
-        env, scenario("translation-context-switch-new", va=NEW_VA, pa=NEW_PA, asid=9)
+        env, new_scenario
     )
     builder = TranslationScenarioBuilder(env)
 
@@ -137,37 +182,37 @@ def run_satp_asid_switch(env) -> None:
     # reset so its PMP/PMA writes remain live when the DUT starts fetching.
     new_state = builder.build(new)
     initialize_frontend(
-        env, FrontendInitConfig(reset_vector=OLD_VA, bare_mode=False, reset_cycles=20)
+        env, FrontendInitConfig(reset_vector=old.va, bare_mode=False, reset_cycles=20)
     )
     old_state = builder.build(old)
     for page in range(new.page_count):
         env.page_table.map_page(
-            (NEW_VA >> 12) + page,
-            (NEW_PA >> 12) + page,
+            (new.va >> 12) + page,
+            (new.pa >> 12) + page,
             **new.s1_pte.as_mapping_kwargs(),
         )
 
     env.monitor.clear()
-    env.monitor.set_expected_pc(OLD_VA)
+    env.monitor.set_expected_pc(old.va)
     env.arm_translation_scenario(old_state)
 
     wait_until(
         env,
-        lambda: any(int(observation.pc) == OLD_VA for observation in env.monitor.observations),
+        lambda: any(int(observation.pc) == old.va for observation in env.monitor.observations),
         description="old-context cfVec source",
     )
 
     prepared_context = env.prepare_translation_context_change(satp_asid=new.satp_asid)
-    prepared_sfence = env.prepare_sfence(addr=OLD_VA, rs1=1, rs2=1, ident=old.satp_asid)
+    prepared_sfence = env.prepare_sfence(addr=old.va, rs1=1, rs2=1, ident=old.satp_asid)
     new_state = replace(new_state, translation_epoch=env.translation_epoch)
-    env.monitor.set_expected_pc(NEW_VA)
+    env.monitor.set_expected_pc(new.va)
     env.arm_translation_scenario(new_state)
     env.translation_oracle.set_fetch_observation_ready(ready=False)
 
     redirect = InjectRedirectSequence(
         RedirectTxn(
-            source_pc=OLD_VA,
-            target_pc=NEW_VA,
+            source_pc=old.va,
+            target_pc=new.va,
             reason="satp-asid-switch",
             satp_flush=1,
         )
@@ -186,6 +231,6 @@ def run_satp_asid_switch(env) -> None:
     active = env.translation_oracle.get_active()
     assert active is not None
     assert active["translation_epoch"] == env.translation_epoch
-    assert active["expected_ptw_requests"][0]["vpn"] == NEW_VA >> 12
-    assert any(int(observation.pc) == NEW_VA for observation in env.monitor.observations)
+    assert active["expected_ptw_requests"][0]["vpn"] == new.va >> 12
+    assert any(int(observation.pc) == new.va for observation in env.monitor.observations)
     assert not env.get_errors()

@@ -13,7 +13,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.cross_page_cases import run_mapped_cross_page_rvi
 
 
@@ -43,6 +43,15 @@ def _randomize_normal_ptw_timing(
 ) -> TranslationScenario:
     scenario_key = f"zhaoxinran/translation/normal/{scenario.scenario_id}"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    _, placement_seed, placement_rng = scenario_rng(f"{scenario_key}/pc")
+    entry = random_pc(
+        placement_rng,
+        mappings=(PcMapping(scenario.va & ~0x1F_FFFF, scenario.pa & ~0x1F_FFFF, 0x20_0000),),
+        entry_offsets=tuple(slot * 0x8000 + (scenario.va & 0x7FFF) for slot in range(64)),
+        instruction_bytes=4,
+    )
+    va_delta = entry.va - scenario.va
+    pa_delta = entry.pa - scenario.pa
     has_ptw = scenario.mode != "bare" or int(scenario.s2xlate) in (2, 3)
     latency = rng.randint(1, 5) if has_ptw else int(scenario.ptw_response_latency)
     latency_max = (
@@ -57,6 +66,15 @@ def _randomize_normal_ptw_timing(
         ready_low_cycles = rng.randint(1, 4)
     randomized = replace(
         scenario,
+        va=entry.va,
+        pa=entry.pa,
+        gpa=scenario.gpa + va_delta if scenario.gpa is not None else None,
+        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
+        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
+        s1_sector_lanes=tuple(
+            replace(lane, ppn=lane.ppn + ((va_delta if scenario.gpa is not None else pa_delta) >> 12))
+            for lane in scenario.s1_sector_lanes
+        ),
         ptw_response_latency=latency,
         ptw_response_latency_max=latency_max,
         ptw_response_seed=seed,
@@ -70,8 +88,10 @@ def _randomize_normal_ptw_timing(
         seed=seed,
         parameters={
             "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
+            "va": randomized.va,
+            "pa": randomized.pa,
+            "gpa": randomized.gpa,
+            "placement_seed": placement_seed,
             "page_count": scenario.page_count,
             "translation_mode": scenario.mode,
             "stage2_mode": scenario.stage2_mode,
@@ -634,11 +654,11 @@ def _assert_all_stage_pbmt_route(
         expected_paths=("uncache", "uncache"),
     )
     scenario = replace(scenario, pma_entries=_pma(first_cacheable=pma_cacheable))
+    scenario = _randomize_normal_ptw_timing(env, scenario, expected_paths)
     pa_lo = scenario.pa & ~(_PAGE_SIZE - 1)
     pa_hi = pa_lo + scenario.page_count * _PAGE_SIZE - 1
     if not pma_cacheable:
         env.memory.mmio_ranges.append((pa_lo, pa_hi))
-    scenario = _randomize_normal_ptw_timing(env, scenario, expected_paths)
     sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario),))
     sequence.initialize_first_phase(env)
 

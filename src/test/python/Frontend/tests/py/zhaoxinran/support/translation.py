@@ -12,12 +12,18 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
+from env.support import PcMapping, random_pc, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until as _wait_until
+from tests.py.support.backend_fault_recovery import (
+    _VA as _BACKEND_FAULT_VA,
+    _PA as _BACKEND_FAULT_PA,
+)
 from tests.py.support.translation_context_switch import (
     OLD_VA as _OLD_VA,
     OLD_PA as _OLD_PA,
     OLD_GPA as _OLD_GPA,
     PAYLOAD as _PAYLOAD,
+    _context_entry,
     permissions as _permissions,
     randomize_context_timing as _randomize_context_timing,
 )
@@ -57,15 +63,27 @@ def _all_stage_scenario(scenario_id: str) -> TranslationScenario:
     )
 
 
-def _sfence_stage_scenario(scenario_id: str, *, s2xlate: int) -> TranslationScenario:
+def _sfence_stage_scenario(env, scenario_id: str, *, s2xlate: int) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/sfence/{scenario_id}"
+    entry, base_seed, seed = _context_entry(scenario_key)
+    gpa = _OLD_GPA + entry.va - _OLD_VA
+    record_scenario(
+        env, scenario_key, base_seed=base_seed, seed=seed,
+        parameters={"va": entry.va, "pa": entry.pa, "gpa": gpa if s2xlate in (2, 3) else None,
+                    "s2xlate": s2xlate},
+    )
     if int(s2xlate) == 3:
-        return _all_stage_scenario(scenario_id)
+        pmp_entries, pma_entries = _permissions(pa=entry.pa)
+        return replace(
+            _all_stage_scenario(scenario_id), va=entry.va, pa=entry.pa, gpa=gpa,
+            pmp_entries=pmp_entries, pma_entries=pma_entries,
+        )
 
-    pmp_entries, pma_entries = _permissions()
+    pmp_entries, pma_entries = _permissions(pa=entry.pa)
     common = {
         "scenario_id": scenario_id,
-        "va": _OLD_VA,
-        "pa": _OLD_PA,
+        "va": entry.va,
+        "pa": entry.pa,
         "payload": _PAYLOAD,
         "page_count": 2,
         "pmp_entries": pmp_entries,
@@ -87,13 +105,93 @@ def _sfence_stage_scenario(scenario_id: str, *, s2xlate: int) -> TranslationScen
             mode="bare",
             stage2_mode="sv39",
             s2xlate=2,
-            gpa=_OLD_GPA,
+            gpa=gpa,
             s2_pte=TranslationPte(vmid=7),
             hgatp_vmid=7,
             priv_virt=1,
             **common,
         )
     raise ValueError(f"unsupported SFENCE stage s2xlate={s2xlate}")
+
+
+def randomize_translation_layout(
+    env, scenario: TranslationScenario, *, scenario_key: str, stride: int = 0x4000,
+) -> TranslationScenario:
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    span = max(0x20_0000, stride * 32)
+    entry = random_pc(
+        rng,
+        mappings=(PcMapping(scenario.va & ~0x1F_FFFF, scenario.pa & ~0x1F_FFFF, span),),
+        entry_offsets=tuple(range(scenario.va % stride, span, stride)),
+        instruction_bytes=4,
+    )
+    va_delta = entry.va - scenario.va
+    pa_delta = entry.pa - scenario.pa
+    relocated = replace(
+        scenario,
+        va=entry.va,
+        pa=entry.pa,
+        gpa=scenario.gpa + va_delta if scenario.gpa is not None else None,
+        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
+        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
+        ptw_response_overrides=tuple(
+            replace(item, vpn=item.vpn + (va_delta >> 12)) for item in scenario.ptw_response_overrides
+        ),
+        s1_sector_lanes=tuple(
+            replace(lane, ppn=lane.ppn + ((va_delta if scenario.s2xlate == 3 else pa_delta) >> 12))
+            for lane in scenario.s1_sector_lanes
+        ),
+        permission_probes=tuple(replace(probe, va=probe.va + va_delta) for probe in scenario.permission_probes),
+    )
+    record_scenario(
+        env, scenario_key, base_seed=base_seed, seed=seed,
+        parameters={"va": relocated.va, "pa": relocated.pa, "gpa": relocated.gpa},
+    )
+    return relocated
+
+
+def randomize_gstage_entry(env, scenario: TranslationScenario, *, stride: int = 0x4000) -> TranslationScenario:
+    return randomize_translation_layout(
+        env, scenario, scenario_key=f"zhaoxinran/translation/gstage/{scenario.scenario_id}/pc", stride=stride,
+    )
+
+
+def backend_fault_entry(env, scenario_key: str):
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    entry = random_pc(
+        rng,
+        mappings=(PcMapping(_BACKEND_FAULT_VA & ~0xFFF, _BACKEND_FAULT_PA & ~0xFFF, 0x10_0000),),
+        entry_offsets=tuple(range(0xF00, 0x10_0000, 0x4000)),
+    )
+    record_scenario(
+        env, scenario_key, base_seed=base_seed, seed=seed,
+        parameters={"reset_pc": entry.va + 0x100, "va": entry.va, "pa": entry.pa},
+    )
+    return entry
+
+
+def randomize_permission_entry(env, scenario: TranslationScenario) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/permission/{scenario.scenario_id}/pc"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    entry = random_pc(
+        rng,
+        mappings=(PcMapping(scenario.va & ~0x1F_FFFF, scenario.pa & ~0x1F_FFFF, 0x20_0000),),
+        entry_offsets=tuple(slot * 0x4000 + (scenario.va & 0x3FFF) for slot in range(128)),
+        instruction_bytes=4,
+    )
+    pa_delta = entry.pa - scenario.pa
+    relocated = replace(
+        scenario,
+        va=entry.va,
+        pa=entry.pa,
+        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
+        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
+    )
+    record_scenario(
+        env, scenario_key, base_seed=base_seed, seed=seed,
+        parameters={"va": relocated.va, "pa": relocated.pa},
+    )
+    return relocated
 
 
 def _run_sfence_retranslation(
@@ -159,7 +257,7 @@ def _run_sfence_scope_after_refill(
 ) -> None:
     scenario = _randomize_context_timing(
         env,
-        _sfence_stage_scenario(scenario_id, s2xlate=0),
+        _sfence_stage_scenario(env, scenario_id, s2xlate=0),
     )
     _run_sfence_retranslation(
         env,

@@ -10,7 +10,6 @@ from env.runtime.pylib import frontend_offset_path
 
 from env.sequences import (
     InjectRedirectSequence,
-    LoadProgramSequence,
     RunUntilCommitSequence,
     TranslationPmpPmaEntry,
     TranslationPtwResponseOverride,
@@ -22,8 +21,8 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSfenceAction,
 )
-from env.core.transactions import BackendRedirectClass, CommitTarget, ProgramImage, RedirectTxn
-from env.support import PmpPmaConfig, record_scenario, require_sig, scenario_rng
+from env.core.transactions import BackendRedirectClass, CommitTarget, RedirectTxn
+from env.support import PmpPmaConfig, RandomPc, record_scenario, require_sig, scenario_rng
 from tests.py.support.dut_support import (
     _assert_observed_instrs,
     _first_observed_index,
@@ -36,8 +35,6 @@ from tests.py.support.translation_scenarios import _randomize_translation_timing
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
     _CNOP,
-    _CROSS_BEAT_PC,
-    _CROSS_PAGE_PC,
     _FETCH_BLOCK_SIZE,
     _IFU_BACKEND_REDIRECT_SIGNALS,
     _IFU_PREV_HALF_RVI_SIGNALS,
@@ -48,9 +45,6 @@ from tests.py.support.uncache_scenarios import (
     _INSTR_UNCACHE_REFILL_RESP,
     _JAL_X0_PLUS_4,
     _MMIO_BASE,
-    _NORMAL_ALT_BASE,
-    _NORMAL_ALT_PHYS_BASE,
-    _NORMAL_BASE,
     _NORMAL_PHYS_BASE,
     _PBMT_IO,
     _PBMT_NC,
@@ -67,12 +61,6 @@ from tests.py.support.uncache_scenarios import (
     _initialize_mmio_fetch,
     _initialize_sv39_fetch,
     _pending_uncache_samples,
-    _prepare_cross_beat_rvi_stream,
-    _prepare_cross_page_rvc_stream,
-    _prepare_cross_page_rvi_stream,
-    _prepare_mmio_cnop_stream,
-    _prepare_normal_and_mmio_cnop_stream,
-    _prepare_sv39_dual_nc_cacheable_stream,
     _prepare_sv39_mapped_pbmt_nc_cfi_stream,
     _pulse_sfence,
     _register_prev_half_rvi_observer,
@@ -86,11 +74,21 @@ from tests.py.support.uncache_scenarios import (
     _wait_for_uncache_a_valid_addr,
 )
 
+from tests.py.zhaoxinran.support.mmio import (
+    prepare_mmio_cnop_stream,
+    prepare_mmio_cross_beat_stream,
+    prepare_mmio_page_tail_stream,
+    prepare_non_crossing_rvi_offsets,
+    prepare_normal_and_mmio_cnop_stream,
+)
 from tests.py.zhaoxinran.support.uncache import (
     _half_rvi_state_is_quiescent,
     _wait_for_first_active_s1_after,
     _run_uncache_pbmt_nc_non_mmio_uses_uncache_path,
     _run_uncache_page_tail_rvi_need_resend_rechecks_next_page,
+    prepare_sv39_cfi_stream,
+    prepare_sv39_dual_stream,
+    sv39_layout_entry,
 )
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -129,18 +127,6 @@ def _configure_random_path_latencies(
             "icache_latency": icache_latency,
         },
     )
-
-
-def _prepare_non_crossing_rvi_offsets(env) -> tuple[int, int, int]:
-    offsets = (0, 10, 20)
-    payload = bytearray(int(_CNOP).to_bytes(2, "little") * 128)
-    for offset in offsets:
-        payload[offset:offset + 4] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
-    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
-    LoadProgramSequence(
-        image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0
-    ).run(env)
-    return tuple(_MMIO_BASE + offset for offset in offsets)
 
 
 def _collect_cfvec_cycles(env, *, max_cycles: int) -> list[dict]:
@@ -281,8 +267,8 @@ def test_uncache_a_ready_backpressure_holds_request(env):
             "expected_path": "a_ready_backpressure_holds_request",
         },
     )
-    _prepare_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     first_req = _wait_for_req_delta(env, env.uncache_agent)
     first_resp = _wait_for_resp_delta(env, env.uncache_agent)
@@ -357,9 +343,9 @@ def test_uncache_response_fault_reports_dut_exception(
             "expected_exception": expected_exception,
         },
     )
-    _prepare_mmio_cnop_stream(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.inject_next_response_fault(**fault_kwargs)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     req_count = _wait_for_req_delta(env, env.uncache_agent)
     resp_count = _wait_for_resp_delta(env, env.uncache_agent)
@@ -392,9 +378,9 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
             "expected_path": "wfi_blocks_acquire_then_releases",
         },
     )
-    _prepare_mmio_cnop_stream(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.backend_model.set_wfi_req(1)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     req_before = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.step(wfi_cycles)
@@ -438,8 +424,8 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
             "expected_path": "wfi_retracts_unaccepted_request",
         },
     )
-    _prepare_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent) > 0
     assert _wait_for_resp_delta(env, env.uncache_agent) > 0
@@ -480,7 +466,8 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     scenario_key = "zhaoxinran/uncache/pending-response-flushed-by-redirect"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(24, 48)
-    target_pc = _MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = pc + rng.randrange(0x40, 0x100, 8)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -493,8 +480,7 @@ def test_uncache_pending_response_flushed_by_redirect(env):
             "expected_path": "pending_response_flushed",
         },
     )
-    _prepare_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     _assert_ifu_uncache_state(env, _IFU_UNCACHE_WAIT_RESP)
@@ -506,7 +492,7 @@ def test_uncache_pending_response_flushed_by_redirect(env):
 
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before_redirect
-    assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
+    assert not any(int(obs.pc) == pc for obs in env.monitor.observations)
     assert not env.monitor.get_errors()
 
 
@@ -523,7 +509,8 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
     scenario_key = f"zhaoxinran/uncache/flushed-fault-response/{blocked_exception}"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(24, 48)
-    target_pc = _MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = pc + rng.randrange(0x40, 0x100, 8)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -537,9 +524,8 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
             "expected_path": "flushed_fault_suppressed",
         },
     )
-    _prepare_mmio_cnop_stream(env)
-    env.uncache_agent.inject_response_fault_at(_MMIO_BASE, **fault_kwargs)
-    _initialize_mmio_fetch(env)
+    env.uncache_agent.inject_response_fault_at(pc, **fault_kwargs)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     _assert_ifu_uncache_state(env, _IFU_UNCACHE_WAIT_RESP)
@@ -565,8 +551,9 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
     scenario_key = "zhaoxinran/uncache/consecutive-redirects-drop-older"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(40, 72)
-    first_target = _MMIO_BASE + rng.choice((0x40, 0x60))
-    second_target = _MMIO_BASE + rng.choice((0x80, 0xA0, 0xC0))
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    first_target = pc + rng.choice((0x40, 0x60))
+    second_target = pc + rng.choice((0x80, 0xA0, 0xC0))
     redirect_gap = rng.randint(2, 6)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
@@ -582,8 +569,7 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
             "expected_path": "newest_redirect_wins",
         },
     )
-    _prepare_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     _force_redirect_to(env, first_target)
@@ -591,7 +577,7 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
     _force_redirect_to(env, second_target)
 
     assert _wait_for_observed_pc(env, second_target, max_cycles=5000)
-    assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
+    assert not any(int(obs.pc) == pc for obs in env.monitor.observations)
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert not env.monitor.get_errors()
 
@@ -613,6 +599,7 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
         miss_rate=0.0,
         seed=seed,
     )
+    normal_pc, mmio_pc = prepare_normal_and_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     record_scenario(
         env,
         scenario_key,
@@ -621,25 +608,24 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
         parameters={
             "icache_latency": icache_latency,
             "uncache_latency": uncache_latency,
-            "redirect_target": _MMIO_BASE,
+            "redirect_target": mmio_pc,
             "expected_path": "pending_icache_flushed_for_mmio",
         },
     )
-    _prepare_normal_and_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env, reset_vector=_NORMAL_BASE)
+    _initialize_mmio_fetch(env, reset_vector=normal_pc)
 
     assert _wait_for_req_delta(env, env.icache_agent)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
 
-    _force_redirect_to(env, _MMIO_BASE)
-    assert _wait_for_observed_pc(env, _MMIO_BASE, max_cycles=5000)
-    assert _wait_for_request_addr(env, _MMIO_BASE, max_cycles=5000)
+    _force_redirect_to(env, mmio_pc)
+    assert _wait_for_observed_pc(env, mmio_pc, max_cycles=5000)
+    assert _wait_for_request_addr(env, mmio_pc, max_cycles=5000)
 
     env.step(128)
 
     assert int(env.icache_agent.get_stats().get("resp_beat_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) > 0
-    assert not any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
+    assert not any(int(obs.pc) == normal_pc for obs in env.monitor.observations)
     assert not env.monitor.get_errors()
 
 
@@ -649,7 +635,8 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     uncache_latency = rng.randint(72, 112)
     icache_latency = rng.randint(72, 112)
-    target_pc = _MMIO_BASE + rng.randrange(0x80, 0x100, 8)
+    normal_pc, mmio_pc = prepare_normal_and_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    target_pc = mmio_pc + rng.randrange(0x80, 0x100, 8)
     env.uncache_agent.configure(
         latency=uncache_latency,
         mmio_latency=uncache_latency,
@@ -672,11 +659,10 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
             "expected_path": "newest_mmio_path_not_polluted",
         },
     )
-    _prepare_normal_and_mmio_cnop_stream(env)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=mmio_pc)
 
-    assert _wait_for_request_addr(env, _MMIO_BASE)
-    _force_redirect_to(env, _NORMAL_BASE)
+    assert _wait_for_request_addr(env, mmio_pc)
+    _force_redirect_to(env, normal_pc)
     assert _wait_for_req_delta(env, env.icache_agent, max_cycles=5000)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
 
@@ -687,8 +673,8 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
 
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.icache_agent.get_stats().get("resp_beat_count", 0)) > 0
-    assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
-    assert not any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
+    assert not any(int(obs.pc) == mmio_pc for obs in env.monitor.observations)
+    assert not any(int(obs.pc) == normal_pc for obs in env.monitor.observations)
     assert not env.monitor.get_errors()
 
 
@@ -700,7 +686,9 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
         "zhaoxinran/uncache/pbmt-nc-non-mmio-path",
         parameters={"expected_path": "pbmt_nc_uses_uncache"},
     )
-    return _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
+    return _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(
+        env, scenario_rng("zhaoxinran/uncache/pbmt-nc-non-mmio-path/pc")[2],
+    )
 
 
 @pytest.mark.funcov_bins("BIN-422")
@@ -709,12 +697,7 @@ def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
     scenario_key = "zhaoxinran/uncache/pbmt-io-waits-commit"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-        pbmt=_PBMT_IO,
-    )
+    expected_block, mapping = prepare_sv39_cfi_stream(env, rng, pbmt=_PBMT_IO)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -763,11 +746,7 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     blocked_cycles = rng.randint(24, 48)
-    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-    )
+    expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -871,11 +850,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     blocked_cycles = rng.randint(96, 160)
-    _expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-    )
+    _expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -985,9 +960,10 @@ def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_pat
 def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_requests(env):
     scenario_key = "zhaoxinran/uncache/pending-nc-to-cacheable"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    entry = sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2])
     uncache_latency = rng.randint(20, 36)
     icache_latency = rng.randint(8, 24)
-    nc_expected, _cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
+    nc_expected, _cacheable_pcs = prepare_sv39_dual_stream(env, entry)
     nc_pcs = [pc for pc, _, _ in nc_expected]
     env.uncache_agent.configure(latency=uncache_latency, mmio_latency=uncache_latency)
     env.icache_agent.configure(
@@ -1002,28 +978,28 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "source_pc": _NORMAL_BASE,
+            "source_pc": entry.va,
             "uncache_latency": uncache_latency,
             "icache_latency": icache_latency,
             "expected_path": "pending_nc_redirects_to_cacheable",
         },
     )
     env.backend_model.set_can_accept(0)
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
-    _configure_exec_attrs_16k(env, base_addr=0x80000000)
-    _force_redirect_to(env, _NORMAL_BASE)
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
+    _configure_exec_attrs_16k(env, base_addr=entry.pa & ~0x3FFF)
+    _force_redirect_to(env, entry.va)
 
-    assert _wait_for_request_addr(env, _NORMAL_PHYS_BASE, max_cycles=6000), env.uncache_agent.get_stats()
+    assert _wait_for_request_addr(env, entry.pa, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_req_count(env, env.uncache_agent, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000), (
         env.uncache_agent.get_stats()
     )
     assert int(env.uncache_agent.get_stats().get("pending", 0)) > 0
     same_page_switch_index = len(env.monitor.observations)
     same_page_uncache_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
-    _remap_sv39_page_pbmt(env, vaddr=_NORMAL_BASE, paddr=_NORMAL_PHYS_BASE, pbmt=_PBMT_PMA)
-    _pulse_sfence(env, addr=_NORMAL_BASE, rs1=1, rs2=0)
+    _remap_sv39_page_pbmt(env, vaddr=entry.va, paddr=entry.pa, pbmt=_PBMT_PMA)
+    _pulse_sfence(env, addr=entry.va, rs1=1, rs2=0)
     assert int(env.uncache_agent.get_stats().get("pending", 0)) > 0
-    _force_redirect_to(env, _NORMAL_BASE)
+    _force_redirect_to(env, entry.va)
     env.backend_model.set_can_accept(1)
     assert _wait_for_req_count(env, env.icache_agent, 2, max_cycles=12000), env.icache_agent.get_stats()
     assert _wait_for_observed_pc_sequence(env, nc_pcs[:8], max_cycles=12000), {
@@ -1048,7 +1024,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
     icache_stats = env.icache_agent.get_stats()
 
     assert int(uncache_stats.get("req_count", 0)) >= _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES
-    assert _NORMAL_PHYS_BASE in uncache_stats.get("request_addrs", [])
+    assert entry.pa in uncache_stats.get("request_addrs", [])
     assert int(icache_stats.get("req_count", 0)) >= 2, icache_stats
     recovery_index = _first_observed_index(env, nc_pcs[0])
     assert recovery_index >= 0
@@ -1060,6 +1036,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
 def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
     scenario_key = "zhaoxinran/uncache/pending-cacheable-to-nc"
     base_seed, seed, rng = scenario_rng(scenario_key)
+    entry = sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2])
     uncache_latency = rng.randint(8, 24)
     icache_latency = rng.randint(48, 80)
     record_scenario(
@@ -1068,8 +1045,8 @@ def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "source_pc": _NORMAL_ALT_BASE,
-            "target_pc": _NORMAL_BASE,
+            "source_pc": (entry.va + 2 * _SV39_PAGE_SIZE),
+            "target_pc": entry.va,
             "uncache_latency": uncache_latency,
             "icache_latency": icache_latency,
             "expected_path": "pending_cacheable_redirects_to_nc",
@@ -1080,6 +1057,7 @@ def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
         uncache_latency=uncache_latency,
         icache_latency=icache_latency,
         agent_seed=seed,
+        entry=entry,
     )
 
 
@@ -1088,9 +1066,10 @@ def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
     *,
     uncache_latency: int = 16,
     icache_latency: int = 64,
-    agent_seed: int = 4,
+    agent_seed: int,
+    entry: RandomPc,
 ):
-    nc_expected, cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
+    nc_expected, cacheable_pcs = prepare_sv39_dual_stream(env, entry)
     nc_pcs = [pc for pc, _, _ in nc_expected]
     env.uncache_agent.configure(
         latency=uncache_latency,
@@ -1102,16 +1081,16 @@ def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
         miss_rate=0.0,
         seed=agent_seed,
     )
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_ALT_BASE)
-    _configure_exec_attrs_16k(env, base_addr=0x80000000)
-    _force_redirect_to(env, _NORMAL_ALT_BASE)
+    _initialize_sv39_fetch(env, reset_vector=(entry.va + 2 * _SV39_PAGE_SIZE))
+    _configure_exec_attrs_16k(env, base_addr=entry.pa & ~0x3FFF)
+    _force_redirect_to(env, (entry.va + 2 * _SV39_PAGE_SIZE))
 
     assert _wait_for_req_count(env, env.icache_agent, 2, max_cycles=12000), env.icache_agent.get_stats()
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
-    _pulse_sfence(env, addr=_NORMAL_ALT_BASE, rs1=1, rs2=0)
+    _pulse_sfence(env, addr=(entry.va + 2 * _SV39_PAGE_SIZE), rs1=1, rs2=0)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
-    _force_redirect_to(env, _NORMAL_BASE)
-    assert _wait_for_request_addr(env, _NORMAL_PHYS_BASE, max_cycles=6000), env.uncache_agent.get_stats()
+    _force_redirect_to(env, entry.va)
+    assert _wait_for_request_addr(env, entry.pa, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(env, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000), {
         "uncache": env.uncache_agent.get_stats(),
         "icache": env.icache_agent.get_stats(),
@@ -1127,7 +1106,7 @@ def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
     icache_stats = env.icache_agent.get_stats()
 
     assert all(
-        _NORMAL_PHYS_BASE + _UNCACHE_BEAT_BYTES * idx in uncache_stats.get("request_addrs", [])
+        entry.pa + _UNCACHE_BEAT_BYTES * idx in uncache_stats.get("request_addrs", [])
         for idx in range(_FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES)
     ), uncache_stats
     assert int(uncache_stats.get("req_count", 0)) >= _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES
@@ -1164,9 +1143,10 @@ def _configure_translation_attribute(env, *, attr: str, paddr: int) -> int:
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    scenario_key = f"zhaoxinran/uncache/sfence-attribute/{old_attr}-to-{new_attr}"
     _configure_random_path_latencies(
         env,
-        f"zhaoxinran/uncache/sfence-attribute/{old_attr}-to-{new_attr}",
+        scenario_key,
         parameters={
             "old_attribute": old_attr,
             "new_attribute": new_attr,
@@ -1174,12 +1154,7 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
         },
     )
     old_pbmt = _PBMT_NC if old_attr == "nc" else _PBMT_PMA
-    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-        pbmt=old_pbmt,
-    )
+    expected_block, mapping = prepare_sv39_cfi_stream(env, scenario_rng(f"{scenario_key}/pc")[2], pbmt=old_pbmt)
     _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
     _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
     _configure_translation_attribute(env, attr=old_attr, paddr=mapping.paddr)
@@ -1237,6 +1212,7 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    entry = sv39_layout_entry(scenario_rng(f"zhaoxinran/uncache/redirect-attribute/{old_attr}-to-{new_attr}/pc")[2])
     _configure_random_path_latencies(
         env,
         f"zhaoxinran/uncache/redirect-attribute/{old_attr}-to-{new_attr}",
@@ -1250,14 +1226,14 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     new_pbmt = _PBMT_NC if new_attr == "nc" else _PBMT_PMA
     _, old_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
+        vaddr=entry.va,
+        paddr=entry.pa,
         pbmt=old_pbmt,
     )
     expected_block, target_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
-        vaddr=_NORMAL_ALT_BASE,
-        paddr=_NORMAL_ALT_PHYS_BASE,
+        vaddr=(entry.va + 2 * _SV39_PAGE_SIZE),
+        paddr=(entry.pa + _SV39_PAGE_SIZE),
         pbmt=new_pbmt,
     )
     _remap_sv39_page_pbmt(
@@ -1267,7 +1243,7 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
         pbmt=old_pbmt,
     )
     _initialize_sv39_fetch(env, reset_vector=old_mapping.vaddr)
-    _configure_exec_pmp(env, base_addr=0x8000_0000, size=0x4000)
+    _configure_exec_pmp(env, base_addr=entry.pa & ~0x3FFF, size=0x4000)
     _configure_translation_attribute(env, attr=old_attr, paddr=old_mapping.paddr)
 
     if old_attr == "cacheable":
@@ -1300,11 +1276,12 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
 @pytest.mark.funcov_tps("ATP-113")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cacheable_non_mmio_uses_icache_path(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/cacheable-non-mmio-uses-icache-path/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="atp-113-sv39-cacheable-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 256,
         expected_path="cacheable",
         expected_result="miss_refill",
@@ -1313,7 +1290,7 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1322,7 +1299,7 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1332,7 +1309,7 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
     env.arm_translation_scenario(state)
-    _force_redirect_to(env, _NORMAL_BASE)
+    _force_redirect_to(env, entry.va)
 
     commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env)
 
@@ -1343,9 +1320,9 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
     }
     env.step(32)
 
-    assert not env.memory.is_mmio(_NORMAL_PHYS_BASE)
-    assert any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
-    assert _NORMAL_PHYS_BASE not in env.uncache_agent.get_stats().get("request_addrs", [])
+    assert not env.memory.is_mmio(entry.pa)
+    assert any(int(obs.pc) == entry.va for obs in env.monitor.observations)
+    assert entry.pa not in env.uncache_agent.get_stats().get("request_addrs", [])
     assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
@@ -1353,11 +1330,12 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_revisit_uses_existing_translation_refill(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-revisit-uses-existing-translation-refill/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-revisit-translation-refill-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 256,
         max_ptw_requests_per_key=1,
         expected_path="cacheable",
@@ -1367,7 +1345,7 @@ def test_uncache_sv39_revisit_uses_existing_translation_refill(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1376,7 +1354,7 @@ def test_uncache_sv39_revisit_uses_existing_translation_refill(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1410,14 +1388,15 @@ def test_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
 
 
 def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-sector-lane-reuses-refill-on-adjacent-page/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-sector-lane-reuse-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 2049,
         page_count=2,
-        s1_sector_lanes=(TranslationSectorLane(lane=1, ppn=(_NORMAL_PHYS_BASE >> 12) + 1),),
+        s1_sector_lanes=(TranslationSectorLane(lane=1, ppn=(entry.pa >> 12) + 1),),
         expected_path="cacheable",
         expected_result="miss_refill",
         pmp_entries=(
@@ -1425,14 +1404,14 @@ def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1441,14 +1420,14 @@ def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1468,7 +1447,7 @@ def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
     assert [item["kind"] for item in result] == ["phase", "phase"]
     assert int(env.ptw_agent.get_stats()["req_count"]) == 1
     assert any(
-        int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
+        int(record["address"]) == ((entry.pa + 0x1000) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )
     assert env.assert_translation_scenario()["error_count"] == 0
@@ -1477,15 +1456,16 @@ def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-invalid-sector-lane-rewalks-and-refetches/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-sector-lane-invalid-rewalk-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 2049,
         page_count=2,
         s1_sector_lanes=(
-            TranslationSectorLane(lane=1, ppn=(_NORMAL_PHYS_BASE >> 12) + 1, valid=0, pte_present=1),
+            TranslationSectorLane(lane=1, ppn=(entry.pa >> 12) + 1, valid=0, pte_present=1),
         ),
         expected_path="cacheable",
         expected_result="miss_refill",
@@ -1494,14 +1474,14 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1510,14 +1490,14 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1534,7 +1514,7 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
     assert int(env.ptw_agent.get_stats()["req_count"]) >= 2
     assert env.translation_oracle.get_active()["expected_fault"] is None
     assert any(
-        int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
+        int(record["address"]) == ((entry.pa + 0x1000) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )
     assert env.assert_translation_scenario()["error_count"] == 0
@@ -1543,19 +1523,20 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-sector-lane-rewalk-response-fault-dut/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-sector-lane-rewalk-response-fault-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 2049,
         page_count=2,
         s1_sector_lanes=(
-            TranslationSectorLane(lane=1, ppn=(_NORMAL_PHYS_BASE >> 12) + 1, valid=0, pte_present=1),
+            TranslationSectorLane(lane=1, ppn=(entry.pa >> 12) + 1, valid=0, pte_present=1),
         ),
         ptw_response_overrides=(
             TranslationPtwResponseOverride(
-                vpn=(_NORMAL_BASE >> 12) + 1,
+                vpn=(entry.va >> 12) + 1,
                 s2xlate=0,
                 patch=(("s1_pf", 1),),
             ),
@@ -1567,14 +1548,14 @@ def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1583,14 +1564,14 @@ def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1608,7 +1589,7 @@ def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
     assert int(env.ptw_agent.get_stats()["response_override_hit_count"]) >= 1
     assert env.translation_oracle.get_active()["expected_fault"] == "instruction_page_fault"
     assert not any(
-        int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
+        int(record["address"]) == ((entry.pa + 0x1000) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )
     assert env.assert_translation_scenario()["error_count"] == 0
@@ -1617,15 +1598,16 @@ def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-sector-lane-missing-pte-reports-dut-exception/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-sector-lane-missing-pte-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 2049,
         page_count=2,
         s1_sector_lanes=(
-            TranslationSectorLane(lane=1, ppn=(_NORMAL_PHYS_BASE >> 12) + 1, valid=0, pte_present=0),
+            TranslationSectorLane(lane=1, ppn=(entry.pa >> 12) + 1, valid=0, pte_present=0),
         ),
         expected_path="cacheable",
         expected_result="miss_refill",
@@ -1634,14 +1616,14 @@ def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1650,14 +1632,14 @@ def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
             TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE + 0x1000,
+                addr=entry.pa + 0x1000,
                 size=0x1000,
             ),
         ),
@@ -1674,7 +1656,7 @@ def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
     assert int(env.ptw_agent.get_stats()["req_count"]) >= 2
     assert env.translation_oracle.get_active()["expected_fault"] == "instruction_page_fault"
     assert not any(
-        int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
+        int(record["address"]) == ((entry.pa + 0x1000) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )
     assert env.assert_translation_scenario()["error_count"] == 0
@@ -1683,11 +1665,12 @@ def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_translation_sequence_refills_after_sfence(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/translation-sequence-refills-after-sfence/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="sv39-sequence-sfence-retranslate-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 256,
         ptw_response_latency=64,
         expected_path="cacheable",
@@ -1697,7 +1680,7 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1706,15 +1689,15 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
     )
     refilled_scenario = TranslationScenario(
         scenario_id="sv39-sequence-sfence-retranslate-new-pa-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_ALT_PHYS_BASE,
+        va=entry.va,
+        pa=(entry.pa + _SV39_PAGE_SIZE),
         payload=int(_CNOP).to_bytes(2, "little") * 256,
         expected_path="cacheable",
         expected_result="miss_refill",
@@ -1723,7 +1706,7 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_ALT_PHYS_BASE,
+                addr=(entry.pa + _SV39_PAGE_SIZE),
                 size=0x1000,
             ),
         ),
@@ -1732,7 +1715,7 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_ALT_PHYS_BASE,
+                addr=(entry.pa + _SV39_PAGE_SIZE),
                 size=0x1000,
             ),
         ),
@@ -1759,7 +1742,7 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
     assert [item["kind"] for item in result] == ["phase", "sfence", "phase"]
     assert int(env.ptw_agent.get_stats()["req_count"]) >= 2
     assert any(
-        int(record["address"]) == (_NORMAL_ALT_PHYS_BASE & ~0x3F)
+        int(record["address"]) == ((entry.pa + _SV39_PAGE_SIZE) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )
     assert env.assert_translation_scenario()["error_count"] == 0
@@ -1780,12 +1763,13 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_all_stage_response_fault_priority(env, scenario_id, s1_pf, s1_af, s2_gpf, s2_gaf):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng(f"zhaoxinran/uncache/{scenario_id}/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id=scenario_id,
-        va=_NORMAL_BASE,
-        gpa=_NORMAL_PHYS_BASE,
-        pa=_NORMAL_ALT_PHYS_BASE,
+        va=entry.va,
+        gpa=entry.pa,
+        pa=(entry.pa + _SV39_PAGE_SIZE),
         payload=int(_CNOP).to_bytes(2, "little") * 32,
         s2xlate=3,
         s1_pte=TranslationPte(asid=5, vmid=7),
@@ -1822,11 +1806,12 @@ def test_uncache_sv39_all_stage_response_fault_priority(env, scenario_id, s1_pf,
 @pytest.mark.funcov_tps("ATP-124")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_execute_denied_reports_instruction_page_fault(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-execute-denied-reports-instruction-page-fault/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="atp-124-sv39-execute-denied-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
         s1_pte=TranslationPte(v=1, r=1, x=0, a=1),
         expected_path="fault",
@@ -1859,11 +1844,12 @@ def test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
 
 
 def _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-pmp-execute-denied-reports-instruction-access-fault/pc")[2])
+    _initialize_sv39_fetch(env, reset_vector=entry.va)
     scenario = TranslationScenario(
         scenario_id="atp-076-sv39-pmp-execute-denied-dut",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
+        va=entry.va,
+        pa=entry.pa,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
         expected_path="fault",
         expected_result="access_fault",
@@ -1872,7 +1858,7 @@ def _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=False),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1881,7 +1867,7 @@ def _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=0x1000,
             ),
         ),
@@ -1913,9 +1899,10 @@ def test_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 
 
 def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
-    cross_page_va = _NORMAL_BASE + _SV39_PAGE_SIZE - 2
-    cross_page_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE - 2
-    next_page_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE
+    entry = sv39_layout_entry(scenario_rng("zhaoxinran/uncache/sv39-cross-page-rvi-uses-second-page-pma-path/pc")[2])
+    cross_page_va = entry.va + _SV39_PAGE_SIZE - 2
+    cross_page_pa = entry.pa + _SV39_PAGE_SIZE - 2
+    next_page_pa = entry.pa + _SV39_PAGE_SIZE
     payload = int(_ADDI_X0_X0_0).to_bytes(4, "little") + int(_CNOP).to_bytes(2, "little") * 64
 
     _initialize_sv39_fetch(env, reset_vector=cross_page_va)
@@ -1932,7 +1919,7 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
                 kind="pmp",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=_SV39_PAGE_SIZE,
             ),
             TranslationPmpPmaEntry(
@@ -1948,7 +1935,7 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
                 kind="pma",
                 index=0,
                 config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
+                addr=entry.pa,
                 size=_SV39_PAGE_SIZE,
             ),
             TranslationPmpPmaEntry(
@@ -1998,25 +1985,26 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
     scenario_key = "zhaoxinran/uncache/csr-change-discards-stale-translation"
     base_seed, seed, _ = scenario_rng(scenario_key)
-    old_va = _NORMAL_BASE + 0xF00
-    old_pa = _NORMAL_PHYS_BASE + 0xF00
-    reentry_va = _NORMAL_BASE + _SV39_PAGE_SIZE
-    old_reentry_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE
-    reentry_pa = _NORMAL_ALT_PHYS_BASE + _SV39_PAGE_SIZE
-    remote_va = _NORMAL_BASE + 2 * _SV39_PAGE_SIZE
-    remote_pa = _NORMAL_ALT_PHYS_BASE + 2 * _SV39_PAGE_SIZE
+    entry = sv39_layout_entry(scenario_rng(f"{scenario_key}/pc")[2])
+    old_va = entry.va + 0xF00
+    old_pa = entry.pa + 0xF00
+    reentry_va = entry.va + _SV39_PAGE_SIZE
+    old_reentry_pa = entry.pa + _SV39_PAGE_SIZE
+    reentry_pa = (entry.pa + _SV39_PAGE_SIZE) + _SV39_PAGE_SIZE
+    remote_va = entry.va + 2 * _SV39_PAGE_SIZE
+    remote_pa = (entry.pa + _SV39_PAGE_SIZE) + 2 * _SV39_PAGE_SIZE
     permissions = (
         TranslationPmpPmaEntry(
             kind="pmp", index=0,
             config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-            addr=_NORMAL_BASE, size=0x8000,
+            addr=entry.va, size=0x8000,
         ),
     )
     attributes = (
         TranslationPmpPmaEntry(
             kind="pma", index=0,
             config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-            addr=_NORMAL_BASE, size=0x8000,
+            addr=entry.va, size=0x8000,
         ),
     )
     old_scenario = TranslationScenario(
@@ -2242,10 +2230,10 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     scenario_key = "zhaoxinran/uncache/resend/first-beat-corrupt"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    _prepare_cross_beat_rvi_stream(env)
+    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
-        _MMIO_BASE,
+        first_beat,
         corrupt=1,
     )
     record_scenario(
@@ -2254,21 +2242,21 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_BEAT_PC,
+            "pc": pc,
             "latency": latency,
             "fault": "corrupt",
             "expected_path": "first_beat_fault_suppresses_resend",
         },
     )
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert _wait_for_request_addr(env, _MMIO_BASE)
+    assert _wait_for_request_addr(env, first_beat)
     assert _wait_for_resp_delta(env, env.uncache_agent)
     assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
-    assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
-    assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert (first_beat + _UNCACHE_BEAT_BYTES) not in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
     assert not env.monitor.get_errors()
 
@@ -2279,7 +2267,7 @@ def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
     scenario_key = "zhaoxinran/uncache/resend/non-crossing-rvi-offsets"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    pcs = _prepare_non_crossing_rvi_offsets(env)
+    pcs = prepare_non_crossing_rvi_offsets(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -2336,10 +2324,10 @@ def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
     scenario_key = "zhaoxinran/uncache/resend/first-beat-combined-fault"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    _prepare_cross_beat_rvi_stream(env)
+    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
-        _MMIO_BASE,
+        first_beat,
         corrupt=1,
         denied=1,
     )
@@ -2349,21 +2337,21 @@ def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_BEAT_PC,
+            "pc": pc,
             "latency": latency,
             "fault": "corrupt_and_denied",
             "expected_path": "first_beat_fault_suppresses_resend",
         },
     )
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert _wait_for_request_addr(env, _MMIO_BASE)
+    assert _wait_for_request_addr(env, first_beat)
     assert _wait_for_resp_delta(env, env.uncache_agent)
     assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
-    assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
-    assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert (first_beat + _UNCACHE_BEAT_BYTES) not in stats.get("request_addrs", [])
     assert int(stats.get("corrupt_resp_count", 0)) == 1
     assert int(stats.get("denied_resp_count", 0)) == 1
     assert not env.monitor.get_errors()
@@ -2374,10 +2362,10 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
     scenario_key = "zhaoxinran/uncache/resend/first-beat-denied"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    _prepare_cross_beat_rvi_stream(env)
+    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
-        _MMIO_BASE,
+        first_beat,
         denied=1,
     )
     record_scenario(
@@ -2386,23 +2374,23 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_BEAT_PC,
+            "pc": pc,
             "latency": latency,
             "fault": "denied",
             "expected_path": "first_beat_denied_allows_resend",
         },
     )
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert _wait_for_request_addr(env, _MMIO_BASE)
-    assert _wait_for_request_addr(env, _MMIO_BASE + 8)
+    assert _wait_for_request_addr(env, first_beat)
+    assert _wait_for_request_addr(env, first_beat + _UNCACHE_BEAT_BYTES)
     assert _wait_for_resp_count(env, 2)
     stats = env.uncache_agent.get_stats()
 
     assert int(stats.get("denied_resp_count", 0)) == 1
     assert int(stats.get("corrupt_resp_count", 0)) == 0
-    assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
-    assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert (first_beat + _UNCACHE_BEAT_BYTES) in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count == 0
     assert not env.monitor.get_errors()
 
@@ -2432,10 +2420,10 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     scenario_key = f"zhaoxinran/uncache/resend/second-beat-{fault}"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    _prepare_cross_beat_rvi_stream(env)
+    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
-        _MMIO_BASE + 8,
+        first_beat + _UNCACHE_BEAT_BYTES,
         corrupt=1 if fault in {"corrupt", "combined"} else 0,
         denied=1 if fault in {"denied", "combined"} else 0,
     )
@@ -2445,23 +2433,23 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_BEAT_PC,
+            "pc": pc,
             "latency": latency,
             "fault": fault,
             "expected_exception": exception,
             "expected_path": "second_beat_fault_reports_exception",
         },
     )
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert _wait_for_request_addr(env, _MMIO_BASE)
-    assert _wait_for_request_addr(env, _MMIO_BASE + 8)
+    assert _wait_for_request_addr(env, first_beat)
+    assert _wait_for_request_addr(env, first_beat + _UNCACHE_BEAT_BYTES)
     assert _wait_for_resp_count(env, 2)
     assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
-    assert _MMIO_BASE in stats.get("request_addrs", [])
-    assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
+    assert first_beat in stats.get("request_addrs", [])
+    assert (first_beat + _UNCACHE_BEAT_BYTES) in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
     assert not env.monitor.get_errors()
 
@@ -2474,14 +2462,16 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     scenario_key = "zhaoxinran/uncache/page-tail/rvi-resend-recheck"
     base_seed, seed, rng = scenario_rng(scenario_key)
     second_latency = rng.randint(12, 24)
-    redirect_target = _MMIO_BASE + rng.choice((0x40, 0x60, 0x80, 0xA0))
+    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    redirect_target = pc & ~(_SV39_PAGE_SIZE - 1)
+    redirect_target = redirect_target + rng.choice((0x40, 0x60, 0x80, 0xA0))
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_PAGE_PC,
+            "pc": pc,
             "second_latency": second_latency,
             "redirect_target": redirect_target,
             "expected_path": "rvi_resend_rechecks_next_page",
@@ -2489,6 +2479,7 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     )
     return _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
         env,
+        pc=pc,
         second_latency=second_latency,
         redirect_target=redirect_target,
     )
@@ -2501,9 +2492,9 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
     scenario_key = f"zhaoxinran/uncache/page-tail/fault-no-half/{denied}"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
-    _prepare_cross_page_rvi_stream(env)
+    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
+    first_beat = pc & ~(_UNCACHE_BEAT_BYTES - 1)
     prev_half_samples = _register_prev_half_rvi_observer(env)
     env.uncache_agent.inject_response_fault_at(
         first_beat,
@@ -2516,13 +2507,13 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_PAGE_PC,
+            "pc": pc,
             "latency": latency,
             "denied": denied,
             "expected_path": "fault_does_not_create_half_state",
         },
     )
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
     assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=5000)
@@ -2554,8 +2545,9 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
     base_seed, seed, rng = scenario_rng(scenario_key)
     first_latency = rng.randint(1, 3)
     second_latency = rng.randint(48, 80)
-    redirect_target = _MMIO_BASE + rng.choice((0x40, 0x60, 0x80, 0xA0))
-    _prepare_cross_page_rvi_stream(env)
+    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
+    redirect_target = pc & ~(_SV39_PAGE_SIZE - 1)
+    redirect_target = redirect_target + rng.choice((0x40, 0x60, 0x80, 0xA0))
     env.uncache_agent.configure(latency=first_latency, mmio_latency=second_latency)
     record_scenario(
         env,
@@ -2563,7 +2555,7 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_PAGE_PC,
+            "pc": pc,
             "first_latency": first_latency,
             "second_latency": second_latency,
             "redirect_target": redirect_target,
@@ -2571,10 +2563,10 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
         },
     )
     prev_half_samples = _register_prev_half_rvi_observer(env)
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
-    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    first_beat = pc & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = pc + 2
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
     assert _wait_for_request_addr(env, next_page, max_cycles=5000)
 
@@ -2637,7 +2629,7 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
         "sample": first_recovery_s1,
     }
     assert not any(
-        int(obs.pc) == _CROSS_PAGE_PC
+        int(obs.pc) == pc
         for obs in env.monitor.observations[observations_before_redirect:]
     )
     assert not env.monitor.get_errors()
@@ -2649,7 +2641,7 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
     scenario_key = "zhaoxinran/uncache/page-tail/rvc-no-next-page"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(12, 24)
-    _prepare_cross_page_rvc_stream(env)
+    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2], is_rvc=True)
     env.uncache_agent.configure(latency=2, mmio_latency=latency)
     record_scenario(
         env,
@@ -2657,22 +2649,22 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS_PAGE_PC,
+            "pc": pc,
             "latency": latency,
             "expected_path": "rvc_delivers_without_next_page_fetch",
         },
     )
     prev_half_samples = _register_prev_half_rvi_observer(env)
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
-    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    first_beat = pc & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = pc + 2
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000), env.uncache_agent.get_stats()
-    assert _wait_for_observed_pc(env, _CROSS_PAGE_PC, max_cycles=8000), {
+    assert _wait_for_observed_pc(env, pc, max_cycles=8000), {
         "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
         "uncache": env.uncache_agent.get_stats(),
     }
-    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == _CROSS_PAGE_PC)
+    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == pc)
     stats = env.uncache_agent.get_stats()
 
     assert int(observed.instr) == _ADDI_X0_X0_0
@@ -2715,7 +2707,7 @@ def test_uncache_mmio_commit_order_waits_last_commit(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     blocked_cycles = rng.randint(48, 80)
-    _prepare_mmio_cnop_stream(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -2729,7 +2721,7 @@ def test_uncache_mmio_commit_order_waits_last_commit(env):
         },
     )
     env.backend_model.set_can_accept(0)
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
@@ -2751,7 +2743,7 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
     latency = rng.randint(1, 16)
     wfi_cycles = rng.randint(48, 80)
     post_wfi_cycles = rng.randint(8, 24)
-    _prepare_mmio_cnop_stream(env)
+    pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     record_scenario(
         env,
@@ -2765,7 +2757,7 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
             "expected_path": "wfi_and_commit_gate_block_next_request",
         },
     )
-    _initialize_mmio_fetch(env)
+    _initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)

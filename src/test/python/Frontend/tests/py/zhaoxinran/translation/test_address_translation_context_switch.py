@@ -15,19 +15,15 @@ from env.sequences import (
 )
 from tests.py.support.dut_support import wait_until as _wait_until
 from tests.py.support.translation_context_switch import (
-    OLD_VA as _OLD_VA,
-    NEW_VA as _NEW_VA,
     OLD_PA as _OLD_PA,
     NEW_PA as _NEW_PA,
-    OLD_GPA as _OLD_GPA,
     randomize_context_timing as _randomize_context_timing,
-    scenario as _scenario,
+    same_vpn_context_scenarios as _same_vpn_context_scenarios,
     translation_complete as _translation_complete,
     run_satp_asid_switch,
 )
 
 from tests.py.zhaoxinran.support.translation import (
-    _all_stage_scenario,
     _sfence_stage_scenario,
     _run_sfence_retranslation,
     _run_sfence_scope_after_refill,
@@ -61,59 +57,44 @@ def test_satp_asid_switch_restarts_translation_from_live_cfvec(env) -> None:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tlb_csr_change_retranslates_same_vpn_with_new_pte_signature(env) -> None:
-    old = _randomize_context_timing(env, replace(
-        _scenario(
-            "translation-context-csr-signature-old",
-            va=_OLD_VA,
-            pa=_OLD_PA,
-            asid=3,
-        ),
-        s1_pte=TranslationPte(asid=3, pbmt=0),
-    ))
-    new = _randomize_context_timing(env, replace(
-        _scenario(
-            "translation-context-csr-signature-new",
-            va=_OLD_VA,
-            pa=_OLD_PA,
-            asid=9,
-        ),
-        s1_pte=TranslationPte(asid=9, pbmt=1),
-    ))
+    old_scenario, new_scenario = _same_vpn_context_scenarios(env)
+    old = _randomize_context_timing(env, old_scenario)
+    new = _randomize_context_timing(env, new_scenario)
     builder = TranslationScenarioBuilder(env)
 
     # Build the target oracle before the live source context; building a
     # scenario drives CSR inputs and therefore consumes DUT cycles.
     new_state = builder.build(new)
     initialize_frontend(
-        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
+        env, FrontendInitConfig(reset_vector=old.va, bare_mode=False, reset_cycles=20)
     )
     old_state = builder.build(old)
     env.monitor.clear()
-    env.monitor.set_expected_pc(_OLD_VA)
+    env.monitor.set_expected_pc(old.va)
     env.arm_translation_scenario(old_state)
     _wait_until(
         env,
-        lambda: any(int(observation.pc) == _OLD_VA for observation in env.monitor.observations)
+        lambda: any(int(observation.pc) == old.va for observation in env.monitor.observations)
         and int(env.ptw_agent.get_stats()["resp_count"]) > 0,
         description="old same-VPN live translation",
     )
 
     for page in range(new.page_count):
         env.page_table.map_page(
-            (_OLD_VA >> 12) + page,
-            (_OLD_PA >> 12) + page,
+            (new.va >> 12) + page,
+            (new.pa >> 12) + page,
             **new.s1_pte.as_mapping_kwargs(),
         )
     change = env.prepare_translation_context_change(satp_asid=new.satp_asid)
     assert change["changed"]["satp"]
     new_state = replace(new_state, translation_epoch=env.translation_epoch)
-    env.monitor.set_expected_pc(_OLD_VA)
+    env.monitor.set_expected_pc(new.va)
     env.arm_translation_scenario(new_state)
     env.translation_oracle.set_fetch_observation_ready(ready=False)
     redirect = InjectRedirectSequence(
         RedirectTxn(
-            source_pc=_OLD_VA,
-            target_pc=_OLD_VA,
+            source_pc=old.va,
+            target_pc=new.va,
             reason="tlb-csr-same-vpn-new-pte-signature",
             satp_flush=1,
         )
@@ -139,12 +120,13 @@ def test_tlb_csr_change_retranslates_same_vpn_with_new_pte_signature(env) -> Non
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_all_stage_context_change_after_refill(env, scenario_id, context_update, changed_name) -> None:
-    scenario = _randomize_context_timing(env, _all_stage_scenario(scenario_id))
-    new_scenario = replace(scenario, scenario_id=f"{scenario_id}-new", pa=_NEW_PA)
+    scenario = _randomize_context_timing(env, _sfence_stage_scenario(env, scenario_id, s2xlate=3))
+    pa_delta = _NEW_PA - _OLD_PA
+    new_scenario = replace(scenario, scenario_id=f"{scenario_id}-new", pa=scenario.pa + pa_delta)
     if changed_name == "vsatp":
         new_scenario = replace(
             new_scenario,
-            gpa=_OLD_GPA + (_NEW_PA - _OLD_PA),
+            gpa=scenario.gpa + pa_delta,
             vsatp_asid=context_update["vsatp_asid"],
             s1_pte=replace(scenario.s1_pte, asid=context_update["vsatp_asid"]),
         )
@@ -176,7 +158,7 @@ def test_all_stage_context_change_after_refill(env, scenario_id, context_update,
     env.assert_translation_scenario()
     old_active = env.translation_oracle.get_active()
     assert old_active is not None
-    assert (_OLD_PA & ~0x3F) in old_active["observed_fetch_pas"]
+    assert (scenario.pa & ~0x3F) in old_active["observed_fetch_pas"]
 
     req_count = int(env.ptw_agent.get_stats()["req_count"])
     for page in range(new_scenario.page_count):
@@ -231,8 +213,8 @@ def test_all_stage_context_change_after_refill(env, scenario_id, context_update,
     assert len(expected_ptw) == new_scenario.page_count
     assert expected_ptw.issubset(active["requested_ptw_request_keys"])
     assert expected_ptw.issubset(active["responded_ptw_request_keys"])
-    assert (_NEW_PA & ~0x3F) in active["observed_fetch_pas"]
-    assert (_OLD_PA & ~0x3F) not in active["observed_fetch_pas"]
+    assert (new_scenario.pa & ~0x3F) in active["observed_fetch_pas"]
+    assert (scenario.pa & ~0x3F) not in active["observed_fetch_pas"]
     assert active["translation_epoch"] == env.translation_epoch
     assert int(env.ptw_agent.get_stats()["req_count"]) > req_count
     assert env.translation_epoch == state.translation_epoch + 1
@@ -279,7 +261,7 @@ def test_sfence_scope_after_refill(
 def test_sfence_stage_after_refill(env, scenario_id, s2xlate, hv, hg) -> None:
     scenario = _randomize_context_timing(
         env,
-        _sfence_stage_scenario(scenario_id, s2xlate=s2xlate),
+        _sfence_stage_scenario(env, scenario_id, s2xlate=s2xlate),
     )
     _run_sfence_retranslation(
         env,
@@ -297,7 +279,7 @@ def test_sfence_stage_after_refill(env, scenario_id, s2xlate, hv, hg) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_unmatched_sfence_during_ptw_wait_preserves_translation(env) -> None:
     scenario = _randomize_context_timing(env, replace(
-        _sfence_stage_scenario("translation-unmatched-sfence-ptw-wait", s2xlate=0),
+        _sfence_stage_scenario(env, "translation-unmatched-sfence-ptw-wait", s2xlate=0),
         ptw_response_latency=32,
     ), latency_min=24, latency_max=48)
     initialize_frontend(
@@ -314,7 +296,7 @@ def test_unmatched_sfence_during_ptw_wait_preserves_translation(env) -> None:
     )
 
     env.pulse_sfence(
-        addr=_NEW_VA,
+        addr=scenario.va + 0x2000,
         rs1=1,
         rs2=1,
         ident=scenario.satp_asid,

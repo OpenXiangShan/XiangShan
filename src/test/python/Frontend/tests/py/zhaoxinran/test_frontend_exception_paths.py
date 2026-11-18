@@ -13,17 +13,11 @@ from tests.py.support.icache_mainpipe import (
     register_mainpipe_observer,
 )
 from tests.py.support.translation_faults import _read_exception_bit
+from tests.py.zhaoxinran.support.exception import exception_entry
 
 
-_CROSS64_PC = 0x8007_003E
-_CROSS64_FIRST_LINE = _CROSS64_PC & ~0x3F
-_CROSS64_SECOND_LINE = _CROSS64_FIRST_LINE + 0x40
-_ILLEGAL_RVC_BASE = 0x8008_0000
-_ILLEGAL_RVC_PC = _ILLEGAL_RVC_BASE + 0x3E
-_LEGAL_AFTER_ILLEGAL_PC = _ILLEGAL_RVC_BASE + 0x40
 _CNOP = 0x0001
 _ADDI_X0_X0_0 = 0x0000_0013
-_TRIGGER_PC = 0x8009_0000
 _TRIGGER_DEBUG_MODE = 1
 _INSTRUCTION_ACCESS_FAULT_BIT = 1
 _HARDWARE_ERROR_BIT = 19
@@ -142,27 +136,30 @@ def test_cacheable_cross64_refill_fault_delivery(
     scenario_key = f"zhaoxinran/exception/cross64/{fault_line}/{expected_denied}"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 20)
+    pc = exception_entry(rng, "cross64").pc
+    first_line = pc & ~0x3F
+    second_line = first_line + 0x40
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _CROSS64_PC,
+            "pc": pc,
             "fault_line": fault_line,
             "latency": latency,
             "expected_denied": expected_denied,
             "expected_path": "cross64_refill_fault",
         },
     )
-    target_line = _CROSS64_FIRST_LINE if fault_line == "first" else _CROSS64_SECOND_LINE
-    clean_line = _CROSS64_SECOND_LINE if fault_line == "first" else _CROSS64_FIRST_LINE
+    target_line = first_line if fault_line == "first" else second_line
+    clean_line = second_line if fault_line == "first" else first_line
     samples = register_mainpipe_observer(env)
     backend_records = _capture_backend_exception_state(env)
     env.icache_agent.inject_response_fault_at(target_line, **fault)
     initialize_cacheable_stream(
         env,
-        _CROSS64_PC,
+        pc,
         latency=latency,
         samples=samples,
     )
@@ -172,7 +169,7 @@ def test_cacheable_cross64_refill_fault_delivery(
         lambda: {
             int(record["address"])
             for record in env.icache_agent.get_stats().get("request_records", [])
-        }.issuperset({_CROSS64_FIRST_LINE, _CROSS64_SECOND_LINE}),
+        }.issuperset({first_line, second_line}),
         max_cycles=6000,
     ), env.icache_agent.get_stats()
     expected_icache_exception = 3 if expected_denied else 5
@@ -191,7 +188,7 @@ def test_cacheable_cross64_refill_fault_delivery(
     assert run_until(
         env,
         lambda: any(
-            record["pc"] == _CROSS64_PC
+            record["pc"] == pc
             and record["exception_bits"] == (expected_exception_bit,)
             for record in backend_records
         ),
@@ -202,9 +199,9 @@ def test_cacheable_cross64_refill_fault_delivery(
     request_addrs = [
         int(record["address"])
         for record in stats.get("request_records", [])
-        if int(record["address"]) in {_CROSS64_FIRST_LINE, _CROSS64_SECOND_LINE}
+        if int(record["address"]) in {first_line, second_line}
     ]
-    assert request_addrs.index(_CROSS64_FIRST_LINE) < request_addrs.index(_CROSS64_SECOND_LINE)
+    assert request_addrs.index(first_line) < request_addrs.index(second_line)
     fault_responses = [
         record
         for record in stats.get("response_records", [])
@@ -222,7 +219,7 @@ def test_cacheable_cross64_refill_fault_delivery(
     assert {int(record["beat_idx"]) for record in fault_responses} == {0, 1}
     assert {int(record["beat_idx"]) for record in clean_responses} == {0, 1}
     target_records = [
-        record for record in backend_records if int(record["pc"]) == _CROSS64_PC
+        record for record in backend_records if int(record["pc"]) == pc
     ]
     assert target_records
     assert all(
@@ -242,20 +239,23 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
     scenario_key = "zhaoxinran/exception/illegal-rvc-then-clean"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 20)
+    illegal_pc = exception_entry(rng, "illegal_rvc").pc
+    base = illegal_pc - 0x3E
+    legal_pc = base + 0x40
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _ILLEGAL_RVC_PC,
+            "pc": illegal_pc,
             "latency": latency,
             "expected_path": "illegal_rvc_then_clean_delivery",
         },
     )
     payload = bytearray(_CNOP.to_bytes(2, "little") * 96)
     payload[0x3E:0x40] = b"\x00\x00"
-    env.load_program(bytes(payload), _ILLEGAL_RVC_BASE)
+    env.load_program(bytes(payload), base)
     env.icache_agent.configure(
         hit_latency=latency,
         miss_latency=latency,
@@ -263,22 +263,22 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
         seed=seed,
     )
     cfvec_cycles = _capture_backend_cfvec_cycles(env)
-    initialize_frontend(env, FrontendInitConfig(reset_vector=_ILLEGAL_RVC_BASE, bare_mode=True, reset_cycles=20))
+    initialize_frontend(env, FrontendInitConfig(reset_vector=base, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
-    env.monitor.set_expected_pc(_ILLEGAL_RVC_BASE)
+    env.monitor.set_expected_pc(base)
 
     def consecutive_illegal_then_legal() -> bool:
         for cycle, current in cfvec_cycles.items():
             previous = cfvec_cycles.get(cycle - 1, [])
             if not any(
-                record["pc"] == _ILLEGAL_RVC_PC
+                record["pc"] == illegal_pc
                 and record["is_rvc"]
                 and record["exception_bits"] == (2,)
                 for record in previous
             ):
                 continue
             if any(
-                record["pc"] == _LEGAL_AFTER_ILLEGAL_PC
+                record["pc"] == legal_pc
                 and record["instr"] == _ADDI_X0_X0_0
                 and record["is_rvc"]
                 and not record["exception_bits"]
@@ -299,14 +299,14 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
         cycle
         for cycle, current in cfvec_cycles.items()
         if any(
-            record["pc"] == _LEGAL_AFTER_ILLEGAL_PC
+            record["pc"] == legal_pc
             and record["instr"] == _ADDI_X0_X0_0
             and record["is_rvc"]
             and not record["exception_bits"]
             for record in current
         )
         and any(
-            record["pc"] == _ILLEGAL_RVC_PC
+            record["pc"] == illegal_pc
             and record["is_rvc"]
             and record["exception_bits"] == (2,)
             for record in cfvec_cycles.get(cycle - 1, [])
@@ -319,7 +319,7 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
         record
         for cycle in cfvec_cycles.values()
         for record in cycle
-        if record["pc"] == _ILLEGAL_RVC_PC
+        if record["pc"] == illegal_pc
     ]
     assert illegal_records
     assert all(
@@ -337,20 +337,21 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
     scenario_key = "zhaoxinran/exception/execute-pc-trigger"
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 20)
+    pc = exception_entry(rng, "trigger").pc
     record_scenario(
         env,
         scenario_key,
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "pc": _TRIGGER_PC,
+            "pc": pc,
             "latency": latency,
             "expected_path": "execute_trigger_delivery",
         },
     )
     samples = _capture_backend_cfvec_cycles(env, include_trigger=True)
-    initialize_cacheable_stream(env, _TRIGGER_PC, latency=latency)
-    _configure_frontend_execute_trigger(env, _TRIGGER_PC)
+    initialize_cacheable_stream(env, pc, latency=latency)
+    _configure_frontend_execute_trigger(env, pc)
     env.step(2)
     _require_dut_signal(
         env, "io_csrCtrl_frontend_trigger_tUpdate_valid"
@@ -358,7 +359,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
 
     def target_triggered() -> bool:
         return any(
-            record["pc"] == _TRIGGER_PC
+            record["pc"] == pc
             and record["trigger"] == _TRIGGER_DEBUG_MODE
             for cycle in samples.values()
             for record in cycle
@@ -372,7 +373,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
         record
         for cycle in samples.values()
         for record in cycle
-        if record["pc"] == _TRIGGER_PC
+        if record["pc"] == pc
     ]
     assert target_records
     assert all(
@@ -386,7 +387,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
         record["trigger"] != _TRIGGER_DEBUG_MODE
         for cycle in samples.values()
         for record in cycle
-        if record["pc"] != _TRIGGER_PC
+        if record["pc"] != pc
     )
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == 0
     assert env.monitor.exception_mark_count == 0

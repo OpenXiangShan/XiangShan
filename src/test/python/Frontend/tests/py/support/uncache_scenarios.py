@@ -97,19 +97,25 @@ def _prepare_cross_beat_rvi_stream(env) -> None:
     env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
     LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
-def _prepare_cross_page_rvi_stream(env) -> None:
+def _page_tail_payload(*, is_rvc: bool) -> bytes:
     payload = bytearray(int(_CNOP).to_bytes(2, "little") * (_SV39_PAGE_SIZE // 2 + 128))
-    tail_offset = _CROSS_PAGE_PC - _MMIO_BASE
-    payload[tail_offset:tail_offset + 4] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
-    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
-    LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
+    if not is_rvc:
+        payload[_SV39_PAGE_SIZE - 2:_SV39_PAGE_SIZE + 2] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
+    return bytes(payload)
 
-def _prepare_cross_page_rvc_stream(env) -> None:
-    payload = int(_CNOP).to_bytes(2, "little") * (_SV39_PAGE_SIZE // 2 + 128)
+def _prepare_cross_page_rvi_stream(env) -> None:
+    payload = _page_tail_payload(is_rvc=False)
     env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
     LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
-def _prepare_sv39_dual_nc_cacheable_stream(env, *, instr_count: int = 512) -> tuple[list[tuple[int, int, bool]], list[int]]:
+def _prepare_cross_page_rvc_stream(env) -> None:
+    payload = _page_tail_payload(is_rvc=True)
+    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
+
+def _prepare_sv39_dual_nc_cacheable_stream(
+    env, *, instr_count: int = 512, vaddr: int = _NORMAL_BASE, paddr: int = _NORMAL_PHYS_BASE,
+) -> tuple[list[tuple[int, int, bool]], list[int]]:
     nc_payload = bytearray()
     for _ in range(8):
         nc_payload.extend(int(_CNOP).to_bytes(2, "little"))
@@ -118,14 +124,16 @@ def _prepare_sv39_dual_nc_cacheable_stream(env, *, instr_count: int = 512) -> tu
         nc_payload.extend(int(_CNOP).to_bytes(2, "little"))
     nc_payload.extend(int(_CNOP).to_bytes(2, "little") * int(instr_count))
 
+    alt_vaddr = vaddr + (_NORMAL_ALT_BASE - _NORMAL_BASE)
+    alt_paddr = paddr + (_NORMAL_ALT_PHYS_BASE - _NORMAL_PHYS_BASE)
     env.page_table.clear()
-    env.page_table.map_page(_NORMAL_BASE >> 12, _NORMAL_PHYS_BASE >> 12, v=1, r=1, x=1, pbmt=_PBMT_NC)
-    env.page_table.map_page(_NORMAL_ALT_BASE >> 12, _NORMAL_ALT_PHYS_BASE >> 12, v=1, r=1, x=1, pbmt=_PBMT_PMA)
+    env.page_table.map_page(vaddr >> 12, paddr >> 12, v=1, r=1, x=1, pbmt=_PBMT_NC)
+    env.page_table.map_page(alt_vaddr >> 12, alt_paddr >> 12, v=1, r=1, x=1, pbmt=_PBMT_PMA)
     env.ptw_agent.configure(mode="sv39", response_source="model", compare_drive_source="model")
-    LoadProgramSequence(image=ProgramImage(payload=bytes(nc_payload), base_addr=_NORMAL_PHYS_BASE), step_cycles=0).run(env)
-    LoadProgramSequence(image=ProgramImage(payload=bytes(nc_payload), base_addr=_NORMAL_ALT_PHYS_BASE), step_cycles=0).run(env)
-    nc_expected = _decode_fetch_block(bytes(nc_payload), vaddr=_NORMAL_BASE)
-    cacheable_pcs = [pc - _NORMAL_BASE + _NORMAL_ALT_BASE for pc, _, _ in nc_expected]
+    LoadProgramSequence(image=ProgramImage(payload=bytes(nc_payload), base_addr=paddr), step_cycles=0).run(env)
+    LoadProgramSequence(image=ProgramImage(payload=bytes(nc_payload), base_addr=alt_paddr), step_cycles=0).run(env)
+    nc_expected = _decode_fetch_block(bytes(nc_payload), vaddr=vaddr)
+    cacheable_pcs = [pc - vaddr + alt_vaddr for pc, _, _ in nc_expected]
     return nc_expected, cacheable_pcs
 
 def _remap_sv39_page_pbmt(env, *, vaddr: int, paddr: int, pbmt: int) -> None:

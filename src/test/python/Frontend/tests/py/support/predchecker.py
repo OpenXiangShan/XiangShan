@@ -45,6 +45,7 @@ def _load_and_reset(
     *,
     branch_halfword: int = 15,
     rvi_jal: bool = False,
+    base: int = _BASE,
 ) -> None:
     LoadProgramSequence(
         image=ProgramImage(
@@ -52,13 +53,13 @@ def _load_and_reset(
                 branch_halfword,
                 rvi_jal=rvi_jal,
             ),
-            base_addr=_BASE,
+            base_addr=base,
         ),
         step_cycles=0,
     ).run(env)
-    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
-    env.monitor.set_expected_pc(_BASE)
+    env.monitor.set_expected_pc(base)
 
 
 def _read_optional(recorder, *names: str) -> int | None:

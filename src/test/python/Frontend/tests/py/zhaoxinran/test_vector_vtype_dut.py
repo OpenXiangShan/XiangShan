@@ -10,8 +10,9 @@ from env.model.golden_trace import GoldenTrace
 from env.model.vtype import VTypeModel, VTypeState
 from env.sequences import LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
-from env.support import record_scenario, scenario_rng
+from env.support import fold_pc, record_scenario, scenario_rng
 from tests.py.support.bin_trace import run_bin_trace
+from tests.py.zhaoxinran.support.vtype import vtype_entry
 
 
 pytestmark = pytest.mark.parametrize(
@@ -234,7 +235,7 @@ def _encode_vsetvl(rd: int = 1, rs1: int = 2, rs2: int = 3) -> int:
     return 0x80007057 | ((int(rs2) & 0x1F) << 20) | ((int(rs1) & 0x1F) << 15) | (int(rd) << 7)
 
 
-def _load_vtype_program(env, instructions: list[int], base: int = 0x80000000) -> None:
+def _load_vtype_program(env, instructions: list[int], base: int) -> None:
     LoadProgramSequence(
         image=ProgramImage(
             payload=b"".join(instr.to_bytes(4, "little") for instr in instructions),
@@ -315,9 +316,7 @@ def _check_vtype_stress(env, start_pc: int, stream: list[int], initial: VTypeSta
     return finish
 
 
-def _load_vtype_stress_program(
-    env, program: list[int], initial: VTypeState, base: int = 0x80000000
-):
+def _load_vtype_stress_program(env, program: list[int], initial: VTypeState, base: int):
     stream = _vtype_stress_stream()
     start_pc = base + 4 * (len(program) + 16)
     _load_vtype_program(env, program + [0x00000013] * 16 + stream + [0x00000013] * 1024, base)
@@ -328,7 +327,7 @@ def _load_vtype_stress_program(
 @pytest.mark.parametrize("spacing", [0, 16], ids=("same_fetch_block", "separate_fetch_blocks"))
 @pytest.mark.parametrize("sequence", ["plain_vsetvl_plain", "multiple_imm", "imm_then_vsetvl", "vsetvl_then_imm"])
 def test_vector_vtype_instruction_order(env, sequence: str, spacing: int) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"instruction_order/{sequence}/{spacing}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -387,7 +386,7 @@ def test_vector_vtype_instruction_order(env, sequence: str, spacing: int) -> Non
 def test_vector_vtype_random_stream(env, ordinal: int) -> None:
     scenario_key = "zhaoxinran/vtype/random_stream"
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
-    base = 0x80000000
+    base = vtype_entry(env, "random_stream", ordinal=ordinal)
     nop = 0x00000013
     cases = (["vsetvli", "vsetivli"] * 14) + (["vsetvli_reserved", "vsetivli_reserved"] * 2)
     assert len(cases) == _STRESS_VSET_COUNT
@@ -473,7 +472,7 @@ def test_vector_vtype_random_stream(env, ordinal: int) -> None:
     ),
 )
 def test_vector_vtype_special_configuration(env, scenario: str, spacing: int) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"special_configuration/{scenario}/{spacing}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -545,7 +544,7 @@ def test_vector_vtype_special_configuration(env, scenario: str, spacing: int) ->
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 @pytest.mark.parametrize("illegal_kind", ["vsetvli", "vsetivli"])
 def test_vector_vtype_legal_after_illegal(env, illegal_kind: str) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"legal_after_illegal/{illegal_kind}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -593,7 +592,7 @@ def test_vector_vtype_legal_after_illegal(env, illegal_kind: str) -> None:
     ]
 )
 def test_vector_vsetvl_feedback_fields(env, scenario: str) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"feedback_fields/{scenario}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -650,7 +649,7 @@ def test_vector_vsetvl_feedback_fields(env, scenario: str) -> None:
 
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 def test_vector_vtype_full_cfvec_backpressure(env) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, "full_cfvec_backpressure")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -702,7 +701,7 @@ def test_vector_vtype_full_cfvec_backpressure(env) -> None:
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 @pytest.mark.parametrize("recovery", ["no_feedback", "walk_then_commit", "arch_walk_then_commit"])
 def test_vector_vsetvl_redirect_feedback_order(env, recovery: str) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"redirect_feedback_order/{recovery}")
     target = base + 0x400
     nop = 0x00000013
     old_instr = 0x00128293
@@ -803,7 +802,7 @@ def test_vector_vsetvl_redirect_feedback_order(env, recovery: str) -> None:
 @pytest.mark.parametrize("committed_kind", ["vsetvli", "vsetivli"])
 @pytest.mark.parametrize("output_kind", ["vsetvli", "vsetivli"])
 def test_vector_vtype_commit_with_new_vset(env, committed_kind: str, output_kind: str) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"commit_with_new_vset/{committed_kind}/{output_kind}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -825,7 +824,7 @@ def test_vector_vtype_commit_with_new_vset(env, committed_kind: str, output_kind
     overlap_cycles = []
     output_pc = base + 4 * 17
     # The pre-drive callback schedules commit for the next edge.
-    preceding_foldpc = ((output_pc - 8 - base) >> 1) | 1
+    preceding_foldpc = fold_pc(output_pc - 8)
 
     def drive_commit_with_output(cycle: int, active_env) -> None:
         cfvec = active_env.backend_cfvec_if
@@ -883,7 +882,7 @@ def test_vector_vtype_commit_with_new_vset(env, committed_kind: str, output_kind
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 @pytest.mark.parametrize("kind", ["vsetvli", "vsetivli"])
 def test_vector_vtype_fetch_fault_on_vset(env, kind: str) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"fetch_fault_on_vset/{kind}")
     nop = 0x00000013
     state_a = VTypeState(False, True, True, 2, 0)
     state_b = VTypeState(False, False, True, 1, 1)
@@ -931,7 +930,7 @@ def test_vector_vtype_fetch_fault_on_vset(env, kind: str) -> None:
     ids=("walk_vtype", "walk_to_arch_vtype"),
 )
 def test_vector_vtype_redirect_recovery(env, walk_to_arch: bool, restored: VTypeState) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"redirect_recovery/{walk_to_arch}")
     target = base + 0x400
     vset = 0x0D0072D7  # vsetvli t0, zero, e32, m1, ta, ma
     old_instr = 0x00128293  # addi t0, t0, 1
@@ -1025,7 +1024,7 @@ def test_vector_vtype_redirect_recovery(env, walk_to_arch: bool, restored: VType
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 @pytest.mark.parametrize("has_vsetvl", [False, True], ids=("commit_vtype", "vsetvl_priority"))
 def test_vector_vtype_backend_commit(env, has_vsetvl: bool) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"backend_commit/{has_vsetvl}")
     nop = 0x00000013
     committed = VTypeState(False, False, True, 1, 1)
     vsetvl = VTypeState(False, True, False, 3, 2)
@@ -1095,7 +1094,7 @@ def test_vector_vtype_backend_commit(env, has_vsetvl: bool) -> None:
 
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 def test_vector_vtype_resuming_stalls_and_releases_ibuffer_output(env) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, "resuming_stalls_and_releases_ibuffer_output")
     nop = 0x00000013
     finish_stress = _load_vtype_stress_program(env, [nop] * 64, VTypeState.initial(), base)
 
@@ -1138,7 +1137,7 @@ def test_vector_vtype_resuming_stalls_and_releases_ibuffer_output(env) -> None:
 
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 def test_vector_vtype_walk_to_arch_and_commit_same_cycle(env) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, "walk_to_arch_and_commit_same_cycle")
     nop = 0x00000013
     committed = VTypeState(False, True, True, 1, 1)
     speculative = VTypeState(False, False, False, 2, 0)
@@ -1200,7 +1199,7 @@ def test_vector_vtype_walk_to_arch_and_commit_same_cycle(env) -> None:
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
 @pytest.mark.parametrize("walk_equal_commit", [True, False], ids=("walk_equal", "walk_different"))
 def test_vector_vtype_commit_and_walk_same_cycle(env, walk_equal_commit: bool) -> None:
-    base = 0x80000000
+    base = vtype_entry(env, f"commit_and_walk_same_cycle/{walk_equal_commit}")
     nop = 0x00000013
     prior = VTypeState(False, False, True, 1, 1)
     committed = VTypeState(False, True, True, 2, 0)
