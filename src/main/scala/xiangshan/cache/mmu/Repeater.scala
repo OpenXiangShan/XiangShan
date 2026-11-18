@@ -162,6 +162,7 @@ class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Paramet
   val refill = Output(Bool())
   val getGpa = Output(Bool())
   val memidx = Output(new MemBlockidxBundle)
+  val fromHwPrefetch = Output(Bool())
   val fastResp = if (hasHint) Some(Flipped(ValidIO(new PtwRespS2))) else None
   val fastHint = if (hasHint) Some(ValidIO(new TLBHintResp)) else None
 }
@@ -189,6 +190,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
+  val fromHwPrefetch = Reg(Vec(Size, Bool()))
 
   val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val canenq = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -212,6 +214,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
   io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   io.getGpa := 0.U
+  io.fromHwPrefetch := false.B
 
   require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
   require(Size >= Width && ((Size & (Size-1)) == 0), s"DTLB Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
@@ -254,6 +257,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
       getGpa(enqidx(i)) := io.tlb.req(i).bits.getGpa
       memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
+      fromHwPrefetch(enqidx(i)) := io.tlb.req(i).bits.fromHwPrefetch
     }
   }
 
@@ -276,6 +280,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     v.zip(ptwResp_EntryMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
     io.memidx := memidx(ptwResp_EntryMatchFirst)
     io.getGpa := getGpa(ptwResp_EntryMatchFirst)
+    io.fromHwPrefetch := fromHwPrefetch(ptwResp_EntryMatchFirst)
   }
 
   when (io.flush) {
@@ -400,6 +405,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+  io.tlb.resp.bits.data.fromHwPrefetch := false.B
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
   // However, it is only necessary to distinguish between different DTLB now
@@ -430,14 +436,17 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B
     io.tlb.resp.bits.data.memidx := load_filter(0).memidx
+    io.tlb.resp.bits.data.fromHwPrefetch := load_filter(0).fromHwPrefetch
   }
   when (store_filter(0).refill) {
     io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := true.B
     io.tlb.resp.bits.data.memidx := store_filter(0).memidx
+    io.tlb.resp.bits.data.fromHwPrefetch := store_filter(0).fromHwPrefetch
   }
   when (prefetch_filter(0).refill) {
     io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := true.B
     io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+    io.tlb.resp.bits.data.fromHwPrefetch := prefetch_filter(0).fromHwPrefetch
   }
 
   val ptw_arb = Module(new RRArbiterInit(new PtwReq, 3))
@@ -474,6 +483,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
+  val fromHwPrefetch = Reg(Vec(Size, Bool()))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
   val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
@@ -529,6 +539,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
   val resp_vector = RegEnable(ParallelMux(ptwResp_OldMatchVec zip ports), io.ptw.resp.fire)
   val resp_getGpa = RegEnable(ParallelMux(ptwResp_OldMatchVec zip getGpa), io.ptw.resp.fire)
+  val resp_fromHwPrefetch = RegEnable(ParallelMux(ptwResp_OldMatchVec zip fromHwPrefetch), io.ptw.resp.fire)
 
   def canMerge(index: Int) : Bool = {
     ptwResp_newMatchVec(index) || oldMatchVec(index) ||
@@ -574,6 +585,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
   io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
+  io.tlb.resp.bits.data.fromHwPrefetch := resp_fromHwPrefetch
   io.tlb.resp.bits.vector := resp_vector
   io.tlb.resp.bits.data.getGpa := RegNext(PriorityMux(ptwResp_OldMatchVec, getGpa))
   io.tlb.resp.bits.getGpa := DontCare
@@ -599,6 +611,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         getGpa(enqPtrVec(i)) := req.bits.getGpa
         memidx(enqPtrVec(i)) := req.bits.memidx
+        fromHwPrefetch(enqPtrVec(i)) := req.bits.fromHwPrefetch
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }
   }
