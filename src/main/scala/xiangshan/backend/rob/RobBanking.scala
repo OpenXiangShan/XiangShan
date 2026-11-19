@@ -99,8 +99,8 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
     (0 until Size).map(entry => selected(entry % bankNum))
   }
 
-  // Both rows retain bank order. The second row wraps from the last row to row zero.
-  def readRows[T <: Data](entries: Seq[T], select: UInt, keepDebug: Boolean): (Vec[T], Vec[T]) = {
+  // Match rowIndices: the current row followed by the next row, each in bank order.
+  def readRows[T <: Data](entries: Seq[T], select: UInt, keepDebug: Boolean): Vec[T] = {
     require(entries.length == Size && select.getWidth == rowCount)
     val banks = VecInit((0 until bankNum).map { bank =>
       VecInit((0 until rowCount).map(row => entries(row * bankNum + bank)))
@@ -108,9 +108,9 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
     if (keepDebug) {
       dontTouch(banks)
     }
-    val current = VecInit(banks.map(bank => Mux1H(select, bank)))
-    val next = VecInit(banks.map(bank => Mux1H(select, bank.drop(1) :+ bank(0))))
-    (current, next)
+    val current = banks.map(bank => Mux1H(select, bank))
+    val next = banks.map(bank => Mux1H(select, bank.drop(1) :+ bank(0)))
+    VecInit(current ++ next)
   }
 
   // Labels follow the supplied pointer, independently of the registered read address.
@@ -122,5 +122,24 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
         if (bankBits == 0) row else Cat(row, bank.U(bankBits.W))
       }
     })
+  }
+
+  // Connect one updated row to the dequeue group, keeping each entry paired
+  // with its commit readiness in the order returned by readRows.
+  def updateRobDeqGroup(
+    deqGroup: Vec[RobCommitEntryBundle],
+    entries: Vec[RobEntryBundle],
+    commitW: Vec[Bool],
+    selectNextRow: Bool
+  ): Unit = {
+    require(deqGroup.length == bankNum)
+    require(entries.length == 2 * bankNum && commitW.length == entries.length)
+    for (bank <- 0 until bankNum) {
+      val nextRowIndex = bank + bankNum
+      deqGroup(bank).connectCommitEntry(entries(bank), commitW(bank))
+      when(selectNextRow) {
+        deqGroup(bank).connectCommitEntry(entries(nextRowIndex), commitW(nextRowIndex))
+      }
+    }
   }
 }
