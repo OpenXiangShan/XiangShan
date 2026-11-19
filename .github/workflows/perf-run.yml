@@ -92,42 +92,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: OpenXiangShan/env-scripts
-          ref: 476b51332047970b96f1c67185837ecd166ca673
+          ref: d5542fe720f14ba5b84f124ce3ea60b3231a9401
           path: cancel-probe-env-scripts
           persist-credentials: false
-
-      - name: Reap the previous isolated probe
-        continue-on-error: true
-        run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=10 node034 python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import select
-          import signal
-
-          pid = 1381086
-          expected = "/nfs/home/cirunner/perf-report/cr261115-cc4f1988b-DefaultConfig-cancel-probe-44484856629-1/emu-gsim"
-          proc = Path(f"/proc/{pid}")
-          try:
-              fd = os.pidfd_open(pid)
-          except ProcessLookupError:
-              print("Previous probe is not running.")
-              raise SystemExit(0)
-          try:
-              stat = (proc / "stat").read_text().rsplit(") ", 1)[1].split()
-              argv = (proc / "cmdline").read_bytes().split(b"\0")
-              if stat[19] == "28046832" and argv[0] == os.fsencode(expected):
-                  signal.pidfd_send_signal(fd, signal.SIGTERM)
-                  if not select.select([fd], [], [], 10)[0]:
-                      raise SystemExit("Previous probe did not exit after SIGTERM.")
-                  print("Previous isolated probe exited.")
-              else:
-                  print("PID no longer belongs to the previous probe.")
-          except (ProcessLookupError, FileNotFoundError):
-              print("Previous probe has already exited.")
-          finally:
-              os.close(fd)
-          PY
 
       - name: Set env
         id: set_env
@@ -252,7 +219,7 @@ jobs:
           if [[ -n "${CST_FILE:-}" ]]; then
             EXTRA_OPTS+=(--cst-file "$CST_FILE")
           fi
-          python3 main.py \
+          exec python3 main.py \
             --gcpt-path "$CKPT_HOME" \
             --json-path "$CKPT_JSON_PATH" \
             --result-path "$SPEC_DIR" \
