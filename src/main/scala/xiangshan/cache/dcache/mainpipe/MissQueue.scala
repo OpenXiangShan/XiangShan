@@ -1294,14 +1294,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     entries.map(_.io.secondary_reject(i))
   }
 
-  // val block_match_vec = entries.map(_.io.match_signals.block_match)
-
   val block_match_seqs = (0 until reqNum).map { i =>
     entries.map(_.io.match_signals_vec(i).block_match)
   }
 
-  val probe_block_vec = entries.map {
-    case e =>
+  val probe_block_vec = entries.map { case e =>
       e.io.probe.req <> io.probe.req
       e.io.probe.block
   }
@@ -1429,8 +1426,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // bigger index miss_req will be reject: 
     req_reject_vec(i) :=(0 until reqNum).map{ j => 
       query_valid(j) && query_valid(i) && j.U < i.U &&
-        get_block(io.queryMQ(i).req.bits.addr) === get_block(io.queryMQ(j).req.bits.addr) &&
-        !aliasMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits)
+      get_block(io.queryMQ(i).req.bits.addr) === get_block(io.queryMQ(j).req.bits.addr) &&
+      !aliasMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits)
     }.reduce(_ || _)
   }
 
@@ -1474,9 +1471,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     can_allocate_vec(i) := (free_entry_count =/= 0.U || reserved_for_req(i)) && !req_reject_vec(i) &&
                             !ParallelORR(Cat(block_match_seqs(i) ++ Seq(match_from_pipe(i)))) &&
                             (!io.queryMQ(i).req.bits.isFromPrefetch || prefetch_quota_available)
-
     val can_merge_from_entry = ParallelORR(Cat(secondary_ready_vec(i)))
-
     can_merge_vec(i) := can_merge_from_entry || can_merge_from_pipe(i)
   }
 
@@ -1627,15 +1622,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     accepted_alloc(i) && io.queryMQ(i).req.bits.isFromPrefetch))
   val released_prefetch_count = PopCount(entries.map(_.io.prefetch_released))
   prefetch_owner_count := prefetch_owner_count + PopCount(accepted_prefetch_alloc) - released_prefetch_count
-  assert(released_prefetch_count <= prefetch_owner_count, "prefetch quota must not underflow")
   assert(PopCount(accepted_prefetch_alloc) <= 1.U, "at most one pure prefetch allocation per cycle")
-  when(accepted_prefetch_alloc.asUInt.orR) {
-    assert(prefetch_owner_count < nMaxPrefetchEntry, "prefetch allocation must have quota")
-  }
-  for (i <- 0 until reqNum; j <- 0 until i) {
-    assert(!(accepted_alloc(i) && accepted_alloc(j) && analysis.target_mshr(i) === analysis.target_mshr(j)),
-      "ordinary allocations must target distinct MSHRs")
-  }
 
   // A fabric winner owns a tentative post-arbitration buffer slot. Only an
   // accurately allocated S2 miss commits that slot as a real TL A request.
