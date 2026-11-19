@@ -4,9 +4,11 @@ import random
 
 from env.core.transactions import BackendRedirectClass, ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
+from env.model.golden_trace import TraceEntry
 from env.sequences import LoadProgramSequence
 from env.support import PcBoundary, PcMapping, RandomPc, random_pc
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
+from tests.py.support.instructions import encode_jal_x0
 from tests.py.support import uncache_scenarios as uncache
 
 
@@ -105,6 +107,60 @@ def mmio_rvi_entry(rng: random.Random, *, cross_beat: bool) -> tuple[RandomPc, b
     offset = placement.pa - uncache._MMIO_BASE
     payload[offset:offset + 4] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     return placement, bytes(payload)
+
+
+def mmio_non_crossing_rvi_stream(
+    rng: random.Random,
+) -> tuple[list[ProgramImage], list[TraceEntry]]:
+    """Link compact runs of single-beat RVI targets on distinct MMIO pages."""
+    beat_bytes = uncache._UNCACHE_BEAT_BYTES
+    page_size = uncache._SV39_PAGE_SIZE
+    beats_per_page = page_size // beat_bytes
+    # Bound simulation work while always exercising a cross-page jump.
+    target_count = rng.randint(16, 100)
+    page_count = rng.randint(2, 8)
+    splits = [0, *sorted(rng.sample(range(1, target_count), page_count - 1)), target_count]
+    # A 1 MiB window keeps any pair of entries within the signed JAL displacement.
+    pages = rng.sample(range(0x10_0000 // page_size), page_count)
+    placements = []
+    for page, start, end in zip(pages, splits, splits[1:]):
+        targets = end - start
+        first_beat = rng.randrange(beats_per_page - (targets + 2) + 1)
+        base = uncache._MMIO_BASE + page * page_size + first_beat * beat_bytes
+        pcs = [base + beat * beat_bytes + rng.choice((0, 2, 4)) for beat in range(targets)]
+        placements.append((base, pcs))
+
+    images = []
+    trace = []
+    for index, (base, pcs) in enumerate(placements):
+        image_beats = len(pcs) + 2
+        payload = bytearray(uncache._CNOP.to_bytes(2, "little") * (image_beats * beat_bytes // 2))
+        cursor = pcs[0]
+        for pc in pcs:
+            for padding_pc in range(cursor, pc, 2):
+                trace.append(TraceEntry(len(trace), padding_pc, uncache._CNOP, 2))
+            offset = pc - base
+            payload[offset:offset + 4] = uncache._ADDI_X0_X0_0.to_bytes(4, "little")
+            trace.append(TraceEntry(len(trace), pc, uncache._ADDI_X0_X0_0, 4))
+            cursor = pc + 4
+
+        if index + 1 < page_count:
+            target_pc = placements[index + 1][1][0]
+            jump_pc = rng.choice([
+                pc for pc in range(cursor, base + (image_beats - 1) * beat_bytes, 2)
+                if pc % beat_bytes <= beat_bytes - 4
+            ])
+            for padding_pc in range(cursor, jump_pc, 2):
+                trace.append(TraceEntry(len(trace), padding_pc, uncache._CNOP, 2))
+            jump = encode_jal_x0(target_pc - jump_pc)
+            offset = jump_pc - base
+            payload[offset:offset + 4] = jump.to_bytes(4, "little")
+            trace.append(TraceEntry(len(trace), jump_pc, jump, 4, kind="jump", taken=True, target_pc=target_pc))
+        else:
+            # Keep the monitor active on the cycle when the final RVI consumes its trace entry.
+            trace.append(TraceEntry(len(trace), cursor, uncache._CNOP, 2))
+        images.append(ProgramImage(payload=bytes(payload), base_addr=base))
+    return images, trace
 
 
 def mmio_rvc_beat_tail_entry(rng: random.Random) -> tuple[RandomPc, bytes]:

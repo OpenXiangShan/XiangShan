@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from env.model.golden_trace import GoldenTrace
+from env.model.memory_model import MemoryModel
 from env.model.page_table_model import PageTableModel
 from env.sequences import TranslationScenarioRandomizer
 from env.support import fold_pc, scenario_rng
@@ -19,6 +21,7 @@ from tests.py.support.translation_scenarios import FAULT_NOP_PAYLOAD, randomize_
 from tests.py.zhaoxinran.support.branch import jal_forward_program
 from tests.py.zhaoxinran.support.exception import exception_entry
 from tests.py.zhaoxinran.support.mmio import (
+    mmio_non_crossing_rvi_stream,
     mmio_rvc_beat_tail_entry,
     mmio_rvi_entry,
     prepare_mmio_cnop_stream,
@@ -67,6 +70,58 @@ def test_mmio_entry_points_to_generated_rvi() -> None:
         assert len(payload) == 128
         assert int.from_bytes(payload[offset:offset + 4], "little") == uncache._ADDI_X0_X0_0
     assert len(placements) > 1
+
+
+def test_mmio_non_crossing_rvi_stream_links_random_pages() -> None:
+    beat_bytes = uncache._UNCACHE_BEAT_BYTES
+    page_size = uncache._SV39_PAGE_SIZE
+    page_counts, target_counts, target_offsets, jump_offsets = set(), set(), set(), set()
+    uneven_split = False
+    for seed in range(32):
+        images, trace = mmio_non_crossing_rvi_stream(random.Random(seed))
+        assert (images, trace) == mmio_non_crossing_rvi_stream(random.Random(seed))
+        pages = [image.base_addr // page_size for image in images]
+        assert 2 <= len(images) == len(set(pages)) <= 8
+        page_counts.add(len(images))
+        memory = MemoryModel()
+        for image in images:
+            assert image.base_addr % page_size + len(image.payload) <= page_size
+            memory.load_bin(image.payload, image.base_addr)
+        jumps = []
+        for index, entry in enumerate(trace):
+            source = GoldenTrace.from_memory(memory, entry.pc, 1).entries[0]
+            assert (source.instr, source.size, source.kind, source.target_pc) == (
+                entry.instr, entry.size, entry.kind, entry.target_pc,
+            )
+            if source.kind == "jump":
+                assert source.instr & 0xFFF == 0x06F  # JAL x0
+                assert entry.target_pc == trace[index + 1].pc
+                assert entry.pc // page_size != entry.target_pc // page_size
+                jumps.append(entry)
+                jump_offsets.add(entry.pc % beat_bytes)
+            elif index + 1 < len(trace):
+                assert trace[index + 1].pc == entry.pc + entry.size
+            if entry.size == 4:
+                assert entry.pc % beat_bytes in (0, 2, 4)
+        assert len(jumps) == len(images) - 1
+        assert [trace[0].pc // page_size, *(entry.target_pc // page_size for entry in jumps)] == pages
+        page_targets = []
+        for image in images:
+            pcs = [
+                entry.pc for entry in trace
+                if entry.size == 4 and entry.kind == "normal" and entry.pc // page_size == image.base_addr // page_size
+            ]
+            assert pcs
+            first_beat = image.base_addr // beat_bytes
+            assert [pc // beat_bytes for pc in pcs] == list(range(first_beat, first_beat + len(pcs)))
+            target_offsets.update(pc % beat_bytes for pc in pcs)
+            page_targets.append(len(pcs))
+        assert 16 <= sum(page_targets) <= 100
+        target_counts.add(sum(page_targets))
+        uneven_split |= max(page_targets) - min(page_targets) > 1
+    assert len(page_counts) > 1 and len(target_counts) > 1
+    assert target_offsets == jump_offsets == {0, 2, 4}
+    assert uneven_split
 
 
 def test_mmio_cross_beat_entry_points_to_generated_rvi() -> None:
