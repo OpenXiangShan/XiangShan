@@ -374,3 +374,272 @@ def test_generated_source_assembles(family: str, tmp_path: Path) -> None:
         check=True,
     )
     assert elf_path.is_file()
+
+
+def test_objdump_parser_preserves_instruction_width_and_labels() -> None:
+    instructions, labels = parse_disassembly(
+        """
+0000000080000000 <_start>:
+    80000000:  0001                 c.addi  x0,0
+    80000002:  008000ef             jal     x1,8000000a <callee>
+000000008000000a <callee>:
+    8000000a:  00008067             jalr    x0,0(x1)
+"""
+    )
+
+    assert labels == {"_start": 0x80000000, "callee": 0x8000000A}
+    assert [item["size"] for item in instructions] == [2, 4, 4]
+    assert instructions[0]["labels"] == ["_start"]
+    assert instructions[-1]["labels"] == ["callee"]
+
+
+@pytest.mark.parametrize(
+    "second_pc",
+    [0x80000000, 0x80000002],
+)
+def test_objdump_parser_rejects_duplicate_or_overlapping_instructions(second_pc) -> None:
+    with pytest.raises(ValueError, match="out-of-order, overlapping, or duplicate"):
+        parse_disassembly(
+            f"""
+    80000000:  00000013             addi    x0,x0,0
+    {second_pc:x}:  0001                 c.addi  x0,0
+"""
+        )
+
+
+def test_objdump_parser_rejects_out_of_order_instructions() -> None:
+    with pytest.raises(ValueError, match="out-of-order"):
+        parse_disassembly(
+            """
+    80000004:  0001                 c.addi  x0,0
+    80000000:  0001                 c.addi  x0,0
+"""
+        )
+
+
+def test_objdump_parser_rejects_conflicting_label_addresses() -> None:
+    with pytest.raises(ValueError, match="conflicting disassembly label"):
+        parse_disassembly(
+            """
+0000000080000000 <same>:
+    80000000:  0001                 c.addi  x0,0
+0000000080000002 <same>:
+    80000002:  0001                 c.addi  x0,0
+"""
+        )
+
+
+@pytest.mark.skipif(
+    any(
+        shutil.which(tool) is None
+        for tool in (
+            "riscv64-unknown-elf-gcc",
+            "riscv64-unknown-elf-objcopy",
+            "riscv64-unknown-elf-objdump",
+        )
+    ),
+    reason="RISC-V ELF tools are not installed",
+)
+def test_program_map_is_verified_against_actual_binary(tmp_path: Path) -> None:
+    source, metadata = generate_case(
+        CaseSpec(family="cfg_layout_mix", seed=0xC0FFEE, blocks=16, iterations=2)
+    )
+    source_path = tmp_path / "case.S"
+    elf_path = tmp_path / "case.elf"
+    binary_path = tmp_path / "case.bin"
+    source_path.write_text(source, encoding="ascii")
+    subprocess.run(
+        [
+            "riscv64-unknown-elf-gcc",
+            "-march=rv64gc_zicsr_zifencei",
+            "-mabi=lp64",
+            "-static",
+            "-no-pie",
+            "-nostdlib",
+            "-nostartfiles",
+            "-Wl,--build-id=none",
+            "-Wl,-Ttext=0x80000000",
+            "-Wl,-e,_start",
+            "-o",
+            str(elf_path),
+            str(source_path),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "riscv64-unknown-elf-objcopy",
+            "-O",
+            "binary",
+            "-j",
+            ".text",
+            str(elf_path),
+            str(binary_path),
+        ],
+        check=True,
+    )
+
+    program_map = build_program_map(
+        source_path,
+        binary_path,
+        metadata,
+        link_address=0x80000000,
+        binary_base=0x80000000,
+    )
+
+    assert program_map["binary_text_verified"] is True
+    assert program_map["summary"]["episode_region_count"] >= 17
+    assert program_map["summary"]["feature_counts"]["crosses_page"] == 1
+    assert any(item["episode_id"] == "cfg-page-tail-probe" for item in program_map["instructions"])
+
+
+def test_random_sources_are_not_discovered_by_directed_asm_suite() -> None:
+    suite_script = FRONTEND_ROOT / "scripts" / "run_baremode_asm_suite.sh"
+    listed = subprocess.run(
+        ["bash", str(suite_script), "--list"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+
+    assert listed
+    assert all("/tests/asm_cases/" in path for path in listed)
+    assert all("/tests/random_case/" not in path for path in listed)
+
+
+def test_testpoint_catalog_preserves_many_to_many_traceability(tmp_path: Path) -> None:
+    source = tmp_path / "testpoints.csv"
+    columns = (
+        "一级测试点",
+        "二级测试点",
+        "三级测试点",
+        "四级测试点",
+        "五级测试点",
+        "Condition",
+        "Checkpoint",
+        "Object",
+        "coverage",
+        "status",
+        "testcase",
+        "evidence",
+    )
+    rows = [
+        {"一级测试点": "Frontend"},
+        {"二级测试点": "IFU"},
+        {
+            "五级测试点": "cross boundary redirect",
+            "Condition": "redirect at page tail",
+            "coverage": "bins (BIN-001) and (ATP-002)",
+            "status": "MODELED",
+        },
+        {"四级测试点": "unnamed group"},
+        {"Condition": "metadata without a leaf name", "status": "UNMAPPED"},
+        {"五级测试点": "document title without metadata"},
+    ]
+    with source.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    catalog = build_catalog(source)
+    output = tmp_path / "catalog.json"
+    write_catalog(catalog, output)
+
+    assert catalog["summary"]["testpoint_count"] == 3
+    assert catalog["summary"]["record_kind_counts"] == {
+        "documented_leaf": 1,
+        "undocumented_leaf": 1,
+        "unnamed_leaf": 1,
+    }
+    assert catalog["testpoints"][0]["coverage_refs"] == ["ATP-002", "BIN-001"]
+    assert catalog["testpoints"][0]["path_text"] == "Frontend/IFU/cross boundary redirect"
+    assert catalog["testpoints"][1]["path_text"] == "Frontend/IFU/unnamed group"
+    assert json.loads(output.read_text(encoding="utf-8"))["source_sha256"]
+
+
+def test_scenario_contract_uses_dynamic_many_to_many_coverage() -> None:
+    spec = ScenarioSpec(
+        scenario_id="cfg-000",
+        family="cfg_layout_mix",
+        ordinal=0,
+        program_seed=1,
+        timing_seed=2,
+        testpoint_ids=("TP-A", "TP-B"),
+        risk_tags=("redirect", "page_boundary"),
+        required_events=(
+            EventRequirement(event="backend.redirect", relation="T+1", anchor="uncache.d"),
+        ),
+    )
+
+    payload = spec.to_dict()
+
+    assert payload["minimum_dynamic_instructions"] == 5000
+    assert payload["coverage_attribution"]["policy"] == "dynamic_many_to_many"
+    assert payload["coverage_attribution"]["single_target_bin"] is False
+    assert payload["coverage_attribution"]["planned_testpoint_ids"] == ["TP-A", "TP-B"]
+
+
+def test_scenario_profile_links_each_case_to_multiple_canonical_testpoints(tmp_path: Path) -> None:
+    catalog = build_catalog(DEFAULT_SOURCE)
+    record = write_cases(
+        [CaseSpec(family="cfg_layout_mix", seed=7, blocks=16, iterations=2)],
+        tmp_path,
+    )[0]
+
+    scenario = build_scenario_spec(record, timing_seed=11, testpoint_catalog=catalog)
+
+    assert scenario.program_seed == 7
+    assert scenario.timing_seed == 11
+    assert len(scenario.testpoint_ids) > 1
+    assert scenario.parameters["testpoint_intent"]
+    assert all(item["path_text"] for item in scenario.parameters["testpoint_intent"])
+    assert scenario.to_dict()["coverage_attribution"]["single_target_bin"] is False
+
+
+def test_realization_requires_actual_event_counts() -> None:
+    spec = ScenarioSpec(
+        scenario_id="case",
+        family="cfg_layout_mix",
+        ordinal=0,
+        program_seed=1,
+        timing_seed=2,
+        risk_tags=("boundary",),
+        required_events=(
+            EventRequirement(event="trace.committed_instruction", min_count=5000),
+            EventRequirement(event="trace.cross_page_instruction"),
+        ),
+    )
+    events = (
+        RealizedEvent(
+            event="trace.committed_instruction",
+            count=6000,
+            evidence_source="nemu_committed_trace",
+        ),
+    )
+
+    missing = evaluate_realization(
+        spec,
+        events,
+        evidence_stage="nemu_program",
+        execution_status="completed",
+        exit_code=0,
+    )
+    realized = evaluate_realization(
+        spec,
+        (
+            *events,
+            RealizedEvent(
+                event="trace.cross_page_instruction",
+                count=1,
+                evidence_source="nemu_committed_trace",
+            ),
+        ),
+        evidence_stage="nemu_program",
+        execution_status="completed",
+        exit_code=0,
+    )
+
+    assert missing.status == "NOT_REALIZED"
+    assert [item.event for item in missing.missing_events] == ["trace.cross_page_instruction"]
+    assert realized.status == "REALIZED"
