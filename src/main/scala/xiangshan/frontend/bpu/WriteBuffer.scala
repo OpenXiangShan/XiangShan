@@ -101,7 +101,6 @@ class WriteBuffer[T <: WriteReqBundle](
   private val replacerWay  = Wire(Vec(numPorts, UInt(log2Ceil(numEntries).W)))
   private val readValidVec = WireInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
   private val readReadyVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
-  private val emptyVec     = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val fullVec      = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   // Replace is to prioritize replacing the entry of the same port as setIdx
   private val victimSameSetIdx = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
@@ -112,9 +111,14 @@ class WriteBuffer[T <: WriteReqBundle](
   // Apply drain first. Write requests below override it when they update the same slot,
   // and flush overrides both at the end of the next-state calculation.
   for (rowIdx <- 0 until numPorts) {
-    val drainIdx = PriorityEncoder(dirty(rowIdx))
+    val drainArbiter = Module(new RRArbiter(gen.cloneType, numEntries, initLastGrant = true))
+    for (entryIdx <- 0 until numEntries) {
+      drainArbiter.io.in(entryIdx).valid := dirty(rowIdx)(entryIdx)
+      drainArbiter.io.in(entryIdx).bits  := entries(rowIdx)(entryIdx)
+    }
+    io.read(rowIdx) <> drainArbiter.io.out
     when(io.read(rowIdx).fire) {
-      nextDirty(rowIdx)(drainIdx) := false.B
+      nextDirty(rowIdx)(drainArbiter.io.chosen) := false.B
     }
   }
 
@@ -254,13 +258,8 @@ class WriteBuffer[T <: WriteReqBundle](
     val replacer = ReplacementPolicy.fromString("plru", numEntries)
     readReadyVec(nRows) := io.read(nRows).ready
     readValidVec(nRows) := dirty(nRows)
-    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
     fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
     io.full(nRows)      := fullVec(nRows)
-    val readIdx = PriorityEncoder(readValidVec(nRows))
-
-    io.read(nRows).valid := !emptyVec(nRows)
-    io.read(nRows).bits  := entries(nRows)(readIdx)
 
     val touchWays = if (numPorts == 1) {
       val touch = WireInit(writeTouchVec(nRows))
