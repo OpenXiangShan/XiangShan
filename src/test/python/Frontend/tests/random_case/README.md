@@ -117,3 +117,19 @@ actual CFI position. Use linked ProgramMap PCs; seeds or metadata alone cannot
 prove the desired layout or interaction. These limits are reported, not silently
 changed by this audit. Actual fullness, held payload stability, flush/recovery,
 wall time and within-run bin growth remain unmeasured without proper evidence.
+
+
+For the c242b00d5 translation risk expansion, `translation_exploration_plan.py`
+constructs explicit stage1/onlyStage1/onlyStage2/allStage Python model scenarios
+in memory, with bounded PTW ready/latency, context IDs, PBMT/PMA and fault plans.
+It does not change the existing long-program wrapper, generate inputs or admit
+runtime. Every plan reports `MODEL_ONLY`, `runtime_reachability=UNCONFIRMED`, and
+`long_golden_trace_admitted=false`. Fault/recovery needs a separate reviewed
+checker/continuation model; a NEMU normal trace cannot be silently reused.
+
+Normal PTW response overrides keep s2xlate/getGpa/memidx identity immutable.
+Agent late-response tests show only the Python output boundary: default fence
+flush drops pending responses; explicit preservation retains request identity.
+A preserved response is not proof it passed the RTL PTWFilter or was consumed by
+TLB. VMID values must already fit a reviewed width; the planner never silently
+truncates them or claims to validate backend Fence implementation.
