@@ -12,16 +12,17 @@ import chisel3.util._
 
 /** Early enqueue decisions: deliberately independent of late cancel/WBQ and downstream ready. */
 private[cache] object MissQueueEnqLogic {
-  def compressGroups(
+  // The lowest demand port leads; prefetches follow demand when they can merge.
+  def mergeLeaders(
     valid: Seq[Bool],
     isPrefetch: Seq[Bool],
-    sameLineAndAlias: Seq[Seq[Bool]]
+    canMergeInto: Seq[Seq[Bool]]
   ): Seq[UInt] = {
     require(valid.nonEmpty && valid.length == isPrefetch.length)
     val n = valid.length
-    require(sameLineAndAlias.length == n && sameLineAndAlias.forall(_.length == n))
+    require(canMergeInto.length == n && canMergeInto.forall(_.length == n))
     valid.indices.map { i =>
-      val members = valid.indices.map(j => valid(j) && (sameLineAndAlias(i)(j) || (i == j).B))
+      val members = valid.indices.map(j => valid(j) && (canMergeInto(i)(j) || (i == j).B))
       val demandMembers = members.zip(isPrefetch).map { case (member, prefetch) => member && !prefetch }
       val demandMask = VecInit(demandMembers).asUInt
       val memberMask = VecInit(members).asUInt
