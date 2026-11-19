@@ -506,6 +506,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
         slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
         slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
+        slotUopBuf(enqIndex)(subIndex).traceInfo.foreach(_ := enqUop.traceInfo.get)
         debug_microOp(enqIndex)(subIndex) := enqUop
         debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
           debug.perfDebugInfo.dispatchTime := timer
