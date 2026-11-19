@@ -28,6 +28,7 @@ import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew}
 import xiangshan.backend.rename.CompressType
+import xiangshan.tracertl.TraceInfo
 import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -63,6 +64,7 @@ class RobSlotInfo(implicit p: Parameters) extends XSBundle {
   val commitType = CommitType()
   val fuType = FuType()
   val fuOpType = FuOpType()
+  val traceInfo = TraceInfo()
 
   def isVectorMemory: Bool = FuType.isLoadStore(fuType) && LSUOpType.isVecMemOp(fuOpType)
 
