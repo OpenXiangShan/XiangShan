@@ -26,6 +26,7 @@ import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, Uncertai
 import xiangshan.backend.Bundles._
 import xiangshan.{AddrTransType, HasXSParameter, Redirect, Resolve, XSBundle, XSModule, ExceptSparseVec}
 import xiangshan.backend.datapath.WbConfig._
+import xiangshan.backend.fu.NewCSR.CSRExceptionPath
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
@@ -437,7 +438,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach{
     fuio =>
       exuio <> fuio
-      fuio.exception := DelayN(exuio.exception, 2)
+      fuio.exception := CSRExceptionPath.delay(exuio.exception)
       fuio.robDeqPtr := DelayN(exuio.robDeqPtr, 2)
   }))
   io.csrin.foreach(exuio => funcUnits.foreach(fu => fu.io.csrin.foreach{fuio => fuio := exuio}))

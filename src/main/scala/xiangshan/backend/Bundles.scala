@@ -1753,6 +1753,8 @@ object Bundles {
     val isForVSnonLeafPTE = Bool()
     // Identifies the faulting slot when two instructions share one ROB entry.
     val isFormer = Bool()
+    // A surviving older slot's FS effect, to be applied before this trap changes V.
+    val formerFsDirty = Bool()
   }
 
   object UopIdx extends NamedUInt(3)
