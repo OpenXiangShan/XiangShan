@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from . import run_random_campaign as campaign_runner
+from . import campaign_case_matrix as campaign_runner
 
 
 def test_family_count_overrides_make_the_generation_matrix_explicit() -> None:
