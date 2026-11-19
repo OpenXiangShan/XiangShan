@@ -198,8 +198,13 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   XSDebug(s2_fire, p"hit_taken_jalr:")
 
-  s3_ittageMeta.provider.valid := s3_provided
-  s3_ittageMeta.provider.bits  := s3_provider
+  // With a correct provider target, confidence and useful stay unchanged in
+  // this prediction-time state.
+  private val s2_skipReadOnCorrect = provided && providerInfo.cnt.isSaturatePositive &&
+    providerInfo.usefulCnt.value === 1.U
+  s3_ittageMeta.skipReadOnCorrect := RegEnable(s2_skipReadOnCorrect, false.B, s2_fire)
+  s3_ittageMeta.provider.valid    := s3_provided
+  s3_ittageMeta.provider.bits     := s3_provider
   s3_ittageMeta.debug_predCycle.foreach(_ := GTimer())
 
   /* *** train/update pipeline *** */
@@ -224,9 +229,11 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     )
   }
 
-  // Re-read for every provider update and for allocation after a misprediction.
-  // Training selects providers and allocation candidates from the current entries.
-  private val t0_needRead = (t0_hasTrainBranch && t0_meta.provider.valid) || t0_updateMisPred
+  // Skip correct training of a saturated provider using its saved
+  // hint. This is a training policy: intervening updates may have changed the
+  // entry. Mispredictions always re-read, even when the saved hint is set.
+  private val t0_needRead =
+    (t0_hasTrainBranch && t0_meta.provider.valid && !t0_meta.skipReadOnCorrect) || t0_updateMisPred
 
   // ITTAGE prediction reads occur in s1, rather than TAGE's s0.  A bank
   // conflict blocks the FTQ training handshake; prediction keeps priority.
@@ -492,14 +499,16 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   trainPerf("altprovider_better", t2_hasProvider && !providerCorrect && perf_altProviderCorrect)
   trainPerf("provider_better", t2_hasAltProvider && providerCorrect && !perf_altProviderCorrect)
 
-  // Keep only the accepted training/read totals for read overhead. Do not count
-  // waiting cycles here; BPU.train_stall_ittage already tracks training stalls.
+  // Count accepted training transactions, including reads avoided by the saved hint.
+  private val perf_skipCorrect = t0_meta.provider.valid && t0_meta.skipReadOnCorrect && !t0_updateMisPred
   XSPerfSeqAccumulate(
     "ittage_train",
     t0_fire,
     Seq(
       ("total", true.B),
-      ("need_read", t0_needRead)
+      ("need_read", t0_needRead),
+      ("no_read", !t0_needRead),
+      ("skip_correct", perf_skipCorrect)
     )
   )
 
