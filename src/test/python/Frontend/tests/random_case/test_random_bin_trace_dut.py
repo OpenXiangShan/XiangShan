@@ -1,0 +1,278 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+
+import pytest
+
+from env.api import (
+    api_Frontend_load_golden_trace,
+    api_Frontend_load_program_file,
+    api_Frontend_run_until_golden_complete,
+)
+from env.model import GoldenTrace
+
+from .program_map import build_program_map
+from .scenario_contract import scenario_spec_from_dict, write_json_contract
+from .scenario_coordinator import ScenarioCoordinator, TimingPlan
+from .translation_timing import build_translation_scenario
+
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+_RUN_PIPELINE_TEST = os.getenv("TB_BIN_TRACE_PIPELINE") == "1"
+logger = logging.getLogger("env.random_bin_trace_test")
+
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise AssertionError(f"missing required env: {name}")
+    return value
+
+
+def _parse_int(raw: str) -> int:
+    return int(str(raw), 0)
+
+
+def _trace_cycle_limit() -> int:
+    value = _parse_int(os.getenv("TB_TRACE_MAX_CYCLES", "0"))
+    if value < 0:
+        raise AssertionError("TB_TRACE_MAX_CYCLES must be >= 0")
+    return value
+
+
+def _timeline_event_limit(trace_entries: int) -> int:
+    configured = _parse_int(os.getenv("TB_RANDOM_MAX_TIMELINE_EVENTS", "0"))
+    if configured < 0:
+        raise AssertionError("TB_RANDOM_MAX_TIMELINE_EVENTS must be >= 0")
+    if configured:
+        return configured
+    # Long uncache/control-flow traces can emit several DUT-facing events per
+    # committed instruction. Size the evidence buffer from the replay itself.
+    return max(20_000, int(trace_entries) * 8)
+
+
+def _build_verified_program_map() -> tuple[dict, Path]:
+    source_path = Path(_require_env("TB_ASM_PATH"))
+    binary_path = Path(_require_env("TB_BIN_PATH"))
+    generator_manifest_path = Path(_require_env("TB_RANDOM_GENERATOR_MANIFEST"))
+    output_path = Path(_require_env("TB_RANDOM_PROGRAM_MAP_PATH"))
+    metadata = json.loads(generator_manifest_path.read_text(encoding="utf-8"))
+    program_map = build_program_map(
+        source_path,
+        binary_path,
+        metadata,
+        link_address=_parse_int(os.getenv("TB_RESET_VECTOR", "0x80000000")),
+        binary_base=_parse_int(os.getenv("TB_BASE_ADDR", "0x80000000")),
+    )
+    write_json_contract(output_path, program_map)
+    return program_map, output_path
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
+def test_random_bin_trace(env):
+    binary_path = Path(_require_env("TB_BIN_PATH"))
+    trace_path = Path(_require_env("TB_TRACE_PATH"))
+    scenario_path = Path(_require_env("TB_RANDOM_SCENARIO_SPEC"))
+    timeline_path = Path(_require_env("TB_RANDOM_TIMELINE_PATH"))
+    base_address = _parse_int(os.getenv("TB_BASE_ADDR", "0x80000000"))
+    reset_vector = _parse_int(os.getenv("TB_RESET_VECTOR", hex(base_address)))
+    trace_start_index = _parse_int(os.getenv("TB_TRACE_START_INDEX", "0"))
+
+    assert binary_path.is_file(), f"bin file not found: {binary_path}"
+    assert trace_path.is_file(), f"trace file not found: {trace_path}"
+    scenario = scenario_spec_from_dict(json.loads(scenario_path.read_text(encoding="utf-8")))
+    program_map, program_map_path = _build_verified_program_map()
+    golden_trace_entries = GoldenTrace.from_file(str(trace_path)).entries[
+        trace_start_index:
+    ]
+    timing_plan_payload = scenario.parameters.get("timing_plan")
+    timing_plan = (
+        TimingPlan.from_dict(timing_plan_payload)
+        if isinstance(timing_plan_payload, dict)
+        else TimingPlan.from_seed(scenario.timing_seed)
+    )
+    coordinator = ScenarioCoordinator(
+        scenario_id=scenario.scenario_id,
+        timing_plan=timing_plan,
+        program_map=program_map,
+        maximum_timeline_events=_timeline_event_limit(len(golden_trace_entries)),
+    )
+    coordinator.install(env)
+
+    execution_status = "FAIL"
+    timeline_details: dict[str, object] = {
+        "scenario_spec_path": str(scenario_path.resolve()),
+        "program_map_path": str(program_map_path.resolve()),
+    }
+    try:
+        translation_scenario = None
+        if scenario.family == "translation_timing_cross":
+            translation_scenario = build_translation_scenario(
+                scenario,
+                binary_path.read_bytes(),
+                virtual_base=reset_vector,
+                physical_base=int(scenario.parameters["translation"]["physical_base"]),
+                guest_physical_base=int(
+                    scenario.parameters["translation"]["guest_physical_base"]
+                ),
+            )
+            translation_enabled = (
+                str(translation_scenario.mode).lower() != "bare"
+                or int(translation_scenario.s2xlate) != 0
+            )
+            env.initialize(
+                reset_vector=int(translation_scenario.va),
+                bare_mode=not translation_enabled,
+                reset_cycles=20,
+            )
+            from env.sequences import TranslationScenarioBuilder
+
+            translation_state = TranslationScenarioBuilder(env).build(
+                translation_scenario
+            )
+            coordinator.configure_translation_pages(translation_state.expected_page_outcomes)
+            if env.functional_coverage is not None:
+                env.functional_coverage.configure_program_address_mapping(
+                    translation_state.expected_page_outcomes
+                )
+            pbmte_record = env.set_translation_pbmte(
+                machine=translation_scenario.ptw_machine_pbmte,
+                hypervisor=translation_scenario.ptw_hypervisor_pbmte,
+            )
+            timeline_details["translation_pbmte_control"] = pbmte_record
+            for control, requested in {
+                "machine": translation_scenario.ptw_machine_pbmte,
+                "hypervisor": translation_scenario.ptw_hypervisor_pbmte,
+            }.items():
+                if requested is None:
+                    continue
+                assert pbmte_record["supported"], (
+                    f"requested PBMTE {control} control is unavailable on the DUT: "
+                    f"{pbmte_record}"
+                )
+                assert control in pbmte_record["driven"], (
+                    f"requested PBMTE {control} control was not driven on the DUT: "
+                    f"{pbmte_record}"
+                )
+                assert int(pbmte_record["driven"][control]) == int(bool(requested))
+            env.backend_model.set_explicit_injection_enabled(
+                False,
+                reason="translation random bin mode uses golden trace and mapped physical memory",
+            )
+            env.monitor.clear()
+            env.monitor.set_expected_pc(int(translation_scenario.va))
+            env.arm_translation_scenario(
+                translation_state,
+                page_indexes=tuple(
+                    range(len(translation_state.expected_page_outcomes))
+                ),
+                expect_ptw=True,
+                # Long random control-flow intentionally creates many predictor
+                # redirects. Non-matching PTW traffic and exception cfVecs are
+                # diagnostic speculation; the golden checker separately proves
+                # that none of it reaches the committed architectural stream.
+                allow_control_flow_speculation=True,
+                required_fetch_vas=tuple(
+                    entry.pc for entry in golden_trace_entries
+                ),
+            )
+            binary_size = len(binary_path.read_bytes())
+        else:
+            env.initialize(reset_vector=reset_vector, bare_mode=True, reset_cycles=20)
+            binary_size = api_Frontend_load_program_file(
+                env,
+                str(binary_path),
+                base_address,
+                max_cycles=0,
+            )
+        trace_entries = api_Frontend_load_golden_trace(
+            env,
+            str(trace_path),
+            max_cycles=0,
+            start_index=trace_start_index,
+        )
+        run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
+        result = getattr(env, "_last_run_until_golden_result", None)
+        assert run_ok is True, (
+            "golden trace run stopped unexpectedly"
+            if result is None
+            else (
+                "golden trace run stopped unexpectedly: "
+                f"status={result.status} cycles={result.cycles_run} "
+                f"cursor={result.cursor}/{result.total_entries} "
+                f"pending_work={result.pending_work} "
+                f"monitor_errors={result.monitor_error_count}"
+            )
+        )
+        assert result is not None, "golden trace run did not report a stop reason"
+        assert result.status == "completed"
+        assert result.completed is True
+        assert result.cursor >= result.total_entries
+        assert result.pending_work == 0
+        assert binary_size > 0
+        assert trace_entries >= scenario.minimum_dynamic_instructions
+        assert not env.monitor.get_errors()
+        assert not coordinator.has_active_action, (
+            "golden trace completed while a scheduled timing action was still active: "
+            + ",".join(coordinator.unrealized_action_ids)
+        )
+        assert not coordinator.unrealized_action_ids, (
+            "scheduled timing actions were not realized: "
+            + ",".join(coordinator.unrealized_action_ids)
+        )
+
+        realized = {event.event: event.count for event in coordinator.realized_events()}
+        for requirement in scenario.required_events:
+            if requirement.evidence_stage != "dut":
+                continue
+            assert realized.get(requirement.event, 0) >= requirement.min_count, (
+                f"DUT scenario event was requested but not realized: {requirement.event} "
+                f"got={realized.get(requirement.event, 0)} required={requirement.min_count}"
+            )
+        if translation_scenario is not None:
+            assert coordinator.translation_mapping_valid, (
+                "translation program mapping missing or invalidated during replay"
+            )
+            # A passing golden-trace/checker run is insufficient: the translation
+            # oracle validates PTW context, translated fetches, and cfVec faults.
+            env.assert_translation_scenario()
+        execution_status = "REALIZED"
+        timeline_details.update(
+            {
+                "cycles_run": int(result.cycles_run),
+                "golden_cursor": int(result.cursor),
+                "golden_entries": int(result.total_entries),
+                "monitor_errors": int(result.monitor_error_count),
+            }
+        )
+        logger.info(
+            "random scenario complete: id=%s cycles=%d cursor=%d actions=%d",
+            scenario.scenario_id,
+            result.cycles_run,
+            result.cursor,
+            coordinator.action_count,
+        )
+    except BaseException as exc:
+        timeline_details["error_type"] = type(exc).__name__
+        timeline_details["error"] = str(exc)
+        raise
+    finally:
+        try:
+            oracle_stats = env.get_stats().get("translation_oracle") or {}
+            timeline_details["translation_oracle_error_count"] = int(
+                oracle_stats.get("error_count", 0)
+            )
+            timeline_details["translation_oracle_errors"] = list(
+                oracle_stats.get("errors") or []
+            )
+        except Exception as exc:
+            timeline_details["translation_oracle_stats_error"] = str(exc)
+        coordinator.write_timeline(
+            timeline_path,
+            execution_status=execution_status,
+            details=timeline_details,
+        )
