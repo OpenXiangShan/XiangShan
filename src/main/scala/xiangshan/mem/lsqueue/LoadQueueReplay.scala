@@ -610,7 +610,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // LoadQueueReplay can't backpressure.
   // We think LoadQueueReplay can always enter, as long as it is the same size as VirtualLoadQueue.
-  assert(freeList.io.canAllocate.reduce(_ || _) || !io.enq.map(_.valid).reduce(_ || _), s"LoadQueueReplay Overflow")
+  val enqNewRequest = io.enq.map{ case enq =>
+    enq.valid && !enq.bits.isLoadReplay
+  }
+  XSError(!freeList.io.canAllocate.reduce(_ || _) && enqNewRequest.reduce(_ || _), s"LoadQueueReplay Overflow")
 
   // Allocate logic
   needEnqueue.zip(newEnqueue).zip(io.enq).map {
