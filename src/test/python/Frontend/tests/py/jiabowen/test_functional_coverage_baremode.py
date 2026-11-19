@@ -337,8 +337,105 @@ def test_baremode_cacheable_stream_delivery_pilot(env):
     LoadProgramSequence(image=_cacheable_stream_image(), step_cycles=0).run(env)
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
 
+    from env.funcov.py.ifu.compact_funcov import _read_ifu_internal_with_path
+
+    recorder = env.functional_coverage
+    commits_before_block = int(env.backend_model.get_stats()["commit_count"])
     env.backend_model.set_can_accept(0)
-    env.step(32)
+
+    def read_ifu(stem: str) -> tuple[int, str]:
+        value, path = _read_ifu_internal_with_path(recorder, env.dut, stem)
+        assert value is not None and path is not None, {"missing_native_ifu_probe": stem}
+        return int(value), str(path)
+
+    def require_blocked(*, allow_pending_drive: bool = False) -> bool:
+        native_accept = recorder._try_read_dut_signal(
+            env.dut, "Frontend_top.io_backend_toIBuf_decodeCanAccept"
+        )
+        command_accept = int(env.dut.io_backend_toIBuf_decodeCanAccept.value)
+        stats = env.backend_model.get_stats()
+        assert native_accept in {0, 1} and command_accept in {0, 1}, {
+            "reason": "backend accept probes are missing or non-boolean",
+            "native_accept": native_accept,
+            "command_accept": command_accept,
+            "cycle": int(env.current_cycle),
+        }
+        assert stats["can_accept"] == 0, {
+            "reason": "backend pressure was not requested", "cycle": int(env.current_cycle),
+            "backend": stats,
+        }
+        assert int(stats["commit_count"]) == commits_before_block, {
+            "reason": "backend committed before pressure release", "cycle": int(env.current_cycle),
+            "commits_before_block": commits_before_block, "backend": stats,
+        }
+        if allow_pending_drive and (command_accept, native_accept) == (0, 1):
+            # Drive is committed after the current rise evaluation. It becomes
+            # effective-native at the next rise, and this grace cannot repeat.
+            return False
+        assert command_accept == native_accept == 0, {
+            "reason": "backend pressure did not become effective-native",
+            "native_accept": native_accept,
+            "command_accept": command_accept,
+            "cycle": int(env.current_cycle),
+            "backend": stats,
+        }
+        return True
+
+    # Wait through reset/startup until *real* cacheable payload enters IBuffer.
+    # A fixed delay immediately after initialize can end before the first fetch.
+    loaded = None
+    pressure_effective_cycle = None
+    pending_drive_cycles = 0
+    for _ in range(6000):
+        env.step(1)
+        if pressure_effective_cycle is None:
+            pressure_ready = require_blocked(allow_pending_drive=pending_drive_cycles == 0)
+            if not pressure_ready:
+                pending_drive_cycles += 1
+                continue
+            pressure_effective_cycle = int(env.current_cycle)
+        else:
+            require_blocked()
+        valid, _ = read_ifu("io_toIBuffer_valid")
+        ready, _ = read_ifu("io_toIBuffer_ready")
+        if valid != 1 or ready != 1:
+            continue
+        enq, enq_path = read_ifu("io_toIBuffer_bits_enqEnable")
+        valid_mask, valid_path = read_ifu("io_toIBuffer_bits_valid")
+        if enq == 0:
+            continue
+        assert enq & ~valid_mask == 0
+        assert read_ifu("s2_useUncacheFetch")[0] == 0
+        exception_mask, exception_path = read_ifu("io_toIBuffer_bits_exceptionMask")
+        assert exception_mask & enq & valid_mask == 0
+        slots = [slot for slot in range(36) if enq & valid_mask & (1 << slot)]
+        assert len(slots) >= 2
+        payload = []
+        for index, slot in enumerate(slots[:2]):
+            pc, pc_path = read_ifu(f"s2_alignedInstrPcVec_{slot}_addr")
+            instr, instr_path = read_ifu(f"io_toIBuffer_bits_instrs_{slot}")
+            is_rvc, rvc_path = read_ifu(f"io_toIBuffer_bits_isRvc_{slot}")
+            assert pc << 1 == _BASE + 2 * index
+            assert instr == _NOP and is_rvc == 1
+            payload.append({"slot": slot, "pc": pc << 1, "instr": instr, "is_rvc": is_rvc,
+                            "signal_paths": [pc_path, instr_path, rvc_path]})
+        loaded = {"cycle": int(env.current_cycle), "enq_enable": enq, "valid_mask": valid_mask,
+                  "exception_mask": exception_mask, "payload": payload,
+                  "signal_paths": [enq_path, valid_path, exception_path]}
+        break
+    assert loaded is not None, "no real cacheable payload entered IBuffer while backend was blocked"
+    # Keep pressure for a full 32 cycles after physical payload is present.
+    for _ in range(32):
+        env.step(1)
+        require_blocked()
+    assert pressure_effective_cycle is not None
+    env._emit_event("ifu.cacheable_stream_loaded_backpressure", {
+        "source": loaded, "release_cycle": int(env.current_cycle),
+        "loaded_hold_cycles": 32, "commits_before_release": commits_before_block,
+        "pressure_effective_cycle": pressure_effective_cycle,
+        "pending_drive_cycles": pending_drive_cycles,
+        "can_accept_signal_path": "Frontend_top.io_backend_toIBuf_decodeCanAccept",
+    })
     env.backend_model.set_can_accept(1)
     commits = _warmup_commits(env, target_count=14, max_cycles=5000)
 
