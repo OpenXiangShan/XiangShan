@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Offline only: qualify an already completed stall8 replay. Never starts simulators.
+set -euo pipefail
+
+(( $# == 2 )) || {
+  echo "usage: $0 RUN_ROOT NEW_AUDIT_DIR" >&2
+  exit 2
+}
+run_root=$(realpath "$1")
+audit_dir=$2
+[[ -d "$run_root" ]] || { echo "missing run root: $run_root" >&2; exit 2; }
+[[ ! -e "$audit_dir" ]] || { echo "audit output already exists: $audit_dir" >&2; exit 2; }
+
+repo=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+frontend="$repo/src/test/python/Frontend"
+python_bin=/nfs/home/zhaoxinran/.venv/mcpgateway/bin/python
+tools_dir="$frontend/tests/random_case"
+name=fe_random_translation_timing_cross_s42f10327d51c116f_o000_ptps_pr01
+expected_campaign_sha=5061856fc1b3af874d887b17beae6b57c5b3a94bc4f1946a07490f1cb0ebf324
+expected_timing_audit_sha=c0c3a7a64246f64b201da0c3d848409c9f6537658f83c31359623c5b97c9fd91
+original_qualification=/tmp/frontend-random-ptpsr1-seed0-offline-audit-crhygnsS/qualification.json
+manifest="$repo/build-frontend/frontend_build_manifest.verilator.json"
+
+campaign="$run_root/candidate-campaign.json"
+timing_audit="$run_root/timing-candidate-audit.json"
+[[ "$(sha256sum "$campaign" | cut -d' ' -f1)" == "$expected_campaign_sha" ]] || {
+  echo "run-root campaign hash mismatch" >&2
+  exit 1
+}
+[[ "$(sha256sum "$timing_audit" | cut -d' ' -f1)" == "$expected_timing_audit_sha" ]] || {
+  echo "run-root timing audit hash mismatch" >&2
+  exit 1
+}
+
+shopt -s nullglob
+artifacts=("$run_root"/funcov/*.funcov.json)
+timelines=("$run_root"/inputs/*.scenario_timeline.json)
+program_maps=("$run_root"/inputs/*.program_map.json)
+case_logs=("$run_root"/logs/*.log)
+(( ${#artifacts[@]} == 1 )) || { echo "expected one funcov artifact" >&2; exit 1; }
+(( ${#timelines[@]} == 1 )) || { echo "expected one scenario timeline" >&2; exit 1; }
+(( ${#program_maps[@]} == 1 )) || { echo "expected one ProgramMap" >&2; exit 1; }
+(( ${#case_logs[@]} == 1 )) || { echo "expected one case log" >&2; exit 1; }
+artifact=${artifacts[0]}
+timeline=${timelines[0]}
+program_map=${program_maps[0]}
+case_log=${case_logs[0]}
+
+mkdir "$audit_dir"
+audit_dir=$(realpath "$audit_dir")
+PYTHONPATH="$frontend" "$python_bin" "$tools_dir/translation_replay_audit.py" \
+  --artifact "$artifact" \
+  --timeline "$timeline" \
+  --current-manifest "$manifest" \
+  --program-map "$program_map" \
+  --case-log "$case_log" \
+  --campaign "$campaign" \
+  --case-name "$name" \
+  --inherited-input-audit "$timing_audit" \
+  --manifest-before "$run_root/build-manifest.before.json" \
+  --environment-before "$run_root/environment.before.diff" \
+  --environment-after "$run_root/environment.after.diff" \
+  --python-input-hashes "$run_root/python-inputs.before.sha256" \
+  --output "$audit_dir/qualification.json"
+
+PYTHONPATH="$frontend" "$python_bin" "$tools_dir/pa_response_boundary_audit.py" \
+  --timeline "$timeline" \
+  --program-map "$program_map" \
+  --output "$audit_dir/pa-boundary.json"
+
+set +e
+PYTHONPATH="$frontend" "$python_bin" "$tools_dir/timing_replay_compare.py" \
+  --original-qualification "$original_qualification" \
+  --candidate-qualification "$audit_dir/qualification.json" \
+  --timing-candidate-audit "$timing_audit" \
+  --case-name "$name" \
+  --output "$audit_dir/original-vs-stall8.json"
+comparison_status=$?
+set -e
+
+PYTHONPATH="$frontend" "$python_bin" "$tools_dir/target_hit_audit.py" \
+  --qualification "$audit_dir/qualification.json" \
+  --output "$audit_dir/target-hit.json"
+
+sha256sum "$audit_dir"/*.json
+if (( comparison_status != 0 )); then
+  echo "same-contract comparison unavailable; candidate qualification and target audit completed" >&2
+fi

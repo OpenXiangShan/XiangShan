@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+# Read-only precheck: bash .../replay_page_tail_candidates.sh check
+# Dense variant: PAGE_TAIL_VARIANT=ptpd bash .../replay_page_tail_candidates.sh check
+# Sparse low-static-cost seed0: PAGE_TAIL_VARIANT=ptps bash ... check
+# Sparse RVI NC-pair seed0: PAGE_TAIL_VARIANT=ptpsr bash ... check
+# One-repeat sparse RVI NC-pair seed0: PAGE_TAIL_VARIANT=ptpsr1 bash ... check
+# Explicit seed1 follow-on (current replay-root campaign only):
+# PAGE_TAIL_VARIANT=ptpsr1 PAGE_TAIL_CASE_INDEX=1 bash ... check
+# After explicit serialized DUT-slot release, run ONE candidate: ... run 0 (or 1).
+set -euo pipefail
+mode=${1:-check}
+index=${2:-0}
+[[ "$mode" == check || "$mode" == run ]] || exit 2
+repo=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+frontend="$repo/src/test/python/Frontend"
+python_bin=/nfs/home/zhaoxinran/.venv/mcpgateway/bin/python
+variant=${PAGE_TAIL_VARIANT:-ptp}
+case_index_override=${PAGE_TAIL_CASE_INDEX:-}
+target_mode=${PAGE_TAIL_TARGET_MODE:-diagnostic}
+expected_attribute_mode=''
+expected_probe_repetitions=''
+expected_attribute_profile=''
+expected_pma_pattern=''
+case "$variant" in
+  ptp)
+    campaign_root=/tmp/frontend-random-page-tail-current-gen-20260918-r3-wUsi0XQH/campaign
+    suffix=ptp
+    ;;
+  ptpd)
+    campaign_root=/tmp/frontend-random-page-tail-pair-dense-20260915-v2
+    suffix=ptpd
+    ;;
+  ptps)
+    campaign_root=/tmp/frontend-random-ptps-seed0-20260921-n2p5s7CQ/campaign
+    suffix=ptps
+    ;;
+  ptpsr)
+    campaign_root=/tmp/frontend-random-ptps-rvi-nc-alternating-20260921-GvSfdHtj/campaign
+    suffix=ptps
+    expected_attribute_mode=rvi_nc_pair
+    expected_attribute_profile=page_tail_rvc_nc_to_cacheable_rvi_nc_pair
+    expected_pma_pattern='[1,0,1,0,0]'
+    ;;
+  ptpsr1)
+    campaign_root=/tmp/frontend-random-ptpsr-pr01-sweep-20260921-a1
+    suffix=ptps_pr01
+    expected_attribute_mode=rvi_nc_pair
+    expected_probe_repetitions=1
+    expected_attribute_profile=page_tail_rvc_nc_to_cacheable_rvi_nc_pair
+    expected_pma_pattern='[1,0,1,0,0]'
+    ;;
+  *)
+    echo "Unsupported PAGE_TAIL_VARIANT: $variant (expected ptp, ptpd, ptps, ptpsr, or ptpsr1)" >&2
+    exit 2
+    ;;
+esac
+if [[ -n "$case_index_override" && "$variant" != ptpsr1 ]]; then
+  echo 'PAGE_TAIL_CASE_INDEX is supported only for PAGE_TAIL_VARIANT=ptpsr1' >&2
+  exit 2
+fi
+if [[ -n "$case_index_override" && "$case_index_override" != 1 ]]; then
+  echo 'PAGE_TAIL_CASE_INDEX must be 1 for the explicit seed1 entry' >&2
+  exit 2
+fi
+case "$target_mode" in
+  diagnostic)
+    target_bins=''
+    ;;
+  directed_source)
+    # Frozen from pattern_reuse.reviewed_current_dut_evidence in the current
+    # scenario spec.  Declaring all source bins before execution permits a
+    # later independent hit audit; it does not require or fabricate a hit.
+    target_bins='BIN-416 BIN-417 BIN-1101 BIN-1107 BIN-1115 BIN-1116 BIN-1117 BIN-1119 BIN-1120 BIN-1121'
+    ;;
+  remaining_temporal)
+    # Frozen before the ptpsr DUT replay from the attribute-only comparison.
+    target_bins='BIN-417 BIN-1120 BIN-1121'
+    ;;
+  *)
+    echo "Unsupported PAGE_TAIL_TARGET_MODE: $target_mode (expected diagnostic, directed_source, or remaining_temporal)" >&2
+    exit 2
+    ;;
+esac
+if [[ "$variant" == ptpsr1 && "$case_index_override" == 1 ]]; then
+  # This root is the already-qualified current candidate campaign. Its record
+  # supplies the input paths and hashes; no seed1 path or metric is copied in.
+  campaign_root=/tmp/frontend-random-page-tail-native-replay-J9tiAVby
+  campaign="$campaign_root/candidate-campaign.json"
+  names=(fe_random_translation_timing_cross_sa4bbc3009c8cfca2_o001_"$suffix")
+  selected_seed_index=1
+  expected_attribute_profile=page_tail_rvc_cacheable_to_nc_rvi_nc_pair
+  expected_pma_pattern='[0,1,0,0,0]'
+else
+  campaign="$campaign_root/campaign.json"
+  names=(fe_random_translation_timing_cross_s42f10327d51c116f_o000_"$suffix")
+  if [[ "$variant" != ptps && "$variant" != ptpsr && "$variant" != ptpsr1 ]]; then
+    names+=(fe_random_translation_timing_cross_sa4bbc3009c8cfca2_o001_"$suffix")
+  fi
+  selected_seed_index=0
+  if [[ "$variant" == ptp || "$variant" == ptpd ]]; then
+    expected_attribute_profile=''
+    expected_pma_pattern=''
+  elif [[ "$variant" == ptpsr || "$variant" == ptpsr1 ]]; then
+    expected_attribute_profile=page_tail_rvc_nc_to_cacheable_rvi_nc_pair
+    expected_pma_pattern='[1,0,1,0,0]'
+  fi
+  if (( index == 1 )); then
+    selected_seed_index=1
+  fi
+fi
+if [[ "$variant" == ptpsr1 && "$case_index_override" == 1 ]]; then
+  [[ "$index" == 1 ]] || {
+    echo 'Explicit seed1 entry requires check/run index 1' >&2
+    exit 2
+  }
+else
+  (( index >= 0 && index < ${#names[@]} )) || {
+    echo "Candidate index $index is unavailable for PAGE_TAIL_VARIANT=$variant" >&2
+    exit 2
+  }
+fi
+if [[ "$variant" == ptpsr1 && "$case_index_override" == 1 ]]; then
+  selected_name=${names[0]}
+else
+  selected_name=${names[index]}
+fi
+# Literal strings preserve all 64 bits; do not pass seeds through JSON floats.
+program_seeds=(4823640145504506223 11870295650258975906)
+timing_seeds=(12181526746822571996 11807444488609381302)
+cd "$repo"
+generator_source="$frontend/tests/random_case/generate_random_asm.py"
+generator_source_sha=$(sha256sum "$generator_source")
+generator_source_sha=${generator_source_sha%% *}
+for candidate_name in "${names[@]}"; do
+  jq -e --arg n "$candidate_name" '.cases[] | select(.name == $n) | (.execution_status == "completed" and (.exit_code | tonumber) == 0)' "$campaign" >/dev/null
+  for kind in source bin trace program_map scenario_spec; do
+    path_key=${kind}_path
+    hash_key=${kind}_sha256
+    input_path=$(jq -er --arg n "$candidate_name" --arg k "$path_key" \
+      '.cases[] | select(.name == $n) | .[$k]' "$campaign")
+    expected=$(jq -er --arg n "$candidate_name" --arg k "$hash_key" \
+      '.cases[] | select(.name == $n) | .[$k]' "$campaign")
+    actual=$(sha256sum "$input_path")
+    [[ "${actual%% *}" == "$expected" ]] || {
+      echo "Candidate input changed: $input_path" >&2
+      exit 1
+    }
+  done
+  realization_path=$(jq -er --arg n "$candidate_name" '.cases[] | select(.name == $n) | .scenario_realization_path' "$campaign")
+  jq -e '.status == "REALIZED" and (.missing_events | length == 0)' "$realization_path" >/dev/null
+  configuration_path=$(jq -er --arg n "$candidate_name" '.cases[] | select(.name == $n) | .configuration_preflight_path' "$campaign")
+  jq -e '.status == "valid" and (.reasons | length == 0)' "$configuration_path" >/dev/null
+  generator_path=$(jq -er --arg n "$candidate_name" \
+    '.cases[] | select(.name == $n) | .generator_manifest_path' "$campaign")
+  [[ -f "$generator_path" ]] || exit 1
+  recorded_generator_source_sha=$(jq -er '.generator_sha256' "$generator_path")
+  [[ "$recorded_generator_source_sha" == "$generator_source_sha" ]] || {
+    echo "Generator source hash mismatch: $generator_path" >&2
+    exit 1
+  }
+  scenario_path=$(jq -er --arg n "$candidate_name" \
+    '.cases[] | select(.name == $n) | .scenario_spec_path' "$campaign")
+  scenario_program_seed=$(jq -er '.program_seed | tostring' "$scenario_path")
+  scenario_timing_seed=$(jq -er '.timing_seed | tostring' "$scenario_path")
+  if [[ -n "$expected_attribute_mode" ]]; then
+    jq -e --arg mode "$expected_attribute_mode" --arg profile "$expected_attribute_profile" \
+      --argjson pma "$expected_pma_pattern" \
+      '.parameters.pattern_reuse.attribute_mode == $mode
+       and .parameters.translation.attribute_plan.profile == $profile
+       and .parameters.translation.attribute_plan.pma_pattern == $pma' \
+      "$scenario_path" >/dev/null
+  fi
+  if [[ -n "$expected_probe_repetitions" ]]; then
+    jq -e --argjson repetitions "$expected_probe_repetitions" \
+      '.parameters.generator_parameters.page_tail_probe_repetitions == $repetitions
+       and .parameters.pattern_reuse.probe_repetitions == $repetitions
+       and .parameters.pattern_reuse.probe_repetitions_decoupled_from_program_iterations == true' \
+      "$scenario_path" >/dev/null
+  fi
+  candidate_index=0
+  if [[ "$candidate_name" == fe_random_translation_timing_cross_sa4bbc3009c8cfca2_o001_* ]]; then
+    candidate_index=1
+  fi
+  [[ "$scenario_program_seed" == "${program_seeds[candidate_index]}" ]] || exit 1
+  [[ "$scenario_timing_seed" == "${timing_seeds[candidate_index]}" ]] || exit 1
+  echo "Candidate input hashes and seeds match: $candidate_name"
+done
+
+manifest=${DUT_MANIFEST:-$repo/build-frontend/frontend_build_manifest.verilator.json}
+expected_manifest_sha=${DUT_MANIFEST_SHA256:-9b839c2bcd54001783025402ef18a2a3899865b789589eb514b393021c8e16d0}
+expected_compatibility_signature=${DUT_COMPATIBILITY_SIGNATURE:-5a758b0571b506ea7df5f650bf98b32eb336e7fc24fb60b2e29b0bfcddcbf552}
+PYTHONPATH="$frontend" "$python_bin" - \
+  "$repo/build-frontend" "$manifest" "$expected_manifest_sha" \
+  "$expected_compatibility_signature" <<'PY'
+import platform
+import sys
+from pathlib import Path
+
+from env.funcov.recorder import (
+    COMPATIBILITY_FIELDS,
+    _json_sha256,
+    current_funcov_sampler_sha256,
+    current_verification_environment_sha256,
+    default_pilot_csv_path,
+)
+from env.runtime.artifact_provenance import file_sha256, load_frontend_build_manifest
+
+build_root = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+expected_manifest_sha = sys.argv[3]
+expected_signature = sys.argv[4]
+build = load_frontend_build_manifest(build_root, manifest, simulator="verilator")
+if build["build_manifest_sha256"] != expected_manifest_sha:
+    raise SystemExit("chosen DUT manifest hash mismatch")
+if build["build_manifest_status"] != "valid":
+    raise SystemExit(
+        "chosen DUT manifest invalid: " + ";".join(build["build_manifest_reasons"])
+    )
+provenance = {
+    "simulator": "verilator",
+    "dut_source_sha": build["dut_source_sha"],
+    "implementation_sha": build["implementation_sha"],
+    "design_baseline_sha": build["design_baseline_sha"],
+    "source_sha_override": bool(build["source_sha_override"]),
+    "source_delta_sha256": build["source_delta_sha256"],
+    "source_delta_files": list(build["source_delta_files"]),
+    "source_delta_policy": build["source_delta_policy"],
+    "dut_build_sha256": build["dut_build_sha256"],
+    "dut_python_extension_sha256": build["dut_python_extension_sha256"],
+    "generated_rtl_sha256": build["generated_rtl_sha256"],
+    "registry_sha256": file_sha256(default_pilot_csv_path()),
+    "sampler_sha256": current_funcov_sampler_sha256(),
+    "sampler_domains": ["all"],
+    "verification_env_sha256": current_verification_environment_sha256(),
+    "signal_contract_sha256": build["signal_contract_sha256"],
+    "build_config": build["build_config"],
+    "toolchain": f"python-{platform.python_version()}",
+}
+signature = _json_sha256({field: provenance[field] for field in COMPATIBILITY_FIELDS})
+if signature != expected_signature:
+    raise SystemExit("chosen DUT compatibility signature mismatch: " + signature)
+print("Chosen DUT manifest valid: " + build["build_manifest_sha256"])
+print("Chosen DUT compatibility signature: " + signature)
+PY
+[[ "$mode" == run ]] || exit 0
+[[ "${TB_DUT_SLOT_RELEASED:-0}" == 1 ]] || {
+  echo 'ctrl-goal must release the shared DUT slot; then set TB_DUT_SLOT_RELEASED=1.' >&2
+  exit 2
+}
+[[ "${VIRTUAL_ENV:-}" == /nfs/home/zhaoxinran/.venv/mcpgateway ]] || {
+  echo 'Activate only the mcpgateway venv first.' >&2
+  exit 2
+}
+[[ "${LD_LIBRARY_PATH:-}" != *"/nfs/share/unitychip"* ]] || {
+  echo 'Refusing DUT replay with the incompatible UnityChip LD_LIBRARY_PATH; use a clean mcpgateway shell.' >&2
+  exit 2
+}
+name=$selected_name
+record=$(jq -cer --arg n "$name" '.cases[] | select(.name == $n)' "$campaign")
+source_path=$(jq -er '.source_path' <<<"$record")
+bin_path=$(jq -er '.bin_path' <<<"$record")
+trace_path=$(jq -er '.trace_path' <<<"$record")
+generator_path=$(jq -er '.generator_manifest_path' <<<"$record")
+scenario_path=$(jq -er '.scenario_spec_path' <<<"$record")
+expected_program_map_sha=$(jq -er '.program_map_sha256' <<<"$record")
+run_root=$(mktemp -d /tmp/frontend-random-page-tail-native-replay-XXXXXXXX)
+echo "New candidate replay output: $run_root"
+cp "$manifest" "$run_root/build-manifest.before.json"
+cp "$campaign" "$run_root/candidate-campaign.json"
+git diff --binary HEAD > "$run_root/environment.before.diff"
+find "$frontend/tests/random_case" "$frontend/env" -type f -name '*.py' -print0 \
+  | sort -z | xargs -0 sha256sum > "$run_root/python-inputs.before.sha256"
+sha256sum "$source_path" "$bin_path" "$trace_path" "$generator_path" "$scenario_path" \
+  > "$run_root/candidate-inputs.sha256"
+export TB_SKIP_NEMU=1 TB_RUN_DUT=1 TB_FRONTEND_SIM=verilator
+export TB_RUN_ID="${name}_native_replay" TB_ARTIFACT_DIR="$run_root"
+export TB_COVERAGE_DIR="$run_root/coverage" TB_WAVEFORM_DIR="$run_root/waveforms"
+export TB_FUNCOV_DIR="$run_root/funcov" TB_CASE_LOG_DIR="$run_root/logs"
+export TB_ASM_PATH="$source_path"
+export TB_RANDOM_GENERATOR_MANIFEST="$generator_path"
+export TB_RANDOM_SCENARIO_SPEC="$scenario_path"
+export TB_RANDOM_PROGRAM_MAP_PATH="$run_root/inputs/$name.program_map.json"
+export TB_RANDOM_TIMELINE_PATH="$run_root/inputs/$name.scenario_timeline.json"
+export TB_SEED="${program_seeds[selected_seed_index]}" TB_BACKEND_RANDOM_SEED="${timing_seeds[selected_seed_index]}"
+export TB_FUNCOV_TARGET_BINS="$target_bins" TB_FUNCOV_TARGET_TP_IDS='' TB_FUNCOV_TARGET_TESTCASES=''
+export TB_BASE_ADDR=0x80000000 TB_RESET_VECTOR=0x80000000
+export TB_TRACE_START_INDEX=0 TB_TRACE_TARGET_CURSOR=0 TB_TRACE_MAX_CYCLES=0
+export TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 TB_RANDOM_MAX_TIMELINE_EVENTS=250000
+export TB_PYTEST_TIMEOUT_SECS=1800 TB_ENABLE_FST_DUMP=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export TB_DUT_BUILD_MANIFEST="$manifest"
+run_entry="TB_DUT_SLOT_RELEASED=1 PAGE_TAIL_VARIANT=$variant PAGE_TAIL_TARGET_MODE=$target_mode"
+if [[ -n "$case_index_override" ]]; then
+  run_entry+=" PAGE_TAIL_CASE_INDEX=$case_index_override"
+fi
+export TB_RUN_COMMAND="$run_entry bash $frontend/tests/random_case/replay_page_tail_candidates.sh run $index"
+status=0
+bash "$frontend/scripts/run_bin_trace_pipeline.sh" \
+  "$bin_path" "$trace_path" "$run_root/inputs/$name.nemu-unused.log" \
+  "$frontend/tests/random_case/test_random_bin_trace_dut.py::test_random_bin_trace" \
+  > "$run_root/pipeline.log" 2>&1 || status=$?
+cp "$manifest" "$run_root/build-manifest.after.json"
+git diff --binary HEAD > "$run_root/environment.after.diff"
+cmp "$run_root/build-manifest.before.json" "$run_root/build-manifest.after.json" || status=3
+cmp "$run_root/environment.before.diff" "$run_root/environment.after.diff" || status=3
+sha256sum --status -c "$run_root/python-inputs.before.sha256" || status=3
+sha256sum --status -c "$run_root/candidate-inputs.sha256" || status=3
+if [[ -f "$TB_RANDOM_PROGRAM_MAP_PATH" ]]; then
+  actual_program_map_sha=$(sha256sum "$TB_RANDOM_PROGRAM_MAP_PATH")
+  [[ "${actual_program_map_sha%% *}" == "$expected_program_map_sha" ]] || status=3
+else
+  status=3
+fi
+printf 'pipeline/check exit=%s; DUT/HIT qualification remains pending artifact audit\n' "$status"
+exit "$status"

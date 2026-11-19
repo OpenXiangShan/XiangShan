@@ -1,0 +1,22 @@
+{
+  "scope": "Historical text fixtures only; never executable replay entry, no latest qualification",
+  "source_baseline": "pre-bbb2dd2c1 audit recovery",
+  "fixtures": {
+    "replay_uncache_a_stall_candidate.sh.txt": {
+      "original_filename": "replay_uncache_a_stall_candidate.sh",
+      "sha256": "4ba546831ae7707d372b57c3aac860f53277c59f2d43097fd1e6c1e90c61acd7",
+      "executable_entry": false
+    },
+    "audit_uncache_a_stall_replay.sh.txt": {
+      "original_filename": "audit_uncache_a_stall_replay.sh",
+      "sha256": "668cf64e15a487d46f4b896527a530e8f30e8b071cb3b7f97b51d4ac0541564f",
+      "executable_entry": false
+    },
+    "replay_page_tail_candidates.sh.txt": {
+      "original_filename": "replay_page_tail_candidates.sh",
+      "sha256": "8992ec424435aae5c8a7bfbc80e7034808d053d13c082788aa111f05a23b5c50",
+      "executable_entry": false,
+      "purpose": "Closed historical page-tail variant, seed/index and preflight/slot ordering contract; text inspection only, never replay or current qualification"
+    }
+  }
+}

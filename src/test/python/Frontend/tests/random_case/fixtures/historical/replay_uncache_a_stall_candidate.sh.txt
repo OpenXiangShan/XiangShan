@@ -1,0 +1,379 @@
+#!/usr/bin/env bash
+# Read-only precheck: bash .../replay_uncache_a_stall_candidate.sh check
+# After ctrl releases the serialized DUT slot, replay the PBMT.NC seed0 only: ... run
+set -euo pipefail
+
+mode=${1:-check}
+[[ "$mode" == check || "$mode" == run ]] || exit 2
+
+repo=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+frontend="$repo/src/test/python/Frontend"
+python_bin=/nfs/home/zhaoxinran/.venv/mcpgateway/bin/python
+candidate_root=/tmp/frontend-random-ptpsr-pbmt-nc-stall8-input-5Aaiy1y1
+campaign="$candidate_root/campaign/campaign.json"
+timing_audit="$candidate_root/pbmt-nc-stall-candidate-audit.json"
+expected_campaign_sha=5061856fc1b3af874d887b17beae6b57c5b3a94bc4f1946a07490f1cb0ebf324
+expected_timing_audit_sha=c0c3a7a64246f64b201da0c3d848409c9f6537658f83c31359623c5b97c9fd91
+expected_control_campaign_sha=7bbf10ae62a33126b8bf3fa0929cbae3305ee3bc7de7fb98cbf0b7c905d8fdc7
+name=fe_random_translation_timing_cross_s42f10327d51c116f_o000_ptps_pr01
+target_bins='BIN-1095 BIN-1096 BIN-1129 BIN-1130'
+
+cd "$repo"
+"$python_bin" - "$campaign" "$timing_audit" \
+  "$expected_campaign_sha" "$expected_timing_audit_sha" \
+  "$expected_control_campaign_sha" "$name" \
+  "$frontend/tests/random_case/generate_random_asm.py" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+
+campaign_path = Path(sys.argv[1])
+audit_path = Path(sys.argv[2])
+expected_campaign_sha = sys.argv[3]
+expected_audit_sha = sys.argv[4]
+expected_control_sha = sys.argv[5]
+selected_name = sys.argv[6]
+generator_source = Path(sys.argv[7])
+
+require(sha256(campaign_path) == expected_campaign_sha, "candidate campaign changed")
+require(sha256(audit_path) == expected_audit_sha, "timing candidate audit changed")
+campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+audit = json.loads(audit_path.read_text(encoding="utf-8"))
+
+qualification = audit.get("qualification", {})
+require(
+    qualification.get("pass") is True
+    and qualification.get("status") == "qualified"
+    and qualification.get("input_qualification") is True
+    and qualification.get("nemu_replay_required") is False
+    and qualification.get("dut_replay_completed") is False
+    and qualification.get("coverage_hit_claimed") is False,
+    "timing candidate qualification contract changed",
+)
+require(
+    audit.get("candidate_kind") == "pbmt_nc_stall"
+    and audit.get("stall_cycles") == 8,
+    "timing audit is not the PBMT.NC stall8 candidate",
+)
+require(audit.get("case_count") == 4, "timing audit no longer contains four cases")
+require(
+    audit["inputs"]["candidate_campaign"]["path"] == str(campaign_path)
+    and audit["inputs"]["candidate_campaign"]["sha256"] == expected_campaign_sha,
+    "timing audit candidate-campaign binding changed",
+)
+control = audit["inputs"]["control_campaign"]
+require(
+    control["sha256"] == expected_control_sha
+    and sha256(Path(control["path"])) == expected_control_sha,
+    "control campaign changed",
+)
+require(
+    campaign.get("mode") == "generate"
+    and campaign.get("status") == "generated"
+    and campaign.get("planned_case_count") == 4
+    and campaign.get("executed_case_count") == 0,
+    "candidate campaign must remain generate-only",
+)
+parameters = campaign.get("parameters", {})
+require(
+    parameters.get("directed_pattern") == "page_tail_pair_sparse"
+    and parameters.get("page_tail_attribute_mode") == "rvi_pbmt_nc_pair"
+    and parameters.get("page_tail_probe_repetitions") == 1
+    and parameters.get("uncache_a_stall_cycles") == 8,
+    "candidate campaign parameters changed",
+)
+
+campaign_cases = {case["name"]: case for case in campaign.get("cases", [])}
+audit_cases = {case["name"]: case for case in audit.get("cases", [])}
+require(len(campaign_cases) == len(audit_cases) == 4, "candidate case set changed")
+require(campaign_cases.keys() == audit_cases.keys(), "campaign/audit case names differ")
+require(selected_name in campaign_cases, "selected seed0 case is missing")
+generator_source_sha = sha256(generator_source)
+
+for case_name in sorted(campaign_cases):
+    case = campaign_cases[case_name]
+    review = audit_cases[case_name]
+    require(review.get("pass") is True and not review.get("reasons"), f"{case_name}: audit failed")
+    require(
+        review.get("metrics")
+        == {
+            "cfg_edge_delta": 0,
+            "dynamic_instruction_delta": 0,
+            "repeated_instruction_delta": 0,
+            "scope": "identical inherited program and NEMU trace",
+            "static_instruction_delta": 0,
+        },
+        f"{case_name}: nonzero program/trace delta",
+    )
+    require(
+        review["program_identity"]["source_and_generator_unchanged"] is True
+        and review["scenario"]["only_pbmt_nc_attribute_and_timing_changed"] is True,
+        f"{case_name}: PBMT.NC/timing identity proof changed",
+    )
+
+    for evidence in (
+        review["directed_source_provenance"],
+        review["program_identity"]["source_candidate"],
+        review["program_identity"]["source_control"],
+        review["scenario"]["candidate"],
+        review["scenario"]["control"],
+        *review["inherited_nemu_inputs"].values(),
+    ):
+        evidence_path = Path(evidence["path"])
+        require(evidence.get("pass") is True, f"{case_name}: evidence was not qualified")
+        require(
+            evidence.get("actual_sha256") == evidence.get("recorded_sha256")
+            and sha256(evidence_path) == evidence.get("recorded_sha256"),
+            f"{case_name}: evidence changed: {evidence_path}",
+        )
+
+    source_path = Path(case["source_path"])
+    scenario_path = Path(case["scenario_spec_path"])
+    generator_path = Path(case["generator_manifest_path"])
+    require(
+        source_path == Path(review["program_identity"]["source_candidate"]["path"])
+        and sha256(source_path) == case["source_sha256"],
+        f"{case_name}: source binding changed",
+    )
+    require(
+        scenario_path == Path(review["scenario"]["candidate"]["path"])
+        and sha256(scenario_path) == case["scenario_spec_sha256"],
+        f"{case_name}: scenario binding changed",
+    )
+    require(
+        sha256(generator_path)
+        == review["program_identity"]["generator_manifest_candidate_sha256"],
+        f"{case_name}: generator manifest changed",
+    )
+    generator = json.loads(generator_path.read_text(encoding="utf-8"))
+    require(
+        case["generator_sha256"] == generator_source_sha
+        and generator["generator_sha256"] == generator_source_sha,
+        f"{case_name}: generator source binding changed",
+    )
+
+    scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+    scenario_parameters = scenario["parameters"]
+    timing_plan = scenario_parameters["timing_plan"]
+    reuse = scenario_parameters["uncache_a_stall_reuse"]
+    attribute_plan = scenario_parameters["translation"]["attribute_plan"]
+    require(
+        scenario["program_seed"] == case["spec"]["seed"]
+        and scenario["timing_seed"] == case["timing_seed"],
+        f"{case_name}: seed binding changed",
+    )
+    require(
+        timing_plan["uncache_a_stall_cycles"] == 8
+        and timing_plan["policy"]["uncache_a_stall"]["release_requires_handshake"] is True
+        and timing_plan["policy"]["uncache_a_stall"]["payload_stability_fields"]
+        == ["address", "mem_back_type_mm", "mem_page_type_nc"],
+        f"{case_name}: stall timing contract changed",
+    )
+    require(
+        reuse["stall_cycles"] == 8
+        and reuse["policy"].endswith("REALIZED is not a coverage HIT"),
+        f"{case_name}: directed-pattern reuse policy changed",
+    )
+    expected_attribute_plan = (
+        {
+            "profile": "page_tail_rvc_pma_nc_rvi_pbmt_nc_pair",
+            "pma_pattern": [1, 0, 1, 1, 1],
+        }
+        if int(case["spec"]["ordinal"]) % 2 == 0
+        else {
+            "profile": "page_tail_rvc_cacheable_rvi_pbmt_nc_pair",
+            "pma_pattern": [0, 1, 0, 1, 1],
+        }
+    )
+    require(
+        scenario_parameters["pattern_reuse"]["attribute_mode"] == "rvi_pbmt_nc_pair"
+        and attribute_plan["pbmt"] == 0
+        and attribute_plan["pbmte"] == 1
+        and attribute_plan["pbmt_pattern"] == [0, 0, 0, 1, 1]
+        and all(attribute_plan[key] == value for key, value in expected_attribute_plan.items()),
+        f"{case_name}: PBMT.NC page-tail attribute contract changed",
+    )
+    required_events = {
+        event["event"]: event["min_count"] for event in scenario["required_events"]
+    }
+    require(
+        required_events.get("dut.uncache_a_stall_cycle") == 8
+        and required_events.get("dut.uncache_a_stall_release") == 1,
+        f"{case_name}: DUT realization requirements changed",
+    )
+
+print("PBMT.NC stall8 candidate precheck: 4/4 inputs qualified; program/trace deltas are zero")
+PY
+
+manifest=${DUT_MANIFEST:-$repo/build-frontend/frontend_build_manifest.verilator.json}
+expected_manifest_sha=${DUT_MANIFEST_SHA256:-9b839c2bcd54001783025402ef18a2a3899865b789589eb514b393021c8e16d0}
+expected_compatibility_signature=${DUT_COMPATIBILITY_SIGNATURE:-4d9422de77523df36b98918a9c279514c9335581d4ddec09f180385e2c79f508}
+PYTHONPATH="$frontend" "$python_bin" - \
+  "$repo/build-frontend" "$manifest" "$expected_manifest_sha" \
+  "$expected_compatibility_signature" <<'PY'
+import platform
+import sys
+from pathlib import Path
+
+from env.funcov.recorder import (
+    COMPATIBILITY_FIELDS,
+    _json_sha256,
+    current_funcov_sampler_sha256,
+    current_verification_environment_sha256,
+    default_pilot_csv_path,
+)
+from env.runtime.artifact_provenance import file_sha256, load_frontend_build_manifest
+
+build_root = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+expected_manifest_sha = sys.argv[3]
+expected_signature = sys.argv[4]
+build = load_frontend_build_manifest(build_root, manifest, simulator="verilator")
+if build["build_manifest_sha256"] != expected_manifest_sha:
+    raise SystemExit("chosen DUT manifest hash mismatch")
+if build["build_manifest_status"] != "valid":
+    raise SystemExit(
+        "chosen DUT manifest invalid: " + ";".join(build["build_manifest_reasons"])
+    )
+provenance = {
+    "simulator": "verilator",
+    "dut_source_sha": build["dut_source_sha"],
+    "implementation_sha": build["implementation_sha"],
+    "design_baseline_sha": build["design_baseline_sha"],
+    "source_sha_override": bool(build["source_sha_override"]),
+    "source_delta_sha256": build["source_delta_sha256"],
+    "source_delta_files": list(build["source_delta_files"]),
+    "source_delta_policy": build["source_delta_policy"],
+    "dut_build_sha256": build["dut_build_sha256"],
+    "dut_python_extension_sha256": build["dut_python_extension_sha256"],
+    "generated_rtl_sha256": build["generated_rtl_sha256"],
+    "registry_sha256": file_sha256(default_pilot_csv_path()),
+    "sampler_sha256": current_funcov_sampler_sha256(),
+    "sampler_domains": ["all"],
+    "verification_env_sha256": current_verification_environment_sha256(),
+    "signal_contract_sha256": build["signal_contract_sha256"],
+    "build_config": build["build_config"],
+    "toolchain": f"python-{platform.python_version()}",
+}
+signature = _json_sha256({field: provenance[field] for field in COMPATIBILITY_FIELDS})
+if signature != expected_signature:
+    raise SystemExit("chosen DUT compatibility signature mismatch: " + signature)
+print("Chosen DUT manifest valid: " + build["build_manifest_sha256"])
+print("Chosen DUT compatibility signature: " + signature)
+PY
+
+echo "Predeclared exact targets: $target_bins"
+[[ "$mode" == run ]] || exit 0
+
+[[ "${TB_DUT_SLOT_RELEASED:-0}" == 1 ]] || {
+  echo 'ctrl-goal must release the shared DUT slot; then set TB_DUT_SLOT_RELEASED=1.' >&2
+  exit 2
+}
+[[ "${VIRTUAL_ENV:-}" == /nfs/home/zhaoxinran/.venv/mcpgateway ]] || {
+  echo 'Activate only the mcpgateway venv first.' >&2
+  exit 2
+}
+[[ "${LD_LIBRARY_PATH:-}" != *"/nfs/share/unitychip"* ]] || {
+  echo 'Refusing DUT replay with the incompatible UnityChip LD_LIBRARY_PATH.' >&2
+  exit 2
+}
+
+candidate_record=$(jq -cer --arg n "$name" '.cases[] | select(.name == $n)' "$campaign")
+audit_record=$(jq -cer --arg n "$name" '.cases[] | select(.name == $n)' "$timing_audit")
+source_path=$(jq -er '.source_path' <<<"$candidate_record")
+generator_path=$(jq -er '.generator_manifest_path' <<<"$candidate_record")
+scenario_path=$(jq -er '.scenario_spec_path' <<<"$candidate_record")
+bin_path=$(jq -er '.inherited_nemu_inputs.binary.path' <<<"$audit_record")
+trace_path=$(jq -er '.inherited_nemu_inputs.trace.path' <<<"$audit_record")
+expected_program_map_path=$(jq -er '.inherited_nemu_inputs.program_map.path' <<<"$audit_record")
+expected_binary_sha=$(jq -er '.inherited_nemu_inputs.binary.recorded_sha256' <<<"$audit_record")
+expected_source_sha=$(jq -er '.source_sha256' <<<"$candidate_record")
+program_seed=$(jq -er '.program_seed | tostring' "$scenario_path")
+timing_seed=$(jq -er '.timing_seed | tostring' "$scenario_path")
+
+run_root=$(mktemp -d /tmp/frontend-random-uncache-a-stall8-replay-XXXXXXXX)
+echo "New stall8 replay output: $run_root"
+cp "$manifest" "$run_root/build-manifest.before.json"
+cp "$campaign" "$run_root/candidate-campaign.json"
+cp "$timing_audit" "$run_root/timing-candidate-audit.json"
+git diff --binary HEAD > "$run_root/environment.before.diff"
+find "$frontend/tests/random_case" "$frontend/env" -type f -name '*.py' -print0 \
+  | sort -z | xargs -0 sha256sum > "$run_root/python-inputs.before.sha256"
+sha256sum \
+  "$source_path" "$bin_path" "$trace_path" "$generator_path" "$scenario_path" \
+  "$campaign" "$timing_audit" \
+  "$frontend/tests/random_case/generate_random_asm.py" \
+  "$frontend/tests/py/jiabowen/test_ifu_instr_uncache_attribute_stability_v3_dut.py" \
+  "$frontend/tests/random_case/replay_uncache_a_stall_candidate.sh" \
+  "$frontend/scripts/run_bin_trace_pipeline.sh" \
+  > "$run_root/candidate-inputs.before.sha256"
+
+export TB_SKIP_NEMU=1 TB_RUN_DUT=1 TB_FRONTEND_SIM=verilator
+export TB_RUN_ID="${name}_stall8_native_replay" TB_ARTIFACT_DIR="$run_root"
+export TB_COVERAGE_DIR="$run_root/coverage" TB_WAVEFORM_DIR="$run_root/waveforms"
+export TB_FUNCOV_DIR="$run_root/funcov" TB_CASE_LOG_DIR="$run_root/logs"
+export TB_ASM_PATH="$source_path"
+export TB_RANDOM_GENERATOR_MANIFEST="$generator_path"
+export TB_RANDOM_SCENARIO_SPEC="$scenario_path"
+export TB_RANDOM_PROGRAM_MAP_PATH="$run_root/inputs/$name.program_map.json"
+export TB_RANDOM_TIMELINE_PATH="$run_root/inputs/$name.scenario_timeline.json"
+export TB_SEED="$program_seed" TB_BACKEND_RANDOM_SEED="$timing_seed"
+export TB_FUNCOV_TARGET_BINS="$target_bins" TB_FUNCOV_TARGET_TP_IDS=''
+export TB_FUNCOV_TARGET_TESTCASES=''
+export TB_BASE_ADDR=0x80000000 TB_RESET_VECTOR=0x80000000
+export TB_TRACE_START_INDEX=0 TB_TRACE_TARGET_CURSOR=0 TB_TRACE_MAX_CYCLES=0
+export TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 TB_RANDOM_MAX_TIMELINE_EVENTS=250000
+export TB_PYTEST_TIMEOUT_SECS=1800 TB_ENABLE_FST_DUMP=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export TB_DUT_BUILD_MANIFEST="$manifest"
+export TB_RUN_COMMAND="TB_DUT_SLOT_RELEASED=1 bash $frontend/tests/random_case/replay_uncache_a_stall_candidate.sh run"
+
+status=0
+bash "$frontend/scripts/run_bin_trace_pipeline.sh" \
+  "$bin_path" "$trace_path" "$run_root/inputs/$name.nemu-unused.log" \
+  "$frontend/tests/random_case/test_random_bin_trace_dut.py::test_random_bin_trace" \
+  > "$run_root/pipeline.log" 2>&1 || status=$?
+cp "$manifest" "$run_root/build-manifest.after.json"
+git diff --binary HEAD > "$run_root/environment.after.diff"
+cmp "$run_root/build-manifest.before.json" "$run_root/build-manifest.after.json" || status=3
+cmp "$run_root/environment.before.diff" "$run_root/environment.after.diff" || status=3
+sha256sum --status -c "$run_root/python-inputs.before.sha256" || status=3
+sha256sum --status -c "$run_root/candidate-inputs.before.sha256" || status=3
+if [[ -f "$TB_RANDOM_PROGRAM_MAP_PATH" ]]; then
+  PYTHONPATH="$frontend/tests/random_case" "$python_bin" - \
+    "$expected_program_map_path" "$TB_RANDOM_PROGRAM_MAP_PATH" \
+    "$expected_source_sha" "$expected_binary_sha" <<'PY' || status=3
+import json
+import sys
+from pathlib import Path
+
+from translation_replay_audit import _program_map_path_metadata_equivalence
+
+report = _program_map_path_metadata_equivalence(
+    expected_path=Path(sys.argv[1]),
+    observed_path=Path(sys.argv[2]),
+    source_sha256=sys.argv[3],
+    binary_sha256=sys.argv[4],
+)
+print(json.dumps({"program_map_binding": report}, sort_keys=True))
+raise SystemExit(0 if report["pass"] else 1)
+PY
+else
+  status=3
+fi
+printf 'pipeline/check exit=%s; DUT/HIT qualification remains pending artifact audit\n' "$status"
+exit "$status"
