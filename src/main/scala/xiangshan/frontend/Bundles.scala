@@ -310,7 +310,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val normalFetch: DecoupledIO[NormalFetchBundle] = DecoupledIO(new NormalFetchBundle)
 
   // Fast fetch path, used for the first fetch after a backend redirect.
-  val fastFetch: ValidIO[FastFetchBundle] = ValidIO(new FastFetchBundle)
+  val fastFetch: DecoupledIO[FastFetchBundle] = DecoupledIO(new FastFetchBundle)
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {

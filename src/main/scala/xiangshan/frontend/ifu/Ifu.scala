@@ -403,12 +403,27 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_fastInst              = genFastInst(s1_rawFirstData, s1_fastFetchInfo)
   private val s1_fastUnexcepted        = Wire(Vec(FastFetchMaxNum, Bool()))
   private val backendRedirectWaitFetch = RegInit(false.B)
+  // The group now in s2 is safe to bypass only when fast fetch covered it
+  // completely (so the normal enqueue leaves no remainder in IBuffer) and it
+  // was actually delivered by the fast path (so it is a true duplicate).
+  private val s2_noRemainder = RegEnable(s1_instrCount === s1_fastFetchInfo.instrNum, s1_fire)
+  private val s2_isFastDup   = RegInit(false.B)
+  when(s2_flush) {
+    s2_isFastDup := false.B
+  }.elsewhen(s1_fire) {
+    s2_isFastDup := io.toIBuffer.fastFetch.fire
+  }.elsewhen(s2_fire) {
+    s2_isFastDup := false.B
+  }
   private val s1_useFastFetch = s1_maybeFastFetch && !s1_fastFetchHasEccError &&
     !s1_fastFetchInfo.hasUnexcepted && !s1_fastUnexcepted.reduce(_ || _)
-  // The paired normal fetch must arrive in the next cycle, so the group must
-  // actually advance to s2 (!s1_flush) and s2 must be empty (!s2_valid).
+  // Fast fetch is paired with the normal fetch of the same group in the next
+  // cycle. s2 must therefore either be empty, or hold an already-delivered fast
+  // duplicate that is fully covered (no IBuffer remainder) and fires this cycle
+  // so that s1 can advance and the next fast group becomes the new duplicate.
   private val s1_fastFetchValid =
-    s1_valid && s1_useFastFetch && !s2_valid && !s1_flush
+    s1_valid && s1_useFastFetch && !s1_flush &&
+      (!s2_valid || (s2_isFastDup && s2_noRemainder && s2_fire))
 
   io.toIBuffer.fastFetch.valid         := s1_fastFetchValid
   io.toIBuffer.fastFetch.bits.instrNum := s1_fastFetchInfo.instrNum

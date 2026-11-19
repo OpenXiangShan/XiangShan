@@ -81,28 +81,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val normalBits  = normalFetch.bits
   private val normalFire  = normalFetch.fire
 
-  // Fast fetch is a one-cycle, best-effort pass-through.
-  // A high fastFetch.valid guarantees that IBuffer is empty. If fastFire is low,
-  // the fast entries are dropped and IBuffer keeps its state unchanged.
-  private val fastFetch   = io.in.fastFetch
-  private val fastEntries = fastFetch.bits.entries
-  private val fastValid   = fastFetch.valid
-  private val fastNum     = fastFetch.bits.instrNum
-  private val fastHasVSet = fastEntries.map { entry =>
-    entry.valid && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === entry.inst).reduce(_ || _)
-  }.reduce(_ || _)
-  private val fastReady = !io.flush && !resumingVType && !fastHasVSet && io.empty
-  private val fastFire  = fastValid && fastReady
-
-  private val hasFastFetch = RegNext(fastFire && !io.flush, init = false.B)
-  private val fastFetchNum = RegNext(fastNum)
-  // Fast entries are delivered unconditionally in the cycle after fastFire, but their
-  // bookkeeping (skipping the duplicated normal enqueue) only applies when the paired
-  // normal fetch actually fires. A backend/wb redirect may cancel that normal fetch in
-  // this very cycle; the fast entries are then wrong-path and are dropped by the
-  // following flush, so they must not advance the dequeue pointers.
-  private val fastPaired = hasFastFetch && normalFire
-
   private val normalLaneValid     = normalBits.valid
   private val normalLaneEnqEnable = normalBits.enqEnable
   // IBuffer is organized as raw registers
@@ -148,6 +126,29 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val enqPtr    = enqPtrDup(0)
   // Use the IFU-IBuffer interaction to pre-determine the queue position for each instruction output by IFU.
   private val ifuAlignedEnqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
+
+  // Fast fetch is a one-cycle, best-effort pass-through.
+  // It is accepted only when IBuffer storage is empty and the current output will
+  // be consumed this cycle. If fastFire is low, the fast entries are dropped and
+  // IBuffer keeps its state unchanged.
+  private val fastFetch   = io.in.fastFetch
+  private val fastEntries = fastFetch.bits.entries
+  private val fastNum     = fastFetch.bits.instrNum
+  private val fastHasVSet = fastEntries.map { entry =>
+    entry.valid && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === entry.inst).reduce(_ || _)
+  }.reduce(_ || _)
+  private val fastReady = !io.flush && !resumingVType && !fastHasVSet && (enqPtr === deqPtr) && decodeCanAccept
+  io.in.fastFetch.ready := fastReady
+  private val fastFire = fastFetch.fire
+
+  private val hasFastFetch = RegNext(fastFire && !io.flush, init = false.B)
+  private val fastFetchNum = RegNext(fastNum)
+  // Fast entries are delivered unconditionally in the cycle after fastFire, but their
+  // bookkeeping (skipping the duplicated normal enqueue) only applies when the paired
+  // normal fetch actually fires. A backend/wb redirect may cancel that normal fetch in
+  // this very cycle; the fast entries are then wrong-path and are dropped by the
+  // following flush, so they must not advance the dequeue pointers.
+  private val fastPaired = hasFastFetch && normalFire
 
   // No bubble for ibuffer.out, so head.valid is enough
   io.empty := enqPtr === deqPtr && !io.out.head.valid
