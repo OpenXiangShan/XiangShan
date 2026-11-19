@@ -6,6 +6,7 @@ import pytest
 
 from .funcov_compare import build_report, load_artifact
 from .native_funcov_adapter import _json_sha
+from .run_random_campaign import _load_funcov_evidence
 
 
 def _write(path, payload):
@@ -71,6 +72,9 @@ def test_unbound_native_preserves_counts_and_never_becomes_zero_hit_pass(native)
     assert report["random"]["union_hit_bins"] is None
     assert not report["qualification"]["pass"]
     assert report["ineligible_random_artifacts"][0]["native_hit_bin_count"] == 1
+    evidence = _load_funcov_evidence([artifact])
+    assert evidence["status"] == "ineligible" and evidence["observed_bin_ids"] == []
+    assert evidence["artifacts"][0]["native_hit_bin_count"] == 1
     assert artifact.read_bytes() == before
 
 
