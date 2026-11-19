@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.VEew
 
@@ -920,3 +921,41 @@ object skidBuffer{
   }
 }
 
+class StoreDataArbiter(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val scalar = Flipped(Decoupled(new MemExuOutput))
+    val vector = Flipped(Decoupled(new MemExuOutput(isVector = true)))
+    val sq = Valid(new MemExuOutput(isVector = true))
+    val redirect = Flipped(Valid(new Redirect))
+  })
+
+  val skidOut = Wire(Decoupled(chiselTypeOf(io.vector.bits)))
+  val pipeIn = Wire(Decoupled(chiselTypeOf(io.vector.bits)))
+  val pipeOut = Wire(Decoupled(chiselTypeOf(io.vector.bits)))
+  val arbiter = Module(new RRArbiterInit(chiselTypeOf(io.vector.bits), 2))
+  val vector = arbiter.io.in(1)
+
+  val killSkid = skidOut.valid && skidOut.bits.uop.robIdx.needFlush(io.redirect)
+  // Skid cuts backward ready; the pipeline cuts forward valid/data.
+  skidBuffer(io.vector, skidOut, killSkid, "VstdSkid")
+  pipeIn.valid := skidOut.valid && !killSkid
+  pipeIn.bits := skidOut.bits
+  skidOut.ready := pipeIn.ready || killSkid
+
+  val killPipe = pipeOut.valid && pipeOut.bits.uop.robIdx.needFlush(io.redirect)
+  vector.valid := pipeOut.valid && !killPipe
+  vector.bits := pipeOut.bits
+  pipeOut.ready := vector.ready || killPipe
+  // A surviving replacement must not inherit the cancelled resident's flush.
+  NewPipelineConnect(pipeIn, pipeOut, pipeOut.fire, killPipe && !pipeIn.fire, Some("VstdPipe"))
+
+  val scalar = arbiter.io.in(0)
+  scalar.valid := io.scalar.valid
+  scalar.bits := 0.U.asTypeOf(scalar.bits)
+  scalar.bits.uop := io.scalar.bits.uop
+  scalar.bits.data := io.scalar.bits.data
+  io.scalar.ready := scalar.ready
+  arbiter.io.out.ready := true.B
+  io.sq.valid := arbiter.io.out.valid
+  io.sq.bits := arbiter.io.out.bits
+}

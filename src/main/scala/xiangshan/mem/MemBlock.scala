@@ -429,6 +429,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
+  val storeDataArbiters = Seq.fill(VstuCnt)(Module(new StoreDataArbiter))
   val exeUnits = loadUnits ++ storeUnits
 
   // The number of vector load/store units is decoupled with the number of load/store units
@@ -1308,20 +1309,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // Lsq to std unit's rs
     if (i < VstuCnt){
-      when (vsSplit(i).io.vstd.get.valid) {
-        lsq.io.std.storeDataIn(i).valid := true.B
-        lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
-        stData(i).ready := false.B
-      }.otherwise {
-        lsq.io.std.storeDataIn(i).valid := stData(i).valid && !st_data_atomics(i)
-        lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
-        lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
-        lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
-        lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
-        lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
-        lsq.io.std.storeDataIn(i).bits.vecDebug.map(_ := DontCare)
-        stData(i).ready := true.B
-      }
+      val arbiter = storeDataArbiters(i)
+      arbiter.io.redirect := redirect
+      arbiter.io.scalar.valid := stData(i).valid && !st_data_atomics(i)
+      arbiter.io.scalar.bits := stData(i).bits
+      lsq.io.std.storeDataIn(i) := arbiter.io.sq
+      stData(i).ready := st_data_atomics(i) || arbiter.io.scalar.ready
     } else {
         lsq.io.std.storeDataIn(i).valid := stData(i).valid && !st_data_atomics(i)
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
@@ -1635,7 +1628,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       Mux(vsSplit(i).io.out.fire, vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
       Option("VsSplitConnectStu")
     )
-    vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
+    storeDataArbiters(i).io.vector <> vsSplit(i).io.vstd.get
 
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
     vsSplit(i).io.vstdMisalign.get.scalaIssueValid := storeUnits(i).io.stin.valid

@@ -248,7 +248,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
-  val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
+  val vstd                = OptionWrapper(isVStore, Decoupled(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisalignIO)
   val threshold           = Flipped(ValidIO(new mergebufferThresholdIO))
   val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
@@ -266,7 +266,7 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new VLSBundle()))
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
-  val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
+  val vstd                = OptionWrapper(isVStore, Decoupled(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisalignIO)
   val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
