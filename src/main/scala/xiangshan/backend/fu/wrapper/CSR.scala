@@ -327,7 +327,17 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
-  io.out.valid := Mux(isXRetReg, csrModOutValid, DelayN(csrModOutValid, 3))
+  // CSR reads that are not serialised (CSROoORead) execute speculatively. The CtrlBlock only drops a write-back
+  // flushed by a redirect in the same or the previous cycle, so drop a uop flushed while it is in the delay stages.
+  private val outDelayValid = Wire(Vec(4, Bool()))
+  private val outDelayRobIdx = Wire(Vec(4, new RobPtr))
+  outDelayValid(0) := csrModOutValid && !isXRetReg
+  outDelayRobIdx(0) := robIdxReg
+  for (i <- 1 to 3) {
+    outDelayValid(i) := RegNext(outDelayValid(i - 1) && !outDelayRobIdx(i - 1).needFlush(io.flush), false.B)
+    outDelayRobIdx(i) := RegEnable(outDelayRobIdx(i - 1), outDelayValid(i - 1))
+  }
+  io.out.valid := Mux(isXRetReg, csrModOutValid, outDelayValid(3))
   io.out.bits.ctrl.exceptionVec := ExceptSparseVec.mux2(
     isXRetReg,
     exceptionVec,
