@@ -12,13 +12,16 @@ import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRConfig.PPNLength
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.decode.isa.CSRs
+import xiangshan.DebugOptionsKey
 
 import scala.collection.immutable.SeqMap
 
 trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with HypervisorLevel =>
 
   val vsstatus = Module(
-    new CSRModule("VSstatus", new SstatusBundle)
+    new CSRModule("VSstatus", new SstatusBundle {
+      if (p(DebugOptionsKey).TraceRTLMode) Seq(FS, VS).foreach(_.withReset(ContextStatus.Clean))
+    })
       with SretEventSinkBundle
       with SretEventSDTSinkBundle
       with MretEventSinkBundle
