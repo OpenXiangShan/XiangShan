@@ -40,8 +40,12 @@ import chisel3.util._
  * once. [[bankWriteSelect]] uses this property to share one payload selector
  * among the entries in each bank.
  *
- * A retirement window can straddle a row boundary. [[readRows]] uses a shared
- * one-hot selector to read the current row and the next row across all banks.
+ * All banks share a one-hot row selector. Use [[firstRowSelect]] to
+ * initialize it, [[rowSelect]] to derive it from a ROB entry index, and
+ * [[nextRowSelect]] to advance to the next row.
+ *
+ * A retirement window can straddle a row boundary. [[readRows]] uses the
+ * shared selector to read the current and next rows across all banks.
  * The next row wraps to row zero at the end of the ROB.
  *
  * TODO: Select a row independently for each bank to avoid reading two full rows
@@ -64,8 +68,11 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
   def bankIndex(index: UInt): UInt = if (bankBits == 0) 0.U else index(bankBits - 1, 0)
   def rowIndex(index: UInt): UInt = index >> bankBits
 
+  // Initial one-hot selector for row zero.
   def firstRowSelect: UInt = 1.U(rowCount.W)
+  // Decode the row bits of a ROB entry index into a one-hot selector.
   def rowSelect(index: UInt): UInt = UIntToOH(rowIndex(index), rowCount)
+  // Advance the selector by one row, wrapping from the last row to row zero.
   def nextRowSelect(select: UInt): UInt = Mux(select.head(1) === 1.U, 1.U, select << 1)
 
   /**
