@@ -641,7 +641,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   val writeMstatusSDT = Wire(Bool())
   val writeSDT        = Wire(Bool())
   writeMstatusSDT := w.wdataFields.SDT.asBool
-  writeSstatusSDT := Mux(this.menvcfg.DTE.asBool, wAliasSstatus.wdataFields.SDT.asBool, reg.SDT.asBool)
+  writeSstatusSDT := Mux(this.menvcfg.DTE.asBool, wAliasSstatus.wdataFields.SDT.asBool, false.B)
   writeSDT        := Mux(w.wen, writeMstatusSDT, wAliasSstatus.wen && writeSstatusSDT)
   // menvcfg.DTE only control Smode dbltrp. Thus mstatus.sdt will not control by DTE.
   // as sstatus is alias of mstatus, when menvcfg.DTE close write,
