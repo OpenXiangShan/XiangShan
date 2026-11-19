@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from . import run_random_campaign as campaign_runner
+from . import campaign_status as campaign_runner
 
 
 def test_campaign_aggregate_separates_case_failures_from_coverage_gates() -> None:
