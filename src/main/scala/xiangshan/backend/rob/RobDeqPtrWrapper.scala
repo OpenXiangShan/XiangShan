@@ -73,11 +73,11 @@ class RobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XS
   for (i <- 0 until CommitWidth){
     commitDeqPtrVec(i) := PriorityMuxDefault(out.canCommitPriorityCond.zip(commitDeqPtrAll.drop(i).take(CommitWidth+1)), deqPtrVec(i))
   }
-  val deqPtrVec_next = Mux(in.state === 0.U && !redirectOutValid && !in.blockCommit, commitDeqPtrVec, deqPtrVec)
+  val deqPtrVecNext = Mux(in.state === 0.U && !redirectOutValid && !in.blockCommit, commitDeqPtrVec, deqPtrVec)
 
-  deqPtrVec := deqPtrVec_next
+  deqPtrVec := deqPtrVecNext
 
-  out.nextPtrVec := deqPtrVec_next
+  out.nextPtrVec := deqPtrVecNext
   out.ptrVec      := deqPtrVec
   out.commitCnt := commitCnt
   out.commitEn := in.state === 0.U && !redirectOutValid && !in.blockCommit

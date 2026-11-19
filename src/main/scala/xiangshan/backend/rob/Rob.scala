@@ -87,28 +87,67 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // accounting.
   // TODO: move slotUopBuf back to RoB entries
   val slotUopBuf = Reg(Vec(RobSize, Vec(2, new RobSlotInfo)))
-  // pointers
 
   /**
    * ROB Pointers and Allocation
    */
-  // For enqueue ptr, we don't duplicate it since only enqueue needs it.
+  // Enqueue: consecutive allocation candidates starting at the ROB tail (enqPtr).
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
-  val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
-  val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val enqPtr = enqPtrVec(0)
+
+  // For each lane, advance the candidate pointer only for earlier valid first uops.
+  val allocatePtrVec = VecInit((0 until RenameWidth).map { i =>
+    enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))
+  })
+
+  // Dequeue: the current commit candidates start at the ROB head (deqPtr).
+  val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
   val deqPtr = deqPtrVec(0)
+  // Dequeue pointers for the next cycle after the current commit decision.
+  val deqPtrVecNext = Wire(Vec(CommitWidth, Output(new RobPtr)))
+
+  // Slot-specific views of the head entry for exception and flush checks.
+  val deqPtrFormer = Wire(new RobPtr)
+  val deqPtrLatter = Wire(new RobPtr)
+
+  // 2 * CommitWidth consecutive entry pointers starting at the ROB head.
+  val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
+  // Width of an entry offset within a commit row.
+  val commitOffsetWidth = log2Ceil(CommitWidth)
+  // Former slot of the last entry in the current commit row.
+  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(commitOffsetWidth, 1.U)).asFormer
+
+  // Use the former slots of deqPtr and enqPtr for the fflags and vxsat writeback
+  // window [deqPtrCmp, enqPtrCmp). It includes the head and excludes the allocation tail.
+  val deqPtrCmp = Wire(new RobPtr)
+  val enqPtrCmp = Wire(new RobPtr)
+
+  // Walk: read one row at a time. walkPtr points to the first entry in the current row.
+  val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val walkPtr = walkPtrVec(0)
+  // Next cycle's read pointers. On redirect, walkPtrNext selects the bank row.
+  val walkPtrVecNext = Wire(Vec(CommitWidth, Output(new RobPtr)))
+  val walkPtrNext = walkPtrVecNext(0)
+  // Delay the read pointers by one cycle to align them with walkValid.
+  val walkingPtrVec = RegNext(walkPtrVec)
 
-  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
+  // Exact current and next walk positions, including the slot. The start can
+  // be inside the first row read.
   val walkPtrTrue = Reg(new RobPtr)
+  val walkPtrTrueNext = Wire(new RobPtr)
+  // Inclusive limit from the redirect. walkFinished is true once walkPtrTrue passes it.
   val lastWalkPtr = Reg(new RobPtr)
+  // Starting entry offset, used to mask earlier entries in the first row.
+  val walkPtrLowBits = Reg(UInt(commitOffsetWidth.W))
 
+  // Without a snapshot, align the next dequeue pointer to a row and enumerate its entries.
+  val deqPtrVecForWalk = VecInit(
+    (0 until CommitWidth).map(_.U).map(deqPtrVecNext(0).lineHeadPtr.addEntries)
+  )
+
+  // Allocation controls.
   val allowEnqueue = RegInit(true.B)
   val allowEnqueueForDispatch = RegInit(true.B)
-
-  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(in.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
 
@@ -161,6 +200,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqBankSelectUops =
     enqBanking.bankWriteSelect(enqFirstUopFireVec.toSeq, allocatePtrVec.map(_.value), in.enq.req.map(_.bits))
 
+  // enqueue write to the ROB entries
   for (i <- 0 until RobSize) {
     // Should not be allocated twice
     assert(PopCount(allocatingOHByEntry(i)) < 2.U, s"ROB entry $i allocation lanes are not one-hot")
@@ -188,17 +228,29 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   /**
-   * Retirement row buffers
+   * Commit
+   *
+   * 1. Read: Use `robBanksRaddrThisLine` to read the current and next ROB rows.
+   *    `robBanksRdataThisLine` and `robBanksRdataNextLine` together provide
+   *    `2 * CommitWidth` candidate entries.
+   * 2. Update: Apply enqueue, writeback, and redirect updates to produce
+   *    `robBanksRdataThisLineUpdate` and `robBanksRdataNextLineUpdate`.
+   * 3. Select and register: Load `robDeqGroup` with `CommitWidth` entries from
+   *    the updated current row, or from the updated next row when the current
+   *    row finishes committing.
+   * 4. Commit: Use `robDeqGroup` to determine which entries can commit. The low
+   *    `commitOffsetWidth` bits of each dequeue pointer select its commit metadata.
    */
-  val commitOffsetWidth = log2Ceil(CommitWidth)
   val robBanksRaddrThisLine = RegInit(deqBanking.firstRowSelect)
-  val robBanksRaddrNextLine = Wire(chiselTypeOf(robBanksRaddrThisLine))
-  robBanksRaddrThisLine := robBanksRaddrNextLine
+  val robBanksRaddrLineNext = WireInit(robBanksRaddrThisLine)
+  robBanksRaddrThisLine := robBanksRaddrLineNext
+
   val (robBanksRdataThisLine, robBanksRdataNextLine) =
     deqBanking.readRows(robEntries.toSeq, robBanksRaddrThisLine, backendParams.debugEn)
-  val needUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
   val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
+
+  val needUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
   val needUpdateCommitW = Wire(Vec(2 * CommitWidth, Bool()))
   val commitValidThisLine = Wire(Vec(CommitWidth, Bool()))
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
@@ -213,17 +265,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
   allCommitted := out.commits.isCommit && commitValidThisLine.last
-  val walkPtrHead = Wire(new RobPtr)
-  val changeBankAddrToDeqPtr = walkPtrVec.head.addEntries(CommitWidth.U).isAfterSlot(lastWalkPtr)
-  when(in.redirect.valid){
-    robBanksRaddrNextLine := deqBanking.rowSelect(walkPtrHead.value)
-  }.elsewhen(allCommitted || out.commits.isWalk && !changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := deqBanking.nextRowSelect(robBanksRaddrThisLine)
-  }.elsewhen(out.commits.isWalk && changeBankAddrToDeqPtr){
-    robBanksRaddrNextLine := deqBanking.rowSelect(deqPtr.value)
-  }.otherwise(
-    robBanksRaddrNextLine := robBanksRaddrThisLine
-  )
+
+  val changeBankAddrToDeqPtr = walkPtr.addEntries(CommitWidth.U).isAfterSlot(lastWalkPtr)
+  when(in.redirect.valid) {
+    // Use walkPtrNext so the read address and the recovery pointer update
+    // on the same clock edge.
+    robBanksRaddrLineNext := deqBanking.rowSelect(walkPtrNext.value)
+  }.elsewhen(allCommitted || out.commits.isWalk && !changeBankAddrToDeqPtr) {
+    // Advance one row when the current row finishes committing or the walk
+    // continues into the next row.
+    robBanksRaddrLineNext := deqBanking.nextRowSelect(robBanksRaddrThisLine)
+  }.elsewhen(out.commits.isWalk && changeBankAddrToDeqPtr) {
+    // Select the dequeue row for commit when the next row starts past the walk limit.
+    robBanksRaddrLineNext := deqBanking.rowSelect(deqPtr.value)
+  }
+
   val robDeqGroup = Reg(Vec(CommitWidth, new RobCommitEntryBundle))
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1,0)))).toSeq
@@ -266,7 +322,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
-  val state_next = Wire(chiselTypeOf(state))
+  val stateNext = Wire(chiselTypeOf(state))
 
 
   val exceptionGen = Module(new ExceptionGen(params))
@@ -471,8 +527,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(in.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interruptSafe && !deqHasFlushed
-  val deqPtrFormer = Wire(new RobPtr)
-  val deqPtrLatter = Wire(new RobPtr)
   deqPtrFormer := deqPtr
   deqPtrLatter := deqPtr
   deqPtrFormer.isFormer := true.B
@@ -504,7 +558,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val handleVlsExcp = deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock && state === s_idle
   when(handleVlsExcp) {
     deqVlsExcpLock := true.B
-  }.elsewhen(deqPtrVec.head =/= deqPtrVec_next.head) {
+  }.elsewhen(deqPtrVec.head =/= deqPtrVecNext.head) {
     deqVlsExcpLock := false.B
   }
 
@@ -611,7 +665,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   // T redirect.valid, T+1 use walkPtrVec read robEntries, T+2 start walk, shouldWalkVec used in T+2
   val shouldWalkVec = Wire(Vec(CommitWidth,Bool()))
-  val walkingPtrVec = RegNext(walkPtrVec)
   when(in.redirect.valid){
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
   }.elsewhen(RegNext(in.redirect.valid)){
@@ -652,8 +705,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val dirtyFs = enqFlagTracker.out.commitSetMask(0)
   val dirtyVs = enqFlagTracker.out.commitSetMask(1)
 
-  val deqPtrCmp = Wire(new RobPtr)
-  val enqPtrCmp = Wire(new RobPtr)
   deqPtrCmp := deqPtr
   enqPtrCmp := enqPtr
   deqPtrCmp.isFormer := true.B
@@ -764,7 +815,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
   val commit_vDeqGroup = VecInit(robDeqGroup.map(_.commit_v))
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
-  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(commitOffsetWidth, 1.U)).asFormer
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
   val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && (x.slotNeedFlushMask(0) || x.slotNeedFlushMask(1) && CompressType.isNotNORMAL(x.entryPairType)))).asUInt.orR || intrBitSetReg || diffTrapPending
   // for instructions that may block others, we don't allow them to commit
@@ -860,7 +910,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // removes only the latter half of the head entry.
   out.lsq.pendingPtr := Mux(resetsPendingSlot, deqPtr.asFormer, pendingPtrReg)
 
-  out.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
+  out.lsq.pendingPtrNext := RegNext(deqPtrVecNext.head)
   out.lsq.scommit := RegNext(
     Mux(out.commits.isCommit && newStCommit ||
       CompressType.isCC(pendingEntry.entryPairType) &&
@@ -873,14 +923,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * (1) redirect: switch to s_walk
    * (2) walk: when walking comes to the end, switch to s_idle
    */
-  state_next := Mux(
+  stateNext := Mux(
     in.redirect.valid || RegNext(in.redirect.valid), s_walk,
     Mux(
       state === s_walk && walkFinished && rab.in.status.walkEnd && vtypeBuffer.in.status.walkEnd, s_idle,
       state
     )
   )
-  state := state_next
+  state := stateNext
 
   /**
    * Pointer updates and capacity
@@ -898,7 +948,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.in.hasCommitted := hasCommitted
   deqPtrGenModule.in.allCommitted := allCommitted
   deqPtrVec := deqPtrGenModule.out.ptrVec
-  deqPtrVec_next := deqPtrGenModule.out.nextPtrVec
+  deqPtrVecNext := deqPtrGenModule.out.nextPtrVec
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.in.redirect := in.redirect
@@ -910,28 +960,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // next walkPtrVec:
   // (1) redirect occurs: update according to state
   // (2) walk: move forwards
-  val deqPtrReadBank = deqPtrVec_next(0).lineHeadPtr
-  val deqPtrVecForWalk = VecInit((0 until CommitWidth).map(i => deqPtrReadBank.addEntries(i.U).asFormer))
   val snapPtrReadBank = snapshots(in.snpt.snptSelect)(0).lineHeadPtr
   val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank.addEntries(i.U).asFormer))
-  val walkPtrVec_next: Vec[RobPtr] = Mux(in.redirect.valid,
+  walkPtrVecNext := Mux(in.redirect.valid,
     Mux(in.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
     Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
   )
-  val walkPtrTrue_next: RobPtr = Mux(in.redirect.valid,
-    Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0), deqPtrVec_next(0)),
-    Mux((state === s_walk) && !walkFinished, walkPtrVec_next.head, walkPtrTrue)
+  walkPtrTrueNext := Mux(in.redirect.valid,
+    Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0), deqPtrVecNext(0)),
+    Mux((state === s_walk) && !walkFinished, walkPtrNext, walkPtrTrue)
   )
-  walkPtrHead := walkPtrVec_next.head
-  walkPtrVec := walkPtrVec_next
-  walkPtrTrue := walkPtrTrue_next
+  walkPtrVec := walkPtrVecNext
+  walkPtrTrue := walkPtrTrueNext
   // T in.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
-  val walkPtrLowBits = Reg(UInt(commitOffsetWidth.W))
   when(in.redirect.valid){
     walkPtrLowBits := Mux(
       in.snpt.useSnpt,
       snapshots(in.snpt.snptSelect)(0).value(commitOffsetWidth-1, 0),
-      deqPtrVec_next(0).value(commitOffsetWidth-1, 0)
+      deqPtrVecNext(0).value(commitOffsetWidth-1, 0)
     )
   }
   when(in.redirect.valid) {
@@ -941,7 +987,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise{
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
   }
-  walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
+  walkDestSizeDeqGroup.zip(walkPtrVecNext).map {
     case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
   }
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
@@ -950,7 +996,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
   allowEnqueueForDispatch := numValidEntries + dispatchNum <= (RobSize - 2 * RenameWidth).U
 
-  val redirectWalkDistance = distanceBetween(in.redirect.bits.robIdx, deqPtrVec_next(0))
+  val redirectWalkDistance = distanceBetween(in.redirect.bits.robIdx, deqPtrVecNext(0))
   when(in.redirect.valid) {
     // TODO: lastWalkPtr points the last valid entry
     lastWalkPtr := Mux(
@@ -965,7 +1011,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * ROB entry state updates
    */
 
-  val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
   deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0).addEntries(i.U).asFormer }
   val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
@@ -1268,9 +1313,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Exception generator interface
    */
-  val commitReadAddr_next = Mux(state_next === s_idle,
-    VecInit(deqPtrVec_next.map(_.value)),
-    VecInit(walkPtrVec_next.map(_.value))
+  val commitReadAddrNext = Mux(stateNext === s_idle,
+    VecInit(deqPtrVecNext.map(_.value)),
+    VecInit(walkPtrVecNext.map(_.value))
   )
 
   exceptionGen.in.redirect <> in.redirect
@@ -1815,10 +1860,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  XSPerfAccumulate("s_idle_to_idle", state === s_idle && state_next === s_idle)
-  XSPerfAccumulate("s_idle_to_walk", state === s_idle && state_next === s_walk)
-  XSPerfAccumulate("s_walk_to_idle", state === s_walk && state_next === s_idle)
-  XSPerfAccumulate("s_walk_to_walk", state === s_walk && state_next === s_walk)
+  XSPerfAccumulate("s_idle_to_idle", state === s_idle && stateNext === s_idle)
+  XSPerfAccumulate("s_idle_to_walk", state === s_idle && stateNext === s_walk)
+  XSPerfAccumulate("s_walk_to_idle", state === s_walk && stateNext === s_idle)
+  XSPerfAccumulate("s_walk_to_walk", state === s_walk && stateNext === s_walk)
 
   XSPerfAccumulate("branch_jump", brhJump)
   XSPerfAccumulate("br_mis_pred", misPred)
@@ -1849,7 +1894,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   XSPerfHistogram("walkRobCycleHist", walkCycle, state === s_walk && walkFinished, 0, 32)
   XSPerfHistogram("walkRabExtraCycleHist", waitRabWalkCycle, state === s_walk && walkFinished && rab.in.status.walkEnd, 0, 32)
-  XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
+  XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && stateNext === s_idle, 0, 32)
 
   private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
   private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
@@ -2481,7 +2526,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(robEntries)
     dontTouch(robDeqGroup)
     dontTouch(robBanksRaddrThisLine)
-    dontTouch(robBanksRaddrNextLine)
+    dontTouch(robBanksRaddrLineNext)
     dontTouch(robBanksRdataThisLine)
     dontTouch(robBanksRdataNextLine)
     dontTouch(robBanksRdataThisLineUpdate)
@@ -2503,11 +2548,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(commitIsVTypeVec)
     dontTouch(walkIsVTypeVec)
     dontTouch(commitValidThisLine)
-    dontTouch(commitReadAddr_next)
+    dontTouch(commitReadAddrNext)
     dontTouch(donotNeedWalk)
-    dontTouch(walkPtrVec_next)
+    dontTouch(walkPtrVecNext)
     dontTouch(walkPtrVec)
-    dontTouch(deqPtrVec_next)
+    dontTouch(deqPtrVecNext)
     dontTouch(deqPtrVecForWalk)
     dontTouch(snapPtrReadBank)
     dontTouch(snapPtrVecForWalk)
