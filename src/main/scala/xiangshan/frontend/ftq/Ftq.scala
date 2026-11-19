@@ -266,6 +266,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // prefetch: pdip
   private val pdip = Module(new Pdip)
   pdip.io.fecCandidates         := io.fromIfu.fecCandidates
+  pdip.io.ftqEnqueue.valid      := (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
+  pdip.io.ftqEnqueue.bits.ptr   := predictionPtr
   pdip.io.commit.valid          := commit
   pdip.io.commit.bits.ptr       := commitPtr(0)
   pdip.io.commit.bits.startPc   := entryQueue(commitPtr(0).value).startPc.unGuard

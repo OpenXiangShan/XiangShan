@@ -45,13 +45,18 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
       val startPc: Pc     = Pc()
     }
 
+    class FtqEnqueue extends Bundle {
+      val ptr: FtqPtr = new FtqPtr
+    }
+
     // from Ifu
     val fecCandidates: Vec[Valid[FecCandidateInfo]] = Vec(MaxFetchReqNum, Flipped(Valid(new FecCandidateInfo)))
 
     // from backend/ftq
-    val commit:   Valid[Commit]   = Flipped(Valid(new Commit))
-    val redirect: Valid[Redirect] = Flipped(Valid(new Redirect))
-    val fetchPtr: FtqPtr          = Input(new FtqPtr)
+    val commit:     Valid[Commit]    = Flipped(Valid(new Commit))
+    val redirect:   Valid[Redirect]  = Flipped(Valid(new Redirect))
+    val ftqEnqueue: Valid[FtqEnqueue] = Flipped(Valid(new FtqEnqueue))
+    val fetchPtr:   FtqPtr           = Input(new FtqPtr)
 
     // to prefetch queue
     val req: Vec[DecoupledIO[PrefetchQueueEntry]] = Vec(NumAdjacent, DecoupledIO(new PrefetchQueueEntry))
@@ -72,9 +77,30 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
     def valid: Bool = mask.orR
   }
 
+  private class TrainingReq extends Bundle {
+    val candidates: Vec[Bool] = Vec(2, Bool())
+    val blkVAddr:   UInt      = UInt(BlockVAddrWidth.W)
+    val setIdx:     UInt      = UInt(SetIdxWidth.W)
+    val tag:        UInt      = UInt(TagWidth.W)
+  }
+
+  private class TriggerKey extends Bundle {
+    val valid:  Bool = Bool()
+    val setIdx: UInt = UInt(SetIdxWidth.W)
+    val tag:    UInt = UInt(TagWidth.W)
+  }
+
+  private class FtqTrigger extends Bundle {
+    val entryValid: Bool       = Bool()
+    val ftqFlag:    Bool       = Bool()
+    val key:        TriggerKey = new TriggerKey
+  }
+
   private val candidates = RegInit(VecInit.fill(FtqSize)(
     VecInit.fill(2)(false.B) // FIXME: magic 2: each Ftq entry can locate in 2 adjacent ICache lines
   ))
+  private val activeTrigger = RegInit(0.U.asTypeOf(new TriggerKey))
+  private val triggerQueue  = RegInit(VecInit.fill(FtqSize)(0.U.asTypeOf(new FtqTrigger)))
   private val entries = Module(new SRAMTemplate(
     new Entry,
     NumSet,
@@ -84,146 +110,176 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   ))
   private val replacer = ReplacementPolicy.fromString("setplru", NumWay, NumSet)
 
+  when(io.redirect.valid) {
+    activeTrigger.valid  := true.B
+    activeTrigger.setIdx := getSetIdx(io.redirect.bits.startPc)
+    activeTrigger.tag    := getTag(io.redirect.bits.startPc)
+  }
+
   /* *** read *** */
-  // when a redirect happens, lookup table and enqueue to prefetch queue
-  private val r0_valid   = io.redirect.valid
-  private val r0_startPc = io.redirect.bits.startPc
-  private val r0_setIdx  = getSetIdx(r0_startPc)
-  entries.io.r.req.valid       := r0_valid
-  entries.io.r.req.bits.setIdx := r0_setIdx
+  private val r0_valid              = io.redirect.valid
+  private val trainSlot             = Reg(new TrainingReq)
+  private val trainSlotValid        = RegInit(false.B)
+  private val writeBufferValid      = RegInit(false.B)
+  private val writeBufferEntry      = Reg(new Entry)
+  private val writeBufferSetIdx     = Reg(UInt(SetIdxWidth.W))
+  private val writeBufferWayMask    = Reg(UInt(NumWay.W))
+  private val writeBufferCandidates = Reg(Vec(2, Bool()))
 
-  // no backpressure to r0, drop if failed to enqueue
-  private val r1_fire      = Wire(Bool())
-  private val r1_valid     = ValidHold(r0_valid, r1_fire)
-  private val r1_sramValid = RegNext(r0_valid, false.B)
-  private val r1_startPc   = RegEnable(r0_startPc, r0_valid)
-  private val r1_setIdx    = getSetIdx(r1_startPc)
-  private val r1_tag       = getTag(r1_startPc)
+  private val queryReadFire      = Wire(Bool())
+  private val trainReadFire      = Wire(Bool())
+  private val trainReadReq       = Wire(Bool())
+  private val trainReadRespValid = RegNext(trainReadFire, false.B)
+  private val r1_fire            = Wire(Bool())
+  private val r1_valid           = ValidHold(queryReadFire, r1_fire)
+  private val queryReadReq       = io.redirect.valid
+  // The query result has its own hold register, so PQ backpressure does not block training reads.
+  trainReadReq                := trainSlotValid && !queryReadReq && !writeBufferValid && !trainReadRespValid
+  entries.io.r.req.valid       := queryReadReq || trainReadReq
+  entries.io.r.req.bits.setIdx := Mux(queryReadReq, getSetIdx(io.redirect.bits.startPc), trainSlot.setIdx)
+  queryReadFire               := entries.io.r.req.fire && queryReadReq
+  trainReadFire               := entries.io.r.req.fire && trainReadReq
 
-  private val r1_entries = DataHoldBypass(entries.io.r.resp.data, r1_sramValid)
+  private val queryReadRespValid = RegNext(queryReadFire, false.B)
+  private val r1_querySetIdx     = RegEnable(getSetIdx(io.redirect.bits.startPc), queryReadFire)
+  private val r1_queryTag        = RegEnable(getTag(io.redirect.bits.startPc), queryReadFire)
+  private val trainResp          = RegEnable(trainSlot, trainReadFire)
 
-  // hold for write pipeline reuse, we need control of this, so do not use DataHoldBypass
-  private val r1_hitMask = VecInit(r1_entries.map(e => e.valid && e.tag === r1_tag)).asUInt
-  private val r1_entry   = Mux1H(r1_hitMask, r1_entries)
-
+  // Forward the entire pending way, including a replacement with a different tag. Comparing only
+  // matching tags here would let a lookup hit the victim that the buffered write has already evicted.
+  private val queryWriteBypass    = writeBufferValid && writeBufferSetIdx === r1_querySetIdx
+  private val r1_forwardedEntries = Wire(Vec(NumWay, new Entry))
+  r1_forwardedEntries := entries.io.r.resp.data
+  for (way <- 0 until NumWay) {
+    when(queryWriteBypass && writeBufferWayMask(way)) {
+      r1_forwardedEntries(way) := writeBufferEntry
+    }
+  }
+  private val r1_entries = DataHoldBypass(r1_forwardedEntries, queryReadRespValid)
+  private val r1_hitMask = VecInit(r1_entries.map(e => e.valid && e.tag === r1_queryTag)).asUInt
+  private val r1_entry = Mux1H(r1_hitMask, r1_entries)
   private val r1_hit = r1_hitMask.orR
   assert(!r1_valid || PopCount(r1_hitMask) <= 1.U, "multi-hit")
-
   private val r1_blkVAddrs = VecInit.tabulate(NumAdjacent)(i => r1_entry.blkVAddr + i.U)
-
-  private val r1_sent        = io.req.map(port => ValidHold(port.fire, r1_fire, flush = r0_valid))
+  private val r1_sent = io.req.map(port => ValidHold(port.fire, r1_fire, flush = queryReadFire))
   private val r1_needEnqueue = io.req.indices.map(i => r1_hit && r1_entry.mask(i) && !r1_sent(i))
 
   io.req.zipWithIndex.foreach { case (port, i) =>
     port.valid       := r1_valid && r1_needEnqueue(i)
-    port.bits.vAddr  := getPc(r1_blkVAddrs(i)).signGuard // for prefetch, we don't care about guard bit
+    port.bits.vAddr  := getPc(r1_blkVAddrs(i)).signGuard
     port.bits.source := PrefetchSource.Pdip
   }
-
   r1_fire := r1_valid && !r1_needEnqueue.reduce(_ || _)
 
-  // save result for write pipeline reuse
-  // use r1_sramValid instead of r1_fire, to let w stage reuse without waiting for pq
-  private val r2_valid     = RegEnable(true.B, false.B, r1_sramValid) // forever true after the first r1_valid
-  private val r2_blkVAddrs = RegEnable(r1_blkVAddrs, r1_sramValid)
-  private val r2_entry     = RegEnable(r1_entry, r1_sramValid)
-  private val r2_hitMask   = RegEnable(r1_hitMask, r1_sramValid)
-  private val r2_hit       = r2_hitMask.orR
-  private val r2_setIdx    = RegEnable(r1_setIdx, r1_sramValid)
-  private val r2_tag       = RegEnable(r1_tag, r1_sramValid)
-
-  /* *** write *** */
-  // 1. mark a Ftq entry as FEC candidate when:
-  //   1) ICache detects a miss, and
-  //   2) the core(backend + IBuffer) is empty when the block reaches Ifu->IBuffer interface
+  // An FTQ slot keeps the trigger snapshot that was active when that generation was enqueued.
   io.fecCandidates.foreach { port =>
-    when(port.valid) {
-      candidates(port.bits.ftqIdx.value) := port.bits.miss // see Ifu.scala for this .miss
+    val idx = port.bits.ftqIdx.value
+    val sameGeneration = triggerQueue(idx).entryValid && triggerQueue(idx).ftqFlag === port.bits.ftqIdx.flag
+    when(port.valid && sameGeneration) {
+      candidates(port.bits.ftqIdx.value) := port.bits.miss
     }
   }
-
-  // 2. if redirect happens, flush all entries after redirectPtr
+  private val redirectFlushMask = VecInit((0 until FtqSize).map { i =>
+    io.redirect.valid && Mux(
+      io.redirect.bits.ptr.flag === io.fetchPtr.flag,
+      i.U >= io.redirect.bits.ptr.value && i.U <= io.fetchPtr.value,
+      i.U >= io.redirect.bits.ptr.value || i.U <= io.fetchPtr.value
+    )
+  })
   when(io.redirect.valid) {
-    candidates.zipWithIndex.foreach { case (reg, i) =>
-      when(Mux(
-        io.redirect.bits.ptr.flag === io.fetchPtr.flag,
-        i.U >= io.redirect.bits.ptr.value && i.U <= io.fetchPtr.value, // same flag, flush between
-        i.U >= io.redirect.bits.ptr.value || i.U <= io.fetchPtr.value  // otherwise, flush sides
-      )) {
-        reg := 0.U.asTypeOf(reg)
+    for (i <- 0 until FtqSize) {
+      when(redirectFlushMask(i)) {
+        candidates(i) := 0.U.asTypeOf(candidates(i))
+        triggerQueue(i).entryValid := false.B
       }
     }
   }
 
-  // 3. promote candidate to the PDIP table when the Ftq entry has commited instruction
-  // NOTE: pdip.io.commit is not actual backend (rob) commit, which does not guarantee continuity,
-  //       the Ftq top is responsible to do commit step-by-step (see the difference between commit and robCommit there)
-  // NOTE: entry should be written to the last redirect startPc, which we have cached in read pipeline, reuse
   private val w0_candidates = candidates(io.commit.bits.ptr.value)
-  private val w0_valid      = io.commit.valid && w0_candidates.reduce(_ || _) && r2_valid
-  private val w0_startPc    = io.commit.bits.startPc
+  private val commitTrigger = triggerQueue(io.commit.bits.ptr.value)
+  private val w0_candidateGenerationMatches = commitTrigger.entryValid &&
+    commitTrigger.ftqFlag === io.commit.bits.ptr.flag
+  private val w0_triggerGenerationMatches = commitTrigger.key.valid
+  private val commitFlushed = redirectFlushMask(io.commit.bits.ptr.value)
+  private val w0_valid = io.commit.valid && w0_candidates.asUInt.orR &&
+    w0_candidateGenerationMatches && w0_triggerGenerationMatches && !commitFlushed
+  private val w0_startPc = io.commit.bits.startPc
 
-  // clear candidates after it is promoted
-  when(w0_valid) {
+  when(io.commit.valid && w0_candidateGenerationMatches) {
     candidates(io.commit.bits.ptr.value) := 0.U.asTypeOf(w0_candidates)
+    triggerQueue(io.commit.bits.ptr.value).entryValid := false.B
   }
 
-  private val w1_fire       = Wire(Bool())
-  private val w1_valid      = ValidHold(w0_valid, w1_fire)
-  private val w1_candidates = RegEnable(w0_candidates, w0_valid)
-  private val w1_startPc    = RegEnable(w0_startPc, w0_valid)
+  private val w1_valid = trainSlotValid
+  private val w1_fire = trainReadFire
+  when(trainReadFire) {
+    trainSlotValid := false.B
+  }
+  when(w0_valid) {
+    trainSlot.candidates := w0_candidates
+    trainSlot.blkVAddr   := getBlockVAddr(w0_startPc)
+    trainSlot.setIdx     := commitTrigger.key.setIdx
+    trainSlot.tag        := commitTrigger.key.tag
+    trainSlotValid       := true.B
+  }
 
-  private val w1_setIdx = r2_setIdx
-  private val w1_tag    = r2_tag
+  when(io.ftqEnqueue.valid) {
+    val idx = io.ftqEnqueue.bits.ptr.value
+    candidates(idx)              := 0.U.asTypeOf(candidates(idx))
+    triggerQueue(idx).entryValid := true.B
+    triggerQueue(idx).ftqFlag    := io.ftqEnqueue.bits.ptr.flag
+    triggerQueue(idx).key        := activeTrigger
+  }
 
-  private val w1_blkVAddr   = getBlockVAddr(w1_startPc)
-  private val w1_blkHitMask = VecInit(r2_blkVAddrs.map(_ === w1_blkVAddr))
-  private val w1_blkHitIdx  = OHToUInt(w1_blkHitMask)
-  private val w1_blkHit     = r2_hit && w1_blkHitMask.reduce(_ || _)
-
-  // if w1 is 1 blk before r2, also prevent dropping candidate
-  private val w1_blkHitPrev = r2_hit && (w1_blkVAddr + 1.U) === r2_blkVAddrs(0)
-
-  private val w1_entry = WireDefault(r2_entry)
-  when(w1_blkHit) {
-    w1_entry.mask := r2_entry.mask | (w1_candidates.asUInt << w1_blkHitIdx).asUInt
-  }.elsewhen(w1_blkHitPrev) {
-    w1_entry.blkVAddr := w1_blkVAddr
-    w1_entry.mask     := (r2_entry.mask << 1).asUInt | w1_candidates.asUInt
+  private val trainHitMask = VecInit(entries.io.r.resp.data.map(e => e.valid && e.tag === trainResp.tag)).asUInt
+  private val trainHit = trainHitMask.orR
+  private val trainOldEntry = Mux(
+    trainHit,
+    Mux1H(trainHitMask, entries.io.r.resp.data),
+    0.U.asTypeOf(new Entry)
+  )
+  private val trainOldBlkVAddrs = VecInit.tabulate(NumAdjacent)(i => trainOldEntry.blkVAddr + i.U)
+  private val trainBlkHitMask = VecInit(trainOldBlkVAddrs.map(_ === trainResp.blkVAddr))
+  private val trainBlkHitIdx = OHToUInt(trainBlkHitMask)
+  private val trainBlkHit = trainHit && trainBlkHitMask.asUInt.orR
+  private val trainBlkHitPrev = trainHit && (trainResp.blkVAddr + 1.U) === trainOldBlkVAddrs(0)
+  private val trainUpdatedEntry = WireDefault(trainOldEntry)
+  when(trainBlkHit) {
+    trainUpdatedEntry.mask := trainOldEntry.mask | (trainResp.candidates.asUInt << trainBlkHitIdx).asUInt
+  }.elsewhen(trainBlkHitPrev) {
+    trainUpdatedEntry.blkVAddr := trainResp.blkVAddr
+    trainUpdatedEntry.mask     := (trainOldEntry.mask << 1).asUInt | trainResp.candidates.asUInt
   }.otherwise {
-    // allocate a new entry if not hit (or hit, but may drop candidate)
-    w1_entry.blkVAddr := w1_blkVAddr
-    w1_entry.mask     := w1_candidates.asUInt
-    w1_entry.tag      := w1_tag
+    trainUpdatedEntry.blkVAddr := trainResp.blkVAddr
+    trainUpdatedEntry.mask     := trainResp.candidates.asUInt
+  }
+  trainUpdatedEntry.tag := trainResp.tag
+  private val trainWayMask = Mux(trainHit, trainHitMask, UIntToOH(replacer.way(trainResp.setIdx), NumWay))
+  when(trainReadRespValid) {
+    assert(PopCount(trainHitMask) <= 1.U, "multi-hit during PDIP training re-read")
+    assert(!writeBufferValid, "PDIP training re-read completed while write buffer was occupied")
+    writeBufferEntry      := trainUpdatedEntry
+    writeBufferSetIdx     := trainResp.setIdx
+    writeBufferWayMask    := trainWayMask
+    writeBufferCandidates := trainResp.candidates
+    writeBufferValid      := true.B
   }
 
-  private val w1_wayMask = Mux(r2_hit, r2_hitMask, UIntToOH(replacer.way(r2_setIdx)))
-
-  entries.io.w.req.valid := w1_fire
-  entries.io.w.req.bits.apply(
-    data = w1_entry,
-    setIdx = w1_setIdx,
-    waymask = w1_wayMask
-  )
-
-  // also update r2 buffer
-  when(w1_fire && !(r1_valid && (r1_setIdx =/= w1_setIdx || r1_tag =/= w1_tag))) {
-    r2_blkVAddrs := VecInit.tabulate(NumAdjacent)(i => w1_entry.blkVAddr + i.U)
-    r2_entry     := w1_entry
-    r2_hitMask   := w1_wayMask
+  private val writeReqValid = writeBufferValid && !entries.io.r.req.valid
+  entries.io.w.apply(writeReqValid, writeBufferEntry, writeBufferSetIdx, writeBufferWayMask)
+  private val tableWriteFire = entries.io.w.req.fire
+  when(tableWriteFire) {
+    assert(PopCount(writeBufferWayMask) === 1.U, "PDIP write must select exactly one way")
+    writeBufferValid := false.B
   }
+  assert(!(entries.io.r.req.fire && tableWriteFire), "PDIP single-port SRAM read/write conflict")
 
-  w1_fire := w1_valid && !r0_valid // prioritize read
-
-  /* *** replacer update *** */
-  private val touchSets = Seq(r1_setIdx, w1_setIdx)
-  private val touchWays = Seq.tabulate(2)(_ => // magic number 2: read touch & write touch
-    Wire(Valid(UInt(log2Ceil(NumWay).W)))
-  )
-  touchWays.head.valid := r1_sramValid && r1_hit
+  private val touchSets = Seq(r1_querySetIdx, writeBufferSetIdx)
+  private val touchWays = Seq.tabulate(2)(_ => Wire(Valid(UInt(log2Ceil(NumWay).W))))
+  touchWays.head.valid := queryReadRespValid && r1_hit
   touchWays.head.bits  := OHToUInt(r1_hitMask)
-  touchWays.last.valid := w1_fire
-  touchWays.last.bits  := OHToUInt(w1_wayMask)
+  touchWays.last.valid := tableWriteFire
+  touchWays.last.bits  := OHToUInt(writeBufferWayMask)
   replacer.access(touchSets, touchWays)
 
   XSPerfAccumulate(
@@ -236,24 +292,24 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
     Mux(io.commit.valid, PopCount(candidates(io.commit.bits.ptr.value)), 0.U)
   )
 
-  XSPerfAccumulate("hit", r1_sramValid && r1_hit)
+  XSPerfAccumulate("hit", queryReadRespValid && r1_hit)
 
-  // if there are 2 continuous cycles have w0_valid, and the previous one have r0_valid also
-  // the previous is dropped (no w1_fire, but w1 stage registers are overwritten by w0_valid)
-  // PDIP promotion should be rare so we consider this not a big problem, just count it and do nothing
+  // A new commit may overwrite the pending training slot, but never an in-flight read or buffered write.
   XSPerfAccumulate("promotionFailure", w0_valid && w1_valid && !w1_fire)
 
   // same for enqueue
   XSPerfAccumulate("enqueueFailure", r0_valid && r1_valid && !r1_fire)
 
   // Observe actual SRAM handshakes separately from control completion.
-  private val perfReadAccepted   = RegNext(entries.io.r.req.fire, false.B)
   private val perfBlockedTargets = PopCount(io.req.map(port => port.valid && !port.ready))
   XSPerfAccumulate("query_attempt_events", r0_valid)
   XSPerfAccumulate("table_read_accepted_events", entries.io.r.req.fire)
   XSPerfAccumulate("table_read_not_accepted_events", entries.io.r.req.valid && !entries.io.r.req.ready)
-  XSPerfAccumulate("table_read_hit_events", perfReadAccepted && r1_hit)
-  XSPerfAccumulate("query_expanded_targets", Mux(perfReadAccepted && r1_hit, PopCount(r1_entry.mask), 0.U))
+  XSPerfAccumulate("query_read_accepted_events", queryReadFire)
+  XSPerfAccumulate("training_read_accepted_events", trainReadFire)
+  XSPerfAccumulate("table_read_hit_events", queryReadRespValid && r1_hit)
+  XSPerfAccumulate("training_read_hit_events", trainReadRespValid && trainHit)
+  XSPerfAccumulate("query_expanded_targets", Mux(queryReadRespValid && r1_hit, PopCount(r1_entry.mask), 0.U))
   XSPerfAccumulate("output_accepted_targets", PopCount(io.req.map(_.fire)))
   XSPerfAccumulate("output_wait_lane_cycles", perfBlockedTargets)
   // A lane accepted on the redirect edge is not lost. Only still-blocked targets are overwritten.
@@ -264,12 +320,14 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   XSPerfAccumulate("training_slot_overwrite_events", w0_valid && w1_valid && !w1_fire)
   XSPerfAccumulate(
     "training_slot_overwrite_bits",
-    Mux(w0_valid && w1_valid && !w1_fire, PopCount(w1_candidates), 0.U)
+    Mux(w0_valid && w1_valid && !w1_fire, PopCount(trainSlot.candidates), 0.U)
   )
   XSPerfAccumulate("table_write_attempt_events", entries.io.w.req.valid)
   XSPerfAccumulate("table_write_accepted_events", entries.io.w.req.fire)
   XSPerfAccumulate("table_write_not_ready_cycles", entries.io.w.req.valid && !entries.io.w.req.ready)
-  XSPerfAccumulate("table_write_control_without_accept_events", w1_fire && !entries.io.w.req.fire)
+  // Completion now is the actual SRAM handshake; keep this legacy diagnostic as an invariant zero.
+  XSPerfAccumulate("table_write_control_without_accept_events", false.B)
+  XSPerfAccumulate("write_buffer_wait_cycles", writeBufferValid && !tableWriteFire)
   // Input candidate bits of an accepted write, not newly installed bits or promotions.
-  XSPerfAccumulate("table_write_accepted_input_bits", Mux(entries.io.w.req.fire, PopCount(w1_candidates), 0.U))
+  XSPerfAccumulate("table_write_accepted_input_bits", Mux(tableWriteFire, PopCount(writeBufferCandidates), 0.U))
 }
