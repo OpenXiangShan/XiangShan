@@ -14,7 +14,7 @@ from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import TranslationScenarioBuilder
 
 from .scenario_coordinator import BIN951_IFU_SIGNAL_NAMES, ScenarioCoordinator, TimingPlan
-from .test_random_case_tools import _FakeCoordinatorEnv, _coordinator_program_map, _fake_bin951_dut
+from .random_case_test_support import _FakeCoordinatorEnv, _coordinator_program_map, _fake_bin951_dut
 from .test_translation_attributes import attribute_plan_from_dict, TRANSLATION_SCHEMA_VERSION
 from .translation_timing import build_translation_scenario
 
