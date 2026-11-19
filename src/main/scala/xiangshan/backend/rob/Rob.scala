@@ -230,28 +230,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Commit
    *
-   * 1. Read: Use `robBanksRaddrThisLine` to read the current and next ROB rows.
-   *    `robBanksRdataThisLine` and `robBanksRdataNextLine` together provide
-   *    `2 * CommitWidth` candidate entries.
-   * 2. Update: Apply enqueue, writeback, and redirect updates to produce
-   *    `robBanksRdataThisLineUpdate` and `robBanksRdataNextLineUpdate`.
-   * 3. Select and register: Load `robDeqGroup` with `CommitWidth` entries from
-   *    the updated current row, or from the updated next row when the current
-   *    row finishes committing.
+   * 1. Read: Use `deqBankRaddr` to read the current and next ROB rows
+   *    into `deqBankRdata`.
+   * 2. Update: Forward enqueue, writeback, and redirect changes into
+   *    `deqBankRdataUpdate`.
+   * 3. Select and register: `updateRobDeqGroup` loads the updated current row,
+   *    or the next row when the current row finishes committing.
    * 4. Commit: Use `robDeqGroup` to determine which entries can commit. The low
    *    `commitOffsetWidth` bits of each dequeue pointer select its commit metadata.
    */
-  val robBanksRaddrThisLine = RegInit(deqBanking.firstRowSelect)
-  val robBanksRaddrLineNext = WireInit(robBanksRaddrThisLine)
-  robBanksRaddrThisLine := robBanksRaddrLineNext
+  val deqBankRaddr = RegInit(deqBanking.firstRowSelect)
+  val deqBankRaddrNext = WireInit(deqBankRaddr)
+  deqBankRaddr := deqBankRaddrNext
 
-  val (robBanksRdataThisLine, robBanksRdataNextLine) =
-    deqBanking.readRows(robEntries.toSeq, robBanksRaddrThisLine, backendParams.debugEn)
-  val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
-  val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
+  val deqBankRdata =
+    deqBanking.readRows(robEntries.toSeq, deqBankRaddr, backendParams.debugEn)
+  // The Update suffix marks read data with same-cycle updates for robDeqGroup.
+  // This data does not drive the next state of robEntries.
+  val deqBankRdataUpdate = WireInit(deqBankRdata)
 
-  val needUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
-  val needUpdateCommitW = Wire(Vec(2 * CommitWidth, Bool()))
+  val rdataUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
   val commitValidThisLine = Wire(Vec(CommitWidth, Bool()))
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val donotNeedWalk = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
@@ -270,27 +268,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   when(in.redirect.valid) {
     // Use walkPtrNext so the read address and the recovery pointer update
     // on the same clock edge.
-    robBanksRaddrLineNext := deqBanking.rowSelect(walkPtrNext.value)
+    deqBankRaddrNext := deqBanking.rowSelect(walkPtrNext.value)
   }.elsewhen(allCommitted || out.commits.isWalk && !changeBankAddrToDeqPtr) {
     // Advance one row when the current row finishes committing or the walk
     // continues into the next row.
-    robBanksRaddrLineNext := deqBanking.nextRowSelect(robBanksRaddrThisLine)
+    deqBankRaddrNext := deqBanking.nextRowSelect(deqBankRaddr)
   }.elsewhen(out.commits.isWalk && changeBankAddrToDeqPtr) {
     // Select the dequeue row for commit when the next row starts past the walk limit.
-    robBanksRaddrLineNext := deqBanking.rowSelect(deqPtr.value)
+    deqBankRaddrNext := deqBanking.rowSelect(deqPtr.value)
   }
 
   val robDeqGroup = Reg(Vec(CommitWidth, new RobCommitEntryBundle))
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(commitOffsetWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(commitOffsetWidth-1, 0)))).toSeq
-
-  for (i <- 0 until CommitWidth) {
-    robDeqGroup(i).connectCommitEntry(robBanksRdataThisLineUpdate(i), needUpdateCommitW(i))
-    when(allCommitted){
-      robDeqGroup(i).connectCommitEntry(robBanksRdataNextLineUpdate(i), needUpdateCommitW(i + CommitWidth))
-    }
-  }
 
   // Shared trace results used by flush handling, commit metadata, and stall diagnostics.
   // The Trace extension section below drives these combinational wires without extra registers.
@@ -1243,27 +1234,30 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  // begin update robBanksRdata
-  val robBanksRdata = VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
-  val needUpdate = Wire(Vec(2 * CommitWidth, new RobEntryBundle))
-  needUpdate := VecInit(robBanksRdataThisLine ++ robBanksRdataNextLine)
-  for (i <- 0 until 2 * CommitWidth) {
-    val enqHeadOH = allocatingOHFor(needUpdateRobIdx(i))
-    val uopCanEnqSeq = enqUopHitsFor(needUpdateRobIdx(i))
+  // Forward updates to the entries read for the next commit or walk cycle.
+  // Each rdataUpdateValid bit indicates that no uops remain to be written back.
+  val rdataUpdateValid = Wire(Vec(deqBankRdataUpdate.length, Bool()))
+  for (i <- deqBankRdataUpdate.indices) {
+    val enqHeadOH = allocatingOHFor(rdataUpdateRobIdx(i))
+    val uopCanEnqSeq = enqUopHitsFor(rdataUpdateRobIdx(i))
     val instCanEnqFlag = enqHeadOH.asUInt.orR
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
-    when(!needUpdate(i).valid && instCanEnqFlag) {
-      needUpdate(i).realDestSize := realDestEnqNum
-    }.elsewhen(needUpdate(i).valid && instCanEnqFlag) {
-      needUpdate(i).realDestSize := robBanksRdata(i).realDestSize + realDestEnqNum
+    when(!deqBankRdataUpdate(i).valid && instCanEnqFlag) {
+      deqBankRdataUpdate(i).realDestSize := realDestEnqNum
+    }.elsewhen(deqBankRdataUpdate(i).valid && instCanEnqFlag) {
+      deqBankRdataUpdate(i).realDestSize := deqBankRdata(i).realDestSize + realDestEnqNum
     }
     val enqFormerWBNum = Mux1H(enqHeadOH, enqFormerWBNumVec)
     val enqLatterWBNum = Mux1H(enqHeadOH, enqLatterWBNumVec)
-    val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer))
-    val latterWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer))
-    val slotNeedFlushMask = robBanksRdata(i).slotNeedFlushMask
+    val formerWbCnt = PopCount(in.writeback.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === rdataUpdateRobIdx(i) && writeback.bits.robIdx.isFormer
+    ))
+    val latterWbCnt = PopCount(in.writeback.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === rdataUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer
+    ))
+    val slotNeedFlushMask = deqBankRdata(i).slotNeedFlushMask
     val canWbExceptionNeedFlushSeq = exceptionWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
-      writeback.valid && needFlushWb && (writeback.bits.robIdx.value === needUpdateRobIdx(i))
+      writeback.valid && needFlushWb && (writeback.bits.robIdx.value === rdataUpdateRobIdx(i))
     }
     val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
       case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
@@ -1274,14 +1268,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
     val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
     val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
-    when(needUpdate(i).valid && needFlushWriteBack) {
-      needUpdate(i).slotNeedFlushMask := slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
+    when(deqBankRdataUpdate(i).valid && needFlushWriteBack) {
+      deqBankRdataUpdate(i).slotNeedFlushMask :=
+        slotNeedFlushMask | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
     }
 
-    val redirectHitThisEntry = needUpdate(i).valid &&
+    val redirectHitThisEntry = deqBankRdataUpdate(i).valid &&
       in.redirect.valid &&
-      in.redirect.bits.robIdx.value === needUpdateRobIdx(i)
-    val entryPairType = robBanksRdata(i).entryPairType
+      in.redirect.bits.robIdx.value === rdataUpdateRobIdx(i)
+    val entryPairType = deqBankRdata(i).entryPairType
     val redirectClearsLatter = redirectHitThisEntry &&
       CompressType.isNotNORMAL(entryPairType) && (
         in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
@@ -1289,36 +1284,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     val enqEntryPairType = Mux1H(enqHeadOH, in.enq.req.map(_.bits.entryPairType))
     val nextPackedUopState = calcNextPackedUopState(
-      entryValid = needUpdate(i).valid,
-      entryUopState = robBanksRdata(i).uopState,
-      entryCompressType = robBanksRdata(i).entryPairType,
+      entryValid = deqBankRdataUpdate(i).valid,
+      entryUopState = deqBankRdata(i).uopState,
+      entryCompressType = deqBankRdata(i).entryPairType,
       redirectClearsLatter = redirectClearsLatter,
       needFlushWriteBackFormer = needFlushWriteBackFormer,
       needFlushWriteBackLater = needFlushWriteBackLater,
       instCanEnqFlag = instCanEnqFlag,
-      enqState = robBanksRdata(i).encodeUopState(enqEntryPairType, enqFormerWBNum, enqLatterWBNum),
+      enqState = deqBankRdata(i).encodeUopState(enqEntryPairType, enqFormerWBNum, enqLatterWBNum),
       formerWbCntRaw = formerWbCnt,
       latterWbCntRaw = latterWbCnt
     )
-    needUpdate(i).uopState := nextPackedUopState
-    needUpdateCommitW(i) := !nextPackedUopState.orR
+    deqBankRdataUpdate(i).uopState := nextPackedUopState
+    rdataUpdateValid(i) := !nextPackedUopState.orR
 
     // trace
-    val youngestSlotIsFormer = CompressType.isNORMAL(robBanksRdata(i).entryPairType) || redirectClearsLatter
+    val youngestSlotIsFormer = CompressType.isNORMAL(deqBankRdata(i).entryPairType) || redirectClearsLatter
     val taken = branchWBs.map(writeback =>
       writeback.valid &&
-      writeback.bits.robIdx.value === needUpdateRobIdx(i) &&
+      writeback.bits.robIdx.value === rdataUpdateRobIdx(i) &&
       (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
       writeback.bits.redirect.get.bits.taken
     ).reduce(_ || _)
-    when(robBanksRdata(i).valid && Itype.isNonTaken(robBanksRdata(i).traceBlockInPipe.itype) && taken){
+    when(deqBankRdata(i).valid && Itype.isNonTaken(deqBankRdata(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
-      needUpdate(i).traceBlockInPipe.itype := Itype.Taken
+      deqBankRdataUpdate(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
-  robBanksRdataThisLineUpdate := VecInit(needUpdate.take(CommitWidth))
-  robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(CommitWidth))
-  // end update robBanksRdata
+  deqBanking.updateRobDeqGroup(robDeqGroup, deqBankRdataUpdate, rdataUpdateValid, allCommitted)
 
   /**
    * Exception generator interface
@@ -2534,13 +2527,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(deqPtrVec)
     dontTouch(robEntries)
     dontTouch(robDeqGroup)
-    dontTouch(robBanksRaddrThisLine)
-    dontTouch(robBanksRaddrLineNext)
-    dontTouch(robBanksRdataThisLine)
-    dontTouch(robBanksRdataNextLine)
-    dontTouch(robBanksRdataThisLineUpdate)
-    dontTouch(robBanksRdataNextLineUpdate)
-    dontTouch(needUpdate)
+    dontTouch(deqBankRaddr)
+    dontTouch(deqBankRaddrNext)
+    dontTouch(deqBankRdata)
+    dontTouch(deqBankRdataUpdate)
     val exceptionWBsVec = MixedVecInit(exceptionWBs)
     dontTouch(exceptionWBsVec)
     dontTouch(commit_wDeqGroup)
