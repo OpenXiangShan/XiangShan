@@ -1037,6 +1037,12 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
         and not any(signal in registered for signal in candidates)
     ]
     assert not missing
+    # Both per-request native exception buses are needed for dual-fetch
+    # admission. Neither an old scalar nor request0 alone can stand for them.
+    assert {
+        f"Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_{index}_value"
+        for index in (0, 1)
+    } <= registered
     assert {
         "Frontend_top.Frontend.inner_ftq.entryQueue_0_startPc_addr",
         "Frontend_top.Frontend.inner_ftq.entryQueue_63_startPc_addr",
