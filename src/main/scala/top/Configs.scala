@@ -455,7 +455,7 @@ class MediumConfig(n: Int = 1) extends Config(
 
 class FuzzConfig(dummy: Int = 0) extends Config(
   new WithFuzzer
-    ++ new KunminghuV2Config(1)
+    ++ new KunminghuV2BaseConfig(1)
 )
 
 class DefaultBaseConfig(n: Int = 1) extends Config(
@@ -479,7 +479,7 @@ class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
-class KunminghuV2Config(n: Int = 1) extends Config(
+private[top] class KunminghuV2BaseConfig(n: Int) extends Config(
   L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ new DefaultBaseConfig(n)
     ++ new WithCHI
@@ -487,10 +487,9 @@ class KunminghuV2Config(n: Int = 1) extends Config(
 
 /** Single-core CHI SoC with the L2 connected directly to DDR through AXI4.
   * The SoC address/PMA map, interrupt count, and module prefix match NHV3A.
-  * CPU and XSTile microarchitecture parameters are inherited from KunminghuV2Config.
   */
 class DefaultConfig(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  (new KunminghuV2BaseConfig(n)).alter((site, here, up) => {
     case MonitorsEnabled => false
     case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
     case coupledL2.WithoutLLC => true
@@ -523,6 +522,8 @@ class DefaultConfig(n: Int = 1) extends Config(
   })
 )
 
+class KunminghuV2Config(n: Int = 1) extends DefaultConfig(n)
+
 class KunminghuV2WithoutLLCConfig(n: Int = 1) extends DefaultConfig(n)
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
@@ -542,7 +543,7 @@ class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  (new KunminghuV2BaseConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
@@ -601,7 +602,7 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
 )
 
 class FpgaDiffKMHV2Config(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  (new KunminghuV2BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
       AlwaysBasicDB = false
