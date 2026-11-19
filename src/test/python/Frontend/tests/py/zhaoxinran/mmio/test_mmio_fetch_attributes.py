@@ -4,10 +4,10 @@ import os
 
 import pytest
 
-from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots, configure_random_mmio_latency
 from tests.py.zhaoxinran.support.uncache import prepare_sv39_cfi_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -17,8 +17,7 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 def test_pbmt_nc_non_mmio_enters_uncache_send_path(env):
     scenario_key = "zhaoxinran/mmio/attributes/pbmt-nc-non-mmio"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    latency = configure_random_mmio_latency(env, rng)
     expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     record_scenario(
         env,
@@ -51,7 +50,7 @@ def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(1, 16)
     blocked_cycles = rng.randint(48, 80)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    env.uncache_agent.configure(latency=latency)
     _expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
     record_scenario(
         env,
@@ -80,19 +79,7 @@ def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
         return 1
 
     env.backend_model.backend_empty_for_dut = backend_empty_override
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._force_redirect_to(env, mapping.vaddr)
 
     assert _wait_for_req_delta(env, env.uncache_agent, max_cycles=6000) > 0

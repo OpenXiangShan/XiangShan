@@ -6,7 +6,7 @@ import pytest
 from env.support import record_scenario, scenario_rng
 
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.zhaoxinran.support.mmio import prepare_mmio_jalr_stream
+from tests.py.zhaoxinran.support.mmio import configure_random_mmio_latency, prepare_mmio_jalr_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -18,8 +18,7 @@ _JALR_X0_X1_0 = 0x00008067
 def test_mmio_jalr_return_is_delivered_as_indirect_control_flow(env):
     scenario_key = "zhaoxinran/mmio/control-flow/jalr-return"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    latency = configure_random_mmio_latency(env, rng)
     pc = prepare_mmio_jalr_stream(env, rng, _JALR_X0_X1_0)
     record_scenario(
         env,

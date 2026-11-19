@@ -5,7 +5,6 @@ from dataclasses import replace
 
 import pytest
 
-from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationPte,
@@ -18,7 +17,7 @@ from tests.py.support import translation_faults
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
-from tests.py.zhaoxinran.support.mmio import prepare_sv39_mmio_page_tail
+from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots, prepare_sv39_mmio_page_tail
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -294,19 +293,7 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
         scenario,
         "instruction_access_fault",
     )
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
@@ -415,19 +402,7 @@ def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
         scenario,
         "instruction_access_fault",
     )
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()

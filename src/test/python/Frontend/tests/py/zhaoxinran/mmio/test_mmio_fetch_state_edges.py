@@ -8,7 +8,7 @@ from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.zhaoxinran.support.mmio import prepare_mmio_cnop_stream
+from tests.py.zhaoxinran.support.mmio import configure_random_mmio_latency, prepare_mmio_cnop_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -28,8 +28,7 @@ def _capture_post_drive_snapshot(cycle: int, env) -> dict[str, int | None]:
 def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     scenario_key = "zhaoxinran/mmio/state-edge/a-fire-enters-wait-resp"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    latency = configure_random_mmio_latency(env, rng)
     pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,
@@ -86,8 +85,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
 def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
     scenario_key = "zhaoxinran/mmio/state-edge/ibuffer-ready-drives-tl-a"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    latency = configure_random_mmio_latency(env, rng)
     pc = prepare_mmio_cnop_stream(env, rng)
     record_scenario(
         env,

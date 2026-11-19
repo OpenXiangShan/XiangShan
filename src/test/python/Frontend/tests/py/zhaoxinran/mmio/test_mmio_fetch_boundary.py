@@ -4,16 +4,17 @@ import hashlib
 import os
 
 import pytest
-from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.model.golden_trace import GoldenTrace
 from env.runtime.frontend_init import FrontendInitConfig
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta, run_until
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.support.translation_faults import _read_exception_bit
+from tests.py.support.translation_faults import _capture_cfvec_deliveries
 
 from tests.py.zhaoxinran.support.mmio import (
     _run_mmio_redirect_cancels_wait_last_commit_before_request,
+    capture_mmio_snapshots,
+    configure_random_mmio_latency,
     load_mmio_payload as _load_mmio_payload,
     mmio_cross_beat_rvi_stream as _random_cross_beat_rvi_stream,
     mmio_non_crossing_rvi_stream,
@@ -30,30 +31,6 @@ _INSTRUCTION_ACCESS_FAULT_BIT = 1
 _HARDWARE_ERROR_BIT = 19
 
 
-def _capture_cfvec_exceptions(env) -> list[dict]:
-    records: list[dict] = []
-
-    def capture(cycle: int, active_env) -> None:
-        observe = active_env.backend_cfvec_if
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
-            records.append(
-                {
-                    "cycle": int(cycle),
-                    "pc": active_env.observed_cfvec_pc(slot),
-                    "exception_bits": tuple(
-                        bit
-                        for bit in (1, 2, 12, 19, 20)
-                        if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) == 1
-                    ),
-                }
-            )
-
-    env.register_cycle_observer(capture)
-    return records
-
-
 def _assert_target_exception(records: list[dict], *, pc: int, expected_bit: int) -> None:
     target = [record for record in records if int(record["pc"]) == int(pc)]
     assert target, {"missing_exception_pc": hex(int(pc)), "records": records[-64:]}
@@ -62,12 +39,6 @@ def _assert_target_exception(records: list[dict], *, pc: int, expected_bit: int)
 
 def _payload_sha256(payload: bytes) -> str:
     return hashlib.sha256(bytes(payload)).hexdigest()
-
-
-def _configure_random_mmio_latency(env, rng) -> int:
-    latency = rng.randint(1, 16)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    return latency
 
 
 def _rvi_rvc_payload(*, first: str) -> bytes:
@@ -91,7 +62,7 @@ def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env):
         _load_mmio_payload(env, image.payload, base=image.base_addr)
     # Let the backend model resolve the JALs from the delivered instruction stream.
     env.backend_model.set_golden_trace(GoldenTrace(trace))
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -148,7 +119,7 @@ def test_mmio_rvc_at_8b_tail_advances_by_2b_without_second_beat(env):
     placement, payload = mmio_rvc_beat_tail_entry(rng)
     pc = placement.pc
     _load_mmio_payload(env, payload)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -188,7 +159,7 @@ def test_mmio_adjacent_rvc_rvi_stream_preserves_pc_progress(env, first: str):
     base_seed, seed, rng = scenario_rng(scenario_key)
     payload = _rvi_rvc_payload(first=first)
     first_pc = load_random_mmio_stream(env, scenario_rng(f"{scenario_key}/pc")[2], payload)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -225,7 +196,7 @@ def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
     scenario_key = "zhaoxinran/mmio/cross-8b-clean-rvi"
     base_seed, seed, rng = scenario_rng(scenario_key)
     pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -269,8 +240,8 @@ def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[
     ordinal = int(bool(fault.get("denied")))
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
     pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
-    latency = _configure_random_mmio_latency(env, rng)
-    cfvec_records = _capture_cfvec_exceptions(env)
+    latency = configure_random_mmio_latency(env, rng)
+    cfvec_records = _capture_cfvec_deliveries(env)
     env.uncache_agent.inject_response_fault_at(
         first_beat,
         **fault,
@@ -319,8 +290,8 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
     ordinal = {None: 0, "corrupt": 1, "corrupt_and_denied": 2}[fault]
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
     pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
-    latency = _configure_random_mmio_latency(env, rng)
-    cfvec_records = _capture_cfvec_exceptions(env)
+    latency = configure_random_mmio_latency(env, rng)
+    cfvec_records = _capture_cfvec_deliveries(env)
     if fault is not None:
         env.uncache_agent.inject_response_fault_at(
             second_beat,
@@ -388,8 +359,8 @@ def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int
     ordinal = int(bool(fault.get("denied")))
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
     pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc", ordinal=ordinal)[2])
-    latency = _configure_random_mmio_latency(env, rng)
-    cfvec_records = _capture_cfvec_exceptions(env)
+    latency = configure_random_mmio_latency(env, rng)
+    cfvec_records = _capture_cfvec_deliveries(env)
     env.uncache_agent.inject_next_response_fault(**fault)
     record_scenario(
         env,
@@ -432,7 +403,7 @@ def test_mmio_branch_instruction_is_delivered_as_control_flow(env):
     payload = branch + int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     payload += int(uncache._CNOP).to_bytes(2, "little") * 128
     pc = load_random_mmio_stream(env, scenario_rng(f"{scenario_key}/pc")[2], payload)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -445,19 +416,7 @@ def test_mmio_branch_instruction_is_delivered_as_control_flow(env):
             "expected_path": "branch_control_flow",
         },
     )
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert uncache._wait_for_request_addr(env, pc)
@@ -488,7 +447,7 @@ def test_mmio_jal_instruction_is_delivered_as_control_flow(env):
     payload += int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     payload += int(uncache._CNOP).to_bytes(2, "little") * 128
     pc = load_random_mmio_stream(env, scenario_rng(f"{scenario_key}/pc")[2], payload)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -519,7 +478,7 @@ def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     stall_cycles = rng.randint(4, 20)
     pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     env.uncache_agent.set_a_ready(0)
     record_scenario(
         env,
@@ -557,7 +516,7 @@ def test_mmio_redirect_drops_a_ready_stalled_request(env):
     scenario_key = "zhaoxinran/mmio/redirect-drops-stalled-request"
     base_seed, seed, rng = scenario_rng(scenario_key)
     pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     target_pc = pc + rng.choice((0x40, 0x60, 0x80, 0xA0))
     env.uncache_agent.set_a_ready(0)
     record_scenario(
@@ -572,19 +531,7 @@ def test_mmio_redirect_drops_a_ready_stalled_request(env):
             "expected_path": "redirect_cancels_unaccepted_request",
         },
     )
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert uncache._wait_for_uncache_a_valid_addr(env, pc)
@@ -639,7 +586,7 @@ def test_mmio_page_tail_rvi_rechecks_next_page_before_delivery(env):
     scenario_key = "zhaoxinran/mmio/page-tail/rvi-recheck"
     base_seed, seed, rng = scenario_rng(scenario_key)
     pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -674,7 +621,7 @@ def test_mmio_page_tail_rvc_delivers_before_next_page_fetch(env):
     scenario_key = "zhaoxinran/mmio/page-tail/rvc-before-next-page"
     base_seed, seed, rng = scenario_rng(scenario_key)
     pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2], is_rvc=True)
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     record_scenario(
         env,
         scenario_key,
@@ -720,7 +667,7 @@ def test_mmio_page_tail_first_beat_fault_preserves_resend_contract(
     ordinal = int(bool(fault.get("denied")))
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
     pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc", ordinal=ordinal)[2])
-    latency = _configure_random_mmio_latency(env, rng)
+    latency = configure_random_mmio_latency(env, rng)
     first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
     next_page = pc + 2
     env.uncache_agent.inject_response_fault_at(first_beat, **fault)

@@ -7,7 +7,7 @@ import pytest
 from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
-from tests.py.zhaoxinran.support.mmio import prepare_mmio_page_tail_stream
+from tests.py.zhaoxinran.support.mmio import configure_random_mmio_latency, prepare_mmio_page_tail_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -16,8 +16,7 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
     scenario_key = "zhaoxinran/mmio/page-state/tail-rvi-half"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(8, 24)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    latency = configure_random_mmio_latency(env, rng, minimum=8, maximum=24)
     pc = prepare_mmio_page_tail_stream(env, rng)
     record_scenario(
         env,

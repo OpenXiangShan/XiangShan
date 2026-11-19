@@ -7,7 +7,7 @@ from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.model.golden_trace import TraceEntry
 from env.sequences import LoadProgramSequence
 from env.support import PcBoundary, PcMapping, RandomPc, random_pc
-from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta, run_until
 from tests.py.support.instructions import encode_jal_x0
 from tests.py.support import uncache_scenarios as uncache
 
@@ -202,6 +202,26 @@ def prepare_non_crossing_rvi_offsets(env, rng: random.Random) -> tuple[int, int,
     return base + offsets[0], base + offsets[1], base + offsets[2]
 
 
+def configure_random_mmio_latency(
+    env, rng: random.Random, *, minimum: int = 1, maximum: int = 16,
+) -> int:
+    latency = rng.randint(minimum, maximum)
+    env.uncache_agent.configure(latency=latency)
+    return latency
+
+
+def capture_mmio_snapshots(env) -> list[dict[str, int | None]]:
+    snapshots: list[dict[str, int | None]] = []
+
+    def capture(cycle: int, active_env) -> None:
+        sample = owner_funcov._snapshot(active_env.functional_coverage, active_env.dut)
+        sample["cycle"] = int(cycle)
+        snapshots.append(sample)
+
+    env.register_cycle_observer(capture)
+    return snapshots
+
+
 def _run_mmio_redirect_cancels_wait_last_commit_before_request(
     env,
     *,
@@ -211,33 +231,21 @@ def _run_mmio_redirect_cancels_wait_last_commit_before_request(
 ):
     """Redirect a non-first MMIO while it is still commit ordered."""
     if latency is not None:
-        env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+        env.uncache_agent.configure(latency=latency)
     env.backend_model.set_can_accept(1)
     env.backend_model.commit_min_delay = 1000
     env.backend_model.commit_max_delay = 1000
     env.backend_model.backend_empty_for_dut = lambda: 0
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        snapshots.append(
-            {
-                "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
-    for _ in range(8000):
-        if snapshots and snapshots[-1]["uncache_state"] == uncache._IFU_UNCACHE_WAIT_LAST_COMMIT:
-            break
-        env.step(1)
-    assert snapshots[-1]["uncache_state"] == uncache._IFU_UNCACHE_WAIT_LAST_COMMIT, {
+    assert run_until(
+        env,
+        lambda: bool(snapshots) and snapshots[-1]["uncache_state"] == uncache._IFU_UNCACHE_WAIT_LAST_COMMIT,
+        max_cycles=8000,
+    ), {
         "snapshots": snapshots[-64:]
     }
 

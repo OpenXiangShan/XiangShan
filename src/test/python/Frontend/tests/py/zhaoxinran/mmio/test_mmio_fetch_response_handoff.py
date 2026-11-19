@@ -8,26 +8,14 @@ from env.core.transactions import ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
-from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta, poll_until, run_until
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.support.instructions import encode_jal_x0
 from env.support import PmpPmaConfig, random_pc, record_scenario, scenario_rng
 
-from tests.py.zhaoxinran.support.mmio import prepare_mmio_cnop_stream
+from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots, prepare_mmio_cnop_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-
-
-def _register_snapshot_observer(env) -> list[dict[str, int | None]]:
-    snapshots: list[dict[str, int | None]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        sample = owner_funcov._snapshot(active_env.functional_coverage, active_env.dut)
-        sample["cycle"] = int(cycle)
-        snapshots.append(sample)
-
-    env.register_cycle_observer(capture)
-    return snapshots
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -36,7 +24,7 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     latency = rng.randint(8, 24)
     pc = prepare_mmio_cnop_stream(env, rng)
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    env.uncache_agent.configure(latency=latency)
     record_scenario(
         env,
         scenario_key,
@@ -49,30 +37,22 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
         },
     )
     env.backend_model.set_can_accept(0)
-    snapshots = _register_snapshot_observer(env)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
     assert _wait_for_resp_delta(env, env.uncache_agent)
-    for _ in range(64):
-        if any(
+    assert run_until(
+        env,
+        lambda: any(
             sample["resp_valid"] == 1
             and sample["to_valid"] == 1
             and sample["to_ready"] == 1
             and sample["s2_req_uncache"] == 1
             and sample["s2_pmp_mmio"] == 1
             for sample in snapshots
-        ):
-            break
-        env.step(1)
-
-    assert any(
-        sample["resp_valid"] == 1
-        and sample["to_valid"] == 1
-        and sample["to_ready"] == 1
-        and sample["s2_req_uncache"] == 1
-        and sample["s2_pmp_mmio"] == 1
-        for sample in snapshots
+        ),
+        max_cycles=64,
     ), {"snapshots": snapshots[-32:]}
     env.backend_model.set_can_accept(1)
     assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
@@ -87,7 +67,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     target_offset = rng.randrange(0x40, 0x100, 8)
     pc = prepare_mmio_cnop_stream(env, rng)
     target_pc = pc + target_offset
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    env.uncache_agent.configure(latency=latency)
     record_scenario(
         env,
         scenario_key,
@@ -100,7 +80,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
             "expected_path": "backend_redirect_wins_response",
         },
     )
-    snapshots = _register_snapshot_observer(env)
+    snapshots = capture_mmio_snapshots(env)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert _wait_for_req_delta(env, env.uncache_agent)
@@ -109,11 +89,11 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     # visible.  The backend drives a queued redirect on the next edge; waiting
     # for tl_d_valid first lets the response retire before the redirect can
     # overlap it.
-    for _ in range(256):
-        sample = snapshots[-1] if snapshots else None
-        if sample and sample["entry_state"] == 3 and sample["tl_d_valid"] == 0:
-            break
-        env.step(1)
+    poll_until(
+        env,
+        lambda: bool(snapshots) and snapshots[-1]["entry_state"] == 3 and snapshots[-1]["tl_d_valid"] == 0,
+        max_cycles=256,
+    )
     assert snapshots and snapshots[-1]["entry_state"] == 3, {
         "snapshots": snapshots[-32:]
     }
@@ -287,7 +267,7 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
     owner_funcov.reset_mmio_nc_owner_coverage_state(env.functional_coverage)
     env.monitor.clear()
     env.monitor.set_expected_pc(cacheable_start)
-    snapshots = _register_snapshot_observer(env)
+    snapshots = capture_mmio_snapshots(env)
     request_baseline = int(env.uncache_agent.get_stats()["req_count"])
     env.backend_model.inject_redirect_from_cfvec(
         source_pc=int(redirect_source.pc),
