@@ -98,6 +98,11 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_readMetaVAddr  = s0_twoPrefetchCase.selectMetaVAddr(s0_req)
   private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
+  private val s0_perfLineSources = PrefetchPerf.lineSources(
+    s0_twoPrefetchCase,
+    s0_req.head.isCrossLine,
+    VecInit(s0_req.map(_.source))
+  )
 
   // TODO: do not flush if req(1).source is not inStream
   fromBpuS0Flush := s0_req.head.source.inStream &&
@@ -121,6 +126,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_req              = RegEnable(s0_req, 0.U.asTypeOf(s0_req), s0_fire)
+  private val s1_perfLineSources = RegEnable(s0_perfLineSources, 0.U.asTypeOf(s0_perfLineSources), s0_fire)
   private val s1_ftqIdx           = RegEnable(s0_ftqIdx, 0.U.asTypeOf(s0_ftqIdx), s0_fire)
   private val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
 
@@ -440,6 +446,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s2_valid = ValidHold(s1_realFire, s2_fire, s2_flush)
 
   private val s2_source     = RegEnable(s1_req.head.source, 0.U.asTypeOf(s1_req.head.source), s1_realFire)
+  private val s2_perfLineSources = RegEnable(s1_perfLineSources, 0.U.asTypeOf(s1_perfLineSources), s1_realFire)
   private val s2_doubleline = RegEnable(s1_readDoubleLine, 0.U.asTypeOf(s1_readDoubleLine), s1_realFire)
   private val s2_pTag       = RegEnable(s1_pTag, 0.U.asTypeOf(s1_pTag), s1_realFire)
   private val s2_exception =
@@ -492,9 +499,10 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }
 
   (0 until PortNumber).foreach { i =>
-    toMissArbiter.io.in(i).valid         := s2_valid && s2_miss(i) && !s2_hasSend(i)
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s2_readMetaVAddr(i), s2_pTag)
-    toMissArbiter.io.in(i).bits.vSetIdx  := s2_readMetaSetIdx(i)
+    toMissArbiter.io.in(i).valid           := s2_valid && s2_miss(i) && !s2_hasSend(i)
+    toMissArbiter.io.in(i).bits.blkPAddr   := getBlkAddrFromPTag(s2_readMetaVAddr(i), s2_pTag)
+    toMissArbiter.io.in(i).bits.vSetIdx    := s2_readMetaSetIdx(i)
+    toMissArbiter.io.in(i).bits.perfSource := s2_perfLineSources(i)
   }
 
   toMiss <> toMissArbiter.io.out
@@ -525,12 +533,65 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       io.fromFtq.bits.req(i).source.getValidSeq
     )
   )
-  // the number of prefetch request sent to missUnit
+  // Legacy attribution uses req(0) for both lines. Use miss_lines below for mixed-source traffic.
   XSPerfSeqAccumulate(
     "miss",
     toMiss.fire,
     s2_source.getValidSeq
   )
+
+  XSPerfSeqAccumulate("miss_lines", toMiss.fire, toMiss.bits.perfSource.getValidSeq)
+  // Snapshot each expanded line once on leaving s1, including any refill updates while it waited.
+  (0 until PortNumber).foreach { i =>
+    val lineValid = if (i == 0) true.B else s1_readDoubleLine
+    val eligible = s1_exceptionOut.isNone && !s1_isMmio
+    val source = s1_perfLineSources(i).getValidSeq
+    XSPerfSeqAccumulate(s"probe${i}_lines", s1_realFire && lineValid, source)
+    XSPerfSeqAccumulate(s"probe${i}_hit_lines", s1_realFire && lineValid && eligible && s1_sramHits(i), source)
+    XSPerfSeqAccumulate(s"probe${i}_miss_lines", s1_realFire && lineValid && eligible && !s1_sramHits(i), source)
+    XSPerfSeqAccumulate(s"probe${i}_blocked_lines", s1_realFire && lineValid && !eligible, source)
+    XSPerfSeqAccumulate(
+      s"miss${i}_wait_line_cycles",
+      toMissArbiter.io.in(i).valid && !toMissArbiter.io.in(i).ready,
+      s2_perfLineSources(i).getValidSeq
+    )
+    XSPerfSeqAccumulate(
+      s"flush${i}_unsent_lines",
+      s2_valid && s2_flush && s2_miss(i) && !s2_hasSend(i) && !toMissArbiter.io.in(i).fire,
+      s2_perfLineSources(i).getValidSeq
+    )
+    XSPerfSeqAccumulate(
+      s"refill${i}_bypass_lines",
+      s2_fire && (if (i == 0) true.B else s2_doubleline) && s2_exception.isNone && !s2_isMmio &&
+        !s2_sramHits(i) && s2_mshrHits(i) && !s2_hasSend(i),
+      s2_perfLineSources(i).getValidSeq
+    )
+  }
+
+  // Translation is shared by a group. Mixed groups count once for EACH source present;
+  // these counters must not be summed across sources as exclusive TLB ownership.
+  PrefetchPerf.sources.foreach { case (name, value) =>
+    val s0Contains = s0_req(0).source.value === value ||
+      (s0_twoPrefetchCase.valid && s0_req(1).source.value === value)
+    val s1Contains = s1_req(0).source.value === value ||
+      (s1_twoPrefetchCase.valid && s1_req(1).source.value === value)
+    XSPerfAccumulate(s"accepted_groups_$name", s0_fire && s0Contains)
+    XSPerfAccumulate(s"itlb_request_group_events_$name", toItlb.fire && Mux(s1_needItlb, s1Contains, s0Contains))
+    XSPerfAccumulate(s"s0_itlb_wait_group_cycles_$name", s0_valid && !toItlb.ready && s0Contains)
+    XSPerfAccumulate(s"s1_itlb_wait_group_cycles_$name", s1_valid && !tlbFinish && s1Contains)
+    XSPerfAccumulate(s"s1_flush_groups_$name", s1_valid && s1_flush && s1Contains)
+    XSPerfAccumulate(s"csr_disabled_groups_$name", s1_fire && !io.csrPfEnable && s1Contains)
+    // Count overlap observations on req(1); physical line ownership still follows req(0).
+    val sharedLines = Mux(
+      s0_twoPrefetchCase.isSameLine,
+      1.U +& (s0_req(0).isCrossLine && s0_req(1).isCrossLine).asUInt,
+      (s0_twoPrefetchCase.isOverlap1 || s0_twoPrefetchCase.isOverlap2).asUInt
+    )
+    XSPerfAccumulate(
+      s"shared_req1_lines_$name",
+      Mux(s0_fire && s0_twoPrefetchCase.valid && s0_req(1).source.value === value, sharedLines, 0.U)
+    )
+  }
 
   /* *** stall reason *** */
   XSPerfAccumulate("stallCycles_fetch_icachePrefetch_missUnit", toMiss.valid && !toMiss.ready)

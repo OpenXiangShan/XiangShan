@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import utility.ReqSourceKey
 import xiangshan.WfiReqBundle
+import xiangshan.frontend.ftq.prefetch.PrefetchSource
 import xscache.common.AliasKey
 import xscache.coupledL2.MemBackTypeMM
 
@@ -67,6 +68,8 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
   private val blkPAddr = RegInit(0.U((PAddrBits - blockOffBits).W))
   private val vSetIdx  = RegInit(0.U(idxBits.W))
   private val way      = RegInit(0.U(wayBits.W))
+  // First allocator owns the traffic; later merges do not change its attribution.
+  private val perfSource = RegEnable(io.req.bits.perfSource, 0.U.asTypeOf(new PrefetchSource), io.req.fire)
   // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
   // vSetIdx is vAddr(untagBits, blockOffBits), aliasTag should be vAddr(untagBits, pgIdxBits)
   // and, AliasTagBits = untagBits - pgIdxBits, so we actually need AliasTagBits-most-significant bits of vSetIdx
@@ -136,10 +139,12 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
   }
 
   // offer the information other than data for write sram and response fetch
-  io.info.valid         := valid && (!flush && !fencei)
-  io.info.bits.blkPAddr := blkPAddr
-  io.info.bits.vSetIdx  := vSetIdx
-  io.info.bits.way      := way
+  io.info.valid           := valid && (!flush && !fencei)
+  io.info.bits.blkPAddr   := blkPAddr
+  io.info.bits.vSetIdx    := vSetIdx
+  io.info.bits.way        := way
+  io.info.bits.perfSource := perfSource
+  io.info.bits.perfIssued := issue
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := !(valid && issue)

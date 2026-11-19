@@ -245,4 +245,31 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
 
   // same for enqueue
   XSPerfAccumulate("enqueueFailure", r0_valid && r1_valid && !r1_fire)
+
+  // Observe actual SRAM handshakes separately from control completion.
+  private val perfReadAccepted   = RegNext(entries.io.r.req.fire, false.B)
+  private val perfBlockedTargets = PopCount(io.req.map(port => port.valid && !port.ready))
+  XSPerfAccumulate("query_attempt_events", r0_valid)
+  XSPerfAccumulate("table_read_accepted_events", entries.io.r.req.fire)
+  XSPerfAccumulate("table_read_not_accepted_events", entries.io.r.req.valid && !entries.io.r.req.ready)
+  XSPerfAccumulate("table_read_hit_events", perfReadAccepted && r1_hit)
+  XSPerfAccumulate("query_expanded_targets", Mux(perfReadAccepted && r1_hit, PopCount(r1_entry.mask), 0.U))
+  XSPerfAccumulate("output_accepted_targets", PopCount(io.req.map(_.fire)))
+  XSPerfAccumulate("output_wait_lane_cycles", perfBlockedTargets)
+  // A lane accepted on the redirect edge is not lost. Only still-blocked targets are overwritten.
+  XSPerfAccumulate("output_overwrite_events", r0_valid && perfBlockedTargets.orR)
+  XSPerfAccumulate("output_overwrite_targets", Mux(r0_valid, perfBlockedTargets, 0.U))
+  XSPerfAccumulate("training_slot_input_events", w0_valid)
+  XSPerfAccumulate("training_slot_input_bits", Mux(w0_valid, PopCount(w0_candidates), 0.U))
+  XSPerfAccumulate("training_slot_overwrite_events", w0_valid && w1_valid && !w1_fire)
+  XSPerfAccumulate(
+    "training_slot_overwrite_bits",
+    Mux(w0_valid && w1_valid && !w1_fire, PopCount(w1_candidates), 0.U)
+  )
+  XSPerfAccumulate("table_write_attempt_events", entries.io.w.req.valid)
+  XSPerfAccumulate("table_write_accepted_events", entries.io.w.req.fire)
+  XSPerfAccumulate("table_write_not_ready_cycles", entries.io.w.req.valid && !entries.io.w.req.ready)
+  XSPerfAccumulate("table_write_control_without_accept_events", w1_fire && !entries.io.w.req.fire)
+  // Input candidate bits of an accepted write, not newly installed bits or promotions.
+  XSPerfAccumulate("table_write_accepted_input_bits", Mux(entries.io.w.req.fire, PopCount(w1_candidates), 0.U))
 }

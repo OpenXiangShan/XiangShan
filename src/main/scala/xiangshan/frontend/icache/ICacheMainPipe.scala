@@ -417,9 +417,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_vSetIdx = VecInit(s1_req.flatMap(_.vSetIdx))
 
   (0 until MaxFetchLineNum).foreach { i =>
-    toMissArbiter.io.in(i).valid         := s1_valid && s1_shouldFetch(i) && !s1_hasSend(i) && !s1_flush
-    toMissArbiter.io.in(i).bits.blkPAddr := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
-    toMissArbiter.io.in(i).bits.vSetIdx  := s1_vSetIdx(i)
+    toMissArbiter.io.in(i).valid           := s1_valid && s1_shouldFetch(i) && !s1_hasSend(i) && !s1_flush
+    toMissArbiter.io.in(i).bits.blkPAddr   := getBlkAddrFromPTag(s1_vAddr(i), s1_pTag)
+    toMissArbiter.io.in(i).bits.vSetIdx    := s1_vSetIdx(i)
+    toMissArbiter.io.in(i).bits.perfSource := 0.U.asTypeOf(toMissArbiter.io.in(i).bits.perfSource)
   }
   toMiss <> toMissArbiter.io.out
 

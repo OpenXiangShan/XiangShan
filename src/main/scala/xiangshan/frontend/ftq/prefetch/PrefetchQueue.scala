@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.frontend.PcInit
@@ -180,11 +181,26 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   /* *** sanity check & perf *** */
   XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in FtqPrefetchQueue")
 
+  // Keep the legacy counters for comparison. `drop` is blocked lane-cycles, including PDIP retries.
   XSPerfAccumulate("full", isFull(enqPtr, deqPtr))
   XSPerfAccumulate("drop", PopCount(io.enq.map(port => port.valid && !port.ready)))
   XSPerfAccumulate("enq_total", PopCount(io.enq.map(_.fire)))
   XSPerfAccumulate("enq_sw", PopCount(io.enqFromSw.map(_.fire)))
   XSPerfAccumulate("enq_pdip", PopCount(io.enqFromPdip.map(_.fire)))
+
+  XSPerfAccumulate("admission_full_cycles", numAvailable === 0.U)
+  XSPerfHistogram("occupancy_cycles", distanceBetween(enqPtr, deqPtr), true.B, 0, Size)
+  // SW requests are pulses; PDIP holds each lane until accepted or superseded by a redirect.
+  XSPerfAccumulate("sw_rejected_targets", PopCount(io.enqFromSw.map(p => p.valid && !p.ready)))
+  XSPerfAccumulate("pdip_wait_lane_cycles", PopCount(io.enqFromPdip.map(p => p.valid && !p.ready)))
+  XSPerfAccumulate("deq_wait_cycles", io.deq.valid && !io.deq.ready)
+  (0 until MaxPrefetchReqNum).foreach { i =>
+    XSPerfSeqAccumulate(
+      s"deq${i}_targets",
+      io.deq.fire && (if (i == 0) true.B else selectedPrefetch.has2),
+      selectedPrefetch.req(i).bits.source.getValidSeq
+    )
+  }
 
   XSPerfSeqAccumulate(
     "2pf",

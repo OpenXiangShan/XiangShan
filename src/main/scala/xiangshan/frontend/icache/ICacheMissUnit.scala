@@ -275,6 +275,66 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   XSPerfAccumulate("sentFetchReq", io.memAcquire.fire && io.memAcquire.bits.source < NumFetchMshr.U)
   XSPerfAccumulate("sentPrefetchReq", io.memAcquire.fire && io.memAcquire.bits.source >= NumFetchMshr.U)
 
+  // Unlike the legacy duplicate counters, these count accepted transactions, never idle lookup bits.
+  XSPerfAccumulate("fetch_accepted_events", io.fetchReq.fire)
+  XSPerfAccumulate("fetch_duplicate_events", io.fetchReq.fire && fetchHit)
+  // Preserve first-merge state across performance-counter clears; reset only on a new allocation.
+  private val perfDemandSeen = allMshr.drop(NumFetchMshr).map { mshr =>
+    val seen = RegInit(false.B)
+    when(mshr.io.req.fire) {
+      seen := false.B
+    }.elsewhen(io.fetchReq.fire && mshr.io.lookUps(0).resp.hit) {
+      seen := true.B
+    }
+    seen
+  }
+  PrefetchPerf.sources.foreach { case (name, value) =>
+    val requestSource = io.prefetchReq.bits.perfSource.value === value
+    val ownedMshrs = allMshr.drop(NumFetchMshr).map { mshr =>
+      (mshr, mshr.io.info.bits.perfSource.value === value)
+    }
+    XSPerfAccumulate(s"prefetch_accepted_lines_$name", io.prefetchReq.fire && requestSource)
+    XSPerfAccumulate(s"prefetch_duplicate_lines_$name", io.prefetchReq.fire && prefetchHit && requestSource)
+    XSPerfAccumulate(s"prefetch_allocated_lines_$name", prefetchDemux.io.in.fire && requestSource)
+    XSPerfAccumulate(
+      s"prefetch_same_cycle_fetch_lines_$name",
+      io.prefetchReq.fire && prefetchHitFetchReq && requestSource
+    )
+    XSPerfAccumulate(s"prefetch_wait_cycles_$name", io.prefetchReq.valid && !io.prefetchReq.ready && requestSource)
+    XSPerfAccumulate(
+      s"prefetch_acquire_lines_$name",
+      PopCount(ownedMshrs.map { case (m, owned) => m.io.acquire.fire && owned })
+    )
+    XSPerfAccumulate(
+      s"prefetch_cancel_before_issue_lines_$name",
+      PopCount(ownedMshrs.map { case (m, owned) =>
+        m.io.info.valid && owned && !m.io.info.bits.perfIssued && (io.flush || io.fencei)
+      })
+    )
+    XSPerfAccumulate(
+      s"prefetch_cancel_after_issue_lines_$name",
+      PopCount(ownedMshrs.map { case (m, owned) =>
+        m.io.info.valid && owned && m.io.info.bits.perfIssued && (io.flush || io.fencei)
+      })
+    )
+    // Demand merges are late observations, not evidence of a useful cache hit after refill.
+    val demandMatches = ownedMshrs.map { case (m, owned) => m.io.lookUps(0).resp.hit && owned }
+    val demandIssuedMatches = ownedMshrs.map { case (m, owned) =>
+      m.io.lookUps(0).resp.hit && owned && m.io.info.bits.perfIssued
+    }
+    XSPerfAccumulate(s"demand_merge_events_$name", io.fetchReq.fire && demandMatches.reduce(_ || _))
+    XSPerfAccumulate(s"demand_merge_issued_events_$name", io.fetchReq.fire && demandIssuedMatches.reduce(_ || _))
+    XSPerfAccumulate(
+      s"demand_first_merge_lines_$name",
+      Mux(io.fetchReq.fire, PopCount(demandMatches.zip(perfDemandSeen).map { case (hit, seen) => hit && !seen }), 0.U)
+    )
+    val refillOwned = idNext >= NumFetchMshr.U && mshrInfo.perfSource.value === value
+    XSPerfAccumulate(s"prefetch_refill_lines_$name", lastFireNext && refillOwned)
+    XSPerfAccumulate(s"prefetch_refill_write_lines_$name", writeSramValid && refillOwned)
+    XSPerfAccumulate(s"prefetch_refill_discard_lines_$name", lastFireNext && !writeSramValid && refillOwned)
+    XSPerfAccumulate(s"prefetch_refill_corrupt_lines_$name", lastFireNext && corruptReg && refillOwned)
+  }
+
   // Mshr occupancy
   XSPerfHistogram(
     "fetchMshrEmptyCnt",

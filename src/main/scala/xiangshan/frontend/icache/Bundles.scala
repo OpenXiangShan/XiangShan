@@ -342,6 +342,8 @@ class WayLookupWriteBundle(implicit p: Parameters) extends WayLookupBundle {
 class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
   val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
+  // Observation only: ignored for demand requests and never used for arbitration or matching.
+  val perfSource: PrefetchSource = new PrefetchSource
 }
 // MissUnit -> ICacheMainPipe / ICachePrefetchPipe / ICacheWayLookup
 class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
@@ -367,9 +369,11 @@ class MshrLookupBundle(implicit p: Parameters) extends ICacheBundle {
 
 // Mshr -> ICacheMissUnit
 class MshrInfoBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt = UInt(idxBits.W)
-  val way:      UInt = UInt(wayBits.W)
+  val blkPAddr:   UInt           = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:    UInt           = UInt(idxBits.W)
+  val way:        UInt           = UInt(wayBits.W)
+  val perfSource: PrefetchSource = new PrefetchSource
+  val perfIssued: Bool           = Bool()
 }
 
 // Mshr -> tilelink bus
