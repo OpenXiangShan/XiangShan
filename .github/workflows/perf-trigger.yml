@@ -98,15 +98,18 @@ on:
 
 jobs:
   build:
-    uses: ./.github/workflows/perf-build.yml
-    with:
-        test_branch: ${{ github.event.inputs.test_branch }}
-        emulator: ${{ github.event.inputs.emulator }}
-        xs_config: ${{ github.event.inputs.xs_config }}
-        cst_file: ${{ github.event.inputs.cst_file }}
-        disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
-        enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
-        enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
+    name: Stage private emulator for cancellation probe
+    runs-on: perf
+    outputs:
+      SPEC_DIR: ${{ steps.stage.outputs.spec_dir }}
+    steps:
+      - id: stage
+        run: |
+          cache=/nfs/home/cirunner/perf-report/cr261115-cc4f1988b-DefaultConfig
+          spec_dir="${cache}-cancel-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -- "$spec_dir"
+          cp -- "$cache/emu-gsim" "$cache/riscv64-nemu-interpreter-so" "$spec_dir/"
+          echo "spec_dir=$spec_dir" >> "$GITHUB_OUTPUT"
 
   run:
     needs: build
@@ -116,7 +119,7 @@ jobs:
         emulator: ${{ github.event.inputs.emulator }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
-        cst_file: ${{ needs.build.outputs.CST_FILE }}
+        cst_file: ''
         disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
