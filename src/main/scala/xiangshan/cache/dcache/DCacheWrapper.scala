@@ -1690,9 +1690,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
   missQueue.io.forward_stData := io.lsu.forward_mshrStData
 
-  // refill to load queue
- // io.lsu.lsq <> missQueue.io.refill_to_ldq
-
   // tilelink stuff
   // ========== Multi-channel support ==========
   // Each channel connects to its corresponding MissQueue TL interface
