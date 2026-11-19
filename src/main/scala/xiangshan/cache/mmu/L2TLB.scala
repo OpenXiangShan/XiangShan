@@ -202,6 +202,59 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
 
+  val tlbTimeoutCycles = 8192
+  val itlbCounter = RegInit(0.U(tlbCounter.getWidth.W))
+  val dtlbCounter = RegInit(0.U(tlbCounter.getWidth.W))
+  val tlbSourceCounters = Seq(itlbCounter, dtlbCounter)
+  val tlbNoRespCycles = RegInit(VecInit(Seq.fill(PtwWidth)(0.U(log2Ceil(tlbTimeoutCycles).W))))
+  val tlbOtherRespSeen = RegInit(VecInit(Seq.fill(PtwWidth)(false.B)))
+  val tlbDraining = RegInit(false.B)
+  val tlbDrainCycles = RegInit(0.U(log2Ceil(tlbTimeoutCycles).W))
+  val tlbSourceTimeout = Wire(Vec(PtwWidth, Bool()))
+
+  for (i <- tlbSourceCounters.indices) {
+    val pending = tlbSourceCounters(i) =/= 0.U
+    val noRespTimeout = tlbNoRespCycles(i) === (tlbTimeoutCycles - 1).U
+    tlbSourceTimeout(i) := pending && !respVec(i) && noRespTimeout &&
+      (tlbOtherRespSeen(i) || respVec(1 - i))
+
+    when (flush) {
+      tlbSourceCounters(i) := 0.U
+    } .elsewhen (reqVec(i) =/= respVec(i)) {
+      tlbSourceCounters(i) := Mux(reqVec(i), tlbSourceCounters(i) + 1.U, tlbSourceCounters(i) - 1.U)
+    }
+
+    // Only recover from one-sided progress while this source has outstanding work.
+    when (flush || tlbDraining || !pending || respVec(i)) {
+      tlbNoRespCycles(i) := 0.U
+      tlbOtherRespSeen(i) := false.B
+    } .otherwise {
+      // Keep an expired wait pending if neither source has responded yet.
+      when (!noRespTimeout) {
+        tlbNoRespCycles(i) := tlbNoRespCycles(i) + 1.U
+      }
+      tlbOtherRespSeen(i) := tlbOtherRespSeen(i) || respVec(1 - i)
+    }
+
+    when (!flush) {
+      assert(!respVec(i) || pending || reqVec(i), "L2TLB response without an outstanding request")
+    }
+  }
+
+  when (flush || !tlbDraining) {
+    tlbDrainCycles := 0.U
+  } .otherwise {
+    tlbDrainCycles := tlbDrainCycles + 1.U
+  }
+
+  // Bound the admission pause without cancelling requests or resetting their accounting.
+  val tlbDrainExpired = tlbDraining && tlbDrainCycles === (tlbTimeoutCycles - 1).U
+  when (flush || tlbCounter === 0.U || tlbDrainExpired) {
+    tlbDraining := false.B
+  } .elsewhen (tlbSourceTimeout.asUInt.orR) {
+    tlbDraining := true.B
+  }
+
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
   arb2.io.in(InArbPTWPort).bits.req_info := ptw.io.llptw.bits.req_info
   arb2.io.in(InArbPTWPort).bits.isHptwReq := false.B
@@ -220,7 +273,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // 1. arb1 and arb2 are both comb logic, so ready can work just the same cycle
   // 2. arb1 can send one req at most in a cycle, so do not need to write
   //    "tlbCounter <= (MissQueueSize - 2).U"
-  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready && tlbCounter < MissQueueSize.U
+  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready && tlbCounter < MissQueueSize.U && !tlbDraining
 
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
   arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
@@ -854,6 +907,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
+  XSPerfAccumulate("req_drain_cycle", tlbDraining)
+  XSPerfAccumulate("req_drain_count", tlbDraining && !RegNext(tlbDraining, false.B))
   for (i <- 0 until (MemReqWidth + 1)) {
     XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
   }
