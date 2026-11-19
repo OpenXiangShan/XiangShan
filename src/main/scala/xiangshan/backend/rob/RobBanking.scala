@@ -124,21 +124,21 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
     })
   }
 
-  // Connect one updated row to the dequeue group, keeping each entry paired
+  // Load one updated row into the shared dequeue registers, keeping each entry paired
   // with its commit readiness in the order returned by readRows.
-  def updateRobDeqGroup(
-    deqGroup: Vec[RobCommitEntryBundle],
+  def updateDeqEntries(
+    deqEntries: Vec[RobCommitEntryBundle],
     entries: Vec[RobEntryBundle],
     commitW: Vec[Bool],
     selectNextRow: Bool
   ): Unit = {
-    require(deqGroup.length == bankNum)
+    require(deqEntries.length == bankNum)
     require(entries.length == 2 * bankNum && commitW.length == entries.length)
     for (bank <- 0 until bankNum) {
       val nextRowIndex = bank + bankNum
-      deqGroup(bank).connectCommitEntry(entries(bank), commitW(bank))
+      deqEntries(bank).connectCommitEntry(entries(bank), commitW(bank))
       when(selectNextRow) {
-        deqGroup(bank).connectCommitEntry(entries(nextRowIndex), commitW(nextRowIndex))
+        deqEntries(bank).connectCommitEntry(entries(nextRowIndex), commitW(nextRowIndex))
       }
     }
   }
