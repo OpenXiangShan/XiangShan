@@ -37,6 +37,21 @@ from .test_random_bin_trace_dut import _timeline_event_limit
 FRONTEND_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_timeline_event_limit_scales_with_trace_and_allows_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TB_RANDOM_MAX_TIMELINE_EVENTS", raising=False)
+    assert _timeline_event_limit(1000) == 20_000
+    assert _timeline_event_limit(6781) == 54_248
+
+    monkeypatch.setenv("TB_RANDOM_MAX_TIMELINE_EVENTS", "75000")
+    assert _timeline_event_limit(6781) == 75_000
+
+    monkeypatch.setenv("TB_RANDOM_MAX_TIMELINE_EVENTS", "-1")
+    with pytest.raises(AssertionError, match="must be >= 0"):
+        _timeline_event_limit(6781)
+
+
 def test_generator_is_deterministic_and_seed_sensitive() -> None:
     spec = CaseSpec(
         family="cfg_layout_mix",
@@ -643,3 +658,645 @@ def test_realization_requires_actual_event_counts() -> None:
     assert missing.status == "NOT_REALIZED"
     assert [item.event for item in missing.missing_events] == ["trace.cross_page_instruction"]
     assert realized.status == "REALIZED"
+
+
+class _FakeSignal:
+    def __init__(self, value: int = 0) -> None:
+        self.value = int(value)
+
+
+class _FakeICacheAgent:
+    def __init__(self) -> None:
+        self.configuration: dict = {}
+
+    def configure(self, **configuration) -> None:
+        self.configuration = dict(configuration)
+
+
+class _FakeUncacheAgent:
+    def __init__(self, interface) -> None:
+        self.interface = interface
+        self.a_ready_override = None
+        self.event_sink = None
+        self.overrides: list[int | None] = []
+
+    def set_a_ready(self, value) -> None:
+        self.a_ready_override = None if value is None else (1 if int(value) else 0)
+        self.overrides.append(self.a_ready_override)
+
+    def on_clock_edge(self, cycle: int) -> None:
+        ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
+        self.interface.a_ready.value = ready
+        if int(self.interface.a_valid.value) != 1 or ready != 1:
+            return
+        if self.event_sink is not None:
+            self.event_sink(
+                {
+                    "type": "handshake.uncache_a",
+                    "source": "uncache_agent",
+                    "cycle": int(cycle),
+                    "payload": {
+                        "address": int(self.interface.a_bits_address.value),
+                        "mem_back_type_mm": int(
+                            self.interface.a_bits_user_mem_back_type_mm.value
+                        ),
+                        "mem_page_type_nc": int(
+                            self.interface.a_bits_user_mem_page_type_nc.value
+                        ),
+                    },
+                }
+            )
+
+
+class _FakeBackendModel:
+    def __init__(self, can_accept_signal: _FakeSignal) -> None:
+        self.can_accept_signal = can_accept_signal
+        self.values: list[int] = []
+
+    def set_can_accept(self, value: int) -> None:
+        normalized = 1 if int(value) else 0
+        self.values.append(normalized)
+        self.can_accept_signal.value = normalized
+
+
+class _FakeCoordinatorEnv:
+    def __init__(self, previous_event_sink) -> None:
+        self.event_sink = previous_event_sink
+        self.backend_ctrl_if = type(
+            "BackendControl",
+            (),
+            {"can_accept": _FakeSignal(1), "redirect_valid": _FakeSignal(0)},
+        )()
+        self.frontend_info_if = type(
+            "FrontendInfo",
+            (),
+            {"io_frontendInfo_ibufFull": _FakeSignal(0)},
+        )()
+        self.clock_reset = type("ClockReset", (), {"reset": _FakeSignal(0)})()
+        self.uncache_if = type(
+            "UncacheInterface",
+            (),
+            {
+                "a_valid": _FakeSignal(0),
+                "a_ready": _FakeSignal(1),
+                "a_bits_address": _FakeSignal(0),
+                "a_bits_user_mem_back_type_mm": _FakeSignal(0),
+                "a_bits_user_mem_page_type_nc": _FakeSignal(0),
+            },
+        )()
+        self.icache_agent = _FakeICacheAgent()
+        self.uncache_agent = _FakeUncacheAgent(self.uncache_if)
+        self.backend_model = _FakeBackendModel(self.backend_ctrl_if.can_accept)
+        self.dut = None
+        self.cycle_observers: list = []
+        self.pre_drive_cycle_observers: list = []
+
+    def set_event_sink(self, sink) -> None:
+        self.event_sink = sink
+        self.uncache_agent.event_sink = sink
+
+    def register_cycle_observer(self, observer) -> None:
+        self.cycle_observers.append(observer)
+
+    def register_pre_drive_cycle_observer(self, observer) -> None:
+        self.pre_drive_cycle_observers.append(observer)
+
+    def drive_uncache_edge(self, cycle: int) -> None:
+        for observer in self.pre_drive_cycle_observers:
+            if getattr(observer, "__name__", "") == "observe_uncache_a_edge":
+                observer(cycle, self)
+        self.uncache_agent.on_clock_edge(cycle)
+
+
+def _coordinator_program_map() -> dict:
+    return {
+        "binary_text_verified": True,
+        "binary_sha256": "program-binary-sha256",
+        "instructions": [
+            {
+                "pc": 0x8000003E,
+                "size": 4,
+                "episode_id": "boundary-episode",
+                "crosses_fetch_block": True,
+                "crosses_cacheline": True,
+                "crosses_page": False,
+                "conditional_branch": False,
+                "call": False,
+                "return": False,
+            }
+        ],
+    }
+
+
+class _FakeDutSignal:
+    def __init__(self, value: int = 0) -> None:
+        self.value = int(value)
+
+
+def _fake_bin951_dut():
+    dut = type("FakeBin951Dut", (), {})()
+    for name in BIN951_REDIRECT_SIGNAL_NAMES.values():
+        setattr(dut, name, _FakeDutSignal())
+    for name in BIN951_IFU_SIGNAL_NAMES.values():
+        setattr(dut, name, _FakeDutSignal())
+    for name in BIN951_FTQ_SIGNAL_NAMES.values():
+        setattr(dut, name, _FakeDutSignal())
+    return dut
+
+
+def _completed_bin951_event():
+    env = _FakeCoordinatorEnv(None)
+    env.dut = _fake_bin951_dut()
+    plan = TimingPlan.from_seed(19, "ibuffer_pressure_cross")
+    coordinator = ScenarioCoordinator(
+        scenario_id="bin951-contract",
+        timing_plan=plan,
+        program_map=_coordinator_program_map(),
+    )
+    coordinator._bin951_runtime_probe_status = "RAW_FST_CONFIRMED"
+    coordinator.install(env)
+
+    def drive(group: dict, values: dict[str, int]) -> None:
+        for key, value in values.items():
+            getattr(env.dut, group[key]).value = int(value)
+
+    drive(BIN951_IFU_SIGNAL_NAMES, {
+        "s0_prev_end_is_half_rvi": 1,
+        "s1_half_valid": 1,
+        "s1_half_data": 0x0013,
+        "s1_half_pc": 0x8000003E >> 1,
+        "s1_enqueue_ptr": 7,
+        "s1_valid": 1,
+        "s2_valid": 1,
+    })
+    coordinator.observe_cycle(10, env)
+    drive(BIN951_REDIRECT_SIGNAL_NAMES, {
+        "valid": 1,
+        "pc": 0x8000003E,
+        "target": 0x80000400,
+        "ftq_flag": 0,
+        "ftq_value": 5,
+        "ftq_offset": 3,
+    })
+    drive(BIN951_IFU_SIGNAL_NAMES, {
+        "ifu_redirect_valid": 1,
+        "s0_flush": 1,
+        "s1_flush": 1,
+        "s2_flush": 1,
+    })
+    drive(BIN951_FTQ_SIGNAL_NAMES, {
+        "ftq_redirect_valid": 1,
+        "ftq_redirect_flag": 0,
+        "ftq_redirect_value": 5,
+        "ftq_redirect_offset": 3,
+        "ftq_redirect_target": 0x80000400,
+    })
+    coordinator.observe_bin951_redirect_edge(11, env)
+    coordinator.observe_cycle(11, env)
+    drive(BIN951_REDIRECT_SIGNAL_NAMES, {"valid": 0})
+    drive(BIN951_IFU_SIGNAL_NAMES, {
+        "ifu_redirect_valid": 0,
+        "s0_prev_end_is_half_rvi": 0,
+        "s1_half_valid": 0,
+        "s1_valid": 0,
+        "s2_valid": 0,
+        "to_ibuffer_valid": 0,
+        "s0_fire": 1,
+    })
+    coordinator.observe_cycle(12, env)
+    drive(BIN951_IFU_SIGNAL_NAMES, {
+        "s0_fire": 0,
+        "s1_valid": 1,
+        "s1_fetch_block0_start_pc": 0x80000400 >> 1,
+    })
+    coordinator.observe_cycle(13, env)
+    drive(BIN951_IFU_SIGNAL_NAMES, {
+        "s2_aligned_pc0": 0x80000400 >> 1,
+        "to_ibuffer_valid": 1,
+        "to_ibuffer_enq0": 1,
+        "to_ibuffer_instr0": 0x00000013,
+        "to_ibuffer_foldpc0": fold_pc(0x80000400),
+    })
+    coordinator.observe_cycle(14, env)
+    return coordinator, coordinator.build_timeline(execution_status="REALIZED")
+
+
+def test_bin951_event_contract_correlates_redirect_half_cleanup_and_recovery():
+    coordinator, timeline = _completed_bin951_event()
+    contract = timeline["bin951_event_contract"]
+    assert contract["schema_version"] == 2
+    event = contract["sampled_events"][0]
+    assert event["redirect"] == {
+        "valid": 1,
+        "pc": 0x8000003E,
+        "target": 0x80000400,
+        "ftq_flag": 0,
+        "ftq_value": 5,
+        "ftq_offset": 3,
+    }
+    assert event["summary"]["pre_redirect_half_present"] is True
+    assert event["summary"]["old_payload_suppressed_until_recovery"] is True
+    assert event["summary"]["recovery_target_match"] is True
+    assert event["summary"]["source_program_map_matches"] is True
+    assert event["summary"]["half_program_map_matches"] is True
+    assert event["status"] == "REALIZED"
+    assert event["validation_failures"] == []
+    assert not event["missing_fields"]
+    realized = {item.event: item.count for item in coordinator.realized_events()}
+    assert realized["dut.bin951_redirect_half_cleanup"] == 1
+
+
+@pytest.mark.parametrize("path, reason", (
+    (("redirect", "ftq_value"), "redirect.ftq_value_missing"),
+    (("pre_redirect_half_state", 0, "s1_half_data"), "pre_redirect_half.s1_half_data_missing"),
+    (("redirect_state", "s1_flush"), "redirect_state.s1_flush_missing_or_low"),
+    (("redirect_state", "ftq_redirect_value"), "ftq_redirect_value_missing_or_mismatched"),
+    (("post_redirect_samples", 0, "s2_valid"), "post_redirect.s2_valid_missing_or_active"),
+    (("post_redirect_samples", 1, "s1_fetch_block0_start_pc"), "recovery_target_missing_or_mismatched"),
+    (("post_redirect_samples", 2, "to_ibuffer_foldpc0"), "recovery_ibuffer_identity_missing_or_mismatched"),
+))
+def test_bin951_missing_or_wrong_evidence_is_unconfirmed(path, reason):
+    _, timeline = _completed_bin951_event()
+    event = copy.deepcopy(timeline["bin951_event_contract"]["sampled_events"][0])
+    value = event
+    for key in path[:-1]:
+        value = value[key]
+    value[path[-1]] = None
+    assert reason in validate_bin951_event(event)
+
+    coordinator = ScenarioCoordinator(
+        scenario_id="bin951-invalid",
+        timing_plan=TimingPlan.from_seed(19, "ibuffer_pressure_cross"),
+        program_map=_coordinator_program_map(),
+    )
+    coordinator._bin951_active = event
+    coordinator._finish_bin951_event()
+    invalid = coordinator.build_timeline(execution_status="REALIZED")
+    assert invalid["bin951_event_contract"]["sampled_events"][0]["status"] == "UNCONFIRMED"
+    assert not any(item.event == "dut.bin951_redirect_half_cleanup" for item in coordinator.realized_events())
+
+
+def test_bin951_requires_pre_drive_redirect_identity():
+    env = _FakeCoordinatorEnv(None)
+    env.dut = _fake_bin951_dut()
+    coordinator = ScenarioCoordinator(
+        scenario_id="bin951-no-edge",
+        timing_plan=TimingPlan.from_seed(19, "ibuffer_pressure_cross"),
+        program_map=_coordinator_program_map(),
+    )
+    coordinator.install(env)
+    getattr(env.dut, BIN951_REDIRECT_SIGNAL_NAMES["valid"]).value = 1
+    coordinator.observe_cycle(11, env)
+    assert coordinator.build_timeline(execution_status="REALIZED")["bin951_event_contract"]["sampled_events"] == []
+    assert not any(item.event == "dut.bin951_redirect_half_cleanup" for item in coordinator.realized_events())
+
+
+def test_bin951_event_contract_preserves_missing_probes_as_null():
+    env = _FakeCoordinatorEnv(None)
+    env.dut = _fake_bin951_dut()
+    delattr(env.dut, BIN951_IFU_SIGNAL_NAMES["s1_half_data"])
+    coordinator = ScenarioCoordinator(
+        scenario_id="bin951-missing-probe",
+        timing_plan=TimingPlan.from_seed(23, "ibuffer_pressure_cross"),
+        program_map=_coordinator_program_map(),
+    )
+    coordinator.install(env)
+    getattr(env.dut, BIN951_REDIRECT_SIGNAL_NAMES["valid"]).value = 1
+    getattr(env.dut, BIN951_REDIRECT_SIGNAL_NAMES["pc"]).value = 0x8000003E
+    getattr(env.dut, BIN951_IFU_SIGNAL_NAMES["s1_half_valid"]).value = 1
+    coordinator.observe_bin951_redirect_edge(4, env)
+    coordinator.observe_cycle(4, env)
+
+    timeline = coordinator.build_timeline(execution_status="REALIZED")
+    active = timeline["bin951_event_contract"]["active_event_at_end"]
+    assert active["redirect"]["pc"] == 0x8000003E
+    assert active["redirect_state"]["s1_half_data"] is None
+    assert "redirect_state.s1_half_data" in active["missing_fields"]
+    assert active["status"] == "PENDING"
+    assert not any(item.event == "dut.bin951_redirect_half_cleanup" for item in coordinator.realized_events())
+
+
+def _uncache_stall_coordinator(stall_cycles: int = 8):
+    env = _FakeCoordinatorEnv(None)
+    plan = TimingPlan.from_dict(
+        {
+            **TimingPlan.from_seed(7, "translation_timing_cross").to_dict(),
+            "uncache_a_stall_cycles": stall_cycles,
+        }
+    )
+    coordinator = ScenarioCoordinator(
+        scenario_id="uncache-stall",
+        timing_plan=plan,
+        program_map=_coordinator_program_map(),
+    )
+    coordinator.install(env)
+    env.uncache_if.a_valid.value = 1
+    env.uncache_if.a_bits_address.value = 0x80403FF8
+    env.uncache_if.a_bits_user_mem_back_type_mm.value = 1
+    env.uncache_if.a_bits_user_mem_page_type_nc.value = 1
+    return coordinator, env
+
+
+def test_timing_plan_default_serialization_and_hash_remain_compatible() -> None:
+    payload = TimingPlan.from_seed(7).to_dict()
+
+    assert "uncache_a_stall_cycles" not in payload
+    assert hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest() == "972f876591d1eb40347a871b13b090a29afd64596035a0d27d6bea7582b36b9e"
+    assert TimingPlan.from_dict(payload).uncache_a_stall_cycles == 0
+
+
+def test_uncache_a_stall_holds_payload_for_eight_cycles_then_requires_fire() -> None:
+    coordinator, env = _uncache_stall_coordinator()
+
+    env.drive_uncache_edge(10)
+    for cycle in range(11, 19):
+        env.drive_uncache_edge(cycle)
+
+    action = coordinator.build_timeline(execution_status="REALIZED")["actions"][0]
+    realized = {event.event: event.count for event in coordinator.realized_events()}
+    assert action["status"] == "REALIZED"
+    assert action["confirmed_low_cycles"] == 8
+    assert action["release_cycle"] == 18
+    assert action["completion_cycle"] == 18
+    assert realized["dut.uncache_a_stall_cycle"] == 8
+    assert realized["dut.uncache_a_stall_release"] == 1
+    assert env.uncache_agent.overrides == [0, None, None]
+
+
+def test_uncache_a_stall_is_not_realized_until_release_handshake() -> None:
+    coordinator, env = _uncache_stall_coordinator(stall_cycles=2)
+
+    coordinator.observe_uncache_a_edge(10, env)
+    env.uncache_if.a_ready.value = 0
+    coordinator.observe_uncache_a_edge(11, env)
+    coordinator.observe_uncache_a_edge(12, env)
+
+    assert coordinator.has_active_action is True
+    assert coordinator._uncache_stall_action["status"] == "RELEASE_PENDING"
+    assert "dut.uncache_a_stall_release" not in {
+        event.event for event in coordinator.realized_events()
+    }
+    env.uncache_agent.on_clock_edge(12)
+    assert coordinator.has_active_action is False
+    assert coordinator._uncache_stall_action["status"] == "REALIZED"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("a_bits_address", 0x80404000),
+        ("a_bits_user_mem_back_type_mm", 0),
+        ("a_bits_user_mem_page_type_nc", 0),
+    ),
+)
+def test_uncache_a_stall_fails_closed_when_payload_changes(field: str, value: int) -> None:
+    coordinator, env = _uncache_stall_coordinator()
+    env.drive_uncache_edge(10)
+    getattr(env.uncache_if, field).value = value
+    env.drive_uncache_edge(11)
+
+    action = coordinator.build_timeline(execution_status="FAIL")["actions"][0]
+    assert action["status"] == "FAIL"
+    assert action["failure_reason"] == "uncache_a_payload_changed_while_stalled"
+    assert coordinator.unrealized_action_ids == ("uncache-a-stall-000",)
+
+
+def test_uncache_a_stall_fails_closed_when_valid_withdraws() -> None:
+    coordinator, env = _uncache_stall_coordinator()
+    env.drive_uncache_edge(10)
+    env.uncache_if.a_valid.value = 0
+    env.drive_uncache_edge(11)
+
+    action = coordinator.build_timeline(execution_status="FAIL")["actions"][0]
+    assert action["status"] == "FAIL"
+    assert action["failure_reason"] == "uncache_a_valid_deasserted_before_release"
+    assert "dut.uncache_a_stall_release" not in {
+        event.event for event in coordinator.realized_events()
+    }
+
+
+def test_scenario_coordinator_records_realized_top_level_timing_actions(tmp_path: Path) -> None:
+    forwarded_events: list[dict] = []
+    env = _FakeCoordinatorEnv(forwarded_events.append)
+    plan = TimingPlan(
+        timing_seed=0x1234,
+        icache_seed=0x5678,
+        icache_hit_latency=2,
+        icache_miss_latency=12,
+        icache_miss_rate=0.1,
+        warmup_response_lines=1,
+        periodic_response_stride=19,
+        maximum_backpressure_windows=1,
+        backpressure_durations=(2,),
+    )
+    program_map = _coordinator_program_map()
+    coordinator = ScenarioCoordinator(
+        scenario_id="cfg-000",
+        timing_plan=plan,
+        program_map=program_map,
+    )
+    coordinator.install(env)
+
+    request = {
+        "type": "handshake.icache_a",
+        "source": "icache_agent",
+        "cycle": 9,
+        "payload": {"address": 0x80000000},
+    }
+    pbmte_control = {
+        "type": "control.translation_pbmte",
+        "source": "frontend_env",
+        "cycle": 9,
+        "payload": {
+            "requested": {"machine": 1, "hypervisor": None},
+            "driven": {"machine": 1},
+            "unsupported": [],
+            "supported": True,
+        },
+    }
+    response = {
+        "type": "handshake.icache_d",
+        "source": "icache_agent",
+        "cycle": 10,
+        "payload": {"address": 0x80000000, "beat_idx": 0},
+    }
+    env.event_sink(request)
+    env.event_sink(pbmte_control)
+    env.event_sink(response)
+    coordinator.observe_cycle(10, env)
+    coordinator.observe_cycle(11, env)
+
+    assert forwarded_events == [request, pbmte_control, response]
+    assert env.icache_agent.configuration == {
+        "hit_latency": 2,
+        "miss_latency": 12,
+        "miss_rate": 0.1,
+        "seed": 0x5678,
+    }
+    assert env.backend_model.values == [0, 1]
+    assert coordinator.action_count == 1
+    assert coordinator.has_active_action is False
+    assert coordinator.unrealized_action_ids == ()
+    realized = {event.event: event.count for event in coordinator.realized_events()}
+    assert realized["dut.icache_request"] == 1
+    assert realized["dut.icache_response"] == 1
+    assert realized["dut.backend_backpressure_cycle"] == 2
+    assert realized["dut.backend_backpressure_window"] == 1
+    assert realized["dut.icache_response_x_backend_backpressure"] == 1
+
+    timeline_path = tmp_path / "timeline.json"
+    timeline = coordinator.write_timeline(
+        timeline_path,
+        execution_status="REALIZED",
+        details={"monitor_errors": 0},
+    )
+    scenario = ScenarioSpec(
+        scenario_id="cfg-000",
+        family="cfg_layout_mix",
+        ordinal=0,
+        program_seed=1,
+        timing_seed=plan.timing_seed,
+        risk_tags=("boundary",),
+        parameters={"timing_plan": plan.to_dict()},
+    )
+    loaded, loaded_events, status, reasons = _load_dut_timeline(
+        timeline_path,
+        scenario,
+        program_map,
+    )
+    assert timeline["actions"][0]["status"] == "REALIZED"
+    assert timeline["event_counts"]["control.translation_pbmte"] == 1
+    assert any(
+        event["type"] == "control.translation_pbmte"
+        and event["payload"]["driven"] == {"machine": 1}
+        for event in timeline["timeline"]
+    )
+    assert loaded["scenario_id"] == "cfg-000"
+    assert loaded_events
+    assert status == "valid"
+    assert reasons == []
+
+
+def test_scenario_coordinator_marks_unfinished_action_as_failed() -> None:
+    env = _FakeCoordinatorEnv(None)
+    plan = TimingPlan(
+        timing_seed=1,
+        icache_seed=2,
+        icache_hit_latency=1,
+        icache_miss_latency=12,
+        icache_miss_rate=0.0,
+        warmup_response_lines=1,
+        periodic_response_stride=13,
+        maximum_backpressure_windows=1,
+        backpressure_durations=(4,),
+    )
+    coordinator = ScenarioCoordinator(
+        scenario_id="unfinished",
+        timing_plan=plan,
+        program_map=_coordinator_program_map(),
+    )
+    coordinator.install(env)
+    env.event_sink(
+        {
+            "type": "handshake.icache_d",
+            "source": "icache_agent",
+            "cycle": 20,
+            "payload": {"address": 0x80000000, "beat_idx": 0},
+        }
+    )
+
+    assert coordinator.has_active_action is True
+    timeline = coordinator.build_timeline(execution_status="FAIL")
+
+    assert timeline["maximum_timeline_events"] == 20_000
+    assert timeline["actions"][0]["status"] == "FAIL"
+    assert timeline["actions"][0]["failure_reason"] == "run_ended_before_window_completed"
+    assert coordinator.has_active_action is False
+    assert coordinator.unrealized_action_ids == ("backend-backpressure-000",)
+
+
+def test_timeline_loader_rejects_malformed_action_without_raising(tmp_path: Path) -> None:
+    program_map = _coordinator_program_map()
+    plan = TimingPlan.from_seed(7)
+    scenario = ScenarioSpec(
+        scenario_id="malformed-action",
+        family="cfg_layout_mix",
+        ordinal=0,
+        program_seed=1,
+        timing_seed=plan.timing_seed,
+        risk_tags=("boundary",),
+        parameters={"timing_plan": plan.to_dict()},
+    )
+    timeline_path = tmp_path / "timeline.json"
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scenario_id": scenario.scenario_id,
+                "execution_status": "REALIZED",
+                "timing_plan": plan.to_dict(),
+                "program_map_binary_sha256": program_map["binary_sha256"],
+                "actions": ["truncated-action"],
+                "details": {"monitor_errors": 0},
+                "realized_events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _, events, status, reasons = _load_dut_timeline(
+        timeline_path,
+        scenario,
+        program_map,
+    )
+
+    assert events == ()
+    assert status == "invalid"
+    assert reasons == [
+        "scenario_timeline_incomplete_actions=index-0-not-an-object"
+    ]
+
+
+def test_timeline_loader_rejects_dropped_events_and_oracle_errors(tmp_path: Path) -> None:
+    program_map = _coordinator_program_map()
+    plan = TimingPlan.from_seed(7)
+    scenario = ScenarioSpec(
+        scenario_id="invalid-evidence",
+        family="translation_timing_cross",
+        ordinal=0,
+        program_seed=1,
+        timing_seed=plan.timing_seed,
+        risk_tags=("translation",),
+        parameters={"timing_plan": plan.to_dict()},
+    )
+    timeline_path = tmp_path / "timeline.json"
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scenario_id": scenario.scenario_id,
+                "execution_status": "REALIZED",
+                "timing_plan": plan.to_dict(),
+                "program_map_binary_sha256": program_map["binary_sha256"],
+                "actions": [],
+                "dropped_timeline_events": 2,
+                "details": {
+                    "monitor_errors": 0,
+                    "translation_oracle_error_count": 1,
+                },
+                "realized_events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _, events, status, reasons = _load_dut_timeline(
+        timeline_path, scenario, program_map
+    )
+
+    assert events == ()
+    assert status == "invalid"
+    assert "scenario_timeline_translation_oracle_errors=1" in reasons
+    assert "scenario_timeline_dropped_events=2" in reasons
