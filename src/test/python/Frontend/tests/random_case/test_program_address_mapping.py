@@ -189,7 +189,7 @@ def test_invalid_mapping_is_rejected_atomically(pages, match):
 def test_translation_timeline_requires_mapping_evidence(tmp_path, mapping_valid):
     coordinator, _ = setup()
     coordinator.configure_translation_pages([{"va": VA, "pa": PA, "ok": True}])
-    payload = coordinator.build_timeline(execution_status="REALIZED", details={"monitor_errors": 0})
+    payload = coordinator.build_timeline(execution_status="REALIZED", details={"monitor_errors": 0, "translation_oracle_error_count": 0, "translation_oracle_errors": []})
     if mapping_valid is None:
         del payload["program_address_mapping"]
     else:
@@ -211,7 +211,7 @@ def test_translation_timeline_requires_mapping_evidence(tmp_path, mapping_valid)
 def test_timeline_valid_flag_cannot_hide_malformed_or_missing_pages(tmp_path, pages):
     coordinator, _ = setup()
     coordinator.configure_translation_pages([{"va": VA, "pa": PA, "ok": True}])
-    payload = coordinator.build_timeline(execution_status="REALIZED", details={"monitor_errors": 0})
+    payload = coordinator.build_timeline(execution_status="REALIZED", details={"monitor_errors": 0, "translation_oracle_error_count": 0, "translation_oracle_errors": []})
     payload["program_address_mapping"]["pages"] = pages
     path = tmp_path / "timeline.json"
     path.write_text(json.dumps(payload))

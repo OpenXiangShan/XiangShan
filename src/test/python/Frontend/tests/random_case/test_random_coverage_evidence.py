@@ -61,6 +61,8 @@ def _write_funcov(
                         else {}
                     ),
                 },
+                "stats": {"monitor": {"error_count": 0, "errors": []},
+                          "translation_oracle": {"error_count": 0, "errors": []}},
                 "outcome": {"status": "pass", "exit_code": 0},
                 "checker": {"status": "pass", "error_count": 0, "errors": []},
             }
@@ -224,7 +226,7 @@ def test_scenario_coordinator_records_realized_top_level_timing_actions(tmp_path
     timeline = coordinator.write_timeline(
         timeline_path,
         execution_status="REALIZED",
-        details={"monitor_errors": 0},
+        details={"monitor_errors": 0, "translation_oracle_error_count": 0, "translation_oracle_errors": []},
     )
     scenario = ScenarioSpec(
         scenario_id="cfg-000",
@@ -275,7 +277,8 @@ def test_timeline_loader_rejects_malformed_action_without_raising(tmp_path: Path
                 "timing_plan": plan.to_dict(),
                 "program_map_binary_sha256": program_map["binary_sha256"],
                 "actions": ["truncated-action"],
-                "details": {"monitor_errors": 0},
+                "details": {"monitor_errors": 0, "translation_oracle_error_count": 0, "translation_oracle_errors": []},
+                "dropped_timeline_events": 0,
                 "realized_events": [],
             }
         ),

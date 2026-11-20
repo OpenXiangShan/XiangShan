@@ -113,12 +113,15 @@ def load_artifact(
     checker = raw.get("checker") or run.get("checker") or {}
     pytest_outcome = str(outcome.get("status") or run.get("pytest_outcome") or "").lower()
     checker_status = str(checker.get("status") or "").lower()
-    checker_error_count = int(checker.get("error_count") or 0)
+    checker_error_count = checker.get("error_count")
     stats = raw.get("stats") or {}
     translation_oracle = stats.get("translation_oracle") if isinstance(stats, dict) else {}
     if not isinstance(translation_oracle, dict):
         translation_oracle = {}
-    translation_oracle_error_count = int(translation_oracle.get("error_count") or 0)
+    translation_oracle_error_count = translation_oracle.get("error_count")
+    monitor = stats.get("monitor") if isinstance(stats, dict) else {}
+    monitor = monitor if isinstance(monitor, dict) else {}
+    monitor_error_count = monitor.get("error_count")
     oracle_records = translation_oracle.get("records") or []
     unresolved_exceptions = sum(
         isinstance(record, dict) and record.get("kind") == "speculative_cfvec_exception"
@@ -135,12 +138,14 @@ def load_artifact(
         reasons.append(f"build_manifest={build_manifest_status or 'unknown'}")
     if raw.get("artifact_type") == "diagnostic_observed_aggregate" or checker_status == "aggregate":
         reasons.append("aggregate_artifact_not_qualified")
-    if checker_error_count != 0:
+    if type(checker_error_count) is not int or checker_error_count != 0 or checker.get("errors") != []:
         reasons.append(f"checker_error_count={checker_error_count}")
-    if translation_oracle_error_count != 0:
+    if type(translation_oracle_error_count) is not int or translation_oracle_error_count != 0 or translation_oracle.get("errors") != []:
         reasons.append(
             f"translation_oracle_error_count={translation_oracle_error_count}"
         )
+    if type(monitor_error_count) is not int or monitor_error_count != 0 or monitor.get("errors") != []:
+        reasons.append(f"monitor_not_proved_clean={monitor_error_count!r}")
     if unresolved_exceptions:
         reasons.append(f"unproved_speculative_cfvec_exceptions={unresolved_exceptions}")
     if not descriptions:

@@ -76,7 +76,9 @@ def _artifact(path: Path, definitions: list[dict[str, str]]) -> None:
                     "clean:event": {"bin_id": "BIN-010", "hits": 1},
                 },
                 "outcome": {"status": "passed"},
-                "checker": {"status": "pass", "error_count": 0},
+                "checker": {"status": "pass", "error_count": 0, "errors": []},
+                "stats": {"monitor": {"error_count": 0, "errors": []},
+                          "translation_oracle": {"error_count": 0, "errors": []}},
                 "run": {
                     "run_id": "seed-1",
                     "seeds": {"test": 11, "backend": 22},

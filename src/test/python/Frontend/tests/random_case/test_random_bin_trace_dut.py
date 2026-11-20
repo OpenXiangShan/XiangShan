@@ -18,6 +18,7 @@ from .program_map import build_program_map
 from .scenario_contract import scenario_spec_from_dict, write_json_contract
 from .scenario_coordinator import ScenarioCoordinator, TimingPlan
 from .translation_timing import build_translation_scenario
+from .native_runtime_binding import freeze_runtime_contract, verify_runtime_contract
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -71,6 +72,24 @@ def _build_verified_program_map() -> tuple[dict, Path]:
     return program_map, output_path
 
 
+def _oracle_health(stats: dict) -> dict:
+    oracle = stats.get("translation_oracle")
+    if not isinstance(oracle, dict):
+        raise ValueError("translation oracle statistics are missing")
+    count, errors = oracle.get("error_count"), oracle.get("errors")
+    if type(count) is not int or count < 0 or not isinstance(errors, list):
+        raise ValueError("translation oracle statistics have invalid types")
+    return {"translation_oracle_error_count": count, "translation_oracle_errors": errors}
+
+
+def _arm_strict_translation(env, state):
+    # Use the public strict API. Predictor redirects do not excuse unexpected
+    # PTW identities or cfVec exceptions; assert_translation_scenario stays on.
+    return env.arm_translation_scenario(
+        state, page_indexes=tuple(range(len(state.expected_page_outcomes))), expect_ptw=True,
+    )
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
 def test_random_bin_trace(env):
@@ -101,12 +120,26 @@ def test_random_bin_trace(env):
         program_map=program_map,
         maximum_timeline_events=_timeline_event_limit(len(golden_trace_entries)),
     )
+    native_contract_path = timeline_path.with_suffix(".native-contract.json")
+    native_pin = freeze_runtime_contract(
+        env, output=native_contract_path,
+        coord_contract=Path(_require_env("TB_RANDOM_COORD_CONTRACT")),
+        coord_sha256=_require_env("TB_RANDOM_COORD_CONTRACT_SHA256"),
+        run_id=_require_env("TB_RUN_ID"),
+        minimum_dynamic_instructions=scenario.minimum_dynamic_instructions,
+        input_paths={"asm": Path(_require_env("TB_ASM_PATH")), "bin": binary_path,
+                     "trace": trace_path,
+                     "generator": Path(_require_env("TB_RANDOM_GENERATOR_MANIFEST")),
+                     "scenario": scenario_path},
+    )
     coordinator.install(env)
 
     execution_status = "FAIL"
     timeline_details: dict[str, object] = {
         "scenario_spec_path": str(scenario_path.resolve()),
         "program_map_path": str(program_map_path.resolve()),
+        "native_runtime_contract": {"path": str(native_contract_path.resolve()), "sha256": native_pin},
+        "native_runtime_postcheck": False,
     }
     try:
         translation_scenario = None
@@ -165,21 +198,7 @@ def test_random_bin_trace(env):
             )
             env.monitor.clear()
             env.monitor.set_expected_pc(int(translation_scenario.va))
-            env.arm_translation_scenario(
-                translation_state,
-                page_indexes=tuple(
-                    range(len(translation_state.expected_page_outcomes))
-                ),
-                expect_ptw=True,
-                # Long random control-flow intentionally creates many predictor
-                # redirects. Non-matching PTW traffic and exception cfVecs are
-                # diagnostic speculation; the golden checker separately proves
-                # that none of it reaches the committed architectural stream.
-                allow_control_flow_speculation=True,
-                required_fetch_vas=tuple(
-                    entry.pc for entry in golden_trace_entries
-                ),
-            )
+            _arm_strict_translation(env, translation_state)
             binary_size = len(binary_path.read_bytes())
         else:
             env.initialize(reset_vector=reset_vector, bare_mode=True, reset_cycles=20)
@@ -215,6 +234,7 @@ def test_random_bin_trace(env):
         assert result.pending_work == 0
         assert binary_size > 0
         assert trace_entries >= scenario.minimum_dynamic_instructions
+        assert type(result.monitor_error_count) is int and result.monitor_error_count == 0
         assert not env.monitor.get_errors()
         assert not coordinator.has_active_action, (
             "golden trace completed while a scheduled timing action was still active: "
@@ -240,13 +260,17 @@ def test_random_bin_trace(env):
             # A passing golden-trace/checker run is insufficient: the translation
             # oracle validates PTW context, translated fetches, and cfVec faults.
             env.assert_translation_scenario()
+        verify_runtime_contract(native_contract_path, native_pin)
+        timeline_details["native_runtime_postcheck"] = True
         execution_status = "REALIZED"
         timeline_details.update(
             {
                 "cycles_run": int(result.cycles_run),
                 "golden_cursor": int(result.cursor),
                 "golden_entries": int(result.total_entries),
-                "monitor_errors": int(result.monitor_error_count),
+                "monitor_errors": result.monitor_error_count,
+                "pending_work": int(result.pending_work),
+                "completed": bool(result.completed),
             }
         )
         logger.info(
@@ -262,13 +286,7 @@ def test_random_bin_trace(env):
         raise
     finally:
         try:
-            oracle_stats = env.get_stats().get("translation_oracle") or {}
-            timeline_details["translation_oracle_error_count"] = int(
-                oracle_stats.get("error_count", 0)
-            )
-            timeline_details["translation_oracle_errors"] = list(
-                oracle_stats.get("errors") or []
-            )
+            timeline_details.update(_oracle_health(env.get_stats()))
         except Exception as exc:
             timeline_details["translation_oracle_stats_error"] = str(exc)
         coordinator.write_timeline(

@@ -272,29 +272,23 @@ def _load_dut_timeline(
     if not isinstance(details, dict):
         reasons.append("scenario_timeline_details_are_not_an_object")
     else:
-        try:
-            monitor_errors = int(details.get("monitor_errors", -1))
-        except (TypeError, ValueError):
-            monitor_errors = -1
-        if monitor_errors != 0:
+        monitor_errors = details.get("monitor_errors")
+        if type(monitor_errors) is not int or monitor_errors != 0:
             reasons.append(
                 f"scenario_timeline_monitor_errors={details.get('monitor_errors')!r}"
             )
-        try:
-            oracle_errors = int(details.get("translation_oracle_error_count", 0))
-        except (TypeError, ValueError):
-            oracle_errors = -1
-        if oracle_errors != 0:
+        oracle_errors = details.get("translation_oracle_error_count")
+        if type(oracle_errors) is not int or oracle_errors != 0:
             reasons.append(
                 "scenario_timeline_translation_oracle_errors="
                 + repr(details.get("translation_oracle_error_count"))
             )
 
-    try:
-        dropped_events = int(payload.get("dropped_timeline_events", 0))
-    except (TypeError, ValueError):
-        dropped_events = -1
-    if dropped_events != 0:
+        if details.get("translation_oracle_errors") != [] or details.get("translation_oracle_stats_error"):
+            reasons.append("scenario_timeline_translation_oracle_errors_missing_or_nonempty")
+
+    dropped_events = payload.get("dropped_timeline_events")
+    if type(dropped_events) is not int or dropped_events != 0:
         reasons.append(
             f"scenario_timeline_dropped_events={payload.get('dropped_timeline_events')!r}"
         )
@@ -324,12 +318,16 @@ def _load_dut_timeline(
 
 
 def _load_funcov_evidence(paths: list[Path], *, native_bindings: dict | None = None,
-                          native_expected_provenance: dict | None = None) -> dict:
+                          native_expected_provenance: dict | None = None,
+                          require_current_native: bool = False) -> dict:
     evidence: list[dict] = []
     artifacts = []
     reasons: list[str] = []
     for path in paths:
         try:
+            raw = json.loads(path.read_text())
+            if require_current_native and "groups" not in raw:
+                raise ValueError("legacy report is diagnostic only, not current native admission")
             binding = (native_bindings or {}).get(str(path.resolve()))
             artifact = load_artifact(path, **({
                 "native_sidecar": Path(binding["sidecar_path"]),
@@ -410,6 +408,8 @@ def _load_funcov_evidence(paths: list[Path], *, native_bindings: dict | None = N
         else None
     )
     return {
+        "admission_scope": "current_native" if require_current_native or native_expected_provenance is not None else "diagnostic_frozen_artifact_only",
+        "canonical_hit_eligible": False,
         "status": "eligible" if not reasons else "ineligible",
         "reasons": reasons,
         "artifacts": evidence,
@@ -658,13 +658,30 @@ def _case_record_after_run(
         "observed_bin_ids": [],
         "compatibility_contract": None,
     }
+    native_admission = None
     if mode == "dut":
         timeline_payload, timeline_events, timeline_status, timeline_reasons = _load_dut_timeline(
             timeline_path,
             scenario_spec,
             program_map,
         )
-        funcov_evidence = _load_funcov_evidence(funcov_paths)
+        try:
+            try:
+                from .native_runtime_binding import bind_native_reports
+            except ImportError:
+                from native_runtime_binding import bind_native_reports
+            bindings, expected = bind_native_reports(
+                funcov_paths, timeline_path=timeline_path,
+                output_dir=case_root / "inputs" / "native-admission",
+            )
+            funcov_evidence = _load_funcov_evidence(
+                funcov_paths, native_bindings=bindings,
+                native_expected_provenance=expected, require_current_native=True,
+            )
+            native_admission = {"scope": "current_native", "bindings": bindings,
+                                "expected_provenance": expected}
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            funcov_evidence.update(status="ineligible", reasons=["native_runtime_binding=" + str(exc)])
 
     program_events = realized_events(trace_analysis) if trace_analysis else ()
     funcov_events = tuple(
@@ -779,6 +796,7 @@ def _case_record_after_run(
         "eligible_functional_coverage_artifacts": funcov_evidence[
             "eligible_artifact_paths"
         ],
+        "native_admission": native_admission,
         "functional_coverage_contract": funcov_evidence["compatibility_contract"],
         "observed_bin_ids": funcov_evidence["observed_bin_ids"],
     }
@@ -864,6 +882,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--native-binding-index-sha256")
     parser.add_argument("--native-audit-output", type=Path)
     parser.add_argument("--nemu-exec", type=Path, default=None)
+    parser.add_argument("--coord-contract", type=Path,
+                        help="coord-published loader-valid runtime contract; required for DUT mode")
+    parser.add_argument("--coord-contract-sha256",
+                        help="explicit SHA256 pin for --coord-contract")
     parser.add_argument("--case-timeout-seconds", type=int, default=7200)
     parser.add_argument("--pytest-timeout-seconds", type=int, default=6400)
     parser.add_argument("--trace-max-cycles", type=int, default=0)
@@ -899,6 +921,17 @@ def main() -> int:
         except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
             raise SystemExit("native audit rejected: " + str(exc)) from exc
         return 0 if report["evidence"]["status"] == "eligible" else 1
+    if args.mode == "dut":
+        if not args.coord_contract or not args.coord_contract_sha256:
+            raise SystemExit("DUT mode requires --coord-contract and --coord-contract-sha256")
+        try:
+            try:
+                from .native_runtime_binding import validate_coord_pin
+            except ImportError:
+                from native_runtime_binding import validate_coord_pin
+            validate_coord_pin(args.coord_contract, args.coord_contract_sha256)
+        except (OSError, ValueError, TypeError) as exc:
+            raise SystemExit("DUT coord contract rejected before generation: " + str(exc)) from exc
     if args.native_binding_index or args.native_binding_index_sha256 or args.native_audit_output:
         raise SystemExit("native binding is post-run offline audit only; select --mode audit-native")
     try:
@@ -1305,6 +1338,8 @@ def main() -> int:
                 "TB_RANDOM_SCENARIO_SPEC": str(record["scenario_spec_path"]),
                 "TB_RANDOM_PROGRAM_MAP_PATH": str(program_map_path),
                 "TB_RANDOM_TIMELINE_PATH": str(timeline_path),
+                "TB_RANDOM_COORD_CONTRACT": str(args.coord_contract.resolve()) if args.coord_contract else "",
+                "TB_RANDOM_COORD_CONTRACT_SHA256": str(args.coord_contract_sha256 or ""),
                 "TB_SEED": str(seed),
                 "TB_BACKEND_RANDOM_SEED": str(timing_seed),
                 "TB_ENABLE_FST_DUMP": "1" if args.waveform else "0",
@@ -1426,6 +1461,19 @@ def main() -> int:
         if record["qualification_pass"]
         for path in record["eligible_functional_coverage_artifacts"]
     ]
+    native_gate_arguments = []
+    if args.mode == "dut" and random_funcov:
+        try:
+            from .native_runtime_binding import write_admission_index
+        except ImportError:
+            from native_runtime_binding import write_admission_index
+        evidence_index = report_root / ("native-evidence-index-"
+            + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+        evidence_pin = write_admission_index(executed, evidence_index)
+        native_gate_arguments = ["--native-evidence-index", str(evidence_index),
+                                 "--native-evidence-index-sha256", evidence_pin]
+        campaign["native_evidence_index"] = {"path": str(evidence_index.resolve()),
+                                              "sha256": evidence_pin}
     if random_funcov:
         compare_command = [
             sys.executable,
@@ -1437,6 +1485,7 @@ def main() -> int:
             "--minimum-qualified-runs",
             str(args.coverage_minimum_qualified_runs),
         ]
+        compare_command.extend(native_gate_arguments)
         if args.require_goal_coverage:
             compare_command.append("--require-qualified-union")
         for artifact in random_funcov:
@@ -1474,6 +1523,7 @@ def main() -> int:
             "--minimum-qualified-runs",
             str(args.coverage_minimum_qualified_runs),
         ]
+        trusted_command.extend(native_gate_arguments)
         if args.require_goal_coverage:
             trusted_command.append("--require-qualified-union")
         trusted = subprocess.run(trusted_command, check=False)
@@ -1500,6 +1550,7 @@ def main() -> int:
                 str(args.coverage_minimum_hit_rate),
                 "--minimum-qualified-runs",
                 str(args.coverage_minimum_qualified_runs),
+                *native_gate_arguments,
             ],
             check=False,
         )
