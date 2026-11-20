@@ -98,7 +98,9 @@ class CustomL1L2Fabric(
   class FabricImp extends LazyModuleImp(CustomL1L2Fabric.this) {
     require(node.out.nonEmpty, "CustomL1L2Fabric requires at least one downstream connection")
     require(!specMissPreview || specChannels > 0)
-    val specPreview = Option.when(specMissPreview)(IO(Output(Vec(node.out.size, new xscache.coupledL2.SpecMissAPreview))))
+    val specPreview = Option.when(specMissPreview)(IO(MixedVec(node.out.map {
+      case (out, _) => new xscache.coupledL2.SpecMissAPreview(chiselTypeOf(out.a.bits))
+    })))
 
     val arbitrationOutputs = node.out.map { case (downstream, downstreamEdge) =>
       (Wire(TLBundle(downstream.params)), downstreamEdge)
@@ -189,25 +191,50 @@ class CustomL1L2Fabric(
       val committedBySlice = Wire(Vec(node.out.size, Vec(specOwners, Bool())))
       val matchedBySlice = Wire(Vec(node.out.size, Vec(specOwners, Bool())))
       (node.out zip arbitrationOutputs).zipWithIndex.foreach { case (((downstream, _), (arbitrationOut, _)), slice) =>
-        val buffer = Module(new SpecMissABuffer(chiselTypeOf(arbitrationOut.a.bits), a.depth, specOwners, specIdBits))
+        val gen = chiselTypeOf(arbitrationOut.a.bits)
         val winner = VecInit((0 until specOwners).map(w =>
           candidateFire(w) && arbitrationOut.a.bits.address === spec.candidate(w).bits.paddr))
         assert(PopCount(winner) <= 1.U, "multiple SpecMiss owners selected one A output")
-        buffer.io.enq.valid := arbitrationOut.a.valid
-        arbitrationOut.a.ready := buffer.io.enq.ready
-        buffer.io.enq.bits.data := arbitrationOut.a.bits
-        buffer.io.enq.bits.speculative := winner.asUInt.orR
-        buffer.io.enq.bits.committed := !winner.asUInt.orR
-        buffer.io.enq.bits.owner := Mux1H(winner, (0 until specOwners).map(_.U))
-        buffer.io.enq.bits.id := Mux1H(winner, (0 until specOwners).map(w => spec.candidate(w).bits.id))
-        for (w <- 0 until specOwners) {
-          buffer.io.resolve(w) := spec.resolve(w)
-          committedBySlice(slice)(w) := buffer.io.committed(w)
-          matchedBySlice(slice)(w) := buffer.io.matched(w)
+        val specId = Mux1H(winner, spec.candidate.map(_.bits.id))
+        val deqSpeculative = if (specMissPreview) {
+          val buffer = Module(new SpecMissABuffer(gen, a.depth))
+          buffer.io.enq.valid := arbitrationOut.a.valid
+          arbitrationOut.a.ready := buffer.io.enq.ready
+          buffer.io.enq.bits.data := arbitrationOut.a.bits
+          buffer.io.enq.bits.speculative := winner.asUInt.orR
+          // The registered MissQueue result belongs to the lane that won this
+          // bank two cycles ago, even if another request is now at the head.
+          val accepted = Mux(arbitrationOut.a.fire, winner.asUInt, 0.U(specOwners.W))
+          val ownersS2 = RegNext(RegNext(accepted, 0.U), 0.U)
+          val idS2 = RegNext(RegNext(specId))
+          buffer.io.decision.valid := ownersS2.orR
+          buffer.io.decision.bits := Mux1H(ownersS2, spec.resolve.map(_.bits.commit))
+          for (w <- 0 until specOwners) {
+            when(ownersS2(w)) { assert(spec.resolve(w).valid && spec.resolve(w).bits.id === idS2) }
+            matchedBySlice(slice)(w) := ownersS2(w)
+            committedBySlice(slice)(w) := ownersS2(w) && spec.resolve(w).bits.commit
+          }
+          specPreview.get(slice) <> buffer.io.preview
+          downstream.a <> buffer.io.deq
+          buffer.io.deq_speculative
+        } else {
+          val buffer = Module(new SpecMissConfirmedABuffer(gen, a.depth, specOwners, specIdBits))
+          buffer.io.enq.valid := arbitrationOut.a.valid
+          arbitrationOut.a.ready := buffer.io.enq.ready
+          buffer.io.enq.bits.data := arbitrationOut.a.bits
+          buffer.io.enq.bits.speculative := winner.asUInt.orR
+          buffer.io.enq.bits.committed := !winner.asUInt.orR
+          buffer.io.enq.bits.owner := Mux1H(winner, (0 until specOwners).map(_.U))
+          buffer.io.enq.bits.id := specId
+          for (w <- 0 until specOwners) {
+            buffer.io.resolve(w) := spec.resolve(w)
+            committedBySlice(slice)(w) := buffer.io.committed(w)
+            matchedBySlice(slice)(w) := buffer.io.matched(w)
+          }
+          downstream.a <> buffer.io.deq
+          buffer.io.deq_speculative
         }
-        downstream.a <> buffer.io.deq
-        specPreview.foreach(_(slice) := buffer.io.preview)
-        XSPerfAccumulate(s"specmiss_a_fire_$slice", buffer.io.deq.fire && buffer.io.deq_speculative)
+        XSPerfAccumulate(s"specmiss_a_fire_$slice", downstream.a.fire && deqSpeculative)
         arbitrationOut.b <> b(downstream.b)
         downstream.c <> c(arbitrationOut.c)
         arbitrationOut.d <> d(downstream.d)

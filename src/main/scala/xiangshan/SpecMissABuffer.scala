@@ -2,82 +2,43 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import xscache.coupledL2.SpecMissAPreview
 
-class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) extends Module {
-  require(depth >= 2)
-  require(nOwners >= 1)
-
+class SpecMissABuffer[T <: Data](gen: T, depth: Int) extends Module {
   val io = IO(new Bundle {
-    val enq = Flipped(Decoupled(new SpecMissBufferedA(gen, nOwners, idBits)))
+    val enq = Flipped(Decoupled(new Bundle {
+      val data = gen.cloneType
+      val speculative = Bool()
+    }))
+    val decision = Flipped(Valid(Bool()))
+    val preview = new SpecMissAPreview(gen.cloneType)
     val deq = Decoupled(gen.cloneType)
-    // Existing head origin, used only to count actual speculative A handshakes.
     val deq_speculative = Output(Bool())
-    val preview = Output(new xscache.coupledL2.SpecMissAPreview)
-    val resolve = Input(Vec(nOwners, Valid(new Bundle {
-      val id = UInt(idBits.W)
-      val commit = Bool()
-    })))
-    val matched = Output(Vec(nOwners, Bool()))
-    val committed = Output(Vec(nOwners, Bool()))
   })
 
-  val entries = Reg(Vec(depth, new SpecMissBufferedA(gen, nOwners, idBits)))
-  val count = RegInit(0.U(log2Ceil(depth + 1).W))
-  val occupied = VecInit((0 until depth).map(i => i.U < count))
-  // Compare each owner's resolution directly, without selecting it before the ID comparison.
-  val resolveMatches = VecInit((0 until depth).map { i =>
-    val waiting = occupied(i) && entries(i).speculative && !entries(i).committed
-    VecInit((0 until nOwners).map { w =>
-      waiting && entries(i).owner === w.U && io.resolve(w).valid &&
-        entries(i).id === io.resolve(w).bits.id
-    })
-  })
-  val resolved = VecInit(resolveMatches.map(_.asUInt.orR))
-  val canceled = VecInit((0 until depth).map(i =>
-    VecInit((0 until nOwners).map(w => resolveMatches(i)(w) && !io.resolve(w).bits.commit)).asUInt.orR))
+  // L2 S1 sees every FIFO head, independently of the MissQueue decision.
+  val head = Queue(io.enq, depth)
+  io.preview.a.valid := head.valid
+  io.preview.a.bits := head.bits.data
+  io.preview.speculative := head.bits.speculative
+  head.ready := io.preview.a.ready
 
-  val headCommittedNow = VecInit((0 until nOwners).map(w =>
-    resolveMatches(0)(w) && io.resolve(w).bits.commit)).asUInt.orR
-  io.deq.valid := count =/= 0.U && (!entries(0).speculative || entries(0).committed || headCommittedNow)
-  // Only preview an unresolved head in its own owner/ID resolution cycle.
-  // A stalled commit becomes an ordinary committed head on the next cycle.
-  io.preview.present := count =/= 0.U && (!entries(0).speculative || entries(0).committed || resolved(0))
-  io.preview.pending := resolved(0)
-  io.deq.bits := entries(0).data
-  io.deq_speculative := entries(0).speculative
-  io.enq.ready := count < depth.U
-  when(io.deq.valid && entries(0).speculative) {
-    assert(entries(0).committed || headCommittedNow, "uncommitted SpecMiss reached TileLink A")
-  }
+  // At most one candidate enters this bank per cycle, with decisions arriving
+  // in enqueue order. A one-bit FIFO retains decisions across S1 backpressure.
+  val decisions = Module(new Queue(Bool(), depth, flow = true, pipe = true))
+  decisions.io.enq.valid := io.decision.valid
+  decisions.io.enq.bits := io.decision.bits
+  assert(!io.decision.valid || decisions.io.enq.ready)
+  val specS2 = RegNext(head.fire && head.bits.speculative, false.B)
+  decisions.io.deq.ready := specS2
+  val retry = RegNext(head.valid && head.bits.speculative && !head.ready, false.B)
+  when(specS2 || retry) { assert(decisions.io.deq.valid) }
+  io.preview.commit := decisions.io.deq.bits
 
-  for (w <- 0 until nOwners) {
-    val matches = VecInit((0 until depth).map(i => resolveMatches(i)(w)))
-    io.matched(w) := matches.asUInt.orR
-    io.committed(w) := io.resolve(w).bits.commit && matches.asUInt.orR
-    when(io.resolve(w).valid) {
-      assert(PopCount(matches) <= 1.U, "specmiss resolution matched multiple candidates in one slice")
-    }
-  }
-
-  val keep = VecInit((0 until depth).map(i => occupied(i) && !canceled(i) &&
-    !(if (i == 0) io.deq.fire else false.B)))
-  val surviving = PopCount(keep)
-  val nextEntries = Wire(Vec(depth, chiselTypeOf(entries(0))))
-  nextEntries := entries
-  for (i <- 0 until depth) {
-    val rank = if (i == 0) 0.U else PopCount(keep.take(i))
-    val updated = Wire(chiselTypeOf(entries(i)))
-    updated := entries(i)
-    when(resolved(i)) {
-      updated.committed := true.B
-    }
-    when(keep(i)) {
-      nextEntries(rank) := updated
-    }
-  }
-  when(io.enq.fire) {
-    nextEntries(surviving(log2Ceil(depth) - 1, 0)) := io.enq.bits
-  }
-  entries := nextEntries
-  count := surviving + io.enq.fire.asUInt
+  // S1 has already reserved capacity. Publish exactly the confirmed transfer
+  // in S2, with its own payload, even while S1 is looking at the next head.
+  io.deq.valid := RegNext(head.fire, false.B) && (!specS2 || decisions.io.deq.bits)
+  io.deq.bits := RegEnable(head.bits.data, head.fire)
+  io.deq_speculative := specS2
+  when(io.deq.valid) { assert(io.deq.ready) }
 }

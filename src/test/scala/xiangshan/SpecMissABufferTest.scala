@@ -7,12 +7,68 @@ import org.scalatest.flatspec.AnyFlatSpec
 import scala.util.Random
 
 class SpecMissABufferTest extends AnyFlatSpec with ChiselSim {
-  behavior of "SpecMissABuffer resolution and FIFO ordering"
+  behavior of "SpecMiss A buffering"
+
+  for (depth <- Seq(2, 3)) {
+    it should s"offer every S1 head and publish the matching confirmed S2 transfer at depth=$depth" in {
+      simulate(new SpecMissABuffer(UInt(32.W), depth)) { c =>
+        case class Request(data: Int, speculative: Boolean, commit: Boolean)
+
+        var records = Vector.empty[Request]
+        var accepted = Option.empty[Request]
+        var acceptedTwoAgo = Option.empty[Request]
+        var previousHead = Option.empty[Request]
+        var stalled = Option.empty[Request]
+        c.io.deq.ready.poke(true.B)
+
+        def tick(in: Option[Request], ready: Boolean): Unit = {
+          c.io.enq.valid.poke(in.isDefined.B)
+          c.io.enq.bits.data.poke(in.map(_.data).getOrElse(0).U)
+          c.io.enq.bits.speculative.poke(in.exists(_.speculative).B)
+          val decision = acceptedTwoAgo.filter(_.speculative)
+          c.io.decision.valid.poke(decision.isDefined.B)
+          c.io.decision.bits.poke(decision.exists(_.commit).B)
+          c.io.preview.a.ready.poke(ready.B)
+
+          val space = records.size < depth
+          c.io.enq.ready.expect(space.B)
+          c.io.preview.a.valid.expect(records.nonEmpty.B)
+          records.headOption.foreach { head =>
+            c.io.preview.a.bits.expect(head.data.U)
+            c.io.preview.speculative.expect(head.speculative.B)
+          }
+          previousHead.filter(_.speculative).orElse(stalled.filter(_.speculative)).foreach { r =>
+            c.io.preview.commit.expect(r.commit.B)
+          }
+          val published = previousHead.filter(r => !r.speculative || r.commit)
+          c.io.deq.valid.expect(published.nonEmpty.B)
+          published.foreach { r =>
+            c.io.deq.bits.expect(r.data.U)
+            c.io.deq_speculative.expect(r.speculative.B)
+          }
+
+          previousHead = records.headOption.filter(_ => ready)
+          stalled = records.headOption.filter(_ => !ready)
+          acceptedTwoAgo = accepted
+          accepted = in.filter(_ => space)
+          records = records.drop(previousHead.size) ++ accepted
+          c.clock.step()
+        }
+
+        val random = new Random(0x55a0 + depth)
+        for (cycle <- 1 to 1200) {
+          val in = Option.when(random.nextInt(5) != 0)(Request(cycle, random.nextBoolean(), random.nextBoolean()))
+          tick(in, ready = cycle % 47 < 33 && random.nextBoolean())
+        }
+        for (_ <- 0 to depth + 2) tick(None, ready = true)
+      }
+    }
+  }
 
   private case class Record(data: BigInt, speculative: Boolean, committed: Boolean, owner: Int, id: Int)
   private case class Decision(id: Int, commit: Boolean)
 
-  private class Driver(c: SpecMissABuffer[UInt], depth: Int, nOwners: Int) {
+  private class Driver(c: SpecMissConfirmedABuffer[UInt], depth: Int, nOwners: Int) {
     var records = Vector.empty[Record]
 
     def tick(
@@ -46,8 +102,6 @@ class SpecMissABufferTest extends AnyFlatSpec with ChiselSim {
       val headPending = records.headOption.exists(r => resolution(r).nonEmpty)
       val headPresent = records.headOption.exists(r => !r.speculative || r.committed) || headPending
       c.io.enq.ready.expect(enqReady.B)
-      c.io.preview.present.expect(headPresent.B)
-      c.io.preview.pending.expect(headPending.B)
       c.io.deq.valid.expect(deqValid.B)
       if (headPresent) {
         c.io.deq.bits.expect(records.head.data.U)
@@ -72,7 +126,7 @@ class SpecMissABufferTest extends AnyFlatSpec with ChiselSim {
 
   for ((depth, owners) <- Seq((2, 3), (3, 3), (2, 1))) {
     it should s"preserve commits, cancellations and backpressure at depth=$depth owners=$owners" in {
-      simulate(new SpecMissABuffer(UInt(119.W), depth, owners, 4)) { c =>
+      simulate(new SpecMissConfirmedABuffer(UInt(119.W), depth, owners, 4)) { c =>
         val d = new Driver(c, depth, owners)
         def spec(data: Int, owner: Int, id: Int): Record = Record(data, true, false, owner, id)
         def normal(data: Int): Record = Record(data, false, true, 0, 0)

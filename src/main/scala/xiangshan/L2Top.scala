@@ -326,7 +326,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module
-      l2.specPreview.foreach(_ := l1_l2_fabric.module.specPreview.get)
+      l2.specPreview.foreach(_ <> l1_l2_fabric.module.specPreview.get)
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
       l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })

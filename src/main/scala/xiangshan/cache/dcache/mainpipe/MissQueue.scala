@@ -1632,13 +1632,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val reserved_commit = Wire(Vec(LoadPipelineWidth, Bool()))
   for (w <- 0 until LoadPipelineWidth) {
     val i = w + 1
-    io.spec_fabric.resolve(w).valid := reserve_valid(w)
-    io.spec_fabric.resolve(w).bits.id := reserve_id(w)
     // Use the same allocation decision as the pipeline handoff.
     reserved_commit(w) := query_fire(i) && reserved_for_req(i) &&
       (analysis.strategy(i) & 1.U) =/= 0.U && analysis.compress_group(i) === i.U &&
       !io.wfi.wfiReq
-    io.spec_fabric.resolve(w).bits.commit := reserved_commit(w)
+    val decision = Wire(chiselTypeOf(io.spec_fabric.resolve(w)))
+    decision.valid := reserve_valid(w)
+    decision.bits.id := reserve_id(w)
+    decision.bits.commit := reserved_commit(w)
+    // The fast L2 sees the candidate in S1 while this decision is being computed.
+    io.spec_fabric.resolve(w) := (if (specMissAtL2S2) RegNext(decision, 0.U.asTypeOf(decision)) else decision)
     XSPerfAccumulate(s"spec_fabric_commit_$w", reserve_valid(w) && reserved_commit(w))
   }
 
