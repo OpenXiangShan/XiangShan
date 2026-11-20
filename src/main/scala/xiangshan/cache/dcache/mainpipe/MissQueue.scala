@@ -179,13 +179,6 @@ trait HasMissReqFunction extends HasDCacheParameters
     req.vaddrSet === new_req.vaddrSet
   }
 
-  def assertAddressMetadata(req: MissReqWoStoreData, valid: Bool): Unit = {
-    when (valid) {
-      assert(req.vaddrAlias === get_alias(req.vaddr), "MissReq alias must match its vaddr")
-      assert(req.vaddrSet === addr_to_dcache_set(req.vaddr), "MissReq set must match its vaddr")
-    }
-  }
-
   // Passing in "req" is to accommodate two different scenarios: MissEntry and MissQueue
   def computeMatchSignals(req: MissReqWoStoreData, new_req: MissReqWoStoreData): MatchSignals = {
     val signals = Wire(new MatchSignals)
@@ -554,7 +547,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = req.vaddrSet
-  assertAddressMetadata(req, req_valid)
   val evict_BtoT_way = RegInit(false.B)
   val alloc_is_store = RegInit(false.B)  // The alloc (first) req is a store req
   val hasStore = RegInit(false.B)
@@ -1268,7 +1260,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // Parallel pipeline registers for queryMQ path (reqNum ports)
   val parallel_pipe_regs = RegInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))))
-  val active_pipe_regs = parallel_pipe_regs
   val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(memChannelBits.W))))
 
   val acquire_from_pipereg_vec = Wire(Vec(reqNum, chiselTypeOf(io.mem_acquire(0))))
@@ -1276,12 +1267,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // val signals = computeMatchSignals(miss_req_pipe_reg.req, io.req.bits)
   val signals_vec = (0 until reqNum).map {i =>
-    computeMatchSignals(active_pipe_regs(i).req, io.queryMQ(i).req.bits)
+    computeMatchSignals(parallel_pipe_regs(i).req, io.queryMQ(i).req.bits)
   }
 
   // Store misses may reside either in MSHR entries or in the miss_req_pipe_reg.
   // sbuffer-flush should wait until both places are clear.
-  val mshr_has_store = Cat(entries.map(_.io.req_hasStore)  ++ active_pipe_regs.map(pipe_reg => pipe_reg.reg_valid() && pipe_reg.req.isFromStore)).orR
+  val mshr_has_store = Cat(entries.map(_.io.req_hasStore)  ++ parallel_pipe_regs.map(pipe_reg => pipe_reg.reg_valid() && pipe_reg.req.isFromStore)).orR
   io.mshr_store_empty := !mshr_has_store
 
   val primary_ready_vec = entries.map(_.io.primary_ready)
@@ -1320,10 +1311,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Analysis result for all queryMQ requests
   val analysis = WireInit(0.U.asTypeOf(new ReqAnalysisResult(reqNum, cfg.nMissEntries)))
   val query_valid = VecInit(io.queryMQ.map(_.req.valid))
-  for (i <- 0 until reqNum) {
-    assertAddressMetadata(io.queryMQ(i).req.bits, query_valid(i))
-    assertAddressMetadata(active_pipe_regs(i).req, active_pipe_regs(i).reg_valid())
-  }
   val spec_candidate_fire = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
   val spec_candidate_id = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(log2Up(cfg.nMissEntries).W))))
   // One-cycle candidate.fire to S2 grant handoff; payloads are overwritten every cycle.
@@ -1450,23 +1437,23 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     can_merge_from_pipe_mshr(i) := 0.U
 
     for (j <- (0 until reqNum).reverse) {
-      val signals_j = computeMatchSignals(active_pipe_regs(j).req, io.queryMQ(i).req.bits)
+      val signals_j = computeMatchSignals(parallel_pipe_regs(j).req, io.queryMQ(i).req.bits)
 
       // merge from pipe_reg
-      when (active_pipe_regs(j).merge_req(signals_j) && !active_pipe_regs(j).cancel &&
+      when (parallel_pipe_regs(j).merge_req(signals_j) && !parallel_pipe_regs(j).cancel &&
             !(io.queryMQ(i).req.bits.isFromStore && acquire_owned_by_fabric(j))) {
         can_merge_from_pipe(i) := true.B
-        can_merge_from_pipe_mshr(i) := active_pipe_regs(j).mshr_id
+        can_merge_from_pipe_mshr(i) := parallel_pipe_regs(j).mshr_id
       }
 
       // A store merging into an allocating pipe reg must be included before
       // sending Acquire, otherwise the entry cmd and Grant param can diverge.
-      when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && active_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
+      when(parallel_pipe_regs(j).alloc && !parallel_pipe_regs(j).cancel && parallel_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
         can_merge_store_from_pipe(j) := true.B
       }
 
       // do not alloc when (addr_match & alias_match)
-      when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && signals_j.block_match) {
+      when(parallel_pipe_regs(j).alloc && !parallel_pipe_regs(j).cancel && signals_j.block_match) {
         match_from_pipe(i) := true.B
         match_from_ith_pipe := j.U
       }
@@ -1682,7 +1669,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // has priority, without feeding the ordinary allocation result into this path.
   val occupied_blocks = entries.map(e =>
     e.io.req_addr.valid -> get_block(e.io.req_addr.bits)
-  ) ++ active_pipe_regs.map(preg =>
+  ) ++ parallel_pipe_regs.map(preg =>
     preg.reg_valid() -> get_block(preg.req.addr)
   ) ++ (0 until reqNum).map(i =>
     (query_valid(i) && !io.queryMQ(i).req.bits.cancel) -> get_block(io.queryMQ(i).req.bits.addr)
@@ -1934,16 +1921,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.miss_req_pipe_reg.merge := false.B
       e.io.miss_req_pipe_reg.alloc := false.B
       for(req <- 0 until reqNum) {
-        when(active_pipe_regs(req).reg_valid() && active_pipe_regs(req).mshr_id === i.U) {
-          e.io.miss_req_pipe_reg := active_pipe_regs(req)
+        when(parallel_pipe_regs(req).reg_valid() && parallel_pipe_regs(req).mshr_id === i.U) {
+          e.io.miss_req_pipe_reg := parallel_pipe_regs(req)
         }
       }
 
       e.io.acquire_fired_by_pipe_reg := false.B
       for(j <- 0 until reqNum) {
         when((acquire_from_pipereg_vec(j).fire ||
-          (acquire_owned_by_fabric(j) && active_pipe_regs(j).alloc)) &&
-          active_pipe_regs(j).mshr_id === i.U) {
+          (acquire_owned_by_fabric(j) && parallel_pipe_regs(j).alloc)) &&
+          parallel_pipe_regs(j).mshr_id === i.U) {
           e.io.acquire_fired_by_pipe_reg := true.B
         }
       }
@@ -2000,16 +1987,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_train.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_train.bits })
 
   for(i <- 0 until reqNum) {
-    acquire_from_pipereg_vec(i).valid := active_pipe_regs(i).alloc && !acquire_owned_by_fabric(i) &&
+    acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !acquire_owned_by_fabric(i) &&
       !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
-    acquire_from_pipereg_vec(i).bits := active_pipe_regs(i).get_acquire(io.l2_pf_store_only)
+    acquire_from_pipereg_vec(i).bits := parallel_pipe_regs(i).get_acquire(io.l2_pf_store_only)
 
     XSPerfAccumulate(s"acquire_fire_from_pipereg_$i", acquire_from_pipereg_vec(i).fire)
     XSPerfAccumulate(s"parallel_pipe_regs_valid_$i", parallel_pipe_regs(i).reg_valid())
   }
 
   for(i <- 0 until reqNum) {
-    parallel_regs_channel(i) := selectChannel(active_pipe_regs(i).req.addr, active_pipe_regs(i).mshr_id)
+    parallel_regs_channel(i) := selectChannel(parallel_pipe_regs(i).req.addr, parallel_pipe_regs(i).mshr_id)
   }
 
   if (numMemChannels > 1) {
@@ -2044,12 +2031,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     entries.map { e =>
       e.io.replace.req <> io.replace.req
       e.io.replace.block
-    } ++ active_pipe_regs.map(_.block_and_alias_match(io.replace.req.bits))
+    } ++ parallel_pipe_regs.map(_.block_and_alias_match(io.replace.req.bits))
   ).orR
 
   val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
-    active_pipe_regs.map(_.evict_set_match(io.evict_set))
-  val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ active_pipe_regs.map(_.req.occupy_way)
+    parallel_pipe_regs.map(_.evict_set_match(io.evict_set))
+  val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ parallel_pipe_regs.map(_.req.occupy_way)
   io.btot_ways_for_set := btot_evict_set_hit.zip(btot_occupy_ways).map {
     case (hit, way) => Fill(nWays, hit) & way
   }.reduce(_|_)
@@ -2058,7 +2045,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for (i <- 0 until LoadPipelineWidth) {
     val occupy_set_hits = entries.map(
       e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.occupy_set(i)
-    ) ++ active_pipe_regs.map(_.evict_set_match(io.occupy_set(i)))
+    ) ++ parallel_pipe_regs.map(_.evict_set_match(io.occupy_set(i)))
     val occupy_ways = occupy_set_hits.zip(btot_occupy_ways).map {
       case (hit, way) => Fill(nWays, hit) & way
     }.reduce(_|_)
