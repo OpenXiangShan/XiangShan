@@ -20,6 +20,7 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
     val deq = Decoupled(gen.cloneType)
     // Existing head origin, used only to count actual speculative A handshakes.
     val deq_speculative = Output(Bool())
+    val preview = Output(new xscache.coupledL2.SpecMissAPreview)
     val resolve = Input(Vec(nOwners, Valid(new Bundle {
       val id = UInt(idBits.W)
       val commit = Bool()
@@ -46,6 +47,10 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   val headCommittedNow = VecInit((0 until nOwners).map(w =>
     resolveMatches(0)(w) && io.resolve(w).bits.commit)).asUInt.orR
   io.deq.valid := count =/= 0.U && (!entries(0).speculative || entries(0).committed || headCommittedNow)
+  // Only preview an unresolved head in its own owner/ID resolution cycle.
+  // A stalled commit becomes an ordinary committed head on the next cycle.
+  io.preview.present := count =/= 0.U && (!entries(0).speculative || entries(0).committed || resolved(0))
+  io.preview.pending := resolved(0)
   io.deq.bits := entries(0).data
   io.deq_speculative := entries(0).speculative
   io.enq.ready := count < depth.U
