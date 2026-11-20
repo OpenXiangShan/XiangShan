@@ -116,4 +116,17 @@ class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
     def _ifu_frontend_trigger_signal_paths(self, value):
         self._runtime._ifu_frontend_trigger_signal_paths = value
 
+
+    # Completed low/high PC checks are run-level witnesses read through the
+    # public sink/hub API, including across hardware resets in the same run.
+    # They are separate from resettable in-flight cacheable transfer receipts.
+    @property
+    def _ifu_owner_address_boundary_witnesses(self):
+        return getattr(self._runtime, "_ifu_owner_address_boundary_witnesses", {})
+
+    @_ifu_owner_address_boundary_witnesses.setter
+    def _ifu_owner_address_boundary_witnesses(self, value):
+        self._runtime._ifu_owner_address_boundary_witnesses = value
+
+
 __all__ = ["CFVEC_COVERPOINTS", "IfuCfvecToffeeCoverage"]

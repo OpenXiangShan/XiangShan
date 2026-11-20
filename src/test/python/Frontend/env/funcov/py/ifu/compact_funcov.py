@@ -299,7 +299,6 @@ def _read_predchecker(recorder, dut, stem: str) -> Optional[int]:
     value = recorder._read_first_dut_signal(
         dut,
         (
-            "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__" + str(stem),
             "Frontend_top.Frontend.inner_ifu.predChecker." + str(stem),
         ),
     )
@@ -314,7 +313,6 @@ def _read_predchecker_with_path(
     """Read a PredChecker probe and retain the concrete DUT path used."""
 
     for prefix in (
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__",
         "Frontend_top.Frontend.inner_ifu.predChecker.",
     ):
         path = prefix + str(stem)

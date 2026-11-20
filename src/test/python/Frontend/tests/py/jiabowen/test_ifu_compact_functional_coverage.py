@@ -33,6 +33,7 @@ class _Signal:
 
 class _FakeDut:
     def set(self, name, value):
+        name = str(name).replace(".__Vtogcov__", ".")
         signal = getattr(self, str(name), None)
         if signal is None:
             signal = _Signal()

@@ -1,158 +1,25 @@
+"""PMA-only dual-fetch suppression shares the checked source-bound replay."""
+
 from __future__ import annotations
 
 import os
-
 import pytest
-from env.sequences import TranslationPmpPmaEntry, TranslationScenario, TranslationScenarioBuilder
 
-from env.support import PmpPmaConfig
-from env.funcov.py.ifu.cacheable_pipeline_funcov import _UPSTREAM_SIGNALS
-from tests.py.jiabowen import test_two_fetch_directed_flow_dut as two_fetch
-from tests.py.support import uncache_scenarios as uncache
-
-
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-_BIN_ID = "BIN-904"
-
-
-def _entry(kind: str, index: int, addr: int, *, cacheable: bool | None = None):
-    config = PmpPmaConfig(
-        match="napot",
-        read=True,
-        write=True,
-        execute=True,
-        **({} if cacheable is None else {"cacheable": bool(cacheable)}),
-    )
-    return TranslationPmpPmaEntry(
-        kind=kind,
-        index=index,
-        config=config,
-        addr=addr,
-        size=uncache._SV39_PAGE_SIZE,
-    )
+from env.funcov.py.ifu.cacheable_pipeline_funcov import _UPSTREAM_SIGNALS, _read_upstream_signal
+from tests.py.jiabowen.test_ifu_nc_dual_suppression_v3_dut import _run_dual_suppression_case
 
 
 def _upstream_snapshot(recorder) -> dict[str, int | None]:
     snapshot: dict[str, int | None] = {}
-    for key, candidates in _UPSTREAM_SIGNALS.items():
-        value = recorder._read_first_dut_signal(recorder.env.dut, candidates)
-        snapshot[str(key)] = None if value is None else int(value)
+    for key in _UPSTREAM_SIGNALS:
+        value = _read_upstream_signal(recorder, key)
+        assert value is not None, {"missing_native_upstream_probe": key}
+        snapshot[str(key)] = int(value)
     return snapshot
 
 
-@pytest.mark.funcov_bins(_BIN_ID)
-@pytest.mark.skipif(
-    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "current V3 review sentinel: PMA-transition traffic has not produced "
-        "a checker-eligible BIN-904 MainPipe acceptance"
-    ),
-)
+@pytest.mark.funcov_bins("BIN-904")
+@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires real Frontend DUT")
 def test_two_fetch_mmio_window_suppresses_second_icache_response(env) -> None:
-    """A trained dual-fetch candidate becomes single after a real PMA update."""
-    mapping_va = uncache._NORMAL_BASE
-    mapping_pa = uncache._NORMAL_PHYS_BASE
-    start_va = mapping_va + two_fetch._SECOND_TAKEN_LOOP_OFFSET
-    page = mapping_pa & ~(uncache._SV39_PAGE_SIZE - 1)
-    payload = two_fetch._second_block_taken_loop()
-
-    uncache._initialize_sv39_fetch(env, reset_vector=start_va)
-    scenario = TranslationScenario(
-        scenario_id="bin-904-train-cacheable-then-pma-uncache-two-fetch",
-        va=mapping_va,
-        pa=mapping_pa,
-        payload=payload,
-        expected_path="cacheable",
-        expected_result="normal",
-        pmp_entries=(
-            _entry("pmp", 0, page),
-        ),
-        pma_entries=(
-            _entry("pma", 0, page, cacheable=True),
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    assert state.expected_page_outcomes[0]["expected_path"] == "cacheable"
-
-    env.arm_translation_scenario(state)
-    uncache._force_redirect_to(env, start_va)
-
-    recorder = env.functional_coverage
-    for _ in range(12000):
-        env.step(1)
-        if recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual"):
-            break
-    assert recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual"), {
-        "reason": "cacheable warmup never formed an FTQ dual-fetch candidate",
-        "icache": env.icache_agent.get_stats(),
-        "backend": env.backend_model.get_stats(),
-        "monitor_errors": env.monitor.get_errors(),
-    }
-
-    # This is the architectural distributed-CSR path, not an internal force.
-    env.write_pma_entry(
-        0,
-        PmpPmaConfig(
-            match="napot", read=True, write=True, execute=True, cacheable=False
-        ),
-        page,
-        size=uncache._SV39_PAGE_SIZE,
-        settle_cycles=4,
-    )
-    env.uncache_agent.configure(latency=4, mmio_latency=4)
-    uncache._force_redirect_to(env, start_va)
-
-    definition = recorder.definition_by_bin_id[_BIN_ID]
-    upstream_observations: list[dict[str, int | None]] = []
-    for _ in range(12000):
-        env.step(1)
-        upstream = _upstream_snapshot(recorder)
-        if any(
-            upstream[key] == 1
-            for key in (
-                "mainpipe_fire",
-                "second_requested",
-                "second_waylookup_valid",
-                "first_mmio",
-                "second_mmio",
-            )
-        ):
-            upstream_observations.append(
-                {"cycle": int(env.current_cycle), **upstream}
-            )
-            upstream_observations = upstream_observations[-32:]
-        if recorder.key_hit(
-            definition.coverage_group,
-            definition.bin_name,
-            coverpoint=definition.coverpoint,
-        ):
-            break
-
-    assert recorder.key_hit(
-        definition.coverage_group,
-        definition.bin_name,
-        coverpoint=definition.coverpoint,
-    ), {
-        "reason": "no same-page MMIO/uncache MainPipe dual-request window was observed",
-        "icache": env.icache_agent.get_stats(),
-        "uncache": env.uncache_agent.get_stats(),
-        "ptw": env.ptw_agent.get_stats(),
-        "monitor_errors": env.monitor.get_errors(),
-        "upstream_observations": upstream_observations,
-    }
-    detail = recorder.hit_detail(
-        definition.coverage_group,
-        definition.bin_name,
-        coverpoint=definition.coverpoint,
-    )
-    assert detail is not None
-    evidence = detail["evidence"][-1]
-    assert evidence["first_mmio"] == 1
-    assert evidence["second_mmio"] == 1
-    assert evidence["real_two_fetch"] == 0
-    assert evidence["output_second_valid"] == 0
-    assert evidence["illegal_mixed_response_emitted"] is False
-    assert not env.monitor.get_errors()
+    """Retain PBMT0 and prove PMA1 independently on the accepted response."""
+    _run_dual_suppression_case(env, warm_cacheable=True, attribute_kind="pma")
