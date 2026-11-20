@@ -584,7 +584,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
-    ++ L2CacheConfig("2MB", ways = 8, banks = 4)
+    ++ L2CacheConfig("2MB", ways = 8, banks = 4, mshrSize = 24)
     ++ WithNKBL1D(64, ways = 4, nCCHIChannels = 2)
     ++ new BaseConfig(n)
 )
