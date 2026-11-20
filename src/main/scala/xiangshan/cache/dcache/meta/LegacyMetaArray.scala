@@ -17,13 +17,13 @@
 
 package xiangshan.cache
 
+import device.reri.{ErrorSource, SeverityLevel, RERIErrorInfo}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug}
 import utility.sram.SRAMTemplate
-import xiangshan.L1CacheErrorInfo
 
 // basic building blocks for L1 DCache
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
@@ -60,7 +60,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     val read = Flipped(Decoupled(new L1MetaReadReq))
     val write = Flipped(Decoupled(new L1MetaWriteReq))
     val resp = Output(Vec(nWays, UInt(encMetaBits.W)))
-    val error = Output(ValidIO(new L1CacheErrorInfo))
+    val error = Output(Valid(new RERIErrorInfo))
   })
   val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
   val rst = rst_cnt < nSets.U
@@ -91,8 +91,11 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.bits.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
-  io.error.bits.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
+  val error = RegNext(io.read.fire) && Cat(ecc_errors).orR
+  io.error.valid := error
+  io.error.bits.severity := Mux(error, SeverityLevel.UEC, SeverityLevel.NONE)
+  io.error.bits.errorSource := ErrorSource.addressError
+  io.error.bits.errorPaddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
   io.read.ready := !wen
@@ -133,7 +136,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     val read = Vec(numReadPorts, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
     val resp = Output(Vec(numReadPorts, Vec(nWays, UInt(encMetaBits.W))))
-    val errors = Output(Vec(numReadPorts, ValidIO(new L1CacheErrorInfo)))
+    val errors = Output(Vec(numReadPorts, Valid(new RERIErrorInfo)))
   })
   val meta = Seq.fill(numReadPorts) {
     Module(new L1MetadataArray(() => onReset))

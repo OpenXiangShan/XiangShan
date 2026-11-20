@@ -157,6 +157,7 @@ jobs:
           # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
           # - name: rvv-bench
           - name: f16_test
+          - name: reri-test
           - name: frontend-misc-test
       fail-fast: false
       max-parallel: 8
