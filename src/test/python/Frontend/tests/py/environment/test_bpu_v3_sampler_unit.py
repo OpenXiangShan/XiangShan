@@ -22,10 +22,10 @@ from env.support.bpu_v3_contract import (
 
 def _target_diff_cycle(**overrides: int) -> BpuTargetDiffCycle:
     values = dict(
-        s3_valid=1, s3_taken=1, s1_taken=1,
-        s1_cfi_position=3, s1_branch_type=2, s1_ras_action=0, s1_target=0,
-        s3_cfi_position=3, s3_branch_type=2, s3_ras_action=0, s3_target=0,
-        ittage_hit=0, s3_override=0, signal_paths={},
+        s3_valid=1, s3_taken=1, s2_taken=1, s2_override=0,
+        s1_target=0, s2_target=0, s3_branch_type=2, s3_ras_action=0, s3_target=0,
+        s3_start_pc=0x80000000, s3_first_taken_mask=1, s2_first_taken_mask=1,
+        ras_enable=1, ittage_hit=0, s3_override=0, signal_paths={},
     )
     values.update(overrides)
     return BpuTargetDiffCycle(**values)
@@ -49,10 +49,10 @@ def test_btb_target_diff_ignores_high_bits_but_ittage_and_ras_do_not() -> None:
     high_bit = 1 << BTB_TARGET_COMPARE_WIDTH
     btb = _target_diff_cycle(s3_target=high_bit)
     ittage = _target_diff_cycle(
-        s1_branch_type=3, s3_branch_type=3, ittage_hit=1, s3_target=high_bit,
+        s3_branch_type=3, ittage_hit=1, s3_target=high_bit,
     )
-    ras = replace(ittage, s1_ras_action=1, s3_ras_action=1)
-    pop_and_push = replace(ittage, s1_ras_action=3, s3_ras_action=3)
+    ras = replace(ittage, s3_ras_action=1)
+    pop_and_push = replace(ittage, s3_ras_action=3)
 
     assert btb.target_only_candidate and btb.btb_high_only_diff
     assert not btb.target_diff
@@ -84,13 +84,13 @@ def test_mbtb_compare_bits_exclude_identity_and_include_prediction_fields() -> N
 def test_mbtb_write_buffer_sampler_selects_hit_entry_and_dirty_probe() -> None:
     groups = MBTB_WRITE_BUFFER_SIGNAL_GROUPS
     values = {
-        candidates[-1]: 0
+        candidates[0]: 0
         for key, candidates in groups.items()
         if key.endswith(("_write_valid", "_hit_mask", "_dirty_mask"))
     }
 
     def set_value(key: str, value: int) -> None:
-        values[groups[key][-1]] = value
+        values[groups[key][0]] = value
 
     set_value("mbtb_a0_i0_p0_write_valid", 1)
     set_value("mbtb_a0_i0_p0_hit_mask", 1 << (2 * 4 + 1))
@@ -109,7 +109,7 @@ def test_mbtb_write_buffer_sampler_selects_hit_entry_and_dirty_probe() -> None:
 
     assert (event.align_bank, event.internal_bank, event.port, event.row, event.entry) == (0, 0, 0, 2, 1)
     assert event.identity_matches and not event.semantic_changed
-    assert dirty == 0 and path == groups["mbtb_a0_i0_r2_e1_dirty"][-1]
+    assert dirty == 0 and path == groups["mbtb_a0_i0_r2_e1_dirty"][0]
 
 
 def test_prefetch_sampler_requires_shared_ready_and_uses_it_for_dual_write() -> None:

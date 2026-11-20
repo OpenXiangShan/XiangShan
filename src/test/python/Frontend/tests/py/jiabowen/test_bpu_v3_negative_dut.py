@@ -4,9 +4,7 @@ import os
 
 import pytest
 
-from env.core.transactions import ProgramImage
-from env.model.backend_state import ResolveEntry
-from env.sequences import LoadProgramSequence
+from dataclasses import asdict
 from env.support.bpu_v3_contract import (
     PREFETCH_DEPTH,
     BpuV3SignalUnavailable,
@@ -22,6 +20,10 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x8000_0000
 _NOP = 0x0000_0013
 
+from tests.py.support.bpu_target_program import build_bpu_target_change_program
+from tests.py.support.mbtb_write_program import build_mbtb_write_compare_program
+from tests.py.support.mbtb_training_request import decoded_source_registration, sample_mbtb_write_launch
+
 
 def _cycle_limit(name: str, default: int) -> int:
     raw = os.getenv(str(name), "").strip()
@@ -30,59 +32,6 @@ def _cycle_limit(name: str, default: int) -> int:
     value = int(raw, 0)
     assert value > 0, f"{name} must be positive"
     return int(value)
-
-
-def _wait_for_live_ftq_identity(env) -> dict[str, int]:
-    for _ in range(_cycle_limit("TB_MBTB_IDENTITY_MAX_CYCLES", 1000)):
-        env.step(1)
-        queue = env.backend_model._cfvec_queue
-        if not queue:
-            continue
-        entry = queue[-1]
-        packed_ftq = (int(entry.ftq_flag) << 6) | (int(entry.ftq_value) & 0x3F)
-        start_pc = env.backend_model._ftq_start_pc_cache.get(packed_ftq)
-        assert start_pc is not None, {
-            "reason": "plain-JALR FTQ identity had no authoritative startPc",
-            "ftq": (int(entry.ftq_flag), int(entry.ftq_value)),
-            "backend": env.backend_model.get_stats(),
-        }
-        return {
-            "inst_pc": int(entry.pc),
-            "start_pc": int(start_pc),
-            "ftq_flag": int(entry.ftq_flag),
-            "ftq_value": int(entry.ftq_value),
-            "ftq_offset": int(entry.ftq_offset),
-            "is_rvc": int(entry.is_rvc),
-        }
-    raise AssertionError(
-        {
-            "reason": "DUT did not expose a live FTQ identity for backend resolve",
-            "backend": env.backend_model.get_stats(),
-            "monitor_errors": env.monitor.get_errors(),
-        }
-    )
-
-
-def _queue_plain_jalr_mispredict(env, identity: dict[str, int], *, target: int) -> None:
-    cycle = int(env.backend_model.current_cycle)
-    env.backend_model._pending_resolves.append(
-        ResolveEntry(
-            ready_cycle=cycle,
-            inst_pc=int(identity["inst_pc"]),
-            pc=int(identity["start_pc"]),
-            target=int(target),
-            taken=True,
-            mispredict=True,
-            ftq_flag=int(identity["ftq_flag"]),
-            ftq_value=int(identity["ftq_value"]),
-            ftq_offset=int(identity["ftq_offset"]),
-            branch_type=3,
-            ras_action=0,
-            queued_cycle=cycle,
-            is_rvc=bool(identity["is_rvc"]),
-            queue_index=None,
-        )
-    )
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -283,263 +232,193 @@ def test_prefetch_depth_full_wrap_and_flush_recovery_canary(env) -> None:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mbtb_write_buffer_compare_bits_semantics_canary(env) -> None:
-    LoadProgramSequence(
-        image=ProgramImage(payload=_NOP.to_bytes(4, "little") * 16, base_addr=_BASE),
-        step_cycles=0,
-    ).run(env)
+    payload, trace, program = build_mbtb_write_compare_program(_BASE)
+    env.load_program(payload, _BASE)
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    assert not env.monitor.get_errors()
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
-
-    identity = _wait_for_live_ftq_identity(env)
-    assert identity["start_pc"] == _BASE, identity
-    assert identity["is_rvc"] == 0, identity
-    env.backend_model.set_can_accept(0)
-
+    # The other BTBs can represent a wider target and must not hide the real
+    # MainBtb target miss. Keep MainBtb enabled for both prediction and training.
+    env.set_bp_ctrl_enable(ubtb_enable=0, abtb_enable=0, mbtb_enable=1,
+                           tage_enable=0, sc_enable=0, ittage_enable=0)
+    env.backend_model.set_golden_trace(trace)
     recorder = env.functional_coverage
     assert recorder is not None and recorder.env is env
     reader = lambda name: recorder._try_read_dut_signal(env.dut, name)
-
-    target = _BASE + 0x1000
-    changed_target = target + 4
-    semantic_equal_cycles: list[int] = []
-    semantic_change_cycles: list[int] = []
-    actual_paths: dict[str, str] = {}
+    source_identity = (program["set_idx"], program["tag"], program["position"])
+    initial_bits = (3, 0, (program["initial_target"] >> 1) & ((1 << 20) - 1), 1)
+    changed_bits = (3, 0, (program["changed_target"] >> 1) & ((1 << 20) - 1), 1)
+    decoded_observations = {}
+    equal_cycles, change_cycles, observations = [], [], []
+    actual_paths = {}
     pending_events = []
+    stopped_input = False
+    previous_launch = None
+
+    def observe_decoded_source() -> None:
+        # Observe only the backend's real, decoded, golden-matched cfVecs. This
+        # never queues, edits, reuses, or invents a ResolveEntry or FTQ identity.
+        for entry in env.backend_model._cfvec_queue:
+            if int(entry.pc) != program["source_pc"] or entry.golden_match_state != "matched":
+                continue
+            index = int(entry.golden_index)
+            if index in decoded_observations:
+                continue
+            oracle = trace.entries[index]
+            assert int(entry.instr) == program["source_instruction"] == oracle.instr
+            assert not entry.is_rvc and entry.is_cfi and oracle.kind == "jump_indirect"
+            assert entry.golden_target_pc == oracle.target_pc
+            assert oracle.target_pc in (program["initial_target"], program["changed_target"])
+            start_pc = decoded_source_registration(env.backend_model, entry, program)
+            decoded_observations[index] = {
+                "golden_index": index, "cycle": int(entry.cycle),
+                "inst_pc": int(entry.pc), "instruction": int(entry.instr),
+                "target": int(oracle.target_pc), "start_pc": int(start_pc),
+                "ftq_flag": int(entry.ftq_flag), "ftq_value": int(entry.ftq_value),
+                "ftq_offset": int(entry.ftq_offset),
+                "native_from_ftq_index_bits": 6,
+                "exact_ftq_occurrence_match_proven": False,
+            }
 
     def sample_cycle() -> None:
-        nonlocal pending_events, actual_paths
+        nonlocal pending_events, previous_launch
+        current_launch = sample_mbtb_write_launch(
+            reader, cycle=int(env.current_cycle), align_bank=program["align_bank"],
+            internal_bank=program["internal_bank"],
+        )
         for event in pending_events:
-            dirty, dirty_path = read_mbtb_write_buffer_dirty(reader, event)
-            expected_dirty = int(event.semantic_changed)
-            assert dirty == expected_dirty, {
+            dirty, path = read_mbtb_write_buffer_dirty(reader, event)
+            assert dirty == int(event.semantic_changed), {
                 "reason": "MBTB hitWritten dirty update did not match compareBits semantics",
-                "cycle": int(env.current_cycle),
-                "expected_dirty": expected_dirty,
-                "observed_dirty": int(dirty),
-                "dirty_path": dirty_path,
-                "event": event,
+                "cycle": int(env.current_cycle), "expected_dirty": int(event.semantic_changed),
+                "observed_dirty": dirty, "dirty_path": path, "event": event,
             }
-            actual_paths[f"dirty_after_{dirty_path}"] = dirty_path
+            actual_paths["dirty_after_" + path] = path
         pending_events = []
-
         try:
             events = sample_mbtb_write_buffer_events(reader)
         except BpuV3SignalUnavailable as exc:
             pytest.fail(str(exc), pytrace=False)
-
-        unique_events = {}
+        seen_slots = set()
         for event in events:
-            key = (
-                event.align_bank,
-                event.internal_bank,
-                event.row,
-                event.entry,
-            )
-            if key in unique_events:
-                unique_events[key] = None
-            else:
-                unique_events[key] = event
-        for event in unique_events.values():
-            if event is None:
+            if ((event.align_bank, event.internal_bank) !=
+                    (program["align_bank"], program["internal_bank"])
+                    or event.incoming.identity != source_identity):
                 continue
-            assert event.dirty == 0, {
-                "reason": "hitWritten selected an already dirty MBTB entry",
-                "cycle": int(env.current_cycle),
-                "event": event,
-            }
-            assert event.identity_matches, {
-                "reason": "MBTB hitWritten identity did not match set/tag/position",
-                "cycle": int(env.current_cycle),
-                "event": event,
-            }
-            pending_events.append(event)
+            slot = (event.align_bank, event.internal_bank, event.row, event.entry)
+            assert slot not in seen_slots, {"reason": "ambiguous simultaneous source writes", "event": event}
+            seen_slots.add(slot)
+            assert event.identity_matches and event.dirty == 0, event
+            assert event.incoming.compare_bits in (initial_bits, changed_bits), event
+            assert event.stored.compare_bits in (initial_bits, changed_bits), event
+            assert previous_launch is not None, {"reason": "no sampled native launch before registered event", "event": event}
+            training = previous_launch.bind_event(event, program, event_cycle=int(env.current_cycle))
+            matching_decodes = [item for item in decoded_observations.values()
+                                if item["target"] == training.target]
+            assert matching_decodes, {"reason": "source write has no real decoded oracle-bound CFI", "event": event}
             actual_paths.update(event.signal_paths)
-            target = (
-                semantic_change_cycles
-                if event.semantic_changed
-                else semantic_equal_cycles
-            )
-            target.append(int(env.current_cycle))
+            actual_paths.update(previous_launch.signal_paths)
+            pending_events.append(event)
+            if event.semantic_changed:
+                assert event.stored.compare_bits == initial_bits and event.incoming.compare_bits == changed_bits, event
+                assert equal_cycles, {"reason": "lower-target change arrived before semantic-equal evidence", "event": event}
+                change_cycles.append(int(env.current_cycle))
+            elif event.incoming.compare_bits == initial_bits:
+                equal_cycles.append(int(env.current_cycle))
+            observations.append({"cycle": int(env.current_cycle), "trace_cursor": trace.cursor,
+                                 "event": asdict(event), "training": asdict(training),
+                                 "native_launch": asdict(previous_launch), "registered_delay_edges": 1,
+                                 "compatible_decoded_source_indices": [item["golden_index"] for item in matching_decodes],
+                                 "exact_ftq_occurrence_match_proven": False})
+        previous_launch = current_launch
 
-    _queue_plain_jalr_mispredict(env, identity, target=target)
-    for _ in range(_cycle_limit("TB_MBTB_INITIAL_DRAIN_CYCLES", 32)):
+    for _ in range(_cycle_limit("TB_MBTB_COMPARE_PROGRAM_MAX_CYCLES", 16000)):
         env.step(1)
+        observe_decoded_source()
         sample_cycle()
-    assert not semantic_equal_cycles and not semantic_change_cycles, {
-        "reason": "initial plain-JALR allocation unexpectedly hit a clean MBTB entry",
-        "identity": identity,
-    }
-
-    _queue_plain_jalr_mispredict(env, identity, target=target)
-    for _ in range(_cycle_limit("TB_MBTB_EQUAL_MAX_CYCLES", 128)):
-        env.step(1)
-        sample_cycle()
-        if semantic_equal_cycles:
+        if trace.cursor >= len(trace.entries) and not stopped_input:
+            # The trace is a fixed architectural prefix. Do not decode a new
+            # unbound indirect CFI after that prefix while draining real writes.
+            env.backend_model.set_can_accept(0)
+            stopped_input = True
+        if stopped_input and equal_cycles and change_cycles and not pending_events:
             break
-    assert semantic_equal_cycles, {
-        "reason": "same-PC plain-JALR retrain did not reach a semantic-equal clean MBTB hitWritten entry",
-        "identity": identity,
-        "backend": env.backend_model.get_stats(),
-        "icache": env.icache_agent.get_stats(),
+    evidence = {
+        **program, "registration_identity": list(source_identity),
+        "trace_cursor": trace.cursor, "trace_entries": len(trace.entries),
+        "decoded_sources": list(decoded_observations.values()),
+        "semantic_equal_cycles": equal_cycles, "semantic_change_cycles": change_cycles,
+        "observations": observations, "signal_paths": actual_paths,
+        "synthetic_resolve": False, "canonical_promotion": False,
+        "native_write_pipeline_delay_edges": 1,
+        "decoded_binding_scope": "architectural source and full target; native train interface has no FTQ occurrence ID",
+        "exact_ftq_occurrence_match_proven": False,
     }
+    env._emit_event("bpu.mbtb_write_compare_architectural_program", evidence)
+    recorder.risk_observations.append({"risk": "mbtb_write_buffer_compare_bits_semantics", **evidence})
+    assert trace.cursor == len(trace.entries), {"reason": "architectural far JALR program did not complete", "evidence": evidence, "backend": env.backend_model.get_stats()}
+    assert equal_cycles, {"reason": "real same-source/same-target JALR did not reach clean semantic-equal hitWritten", "evidence": evidence}
+    assert change_cycles, {"reason": "real same-source lower-target change did not reach compareBits update", "evidence": evidence}
+    assert not pending_events, {"reason": "last dirty update was not observed across the edge", "events": pending_events}
+    assert not env.monitor.get_errors(), env.monitor.get_errors()
+    assert not env.get_errors(), env.get_errors()
 
-    if pending_events:
-        env.step(1)
-        sample_cycle()
-
-    _queue_plain_jalr_mispredict(env, identity, target=changed_target)
-    for _ in range(_cycle_limit("TB_MBTB_CHANGE_MAX_CYCLES", 128)):
-        env.step(1)
-        sample_cycle()
-        if semantic_change_cycles:
-            break
-    assert semantic_change_cycles, {
-        "reason": "same-PC plain-JALR lower-target change did not reach MBTB compareBits update",
-        "identity": identity,
-        "equal_cycles": semantic_equal_cycles,
-        "backend": env.backend_model.get_stats(),
-    }
-
-    if pending_events:
-        env.step(1)
-        sample_cycle()
-
-    recorder.risk_observations.append(
-        {
-            "cycle": int(env.current_cycle),
-            "risk": "mbtb_write_buffer_compare_bits_semantics",
-            "identity": dict(identity),
-            "semantic_equal_target": int(target),
-            "semantic_change_target": int(changed_target),
-            "semantic_equal_cycles": list(semantic_equal_cycles),
-            "semantic_change_cycles": list(semantic_change_cycles),
-            "signal_paths": actual_paths,
-        }
-    )
-    assert not env.monitor.get_errors()
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "latest DUT no longer produces the target-equal BTB comparison from the "
-        "current one-shot OtherIndirect training stimulus"
-    ),
-)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_btb_lower_target_diff_semantics_canary(env) -> None:
-    env.load_program(_NOP.to_bytes(4, "little") * 4096, _BASE)
+    payload, trace, program = build_bpu_target_change_program(_BASE)
+    env.load_program(payload, _BASE)
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    assert not env.monitor.get_errors()
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
-    identity = _wait_for_live_ftq_identity(env)
     env.set_bp_ctrl_enable(ittage_enable=0)
-
+    env.backend_model.set_golden_trace(trace)
     recorder = env.functional_coverage
     assert recorder is not None and recorder.env is env
     reader = lambda name: recorder._try_read_dut_signal(env.dut, name)
-
-    btb_target_equal_cycles: list[int] = []
-    btb_target_diff_cycles: list[int] = []
-    btb_high_only_cycles: list[int] = []
-    actual_paths: dict[str, str] = {}
-
-    def sample_cycle() -> None:
-        try:
-            sample = sample_bpu_target_diff_cycle(reader)
-        except BpuV3SignalUnavailable as exc:
-            pytest.fail(str(exc), pytrace=False)
-        if not sample.target_only_candidate:
-            return
-        assert sample.s3_override == int(sample.target_diff), {
-            "reason": "BPU target-only override did not match predictor-specific target comparison",
-            "cycle": int(env.current_cycle),
-            "sample": sample,
-        }
-        actual_paths.update(sample.signal_paths)
-        if sample.target_source != "btb":
-            return
-        if sample.btb_high_only_diff:
-            btb_high_only_cycles.append(int(env.current_cycle))
-        elif sample.target_diff:
-            btb_target_diff_cycles.append(int(env.current_cycle))
-        else:
-            btb_target_equal_cycles.append(int(env.current_cycle))
-
-    def run_phase(max_cycles: int) -> None:
-        for _ in range(int(max_cycles)):
-            env.step(1)
-            sample_cycle()
-
-    target = _BASE + 0x1000
-    lower_changed_target = target + 4
-    # Same-startPc BTBs reconstruct upper target bits; only lower/carry changes
-    # are legal dynamic mismatches. The high-only rule is checked structurally.
-
-    _queue_plain_jalr_mispredict(env, identity, target=target)
-    run_phase(_cycle_limit("TB_BTB_COMPARE_TRAIN_CYCLES", 64))
-    env.backend_model.inject_redirect(
-        identity["start_pc"],
-        "btb_target_equal_probe",
-        delay_cycles=0,
-    )
-    run_phase(_cycle_limit("TB_BTB_COMPARE_EQUAL_CYCLES", 128))
-
-    assert btb_target_equal_cycles, {
-        "reason": "trained OtherIndirect did not produce a target-equal BTB comparison",
-        "identity": identity,
-        "backend": env.backend_model.get_stats(),
-    }
-
-    equal_count = len(btb_target_equal_cycles)
-    _queue_plain_jalr_mispredict(env, identity, target=target)
-    run_phase(_cycle_limit("TB_BTB_COMPARE_TRAIN_CYCLES", 64))
-    env.backend_model.inject_redirect(
-        identity["start_pc"],
-        "btb_target_equal_retrain_probe",
-        delay_cycles=0,
-    )
-    run_phase(_cycle_limit("TB_BTB_COMPARE_EQUAL_CYCLES", 128))
-    assert len(btb_target_equal_cycles) > equal_count, {
-        "reason": "same-target retrain did not preserve a repeatable BTB comparison",
-        "identity": identity,
-        "equal_cycles": btb_target_equal_cycles,
-        "backend": env.backend_model.get_stats(),
-    }
-    assert not btb_target_diff_cycles, {
-        "reason": "BTB target diff appeared before the lower target changed",
-        "diff_cycles": btb_target_diff_cycles,
-    }
-
-    _queue_plain_jalr_mispredict(env, identity, target=lower_changed_target)
-    run_phase(_cycle_limit("TB_BTB_COMPARE_CHANGE_TRAIN_CYCLES", 128))
-    env.backend_model.inject_redirect(
-        identity["start_pc"],
-        "btb_target_lower_change_probe",
-        delay_cycles=0,
-    )
-    run_phase(_cycle_limit("TB_BTB_COMPARE_LOWER_CHANGE_CYCLES", 128))
-
-    assert btb_target_diff_cycles, {
-        "reason": "BTB lower-target change did not exercise s3 override",
-        "identity": identity,
-        "high_only_cycles": btb_high_only_cycles,
-        "backend": env.backend_model.get_stats(),
-    }
-
-    recorder.risk_observations.append(
-        {
-            "cycle": int(env.current_cycle),
-            "risk": "btb_lower_target_diff_semantics",
-            "identity": dict(identity),
-            "target": int(target),
-            "lower_changed_target": int(lower_changed_target),
-            "btb_target_equal_cycles": list(btb_target_equal_cycles),
-            "btb_target_diff_cycles": list(btb_target_diff_cycles),
-            "btb_high_only_cycles": list(btb_high_only_cycles),
-            "btb_high_only_dynamic_status": "not_legally_constructible_same_start_pc",
-            "signal_paths": actual_paths,
-        }
-    )
-    assert not env.monitor.get_errors()
+    equal_cycles, diff_cycles, high_only_cycles, suppressed_cycles, observations = [], [], [], [], []
+    actual_paths = {}
+    for _ in range(_cycle_limit("TB_BTB_COMPARE_PROGRAM_MAX_CYCLES", 12000)):
+        env.step(1)
+        sample = sample_bpu_target_diff_cycle(reader)
+        if (sample.target_only_candidate and sample.s3_start_pc == program["source_pc"]
+                and sample.s3_branch_type == 3 and sample.s3_ras_action == 0
+                and sample.target_source == "btb"):
+            assert sample.s3_override == sample.expected_override, {
+                "reason": "registered S3/S2 BTB target-only override equation mismatch",
+                "cycle": int(env.current_cycle), "sample": sample,
+            }
+            actual_paths.update(sample.signal_paths)
+            observation = {"cycle": int(env.current_cycle),
+                           "trace_cursor": trace.cursor, "sample": vars(sample)}
+            observations.append(observation)
+            kind = sample.target_comparison_kind
+            if kind == "equal":
+                assert not sample.full_target_diff
+                equal_cycles.append(int(env.current_cycle))
+            elif kind == "suppressed":
+                suppressed_cycles.append(int(env.current_cycle))
+            elif kind == "high_only":
+                high_only_cycles.append(int(env.current_cycle))
+            else:
+                diff_cycles.append(int(env.current_cycle))
+        if trace.cursor >= len(trace.entries):
+            break
+    env._emit_event("bpu.target_comparison_architectural_program", {
+        **program, "trace_cursor": trace.cursor, "trace_entries": len(trace.entries),
+        "equal_cycles": equal_cycles, "diff_cycles": diff_cycles,
+        "high_only_cycles": high_only_cycles, "suppressed_cycles": suppressed_cycles,
+        "observations": observations,
+        "signal_paths": actual_paths, "synthetic_resolve": False,
+        "canonical_promotion": False,
+    })
+    assert trace.cursor == len(trace.entries), {"reason": "architectural JALR program did not complete",
+        "cursor": trace.cursor, "entries": len(trace.entries), "backend": env.backend_model.get_stats()}
+    assert len(equal_cycles) >= 2, {"reason": "repeated real JALR did not yield repeatable target-equal BTB evidence",
+        "program": program, "equal_cycles": equal_cycles, "suppressed_cycles": suppressed_cycles,
+        "observations": observations[-16:]}
+    assert diff_cycles, {"reason": "architectural lower-target change did not reach a target-only BTB mismatch",
+        "program": program, "observations": observations[-16:]}
+    assert not env.monitor.get_errors(), env.monitor.get_errors()
+    assert not env.get_errors(), env.get_errors()
