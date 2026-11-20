@@ -244,6 +244,7 @@ class LrqCreditManager(implicit p: Parameters) extends XSModule {
   XSError(nextBusy > LoadQueueReplaySize.U,
     p"LRQ credit imbalance: busy=$busy returned=${io.update.returned} next=$nextBusy\n")
   XSError(io.canceledHeldCount > io.heldCount, "LRQ canceled holds exceed occupied holds")
+  XSPerfHistogram("lrq_credit_busy", busy, true.B, 0, LoadQueueReplaySize + 1)
   XSPerfAccumulate("lrq_borrow_allowed_cycles", useBorrow)
   XSPerfAccumulate("lrq_borrow_last_credit", useBorrow &&
     (busy +& PopCount(io.accepted) === LoadQueueReplaySize.U) && io.accepted.asUInt.orR)
@@ -1122,7 +1123,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.replayAllocate := allocated.asUInt.orR
 
   XSPerfAccumulate("replay_special_mode_enter", specialModeEnter)
-  val perfValidCount = RegNext(PopCount(allocated))
+  XSPerfHistogram("lrq_allocated_entries", PopCount(allocated), true.B, 0, LoadQueueReplaySize + 1)
+  XSPerfHistogram("lrq_pending_entries", PopCount(allocated.asUInt & pending.asUInt), true.B, 0, LoadQueueReplaySize + 1)
 
   //  perf cnt
   val normalRelease = VecInit(io.enq.zipWithIndex.map { case (enq, w) =>
