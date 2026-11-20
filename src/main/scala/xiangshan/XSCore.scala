@@ -84,6 +84,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter {
   val io = IO(new Bundle {
+    val entropy = new EntropySourceIO
     val hartId = Input(UInt(hartIdLen.W))
     val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
     val msiAck = Output(Bool())
@@ -129,6 +130,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val frontend = outer.frontend.module
   val backend = outer.backend.module
+  io.entropy <> backend.io.entropy
   val memBlock = outer.memBlock.module
 
   frontend.io.hartId := memBlock.io.inner_hartId

@@ -234,6 +234,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   def debug = wrapper.asInstanceOf[L].debug
 
   val tileio = IO(new Bundle {
+    val entropy = new EntropySourceIO
     val hartId = Input(UInt(p(MaxHartIdBits).W))
     val riscv_wfi = Output(Bool())
     val riscv_critical_error = Output(Bool())
@@ -255,6 +256,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
   core_with_l2.module.io.reset_mtvec.foreach(_ := tileio.riscv_rst_mtvec.get)
   core_with_l2.module.io.hartId := tileio.hartId
+  tileio.entropy <> core_with_l2.module.io.entropy
   core_with_l2.module.io.nodeID.get := tileio.nodeID
 
   /* dft */

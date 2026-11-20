@@ -292,6 +292,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val io = IO(new Bundle {
       val clock = Input(Clock())
+      val entropy = Vec(NumCores, new EntropySourceIO)
       val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
@@ -459,6 +460,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+      io.entropy(i) <> core.module.io.entropy
       core.module.io.msiInfo.valid := imsic_bus_tops(i).module.msiio.vld_req
       core.module.io.msiInfo.bits := imsic_bus_tops(i).module.msiio.data
       imsic_bus_tops(i).module.msiio.vld_ack := core.module.io.msiAck

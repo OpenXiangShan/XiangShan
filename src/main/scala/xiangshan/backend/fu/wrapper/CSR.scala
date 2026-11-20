@@ -188,6 +188,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.nonMaskableIRP.NMI_31 := csrIn.externalInterrupt.nmi.nmi_31
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
+  csrMod.io.entropy <> csrIn.entropy
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
   csrMod.io.fromTop.l2FlushDone := io.csrin.get.l2FlushDone
   csrMod.io.fromTop.reset_mtvec.foreach(_ := io.csrin.get.reset_mtvec.get)
