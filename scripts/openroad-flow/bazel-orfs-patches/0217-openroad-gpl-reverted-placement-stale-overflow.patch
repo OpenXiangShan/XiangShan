@@ -1,0 +1,287 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Tue, 10 Nov 2026 19:49:28 +0100
+Subject: [PATCH 1/2] gpl: a reverted placement does not converge on the
+ overflow it replaced
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+revertToSnapshot() puts back the snapshot's placement, and the region's
+overflow keeps the value measured on the placement it discards until
+the next iteration measures again. A routability pass that goes back to
+the routability snapshot (GPL-0087, GPL-0089) on an iteration where a
+region's overflow is at or below the target overflow is followed, in
+the same iteration, by a convergence test that reads that value. With
+one region the placement ends there, on the snapshot: the placement
+taken at the snapshot overflow (0.60 by default), reported as converged
+at the overflow of the one it replaced. With several regions, each one
+that reached the target on that iteration is locked on its snapshot
+while the others go on.
+
+With one region that takes the cells to settle on the very iteration
+the overflow reaches the target. The next change ends a waiting pass on
+that iteration and would make it the rule, so this one comes first.
+
+revertToSnapshot() now marks the region's overflow stale, beside the
+two reported values it already clears for the same reason, and
+updateNextIter() clears the mark where the main loop measures the
+overflow again. The convergence test moves into
+NesterovBase::isConvergenceDue(), which does not hold on a stale
+overflow. checkConvergence() uses it, and the next change asks the same
+question before the pass. A placement that was just reverted goes on
+from the snapshot, and the next measurement decides. A pass that does
+not revert (GPL-0090) leaves the overflow as measured, and the
+placement can converge in the same iteration, as before.
+
+What does not change, and what is left:
+
+- A revert on an iteration where every region is above the target was
+  not followed by convergence before either.
+- The other callers of revertToSnapshot() are the divergence recoveries
+  (GPL-0112, GPL-0998, GPL-0997) and the revert after the loop
+  (GPL-0121). They go on to the next iteration's measurement or end the
+  placement, and nothing reads the mark in between.
+- The mark gates the convergence test only. nesterovAdjustPhi() reads
+  the region's overflow at the top of the next iteration, before it is
+  measured again, for a one-shot threshold at 0.35; that is as it was.
+- NesterovPlace keeps the regions' average, as stale as their own after
+  a revert. Inside the loop the next iteration measures it before
+  anything reads it. When the iteration limit (GPL-1010) falls on a
+  reverting iteration, what reads it after the loop sees the stale
+  average: the GPL-0121 test, incremental placement's choice of a
+  second phase and, with graphics on, the last point of the plot.
+  Before this change a revert with every region at or below the target
+  ended the placement with it.
+- The same could be had by having runRoutability() return whether it
+  reverted and the main loop go on to the next iteration, as it does
+  after a divergence recovery. The mark sits in NesterovBase with the
+  state the revert invalidates. Measuring again inside
+  revertToSnapshot() would need the iteration number, which the
+  overflow's denominator depends on.
+
+TimingRepairIntegrationTest.RevertedPlacementDoesNotConvergeOnStaleOverflow
+drives the real controller in the main loop's order:
+routabilitySnapshot(), runRoutability(), isConverged(). The cells are
+settled at the target overflow, so the pass runs with no wait; it finds
+congestion and reverts. Without the change the placement converges in
+that iteration. With it it does not, and once updateNextIter() has
+cleared the mark, a pass that meets the congestion target is followed
+by convergence.
+
+No compared regression golden prints a revert: simple01-rd to
+simple04-rd run one pass that ends in GPL-0090, so none changes.
+test/upf_aes.ok shows reverts but is not compared (upf_aes is a
+pass/fail test).
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/nesterovBase.cpp             | 18 +++-
+ openroad/gpl/src/nesterovBase.h               |  6 ++
+ .../test/congestion_buffers_timing_test.cpp   | 98 ++++++++++++++++++-
+ 3 files changed, 118 insertions(+), 4 deletions(-)
+
+diff --git a/openroad/gpl/src/nesterovBase.cpp b/openroad/gpl/src/nesterovBase.cpp
+index 9f7a7d0..811d0c0 100644
+--- a/openroad/gpl/src/nesterovBase.cpp
++++ b/openroad/gpl/src/nesterovBase.cpp
+@@ -3677,6 +3677,7 @@ void NesterovBase::updateNextIter(const int iter)
+ 
+   sum_overflow_ = getOverflowArea() / overflowDenominator;
+   sum_overflow_unscaled_ = getOverflowAreaUnscaled() / overflowDenominator;
++  is_overflow_stale_ = false;
+ 
+   int64_t hpwl = nbc_->getHpwl();
+ 
+@@ -3906,6 +3907,15 @@ void NesterovBase::saveSnapshot()
+   }
+ }
+ 
++bool NesterovBase::isConvergenceDue() const
++{
++  // After a revert the overflow still describes the placement that was
++  // discarded; the reverted one has yet to be measured.
++  return isConverged_
++         || (!is_overflow_stale_
++             && sum_overflow_unscaled_ <= npVars_->targetOverflow);
++}
++
+ bool NesterovBase::checkConvergence(int gpl_iter_count,
+                                     int routability_gpl_iter_count,
+                                     RouteBase* rb)
+@@ -3914,7 +3924,7 @@ bool NesterovBase::checkConvergence(int gpl_iter_count,
+   if (isConverged_) {
+     return true;
+   }
+-  if (sum_overflow_unscaled_ <= npVars_->targetOverflow) {
++  if (isConvergenceDue()) {
+     const bool has_group = pb_->getGroup();
+     const std::string group_name = has_group ? pb_->getGroup()->getName() : "";
+     const int final_iter = gpl_iter_count;
+@@ -4135,6 +4145,12 @@ bool NesterovBase::revertToSnapshot()
+   prev_reported_hpwl_ = 0;
+   prev_reported_overflow_unscaled_ = 0;
+ 
++  // The overflow is not part of the snapshot either, and it gates more than a
++  // report: left as it is, the convergence test later in this iteration would
++  // judge the reverted placement by the overflow of the one it replaced. The
++  // next updateNextIter() measures the placement again and clears the mark.
++  is_overflow_stale_ = true;
++
+   return true;
+ }
+ 
+diff --git a/openroad/gpl/src/nesterovBase.h b/openroad/gpl/src/nesterovBase.h
+index 8ce33ca..e839008 100644
+--- a/openroad/gpl/src/nesterovBase.h
++++ b/openroad/gpl/src/nesterovBase.h
+@@ -1264,6 +1264,8 @@ class NesterovBase
+   bool checkConvergence(int gpl_iter_count,
+                         int routability_gpl_iter_count,
+                         RouteBase* rb);
++  // True when checkConvergence() would return true; no side effects.
++  bool isConvergenceDue() const;
+   void resetConverged() { isConverged_ = false; }
+ 
+   bool checkDivergence();
+@@ -1532,6 +1534,10 @@ class NesterovBase
+   float sum_overflow_ = 0;
+   float sum_overflow_unscaled_ = 0;
+   float prev_reported_overflow_unscaled_ = 0;
++  // Set by revertToSnapshot(): the overflow above was measured on the
++  // placement the revert discarded. Cleared by updateNextIter(), where the
++  // main loop measures it again.
++  bool is_overflow_stale_ = false;
+ 
+   // half-parameter-wire-length
+   int64_t prev_hpwl_ = 0;
+diff --git a/openroad/gpl/test/congestion_buffers_timing_test.cpp b/openroad/gpl/test/congestion_buffers_timing_test.cpp
+index ffc0fe9..4697298 100644
+--- a/openroad/gpl/test/congestion_buffers_timing_test.cpp
++++ b/openroad/gpl/test/congestion_buffers_timing_test.cpp
+@@ -31,9 +31,9 @@
+ 
+ namespace gpl {
+ 
+-// Friend access only sets the iteration's overflow and invokes the production
+-// boundary. TimingBase, resizer, callbacks and updateGCellState all run for
+-// real.
++// Friend access sets the iteration's overflow and displacement, reads the
++// controller's state and invokes the production boundary. TimingBase, resizer,
++// callbacks and updateGCellState all run for real.
+ class TimingRepairIntegrationTest : public tst::IntegratedFixture
+ {
+  protected:
+@@ -291,6 +291,55 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
+     grt_.getRudy()->setWireWidth(1000000);
+   }
+ 
++  // Sets the unscaled overflow the two gates read: each region's for the
++  // convergence test, their average for the routability gate.
++  void setOverflow(float overflow)
++  {
++    np_->average_overflow_unscaled_ = overflow;
++    for (const auto& nb : nb_vec_) {
++      nb->sum_overflow_unscaled_ = overflow;
++    }
++  }
++
++  // Cells moving at the given fraction of their peak displacement.
++  void setDisplacementRatio(float ratio)
++  {
++    for (const auto& nb : nb_vec_) {
++      nb->peak_coordi_distance_ = 1.0f;
++      nb->coordiDistance_ = ratio;
++    }
++  }
++
++  // Takes the routability snapshot at the snapshot overflow, as the main loop
++  // does on the way down.
++  void saveRoutabilitySnapshot(float current_a)
++  {
++    setOverflow(options_.routabilitySnapshotOverflow);
++    np_->routabilitySnapshot(0, current_a, "", ordinary_iterations_, 0);
++    ASSERT_TRUE(np_->is_routability_snapshot_saved_);
++  }
++
++  bool placementSettled() const { return np_->isPlacementSettled(); }
++  // True when the last RUDY average, computed by a pass or at convergence, is
++  // below the congestion target. A pass that finds it so does not revert.
++  bool congestionTargetMet() const
++  {
++    return rb_->getRudyAverage() < rb_->rbVars_.targetRC;
++  }
++  int settleWaitStart() const
++  {
++    return np_->routability_settle_wait_start_iter_;
++  }
++
++  // One iteration's routability snapshot, routability step and convergence
++  // test, in the main loop's order. Returns whether the placement converged.
++  bool runRoutabilityThenConvergence(int iter, float& current_a)
++  {
++    np_->routabilitySnapshot(iter, current_a, "", ordinary_iterations_, 0);
++    np_->runRoutability(iter, 0, "", ordinary_iterations_, current_a);
++    return np_->isConverged(iter, 0);
++  }
++
+   odb::dbInst* inflatedNewBuffer()
+   {
+     for (const auto& cell : nb_vec_[0]->getGCells()) {
+@@ -496,6 +545,49 @@ INSTANTIATE_TEST_SUITE_P(RoutabilityPhases,
+                          TimingRepairRoutabilityPhaseTest,
+                          ::testing::Values(0, 1, 2));
+ 
++// A routability pass that finds congestion goes back to the snapshot. The
++// overflow measured before the revert describes the placement that was
++// discarded, so the convergence test of the same iteration must not end the
++// placement on it. The next measurement counts again.
++TEST_F(TimingRepairIntegrationTest,
++       RevertedPlacementDoesNotConvergeOnStaleOverflow)
++{
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  // Settled at the target overflow: the pass runs with no wait, on an
++  // iteration whose overflow passes the convergence test.
++  setDisplacementRatio(0.0f);
++  setOverflow(options_.overflow);
++  ASSERT_TRUE(placementSettled());
++  bool converged = runRoutabilityThenConvergence(1, current_a);
++  ASSERT_EQ(ordinary_iterations_, 1);
++  ASSERT_EQ(settleWaitStart(), -1);
++  ASSERT_TRUE(routabilityNeeded())
++      << "the pass must find congestion and go back to the snapshot";
++  ASSERT_GT(rb_->getTotalInflation(), 0);
++  ASSERT_FALSE(converged)
++      << "a reverted placement must not converge on the overflow it replaced";
++
++  // The next iteration measures the placement again. updateNextIter() stands
++  // in for it with no Nesterov step before it, so the overflow and the
++  // displacement are set by hand afterwards; the rest of what it does is not
++  // read here. A pass that meets the congestion target does not revert, and
++  // the placement converges.
++  np_->updateNextIter(2);
++  setDisplacementRatio(0.0f);
++  setOverflow(options_.overflow);
++  grt_.getRudy()->setWireWidth(1);
++  converged = runRoutabilityThenConvergence(2, current_a);
++  ASSERT_EQ(ordinary_iterations_, 2);
++  ASSERT_FALSE(routabilityNeeded());
++  ASSERT_TRUE(congestionTargetMet())
++      << "the second pass must finish without a revert";
++  EXPECT_TRUE(converged)
++      << "a measured placement at the target overflow must converge";
++}
++
+ TEST_F(TimingRepairIntegrationTest,
+        SynchronousCallbacksPrecedeInflationAndOptimizerInitialization)
+ {
+-- 
+2.53.0
+

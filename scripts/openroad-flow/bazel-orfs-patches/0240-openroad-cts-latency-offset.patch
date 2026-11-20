@@ -1,0 +1,413 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] cts: a sink's cts_latency_offset property moves its balanced
+ latency
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The latency balancer gives every macro sink its clock pin's
+max_clock_tree_path (rise and fall averaged) and pads the faster trees
+until each macro's pin arrival plus that insertion delay meets the
+register tree's average. There was no way to ask for a macro to be
+clocked earlier or later than that on purpose: a parent over hardened
+blocks whose crossings want block-granular useful skew, or whose blocks
+drift early between CTS's placement parasitics and global route, could
+only edit the block's abstract, which pre-CTS (ideal clock) timing also
+reads.
+
+The balancer now subtracts a sink instance's "cts_latency_offset" double
+property (seconds) from the insertion delay it balances with, in both
+places it adds one, through one helper. A positive offset lands the
+block's internal clock that much later, a negative one earlier; CTS-0139
+names each sink it applies to.
+
+A macro tree whose only child is the register tree is a leaf to the
+balancer: it pads the two trees' average arrivals against each other and
+never looks at one macro. Where a sink of such a tree has the property,
+the tree is no longer taken as a leaf, so the graph descends to each
+macro, as it already does for a macro tree with clock-gated children.
+
+Nothing else reads the property: STA, the H-tree's macro clustering and
+-useful_skew's targets are unchanged, and a design without the property
+balances as before.
+
+cts::set_latency_offset <instance> <offset> sets it from Tcl, the offset
+in the user time unit, before clock_tree_synthesis; a flow that calls it
+on an OpenROAD without this change stops on an unknown command instead
+of building an unskewed tree.
+
+src/cts/test/latency_offset asks for one macro 50 ps late on
+insertion_delay.def and checks that it lands within 15 ps of that after
+the registers' mean arrival (54.5 ps here); asked for 0 it lands at 3.7
+and the check fails.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD with a per-sink latency target in CTS, or when nothing sets the
+property.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/cts/src/LatencyBalancer.cpp | 100 +++++++++++++++------------
+ openroad/cts/src/LatencyBalancer.h   |   8 +++
+ openroad/cts/src/TritonCTS.tcl       |  23 ++++++
+ openroad/cts/test/BUILD              |   6 ++
+ openroad/cts/test/latency_offset.ok  |  79 +++++++++++++++++++++
+ openroad/cts/test/latency_offset.tcl |  49 +++++++++++++
+ 6 files changed, 222 insertions(+), 43 deletions(-)
+ create mode 100644 openroad/cts/test/latency_offset.ok
+ create mode 100644 openroad/cts/test/latency_offset.tcl
+
+diff --git a/openroad/cts/src/LatencyBalancer.cpp b/openroad/cts/src/LatencyBalancer.cpp
+index 5e66697..68f6487 100644
+--- a/openroad/cts/src/LatencyBalancer.cpp
++++ b/openroad/cts/src/LatencyBalancer.cpp
+@@ -186,7 +186,10 @@ int64_t LatencyBalancer::computeWireLumpedDelay(
+ 
+ void LatencyBalancer::findLeafBuilders(TreeBuilder* builder)
+ {
+-  if (builder->isLeafTree()) {
++  // A leaf tree is balanced as one sink, its sinks' average arrival. A
++  // macro tree with a cts_latency_offset sink is not: the offset is a
++  // sink's own, so the graph descends to each macro.
++  if (builder->isLeafTree() && !hasLatencyOffsetSink(builder)) {
+     std::string topBufferName = builder->getTopBufferName();
+     inst2builder_[topBufferName] = builder;
+   }
+@@ -276,27 +279,7 @@ void LatencyBalancer::buildGraph(odb::dbNet* clkInputNet)
+             sta::Vertex* sinkVertex = timingGraph_->pinDrvrVertex(pin);
+             float arrival
+                 = getVertexClkArrival(sinkVertex, clkInputNet, sinkIterm);
+-            float insDelay = 0.0;
+-            sta::LibertyCell* libCell
+-                = network_->libertyCell(network_->dbToSta(sinkInst));
+-            odb::dbMTerm* mterm = sinkIterm->getMTerm();
+-            if (libCell && mterm) {
+-              sta::LibertyPort* libPort
+-                  = libCell->findLibertyPort(mterm->getConstName());
+-              if (libPort) {
+-                const float rise = libPort->clkTreeDelay(
+-                    0.0, sta::RiseFall::rise(), sta::MinMax::max());
+-                const float fall = libPort->clkTreeDelay(
+-                    0.0, sta::RiseFall::fall(), sta::MinMax::max());
+-
+-                if (rise != 0 || fall != 0) {
+-                  insDelay = (rise + fall);
+-                  if (rise != 0 && fall != 0) {
+-                    insDelay /= 2.0;
+-                  }
+-                }
+-              }
+-            }
++            const float insDelay = sinkInsertionDelay(sinkIterm);
+             worseDelay_ = std::max(worseDelay_, (arrival + insDelay));
+             graph_[sinkId].arrival = arrival + insDelay;
+             debugPrint(logger_,
+@@ -421,27 +404,7 @@ void LatencyBalancer::computeSinkArrivalRecur(odb::dbNet* topClokcNet,
+           sta::Vertex* sinkVertex = timingGraph_->pinDrvrVertex(pin);
+           float arrival = getVertexClkArrival(sinkVertex, topClokcNet, iterm);
+           // add insertion delay
+-          float insDelay = 0.0;
+-          sta::LibertyCell* libCell
+-              = network_->libertyCell(network_->dbToSta(inst));
+-          odb::dbMTerm* mterm = iterm->getMTerm();
+-          if (libCell && mterm) {
+-            sta::LibertyPort* libPort
+-                = libCell->findLibertyPort(mterm->getConstName());
+-            if (libPort) {
+-              const float rise = libPort->clkTreeDelay(
+-                  0.0, sta::RiseFall::rise(), sta::MinMax::max());
+-              const float fall = libPort->clkTreeDelay(
+-                  0.0, sta::RiseFall::fall(), sta::MinMax::max());
+-
+-              if (rise != 0 || fall != 0) {
+-                insDelay = (rise + fall);
+-                if (rise != 0 && fall != 0) {
+-                  insDelay /= 2.0;
+-                }
+-              }
+-            }
+-          }
++          const float insDelay = sinkInsertionDelay(iterm);
+           sumArrivals += (arrival + insDelay);
+           numSinks++;
+         }
+@@ -964,6 +927,57 @@ odb::dbITerm* LatencyBalancer::insertDelayBuffers(
+   return getFirstInput(returnBuffer);
+ }
+ 
++bool LatencyBalancer::hasLatencyOffsetSink(TreeBuilder* builder) const
++{
++  if (builder->getTreeType() != TreeType::MacroTree) {
++    return false;
++  }
++  bool found = false;
++  builder->getClock().forEachSink([&](const ClockInst& sink) {
++    odb::dbITerm* iterm = sink.getDbInputPin();
++    if (iterm
++        && odb::dbDoubleProperty::find(iterm->getInst(), "cts_latency_offset")) {
++      found = true;
++    }
++  });
++  return found;
++}
++
++float LatencyBalancer::sinkInsertionDelay(odb::dbITerm* iterm)
++{
++  odb::dbInst* inst = iterm->getInst();
++  float insDelay = 0.0;
++  sta::LibertyCell* libCell = network_->libertyCell(network_->dbToSta(inst));
++  odb::dbMTerm* mterm = iterm->getMTerm();
++  if (libCell && mterm) {
++    sta::LibertyPort* libPort = libCell->findLibertyPort(mterm->getConstName());
++    if (libPort) {
++      const float rise = libPort->clkTreeDelay(
++          0.0, sta::RiseFall::rise(), sta::MinMax::max());
++      const float fall = libPort->clkTreeDelay(
++          0.0, sta::RiseFall::fall(), sta::MinMax::max());
++
++      if (rise != 0 || fall != 0) {
++        insDelay = (rise + fall);
++        if (rise != 0 && fall != 0) {
++          insDelay /= 2.0;
++        }
++      }
++    }
++  }
++  odb::dbDoubleProperty* offset
++      = odb::dbDoubleProperty::find(inst, "cts_latency_offset");
++  if (offset) {
++    insDelay -= offset->getValue();
++    logger_->info(CTS,
++                  139,
++                  "Sink {} is balanced {:.1f} ps later (cts_latency_offset).",
++                  iterm->getName(),
++                  offset->getValue() * 1e12);
++  }
++  return insDelay;
++}
++
+ bool LatencyBalancer::propagateClock(odb::dbITerm* input)
+ {
+   odb::dbInst* inst = input->getInst();
+diff --git a/openroad/cts/src/LatencyBalancer.h b/openroad/cts/src/LatencyBalancer.h
+index 1579091..2e07b4a 100644
+--- a/openroad/cts/src/LatencyBalancer.h
++++ b/openroad/cts/src/LatencyBalancer.h
+@@ -133,6 +133,14 @@ class LatencyBalancer
+       const std::vector<odb::dbITerm*>& sinksInput);
+   bool propagateClock(odb::dbITerm* input);
+   bool isSink(odb::dbITerm* iterm);
++  // The insertion delay a sink is balanced with: its clock pin's
++  // max_clock_tree_path, rise and fall averaged, less the sink instance's
++  // "cts_latency_offset" double property (seconds) if it has one. A
++  // positive offset lands the sink's internal clock that much later than
++  // the others; STA never reads the property.
++  float sinkInsertionDelay(odb::dbITerm* iterm);
++  // A macro tree one of whose sinks carries a cts_latency_offset.
++  bool hasLatencyOffsetSink(TreeBuilder* builder) const;
+ 
+   void showGraph();
+ 
+diff --git a/openroad/cts/src/TritonCTS.tcl b/openroad/cts/src/TritonCTS.tcl
+index 1212b71..0580f7b 100644
+--- a/openroad/cts/src/TritonCTS.tcl
++++ b/openroad/cts/src/TritonCTS.tcl
+@@ -619,6 +619,29 @@ proc report_cts { args } {
+ }
+ 
+ namespace eval cts {
++# The latency balancer clocks the instance's clock pin offset later than
++# balanced (negative: earlier), offset in the user time unit, through the
++# instance's cts_latency_offset property (seconds). Call it before
++# clock_tree_synthesis; the property stays in the database.
++proc set_latency_offset { inst_name offset } {
++  set block [ord::get_db_block]
++  if { $block == "NULL" } {
++    utl::error CTS 140 "No design block found."
++  }
++  set inst [$block findInst $inst_name]
++  if { $inst == "NULL" } {
++    utl::error CTS 141 "set_latency_offset: no instance $inst_name."
++  }
++  sta::check_float "offset" $offset
++  set seconds [sta::time_ui_sta $offset]
++  set prop [odb::dbDoubleProperty_find $inst cts_latency_offset]
++  if { $prop == "NULL" } {
++    odb::dbDoubleProperty_create $inst cts_latency_offset $seconds
++  } else {
++    $prop setValue $seconds
++  }
++}
++
+ proc clock_tree_synthesis_debug { args } {
+   sta::parse_key_args "clock_tree_synthesis_debug" args \
+     keys {} flags {-plot} ;# checker off
+diff --git a/openroad/cts/test/BUILD b/openroad/cts/test/BUILD
+index 6c0764c..7750a58 100644
+--- a/openroad/cts/test/BUILD
++++ b/openroad/cts/test/BUILD
+@@ -42,6 +42,7 @@ COMPULSORY_TESTS = [
+     "insertion_delay",
+     "inverter_sinks",
+     "inverters",
++    "latency_offset",
+     "lvt_lib",
+     "max_cap",
+     "max_wl_two_sinks",
+@@ -218,6 +219,11 @@ filegroup(
+                 "array_tile_ins_delay.lef",
+                 "array_tile_ins_delay.lib",
+             ],
++            "latency_offset": [
++                "array_tile_ins_delay.lef",
++                "array_tile_ins_delay.lib",
++                "insertion_delay.def",
++            ],
+             "inverters": [
+                 "array_tile_ins_delay.lef",
+                 "array_tile_ins_delay.lib",
+diff --git a/openroad/cts/test/latency_offset.ok b/openroad/cts/test/latency_offset.ok
+new file mode 100644
+index 0000000..d5be048
+--- /dev/null
++++ b/openroad/cts/test/latency_offset.ok
+@@ -0,0 +1,79 @@
++[INFO ODB-0227] LEF file: Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
++[INFO ODB-0227] LEF file: array_tile_ins_delay.lef, created 1 library cells
++[INFO ODB-0128] Design: multi_sink
++[INFO ODB-0130]     Created 1 pins.
++[INFO ODB-0131]     Created 279 components and 1673 component-terminals.
++[INFO ODB-0133]     Created 1 nets and 279 connections.
++[INFO CTS-0050] Root buffer is CLKBUF_X3.
++[INFO CTS-0051] Sink buffer is CLKBUF_X3.
++[INFO CTS-0052] The following clock buffers will be used for CTS:
++                    CLKBUF_X3
++[INFO CTS-0049] Characterization buffer is CLKBUF_X3.
++[INFO CTS-0007] Net "clk" found for clock "core".
++[INFO CTS-0011]  Clock net "clk" for macros has 1 sinks.
++[INFO CTS-0011]  Clock net "clk_regs" for registers has 278 sinks.
++[INFO CTS-0008] TritonCTS found 2 clock nets.
++[INFO CTS-0097] Characterization used 1 buffer(s) types.
++[INFO CTS-0201] 1 blockages from hard placement blockages and placed macros will be used.
++[INFO CTS-0027] Generating H-Tree topology for net clk.
++[INFO CTS-0028]  Total number of sinks: 1.
++[INFO CTS-0029]  Macro  sinks will be clustered in groups of up to 4 and with maximum cluster diameter of 50.0 um.
++[INFO CTS-0030]  Number of static layers: 1.
++[INFO CTS-0020]  Wire segment unit: 14000  dbu (7 um).
++[INFO CTS-0021]  Distance between buffers: 7 units (100 um).
++[INFO CTS-0023]  Original sink region: [(5700, 50400), (5700, 50400)].
++[INFO CTS-0024]  Normalized sink region: [(0.407143, 3.6), (0.407143, 3.6)].
++[INFO CTS-0025]     Width:  0.0000.
++[INFO CTS-0026]     Height: 0.0000.
++ Level 1
++    Direction: Vertical
++    Sinks per sub-region: 1
++    Sub-region size: 0.0000 X 0.0000
++[INFO CTS-0034]     Segment length (rounded): 1.
++[INFO CTS-0038]  Stop criterion found. Sink region hpwl is smaller than max wirelength (692.813 um) and max number of sinks is 15.
++[INFO CTS-0035]  Number of sinks covered: 1.
++[INFO CTS-0201] 1 blockages from hard placement blockages and placed macros will be used.
++[INFO CTS-0027] Generating H-Tree topology for net clk_regs.
++[INFO CTS-0028]  Total number of sinks: 278.
++[INFO CTS-0029]  Register sinks will be clustered in groups of up to 10 and with maximum cluster diameter of 60.0 um.
++[INFO CTS-0030]  Number of static layers: 1.
++[INFO CTS-0020]  Wire segment unit: 14000  dbu (7 um).
++[INFO CTS-0021]  Distance between buffers: 7 units (100 um).
++[INFO CTS-0204] A clustering solution was found from clustering size of 10 and clustering diameter of 60.
++[INFO CTS-0205] Better solution may be possible if either -sink_clustering_size, -sink_clustering_max_diameter, or both options are omitted to enable automatic clustering.
++[INFO CTS-0019]  Total number of sinks after clustering: 28.
++[INFO CTS-0024]  Normalized sink region: [(1.34629, 0.912143), (13.4493, 11.6927)].
++[INFO CTS-0025]     Width:  12.1030.
++[INFO CTS-0026]     Height: 10.7806.
++ Level 1
++    Direction: Horizontal
++    Sinks per sub-region: 14
++    Sub-region size: 6.0515 X 10.7806
++[INFO CTS-0034]     Segment length (rounded): 4.
++[INFO CTS-0038]  Stop criterion found. Sink region hpwl is smaller than max wirelength (692.813 um) and max number of sinks is 15.
++[INFO CTS-0035]  Number of sinks covered: 28.
++[INFO CTS-0018]     Created 2 clock buffers.
++[INFO CTS-0012]     Minimum number of buffers in the clock path: 2.
++[INFO CTS-0013]     Maximum number of buffers in the clock path: 2.
++[INFO CTS-0015]     Created 2 clock nets.
++[INFO CTS-0016]     Fanout distribution for the current clock = 1:1..
++[INFO CTS-0017]     Max level of the clock tree: 1.
++[INFO CTS-0018]     Created 31 clock buffers.
++[INFO CTS-0012]     Minimum number of buffers in the clock path: 3.
++[INFO CTS-0013]     Maximum number of buffers in the clock path: 3.
++[INFO CTS-0015]     Created 31 clock nets.
++[INFO CTS-0016]     Fanout distribution for the current clock = 8:1, 10:27, 14:2..
++[INFO CTS-0017]     Max level of the clock tree: 1.
++[INFO CTS-0124] Clock net "clk"
++[INFO CTS-0125]  Sinks 1
++[INFO CTS-0098] Clock net "clk_regs"
++[INFO CTS-0099]  Sinks 279
++[INFO CTS-0100]  Leaf buffers 28
++[INFO CTS-0101]  Average sink wire length 72.77 um
++[INFO CTS-0102]  Path depth 3 - 3
++[INFO CTS-0207]  Dummy loads inserted 1
++[INFO CTS-0033] Balancing latency for clock core
++[INFO CTS-0139] Sink inst_0/clk is balanced 50.0 ps later (cts_latency_offset).
++[INFO CTS-0036]  inserted 6 delay buffers
++[INFO CTS-0037] Total number of delay buffers: 6
++Macro clocked the offset after the registers within 0.015 ns: 1
+diff --git a/openroad/cts/test/latency_offset.tcl b/openroad/cts/test/latency_offset.tcl
+new file mode 100644
+index 0000000..44ae603
+--- /dev/null
++++ b/openroad/cts/test/latency_offset.tcl
+@@ -0,0 +1,49 @@
++# cts::set_latency_offset clocks a macro later than CTS's latency balance:
++# the macro's clock pin arrival plus its insertion delay lands the offset
++# after the registers' mean clock arrival, within a delay buffer. The
++# result is printed as a boolean so the golden survives STA changes.
++source "helpers.tcl"
++
++source Nangate45/Nangate45.vars
++read_liberty Nangate45/Nangate45_typ.lib
++read_liberty array_tile_ins_delay.lib
++read_lef Nangate45/Nangate45.lef
++read_lef array_tile_ins_delay.lef
++read_def insertion_delay.def
++
++source Nangate45/Nangate45.rc
++source $layer_rc_file
++set_wire_rc -signal -layer $wire_rc_layer
++set_wire_rc -clock -layer $wire_rc_layer_clk
++
++create_clock -name core -period 5 clk
++
++set_cts_config -wire_unit 20 \
++  -distance_between_buffers 100 \
++  -sink_clustering_size 10 \
++  -sink_clustering_max_diameter 60 \
++  -num_static_layers 1 \
++  -root_buf CLKBUF_X3 \
++  -buf_list CLKBUF_X3
++
++set offset 0.05
++cts::set_latency_offset inst_0 $offset
++clock_tree_synthesis -sink_clustering_enable
++
++set_propagated_clock [all_clocks]
++estimate_parasitics -placement
++
++# array_tile_ins_delay.lib: max_clock_tree_path rise 0.003, fall 0.004
++set macro [expr { [get_property [get_pins inst_0/clk] arrival_max_rise] + 0.0035 }]
++set sum 0.0
++set n 0
++foreach pin [all_registers -clock_pins] {
++  if { [get_full_name $pin] eq "inst_0/clk" } {
++    continue
++  }
++  set sum [expr { $sum + [get_property $pin arrival_max_rise] }]
++  incr n
++}
++set skew [expr { $macro - $sum / $n }]
++puts "Macro clocked the offset after the registers within 0.015 ns:\
++  [expr { abs($skew - $offset) < 0.015 }]"
+-- 
+2.53.0
+

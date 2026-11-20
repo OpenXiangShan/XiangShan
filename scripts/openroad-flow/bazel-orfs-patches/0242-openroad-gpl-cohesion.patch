@@ -1,0 +1,1071 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Tue, 17 Nov 2026 10:20:21 +0100
+Subject: [PATCH] gpl: -clusters_file, groups of cells pulled toward an anchor
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Nesterov placement minimises the sum of wirelength plus a density
+penalty. A module whose partners sit on opposite sides of the die is
+spread between them by that sum, and the paths inside it pay: on
+XiangShan's XSTile parent, CtrlBlock's cells fill 8 % of their bounding
+box and its worst paths are a wall of control logic at 2,406 ps, where
+the same module placed alone closes at 1,200 ps.
+
+global_placement -clusters_file <json> names groups of cells by
+instance-name prefix; each group's cells are pulled toward its anchor,
+or its own centroid when it has none:
+
+  {"tau_iter": 0,
+   "clusters": [{"name": "CtrlBlock",
+                 "prefixes": ["core/backend/inner_ctrlBlock"],
+                 "anchor_um": [1200, 1250],
+                 "weight": 1.0}]}
+
+A prefix matches the instance of that name and every instance under
+it (prefix/...); the longest matching prefix wins. The pull is the
+descent direction of k * |x - a|^2, k chosen so that a cell one RMS
+radius from the centroid is pulled with `weight` times the mean
+wirelength gradient. It is added to the sum gradient before the
+preconditioner, so the step length, the backtracking and the snapshots
+see it as they see the wirelength and density terms. With tau_iter > 0
+it decays as exp(-iter / tau_iter): a short tau shapes the start of
+placement and lets go, as DG-RePlAce's cluster constraint does (Kahng
+et al., IEEE TCAD 2024); 0 holds the group to the end. The file is
+meant to come from the macro placer's clustering (rtl_macro_placer),
+which already places standard-cell clusters as soft macros.
+
+The file is read once. Which group each gcell is in is matched again,
+by instance name, after any change to the gcell list (a timing-driven
+repair's buffers, routability's fillers): every such change goes
+through the parallel-vector bookkeeping, which marks the groups stale.
+
+Hard stops: an unreadable file (GPL-0343), a malformed one (GPL-0344:
+not JSON, no clusters array, a key missing or of the wrong type, a
+negative weight, an anchor that is not [x, y]), a group that matches no
+cell (GPL-0342). CPU only: the GPU path refuses it (GPL-0340). Without
+-clusters_file nothing changes: gpl's test logs are those of the change
+before this one.
+
+On XSTile's parent, six groups (dispatch, decode, rename, memCtrl, the
+13 integer issue queues, fusionDecoder; weight 1, no fade), measured
+with this change written against an earlier OpenROAD: the reg2reg
+excess over 2,000 ps fell 36 %; adding the ROB (658,000 cells) diverged
+(GPL-0307).
+
+cohesion_test: a group of gcd's cells ends up tighter (RMS radius
+-14 % at weight 1, -73 % at weight 4), an anchor draws its centroid,
+a short tau lets go, the groups follow the cells when the gcell list
+changes under them, and every bad file stops.
+
+Not upstreamed. Carried in bazel-orfs to measure on XiangShan, applied
+after the other carried OpenROAD patches (last, after 0240); retires at
+a //:bump onto an OpenROAD that has it, or is dropped if the
+measurements do not hold.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/BUILD                  |   1 +
+ openroad/gpl/README.md              |   2 +
+ openroad/gpl/include/gpl/Replace.h  |   4 +
+ openroad/gpl/src/nesterovBase.cpp   | 257 +++++++++++++++
+ openroad/gpl/src/nesterovBase.h     |  30 ++
+ openroad/gpl/src/replace.i          |   3 +
+ openroad/gpl/src/replace.tcl        |   2 +
+ openroad/gpl/test/BUILD             |  21 ++
+ openroad/gpl/test/cohesion_test.cpp | 477 ++++++++++++++++++++++++++++
+ 9 files changed, 797 insertions(+)
+ create mode 100644 openroad/gpl/test/cohesion_test.cpp
+
+diff --git a/openroad/gpl/BUILD b/openroad/gpl/BUILD
+index d03e3bae9a..42edb04eda 100644
+--- a/openroad/gpl/BUILD
++++ b/openroad/gpl/BUILD
+@@ -190,6 +190,7 @@ cc_library(
+         "//openroad/sta:opensta_lib",
+         "//openroad/utl",
+         "@abseil-cpp//absl/container:inlined_vector",
++        "@boost.json",
+         "@boost.polygon",
+         "@boost.random",
+         "@boost.scope_exit",
+diff --git a/openroad/gpl/README.md b/openroad/gpl/README.md
+index 29db5a0719..aade572845 100644
+--- a/openroad/gpl/README.md
++++ b/openroad/gpl/README.md
+@@ -114,6 +114,7 @@ global_placement
+     [-routability_max_inflation_ratio routability_max_inflation_ratio]\
+     [-routability_rc_coefficients routability_rc_coefficients]\
+     [-keep_resize_below_overflow keep_resize_below_overflow]\
++    [-clusters_file clusters_file]\
+     [-timing_driven_net_reweight_overflow timing_driven_net_reweight_overflow]\
+     [-timing_driven_net_weight_max timing_driven_net_weight_max]\
+     [-timing_driven_nets_percentage timing_driven_nets_percentage]\
+@@ -161,6 +162,7 @@ global_placement
+ | `-virtual_cts_max_skew_fraction` | Set max insertion delay as fraction of clock period. Valid range is [0, 1]; out-of-range values are clamped. Default is 0.10 (10%). |
+ | `-random_seed` | Set random seed for placement perturbation. Perturbation shifts standard cells by random offsets drawn from a 2D circular Gaussian distribution at the start of global placement to explore layout variations. Default is `1`. |
+ | `-perturb_dist` | Set the perturbation distance (radius) in nanometers. Under a 2D circular Gaussian distribution, 99.5% of the cell perturbations will fall within this radius. If not provided (or <= 0), it defaults to 0.5 microns or one standard cell height (row height), whichever is smaller. |
++| `-clusters_file` | A JSON file naming groups of cells by instance-name prefix (a prefix matches the instance of that name and every instance under it, `prefix/...`; the longest matching prefix wins). During Nesterov placement each group's cells are pulled toward the group's `anchor_um` or, without one, its own centroid, with a force scaled so that a cell one RMS radius from the centroid is pulled with `weight` times the mean wirelength gradient. With `tau_iter` > 0 the pull fades as exp(-iteration / `tau_iter`); `0` holds the groups to the end. Example: `{"tau_iter": 0, "clusters": [{"name": "ctrl", "prefixes": ["core/ctrl"], "weight": 1.0}]}`. Not supported on the GPU. Off by default. |
+ 
+ #### Initial-Placement Arguments
+ 
+diff --git a/openroad/gpl/include/gpl/Replace.h b/openroad/gpl/include/gpl/Replace.h
+index ac5e629c11..deb33ea907 100644
+--- a/openroad/gpl/include/gpl/Replace.h
++++ b/openroad/gpl/include/gpl/Replace.h
+@@ -135,6 +135,10 @@ struct PlaceOptions
+   int nesterovPlaceMaxIter = 5000;
+   // timing driven check overflow to keep resizer changes (non-virtual resizer)
+   float keepResizeBelowOverflow = 1.0;
++  // Clusters (-clusters_file): a JSON file naming groups of cells by
++  // instance-name prefix, each pulled toward an anchor (or its own
++  // centroid) during Nesterov placement. Empty: off.
++  std::string clustersFile;
+   bool routabilityUseRudy = true;
+   bool disableRevertIfDiverge = false;
+   bool disablePinDensityAdjust = false;
+diff --git a/openroad/gpl/src/nesterovBase.cpp b/openroad/gpl/src/nesterovBase.cpp
+index 154588b71e..84b5483a15 100644
+--- a/openroad/gpl/src/nesterovBase.cpp
++++ b/openroad/gpl/src/nesterovBase.cpp
+@@ -15,6 +15,7 @@
+ #include <iterator>
+ #include <memory>
+ #include <optional>
++#include <stdexcept>
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+@@ -22,6 +23,7 @@
+ #include <vector>
+ 
+ #include "backendContext.h"
++#include "boost/json.hpp"
+ #include "boost/polygon/polygon.hpp"
+ #include "boost/random/normal_distribution.hpp"
+ #include "boost/random/uniform_int_distribution.hpp"
+@@ -1216,6 +1218,7 @@ NesterovPlaceVars::NesterovPlaceVars(const PlaceOptions& options,
+       routability_end_overflow(options.routabilityCheckOverflow),
+       routability_snapshot_overflow(options.routabilitySnapshotOverflow),
+       keepResizeBelowOverflow(options.keepResizeBelowOverflow),
++      clustersFile(options.clustersFile),
+       timingDrivenMode(options.timingDrivenMode),
+       timingDrivenRepairTiming(options.timingDrivenRepairTiming),
+       timingDrivenRepairTnsEndPercent(options.timingDrivenRepairTnsEndPercent),
+@@ -3409,6 +3412,9 @@ void NesterovBase::updateGradients(std::vector<FloatPoint>& sumGrads,
+   (void) wlCoeffY;
+ 
+ #ifdef ENABLE_GPU
++  if (nb_device_ctx_ && npVars_ != nullptr && !npVars_->clustersFile.empty()) {
++    log_->error(GPL, 340, "-clusters_file is not supported on the GPU path.");
++  }
+   if (nb_device_ctx_) {
+     SumGradSlot target = SumGradSlot::Cur;
+     SlpSlot coord_slot = SlpSlot::Cur;
+@@ -3462,6 +3468,16 @@ void NesterovBase::updateGradients(std::vector<FloatPoint>& sumGrads,
+   nbc_->getAllWireLengthGradientsWA(nb_gcells_, wireLengthGrads);
+   density_grad_backend_->getCellGradients(nb_gcells_, densityGrads);
+ 
++  if (npVars_ != nullptr && !npVars_->clustersFile.empty()) {
++    if (!cohesion_read_) {
++      readCohesionClusters();
++    }
++    if (cohesion_groups_stale_) {
++      matchCohesionGroups();
++    }
++    addCohesionForces(wireLengthGrads, cohesion_force_);
++  }
++
+   // Two-phase: parallel per-cell compute, then deterministic serial reduce.
+ 
+   const size_t numGCells = nb_gcells_.size();
+@@ -3471,6 +3487,10 @@ void NesterovBase::updateGradients(std::vector<FloatPoint>& sumGrads,
+ 
+     sumGrads[i].x = wireLengthGrads[i].x + densityPenalty_ * densityGrads[i].x;
+     sumGrads[i].y = wireLengthGrads[i].y + densityPenalty_ * densityGrads[i].y;
++    if (!cohesion_force_.empty()) {
++      sumGrads[i].x += cohesion_force_[i].x;
++      sumGrads[i].y += cohesion_force_[i].y;
++    }
+ 
+     FloatPoint wireLengthPreCondi = nbc_->getWireLengthPreconditioner(gCell);
+     FloatPoint densityPrecondi = getDensityPreconditioner(gCell);
+@@ -3639,6 +3659,8 @@ void NesterovBase::updateNextIter(const int iter)
+     return;
+   }
+ 
++  cohesion_iter_ = iter;
++
+   // swap vector pointers
+   std::swap(prevSLPCoordi_, curSLPCoordi_);
+   std::swap(prevSLPWireLengthGrads_, curSLPWireLengthGrads_);
+@@ -5236,6 +5258,7 @@ void NesterovBase::swapAndPopParallelVectors(size_t remove_index,
+   swapAndPop(curCoordi_, remove_index, last_index);
+   swapAndPop(nextCoordi_, remove_index, last_index);
+   swapAndPop(initCoordi_, remove_index, last_index);
++  cohesion_groups_stale_ = true;
+ }
+ 
+ void NesterovBase::rebindHandleIndex(size_t nb_index)
+@@ -5307,6 +5330,7 @@ void NesterovBase::appendParallelVectors()
+   curCoordi_.emplace_back();
+   nextCoordi_.emplace_back();
+   initCoordi_.emplace_back();
++  cohesion_groups_stale_ = true;
+ }
+ 
+ void NesterovBaseCommon::printGCells()
+@@ -5569,4 +5593,237 @@ static float getSecondNorm(const std::vector<FloatPoint>& a)
+   }
+   return std::sqrt(norm / (2.0 * a.size()));
+ }
++
++// -clusters_file: groups of cells, each pulled toward an anchor (or its own
++// centroid). The objective sum is wirelength plus density; a module whose
++// partners sit across the die is spread between them by it, and the paths
++// inside that module pay. The pull is the descent direction of
++// k * |x - a|^2 per cell, k chosen so that a cell one RMS radius from the
++// cluster's centroid is pulled with `weight` times the mean wirelength
++// gradient: the weight is dimensionless and scales with the design. With
++// tau_iter > 0 the pull decays as exp(-iter / tau_iter): a short tau shapes
++// the start of placement and lets it go (DG-RePlAce, Kahng et al., TCAD
++// 2024), tau_iter 0 holds the cluster together to the end.
++//
++// {"tau_iter": 0,
++//  "clusters": [{"name": "CtrlBlock",
++//                "prefixes": ["core/backend/inner_ctrlBlock"],
++//                "anchor_um": [1200, 1250],   // optional
++//                "weight": 1.0}]}
++// Every way a clusters file can be malformed is one message.
++constexpr int kMsgIdClustersFileMalformed = 344;
++
++void NesterovBase::readCohesionClusters()
++{
++  cohesion_clusters_.clear();
++  const std::string& path = npVars_->clustersFile;
++  std::ifstream in(path);
++  if (!in) {
++    log_->error(GPL, 343, "-clusters_file: cannot read {}.", path);
++  }
++  const std::string text((std::istreambuf_iterator<char>(in)),
++                         std::istreambuf_iterator<char>());
++  boost::system::error_code ec;
++  const boost::json::value doc = boost::json::parse(text, ec);
++  if (ec || !doc.is_object() || !doc.as_object().contains("clusters")
++      || !doc.as_object().at("clusters").is_array()) {
++    log_->error(GPL,
++                kMsgIdClustersFileMalformed,
++                "-clusters_file {}: expected an object with a clusters array.",
++                path);
++  }
++  const auto& top = doc.as_object();
++  const double dbu = pb_->db()->getChip()->getBlock()->getDbUnitsPerMicron();
++  std::string name = "?";
++  // A key that is missing or of the wrong type is a malformed file too.
++  try {
++    if (top.contains("tau_iter")) {
++      cohesion_tau_ = boost::json::value_to<double>(top.at("tau_iter"));
++    }
++    for (const auto& v : top.at("clusters").as_array()) {
++      const auto& o = v.as_object();
++      CohesionCluster c;
++      name = "?";
++      c.name = boost::json::value_to<std::string>(o.at("name"));
++      name = c.name;
++      c.prefixes
++          = boost::json::value_to<std::vector<std::string>>(o.at("prefixes"));
++      c.weight = boost::json::value_to<double>(o.at("weight"));
++      if (o.contains("anchor_um")) {
++        c.anchor_um
++            = boost::json::value_to<std::vector<double>>(o.at("anchor_um"));
++        c.has_anchor = true;
++      }
++      cohesion_clusters_.push_back(std::move(c));
++    }
++  } catch (const boost::system::system_error& e) {
++    log_->error(GPL,
++                kMsgIdClustersFileMalformed,
++                "-clusters_file {}: cluster {}: {}.",
++                path,
++                name,
++                e.what());
++  } catch (const std::logic_error&) {  // out_of_range, invalid_argument
++    log_->error(GPL,
++                kMsgIdClustersFileMalformed,
++                "-clusters_file {}: cluster {}: a key is missing or of the "
++                "wrong type.",
++                path,
++                name);
++  }
++  for (CohesionCluster& c : cohesion_clusters_) {
++    if (c.weight < 0 || c.prefixes.empty()) {
++      log_->error(
++          GPL,
++          kMsgIdClustersFileMalformed,
++          "-clusters_file {}: cluster {} needs prefixes and a weight >= 0.",
++          path,
++          c.name);
++    }
++    if (c.has_anchor) {
++      if (c.anchor_um.size() != 2) {
++        log_->error(GPL,
++                    kMsgIdClustersFileMalformed,
++                    "-clusters_file {}: anchor_um of {} is not [x, y].",
++                    path,
++                    c.name);
++      }
++      c.anchor_x = c.anchor_um[0] * dbu;
++      c.anchor_y = c.anchor_um[1] * dbu;
++    }
++  }
++  cohesion_read_ = true;
++}
++
++// Which cluster each of nb_gcells_ belongs to, by its instance's name. The
++// index of a cell in nb_gcells_ changes when cells are created or destroyed
++// (timing-driven repair, routability's fillers): every such change goes
++// through appendParallelVectors() or swapAndPopParallelVectors(), which mark
++// the groups stale, and they are matched again before the next pull.
++void NesterovBase::matchCohesionGroups()
++{
++  cohesion_group_.assign(nb_gcells_.size(), -1);
++  std::vector<int64_t> members(cohesion_clusters_.size(), 0);
++  for (size_t i = 0; i < nb_gcells_.size(); i++) {
++    const GCell* cell = nb_gcells_[i];
++    if (!cell->isInstance() || cell->insts().empty()) {
++      continue;
++    }
++    // The longest matching prefix wins: a module's prefix also covers the
++    // child modules that the clustering put in other clusters.
++    const std::string name = cell->insts()[0]->dbInst()->getName();
++    size_t best_len = 0;
++    for (size_t g = 0; g < cohesion_clusters_.size(); g++) {
++      for (const std::string& prefix : cohesion_clusters_[g].prefixes) {
++        if (prefix.size() > best_len
++            && name.compare(0, prefix.size(), prefix) == 0
++            && (name.size() == prefix.size() || name[prefix.size()] == '/')) {
++          cohesion_group_[i] = static_cast<int>(g);
++          best_len = prefix.size();
++        }
++      }
++    }
++    if (cohesion_group_[i] >= 0) {
++      members[cohesion_group_[i]]++;
++    }
++  }
++  const bool first = !cohesion_matched_;
++  for (size_t g = 0; g < cohesion_clusters_.size(); g++) {
++    const auto& c = cohesion_clusters_[g];
++    if (first && members[g] == 0) {
++      log_->error(GPL,
++                  342,
++                  "-clusters_file {}: cluster {} matches no cell.",
++                  npVars_->clustersFile,
++                  c.name);
++    }
++    if (first) {
++      log_->info(GPL,
++                 341,
++                 "Cluster {} weight {:g}{}: {} cells.",
++                 c.name,
++                 c.weight,
++                 c.has_anchor ? " anchored" : "",
++                 members[g]);
++    } else {
++      debugPrint(log_,
++                 GPL,
++                 "cohesion",
++                 1,
++                 "Cluster {} matched again: {} cells.",
++                 c.name,
++                 members[g]);
++    }
++  }
++  cohesion_matched_ = true;
++  cohesion_groups_stale_ = false;
++}
++
++void NesterovBase::addCohesionForces(
++    const std::vector<FloatPoint>& wireLengthGrads,
++    std::vector<FloatPoint>& cohesionForce) const
++{
++  const size_t groups = cohesion_clusters_.size();
++  const size_t n = nb_gcells_.size();
++  cohesionForce.assign(n, FloatPoint(0, 0));
++  const double decay
++      = cohesion_tau_ > 0 ? std::exp(-cohesion_iter_ / cohesion_tau_) : 1.0;
++  if (decay < 1e-6) {
++    return;
++  }
++  std::vector<double> sx(groups, 0), sy(groups, 0);
++  std::vector<int64_t> cnt(groups, 0);
++  double wl_sum = 0;
++  int64_t wl_n = 0;
++  for (size_t i = 0; i < n; i++) {
++    const GCell* cell = nb_gcells_[i];
++    if (cell->isInstance()) {
++      wl_sum
++          += std::fabs(wireLengthGrads[i].x) + std::fabs(wireLengthGrads[i].y);
++      wl_n++;
++    }
++    const int g = cohesion_group_[i];
++    if (g >= 0) {
++      sx[g] += cell->dCx();
++      sy[g] += cell->dCy();
++      cnt[g]++;
++    }
++  }
++  if (wl_n == 0) {
++    return;
++  }
++  const double wl_mean = wl_sum / wl_n;
++  std::vector<double> cx(groups), cy(groups), tx(groups), ty(groups),
++      r2(groups, 0);
++  for (size_t g = 0; g < groups; g++) {
++    cx[g] = cnt[g] ? sx[g] / cnt[g] : 0;
++    cy[g] = cnt[g] ? sy[g] / cnt[g] : 0;
++    const auto& c = cohesion_clusters_[g];
++    tx[g] = c.has_anchor ? c.anchor_x : cx[g];
++    ty[g] = c.has_anchor ? c.anchor_y : cy[g];
++  }
++  for (size_t i = 0; i < n; i++) {
++    const int g = cohesion_group_[i];
++    if (g >= 0) {
++      const double dx = nb_gcells_[i]->dCx() - cx[g];
++      const double dy = nb_gcells_[i]->dCy() - cy[g];
++      r2[g] += dx * dx + dy * dy;
++    }
++  }
++  std::vector<double> k(groups, 0);
++  for (size_t g = 0; g < groups; g++) {
++    if (cnt[g] > 0) {
++      const double rms = std::max(1.0, std::sqrt(r2[g] / cnt[g]));
++      k[g] = decay * cohesion_clusters_[g].weight * wl_mean / rms;
++    }
++  }
++  for (size_t i = 0; i < n; i++) {
++    const int g = cohesion_group_[i];
++    if (g >= 0) {
++      cohesionForce[i] = FloatPoint(k[g] * (tx[g] - nb_gcells_[i]->dCx()),
++                                    k[g] * (ty[g] - nb_gcells_[i]->dCy()));
++    }
++  }
++}
++
+ }  // namespace gpl
+diff --git a/openroad/gpl/src/nesterovBase.h b/openroad/gpl/src/nesterovBase.h
+index dfa445be6b..3b7e7735bf 100644
+--- a/openroad/gpl/src/nesterovBase.h
++++ b/openroad/gpl/src/nesterovBase.h
+@@ -851,6 +851,7 @@ struct NesterovPlaceVars
+   const float routability_end_overflow;
+   const float routability_snapshot_overflow;
+   const float keepResizeBelowOverflow;
++  const std::string clustersFile;
+ 
+   static constexpr int maxRecursionWlCoef = 10;
+   static constexpr int maxRecursionInitSLPCoef = 10;
+@@ -1228,6 +1229,14 @@ class NesterovBase
+                        float wlCoeffX,
+                        float wlCoeffY);
+ 
++  // Clusters (-clusters_file): each cluster's cells pulled toward its
++  // anchor (or its centroid), w * mean |wirelength gradient| at one RMS
++  // radius, times exp(-iter / tau_iter) when tau_iter > 0.
++  void readCohesionClusters();
++  void matchCohesionGroups();
++  void addCohesionForces(const std::vector<FloatPoint>& wireLengthGrads,
++                         std::vector<FloatPoint>& cohesionForce) const;
++
+   void nbUpdatePrevGradient(float wlCoeffX, float wlCoeffY);
+   void nbUpdateCurGradient(float wlCoeffX, float wlCoeffY);
+   void nbUpdateNextGradient(float wlCoeffX, float wlCoeffY);
+@@ -1390,6 +1399,7 @@ class NesterovBase
+   friend class TimingRepairIntegrationTest;
+   friend class RoutabilityMinimumTest;
+   friend class EndOfDescentTest;
++  friend class CohesionTest;
+ 
+   NesterovBaseVars nbVars_;
+   std::shared_ptr<PlacerBase> pb_;
+@@ -1602,6 +1612,26 @@ class NesterovBase
+   bool isDiverged_ = false;
+ 
+   const NesterovPlaceVars* npVars_ = nullptr;
++  // per nb_gcells_ index: the -clusters_file group it belongs to, or -1;
++  // stale after any change to nb_gcells_ (see matchCohesionGroups()).
++  std::vector<int> cohesion_group_;
++  bool cohesion_read_ = false;
++  bool cohesion_matched_ = false;
++  bool cohesion_groups_stale_ = true;
++  std::vector<FloatPoint> cohesion_force_;
++  struct CohesionCluster
++  {
++    std::string name;
++    std::vector<std::string> prefixes;
++    bool has_anchor = false;
++    std::vector<double> anchor_um;  // as read
++    double anchor_x = 0;            // dbu
++    double anchor_y = 0;
++    double weight = 0;
++  };
++  std::vector<CohesionCluster> cohesion_clusters_;
++  double cohesion_tau_ = 0;
++  int cohesion_iter_ = 0;
+ 
+   float minSumOverflow_ = 1e30;
+   float hpwlWithMinSumOverflow_ = 1e30;
+diff --git a/openroad/gpl/src/replace.i b/openroad/gpl/src/replace.i
+index b1da96a811..b2557e6625 100644
+--- a/openroad/gpl/src/replace.i
++++ b/openroad/gpl/src/replace.i
+@@ -86,6 +86,9 @@ static gpl::PlaceOptions getOptions(
+   checkKey(keys, "-power_driven_net_weight", options.powerDrivenNetWeight);
+   checkKey(
+       keys, "-keep_resize_below_overflow", options.keepResizeBelowOverflow);
++  if (auto it = keys.find("-clusters_file"); it != keys.end()) {
++    options.clustersFile = it->second;
++  }
+   checkKey(keys,
+            "-virtual_cts_max_skew_fraction",
+            options.virtualCtsMaxSkewFraction);
+diff --git a/openroad/gpl/src/replace.tcl b/openroad/gpl/src/replace.tcl
+index 02eddb2012..5c36a92e13 100644
+--- a/openroad/gpl/src/replace.tcl
++++ b/openroad/gpl/src/replace.tcl
+@@ -36,6 +36,7 @@ sta::define_cmd_args "global_placement" {\
+     [-routability_congested_nets_percentage routability_congested_nets_percentage]\
+     [-routability_rc_coefficients routability_rc_coefficients]\
+     [-keep_resize_below_overflow keep_resize_below_overflow]\
++    [-clusters_file clusters_file]\
+     [-timing_driven_net_reweight_overflow timing_driven_net_reweight_overflow]\
+     [-timing_driven_net_weight_max timing_driven_net_weight_max]\
+     [-timing_driven_nets_percentage timing_driven_nets_percentage]\
+@@ -73,6 +74,7 @@ proc global_placement { args } {
+       -timing_driven_nets_percentage \
+       -timing_driven_repair_tns_end_percent \
+       -keep_resize_below_overflow \
++      -clusters_file \
+       -virtual_cts_max_skew_fraction \
+       -random_seed \
+       -perturb_dist \
+diff --git a/openroad/gpl/test/BUILD b/openroad/gpl/test/BUILD
+index bef0b9cbe0..064a20026f 100644
+--- a/openroad/gpl/test/BUILD
++++ b/openroad/gpl/test/BUILD
+@@ -453,6 +453,27 @@ cc_test(
+     ],
+ )
+ 
++# global_placement -clusters_file: groups of cells pulled together.
++cc_test(
++    name = "cohesion_test",
++    srcs = ["cohesion_test.cpp"],
++    data = [
++        "gcd.def",
++        "nangate45.lef",
++    ],
++    env = GPU_ENV_OFF,
++    deps = [
++        "//openroad/gpl:gpl_impl",
++        "//openroad/odb/src/db",
++        "//openroad/odb/src/defin",
++        "//openroad/odb/src/lefin",
++        "//openroad/tst",
++        "//openroad/utl",
++        "@googletest//:gtest",
++        "@googletest//:gtest_main",
++    ],
++)
++
+ cc_test(
+     name = "overflow_test",
+     srcs = ["overflow_test.cpp"],
+diff --git a/openroad/gpl/test/cohesion_test.cpp b/openroad/gpl/test/cohesion_test.cpp
+new file mode 100644
+index 0000000000..6b279ac31a
+--- /dev/null
++++ b/openroad/gpl/test/cohesion_test.cpp
+@@ -0,0 +1,477 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++// global_placement -clusters_file: each named group of cells is pulled
++// toward its own centroid, or toward an anchor, during Nesterov placement.
++
++#include <algorithm>
++#include <cmath>
++#include <cstddef>
++#include <fstream>
++#include <functional>
++#include <memory>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include "gpl/Replace.h"
++#include "gtest/gtest.h"
++#include "odb/db.h"
++#include "odb/dbTypes.h"
++#include "odb/defin.h"
++#include "odb/geom.h"
++#include "odb/lefin.h"
++#include "openroad/gpl/src/graphicsNone.h"
++#include "openroad/gpl/src/nesterovBase.h"
++#include "openroad/gpl/src/nesterovPlace.h"
++#include "openroad/gpl/src/placerBase.h"
++#include "openroad/gpl/src/point.h"
++#include "tst/fixture.h"
++#include "utl/deleter.h"
++
++namespace gpl {
++
++class CohesionTest : public tst::Fixture
++{
++ protected:
++  // gcd (294 cells) with every movable cell starting at the core's center.
++  struct Placer
++  {
++    // Declared first, so that it outlives the placer that points into it.
++    utl::UniquePtrWithDeleter<odb::dbDatabase> db;
++    std::shared_ptr<PlacerBaseCommon> pbc;
++    std::shared_ptr<NesterovBaseCommon> nbc;
++    std::vector<std::shared_ptr<PlacerBase>> pb_vec;
++    std::vector<std::shared_ptr<NesterovBase>> nb_vec;
++    std::unique_ptr<NesterovPlace> np;
++
++    NesterovBase& nb() const { return *nb_vec.front(); }
++    odb::dbBlock* block() const { return db->getChip()->getBlock(); }
++  };
++
++  // The database, with `before` run on its block before the placer is made.
++  std::unique_ptr<Placer> makePlacer(
++      const PlaceOptions& options,
++      const std::function<void(odb::dbBlock*)>& before = nullptr)
++  {
++    auto placer = std::make_unique<Placer>();
++    placer->db = utl::UniquePtrWithDeleter<odb::dbDatabase>(
++        odb::dbDatabase::create(), odb::dbDatabase::destroy);
++    placer->db->setLogger(&logger_);
++    const std::string dir = "_main/openroad/gpl/test/";
++    odb::lefin lef_reader(
++        placer->db.get(), &logger_, /* ignore_non_routing_layers = */ false);
++    odb::dbLib* lib = lef_reader.createTechAndLib(
++        "tech", "lib", getFilePath(dir + "nangate45.lef").c_str());
++    if (lib == nullptr) {
++      ADD_FAILURE() << "nangate45.lef did not load";
++      return nullptr;
++    }
++    odb::dbChip* chip = odb::dbChip::create(placer->db.get(), lib->getTech());
++    std::vector<odb::dbLib*> libs{lib};
++    odb::defin def_reader(placer->db.get(), &logger_);
++    if (!def_reader.readChip(
++            libs, getFilePath(dir + "gcd.def").c_str(), chip)) {
++      ADD_FAILURE() << "gcd.def did not load";
++      return nullptr;
++    }
++    odb::dbBlock* block = chip->getBlock();
++    const odb::Point center = block->getCoreArea().center();
++    for (odb::dbInst* inst : block->getInsts()) {
++      if (!inst->isFixed()) {
++        inst->setLocation(center.x(), center.y());
++        inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
++      }
++    }
++    if (before) {
++      before(block);
++    }
++
++    const PlacerBaseVars pb_vars(options);
++    placer->pbc = std::make_shared<PlacerBaseCommon>(
++        placer->db.get(), pb_vars, &logger_);
++    placer->pb_vec.push_back(std::make_shared<PlacerBase>(
++        placer->db.get(), placer->pbc, &logger_, /* check_density = */ false));
++    const NesterovBaseVars nb_vars(options);
++    placer->nbc = std::make_shared<NesterovBaseCommon>(
++        nb_vars, placer->pbc, &logger_, /* num_threads = */ 1, Clusters{});
++    // As the RouteBase that a placement without one does not have: the
++    // callbacks that create and destroy gcells keep it in step.
++    placer->nbc->resizeMinRcCellSize();
++    placer->nb_vec.push_back(std::make_shared<NesterovBase>(
++        nb_vars, placer->pb_vec[0], placer->nbc, &logger_));
++    const NesterovPlaceVars np_vars(options, placer->nbc->getHpwl());
++    placer->np
++        = std::make_unique<NesterovPlace>(np_vars,
++                                          placer->pbc,
++                                          placer->nbc,
++                                          placer->pb_vec,
++                                          placer->nb_vec,
++                                          /* rb = */ nullptr,
++                                          /* tb = */ nullptr,
++                                          /* cb = */ nullptr,
++                                          /* pwb = */ nullptr,
++                                          std::make_unique<GraphicsNone>(),
++                                          &logger_);
++    return placer;
++  }
++
++  // The group: every 10th movable instance of gcd, which the placement
++  // spreads over the core.
++  static std::vector<std::string> groupNames(odb::dbBlock* block)
++  {
++    std::vector<std::string> names;
++    int i = 0;
++    for (odb::dbInst* inst : block->getInsts()) {
++      if (!inst->isFixed() && (i++ % 10) == 0) {
++        names.push_back(inst->getName());
++      }
++    }
++    return names;
++  }
++
++  std::string writeFile(const std::string& name, const std::string& text)
++  {
++    const std::string path = ::testing::TempDir() + name;
++    std::ofstream out(path);
++    out << text;
++    return path;
++  }
++
++  static std::string quoted(const std::vector<std::string>& names)
++  {
++    std::string list;
++    for (const std::string& name : names) {
++      list += (list.empty() ? "\"" : ", \"") + name + "\"";
++    }
++    return list;
++  }
++
++  // A clusters file with one group of `names`.
++  std::string clustersFile(const std::vector<std::string>& names,
++                           const double weight = 1,
++                           const std::string& extra = "",
++                           const double tau_iter = 0)
++  {
++    return writeFile("clusters.json",
++                     "{\"tau_iter\": " + std::to_string(tau_iter)
++                         + ", \"clusters\": [{\"name\": \"group\", "
++                           "\"prefixes\": ["
++                         + quoted(names) + "], " + extra + "\"weight\": "
++                         + std::to_string(weight) + "}]}");
++  }
++
++  struct Spread
++  {
++    double cx = 0;  // the group's centroid, DBU
++    double cy = 0;
++    double rms = 0;  // RMS distance of its cells from the centroid, DBU
++  };
++
++  // Where the placement left the group's cells.
++  static Spread spread(const Placer& placer,
++                       const std::vector<std::string>& names)
++  {
++    std::vector<odb::Point> at;
++    for (const std::string& name : names) {
++      odb::dbInst* inst = placer.block()->findInst(name.c_str());
++      at.push_back(inst->getBBox()->getBox().center());
++    }
++    Spread s;
++    for (const odb::Point& p : at) {
++      s.cx += p.x();
++      s.cy += p.y();
++    }
++    s.cx /= at.size();
++    s.cy /= at.size();
++    for (const odb::Point& p : at) {
++      s.rms
++          += (p.x() - s.cx) * (p.x() - s.cx) + (p.y() - s.cy) * (p.y() - s.cy);
++    }
++    s.rms = std::sqrt(s.rms / at.size());
++    return s;
++  }
++
++  // Places gcd with `options` and says where the group ended up.
++  Spread place(const PlaceOptions& options,
++               const std::vector<std::string>& names)
++  {
++    const std::unique_ptr<Placer> placer = makePlacer(options);
++    if (placer == nullptr) {
++      return {};
++    }
++    const PlaceResult result = placer->np->doNesterovPlace();
++    EXPECT_EQ(result.stop, PlaceStop::kConverged);
++    EXPECT_LE(result.overflow, options.overflow);
++    return spread(*placer, names);
++  }
++
++  // The names of the group's cells.
++  std::vector<std::string> names_;
++  PlaceOptions options_;
++
++  void SetUp() override
++  {
++    const std::unique_ptr<Placer> placer = makePlacer(options_);
++    ASSERT_NE(placer, nullptr);
++    names_ = groupNames(placer->block());
++    ASSERT_GE(names_.size(), 25u);
++  }
++
++  static const std::vector<int>& groups(const Placer& placer)
++  {
++    return placer.nb().cohesion_group_;
++  }
++
++  static const std::vector<FloatPoint>& forces(const Placer& placer)
++  {
++    return placer.nb().cohesion_force_;
++  }
++
++  // The group each of nb_gcells_ should be in: instances by name, -1 for
++  // fillers and the rest.
++  static std::vector<int> expectedGroups(
++      const Placer& placer,
++      const std::function<int(const std::string&)>& group_of)
++  {
++    std::vector<int> expected;
++    for (const GCellHandle& cell : placer.nb().getGCells()) {
++      expected.push_back(cell->isInstance()
++                             ? group_of(cell->insts()[0]->dbInst()->getName())
++                             : -1);
++    }
++    return expected;
++  }
++
++  // Where the instance `name` is in nb_gcells_.
++  static size_t indexOf(const Placer& placer, const std::string& name)
++  {
++    const std::vector<GCellHandle>& cells = placer.nb().getGCells();
++    for (size_t i = 0; i < cells.size(); ++i) {
++      if (cells[i]->isInstance()
++          && cells[i]->insts()[0]->dbInst()->getName() == name) {
++        return i;
++      }
++    }
++    ADD_FAILURE() << name << " is not in nb_gcells_";
++    return cells.size();
++  }
++
++  // A pin-less buffer a quarter of the way in from the core's lower left
++  // corner, away from the cells, made as the callbacks of a timing-driven
++  // repair make one: appended to nb_gcells_.
++  static odb::dbInst* insertBuffer(Placer& placer, const char* name)
++  {
++    odb::dbBlock* block = placer.block();
++    odb::dbMaster* master = placer.db->findMaster("BUF_X1");
++    odb::dbInst* inst = odb::dbInst::create(block, master, name);
++    const odb::Rect core = block->getCoreArea();
++    inst->setLocation(core.xMin() + core.dx() / 4, core.yMin() + core.dy() / 4);
++    inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
++    const size_t index = placer.nbc->createCbkGCell(inst);
++    placer.nb().createCbkGCell(inst, index);
++    placer.nbc->fixPointers();
++    return inst;
++  }
++
++  // Removes it as the callbacks of a repair do: the last of nb_gcells_
++  // takes its place.
++  static void destroyBuffer(Placer& placer, odb::dbInst* inst)
++  {
++    const auto replacement = placer.nb().destroyCbkGCell(inst);
++    ASSERT_TRUE(replacement.has_value());
++    if (replacement->first != nullptr) {
++      ASSERT_TRUE(
++          placer.nb().updateHandle(replacement->first, replacement->second));
++    }
++    odb::dbInst::destroy(inst);
++    placer.nbc->fixPointers();
++  }
++};
++
++// The group's cells end up closer together than the placement leaves them
++// without the pull, the more so the heavier the weight, and the placement
++// still converges.
++TEST_F(CohesionTest, ClusterPullsItsCellsTogether)
++{
++  const Spread without = place(options_, names_);
++
++  PlaceOptions options = options_;
++  options.clustersFile = clustersFile(names_, /* weight = */ 1);
++  logger_.redirectStringBegin();
++  const Spread with = place(options, names_);
++  const std::string log = logger_.redirectStringEnd();
++  options.clustersFile = clustersFile(names_, /* weight = */ 4);
++  const Spread heavier = place(options, names_);
++
++  EXPECT_NE(log.find("GPL-0341] Cluster group weight 1: "
++                     + std::to_string(names_.size()) + " cells."),
++            std::string::npos)
++      << log;
++  // gcd: 22,507 DBU without, 19,364 at weight 1, 6,058 at weight 4.
++  EXPECT_LT(with.rms, 0.95 * without.rms)
++      << "RMS radius at weight 1 " << with.rms << " DBU, without "
++      << without.rms;
++  EXPECT_LT(heavier.rms, 0.5 * with.rms)
++      << "RMS radius at weight 4 " << heavier.rms << " DBU, at weight 1 "
++      << with.rms;
++}
++
++// An anchor pulls the group to it: its centroid ends up nearer the anchor
++// than the placement leaves it without the pull.
++TEST_F(CohesionTest, AnchorPullsTheClusterToIt)
++{
++  const std::unique_ptr<Placer> probe = makePlacer(options_);
++  ASSERT_NE(probe, nullptr);
++  const odb::Rect core = probe->block()->getCoreArea();
++  const double dbu = probe->block()->getDbUnitsPerMicron();
++  // A quarter of the way in from the core's lower left corner.
++  const double ax = core.xMin() + 0.25 * core.dx();
++  const double ay = core.yMin() + 0.25 * core.dy();
++
++  const Spread without = place(options_, names_);
++  PlaceOptions options = options_;
++  options.clustersFile
++      = clustersFile(names_,
++                     /* weight = */ 4,
++                     "\"anchor_um\": [" + std::to_string(ax / dbu) + ", "
++                         + std::to_string(ay / dbu) + "], ");
++  logger_.redirectStringBegin();
++  const Spread with = place(options, names_);
++  const std::string log = logger_.redirectStringEnd();
++
++  EXPECT_NE(log.find("GPL-0341] Cluster group weight 4 anchored: "),
++            std::string::npos)
++      << log;
++  const double before = std::hypot(without.cx - ax, without.cy - ay);
++  const double after = std::hypot(with.cx - ax, with.cy - ay);
++  EXPECT_LT(after, 0.5 * before) << "centroid to anchor with the pull " << after
++                                 << " DBU, without " << before;
++}
++
++// With tau_iter > 0 the pull fades: a short tau shapes the start and lets
++// the group go, and it ends up as spread as without the pull.
++TEST_F(CohesionTest, ShortTauLetsTheClusterGo)
++{
++  const Spread without = place(options_, names_);
++  PlaceOptions held = options_;
++  held.clustersFile = clustersFile(names_, /* weight = */ 4);
++  const Spread held_spread = place(held, names_);
++
++  PlaceOptions fading = options_;
++  fading.clustersFile
++      = clustersFile(names_, /* weight = */ 4, "", /* tau_iter = */ 20);
++  const Spread fading_spread = place(fading, names_);
++
++  EXPECT_GT(fading_spread.rms, 3 * held_spread.rms)
++      << "RMS radius with tau_iter 20 " << fading_spread.rms
++      << " DBU, held to the end " << held_spread.rms;
++  EXPECT_NEAR(fading_spread.rms, without.rms, 0.05 * without.rms);
++}
++
++// The groups follow the cells when nb_gcells_ changes under them, as a
++// timing-driven repair or routability's fillers change it: a cell that
++// takes another's index takes its own group, not the other's.
++TEST_F(CohesionTest, GroupsFollowTheCellsWhenTheListChanges)
++{
++  std::vector<std::string> prefixes = names_;
++  prefixes.emplace_back("keep");  // a module: keep/... and not keepx
++  PlaceOptions options = options_;
++  options.clustersFile = clustersFile(prefixes);
++  std::unique_ptr<Placer> placer = makePlacer(options);
++  ASSERT_NE(placer, nullptr);
++  const auto group_of = [&](const std::string& name) {
++    if (name.rfind("keep/", 0) == 0
++        || std::ranges::find(names_, name) != names_.end()) {
++      return 0;
++    }
++    return -1;
++  };
++  const float coef = 1;  // the gradients are not looked at
++
++  // A member, appended after the fillers, in the groups made at the next
++  // gradient.
++  odb::dbInst* transient = insertBuffer(*placer, "keep/transient");
++  placer->nb().nbUpdateCurGradient(coef, coef);
++  ASSERT_EQ(groups(*placer), expectedGroups(*placer, group_of));
++
++  // A cell that is not a member is appended and the member removed: the
++  // newcomer takes the member's index and the list has its old length.
++  const size_t length = placer->nb().getGCells().size();
++  const size_t index = indexOf(*placer, "keep/transient");
++  insertBuffer(*placer, "keepx");
++  destroyBuffer(*placer, transient);
++  ASSERT_EQ(placer->nb().getGCells().size(), length);
++  ASSERT_EQ(indexOf(*placer, "keepx"), index);
++
++  placer->nb().nbUpdateCurGradient(coef, coef);
++  EXPECT_EQ(groups(*placer), expectedGroups(*placer, group_of));
++  EXPECT_EQ(groups(*placer)[index], -1);
++  ASSERT_EQ(forces(*placer).size(), length);
++  EXPECT_EQ(forces(*placer)[index].x, 0) << "keepx is pulled";
++  EXPECT_EQ(forces(*placer)[index].y, 0) << "keepx is pulled";
++
++  // A member appended later is pulled with the rest.
++  insertBuffer(*placer, "keep/late");
++  placer->nb().nbUpdateCurGradient(coef, coef);
++  EXPECT_EQ(groups(*placer), expectedGroups(*placer, group_of));
++  const size_t late = indexOf(*placer, "keep/late");
++  EXPECT_EQ(groups(*placer)[late], 0);
++  EXPECT_GT(forces(*placer)[late].x, 0) << "toward the group, up and right";
++  EXPECT_GT(forces(*placer)[late].y, 0) << "toward the group, up and right";
++}
++
++// A file that cannot be read, is not a clusters file, or names a group
++// that matches no cell stops the placement.
++TEST_F(CohesionTest, BadFilesAreHardStops)
++{
++  const auto error_of = [&](const std::string& path) {
++    PlaceOptions options = options_;
++    options.clustersFile = path;
++    logger_.redirectStringBegin();
++    std::string what;
++    try {
++      makePlacer(options);
++    } catch (const std::runtime_error& e) {
++      what = e.what();
++    }
++    logger_.redirectStringEnd();
++    return what;
++  };
++  const std::string group
++      = "\"name\": \"g\", \"prefixes\": [\"" + names_.front() + "\"], ";
++
++  EXPECT_EQ(error_of(::testing::TempDir() + "no_such_file.json"), "GPL-0343");
++  EXPECT_EQ(error_of(writeFile("not_json.json", "{\"clusters\": [")),
++            "GPL-0344");
++  EXPECT_EQ(error_of(writeFile("no_clusters.json", "{\"tau_iter\": 0}")),
++            "GPL-0344");
++  EXPECT_EQ(
++      error_of(writeFile(
++          "no_weight.json",
++          "{\"clusters\": [{" + group.substr(0, group.size() - 2) + "}]}")),
++      "GPL-0344");
++  EXPECT_EQ(error_of(writeFile(
++                "weight_string.json",
++                "{\"clusters\": [{" + group + "\"weight\": \"one\"}]}")),
++            "GPL-0344");
++  EXPECT_EQ(
++      error_of(writeFile("negative.json",
++                         "{\"clusters\": [{" + group + "\"weight\": -1}]}")),
++      "GPL-0344");
++  EXPECT_EQ(error_of(writeFile("anchor3.json",
++                               "{\"clusters\": [{" + group
++                                   + "\"anchor_um\": [1, 2, 3], "
++                                     "\"weight\": 1}]}")),
++            "GPL-0344");
++  EXPECT_EQ(error_of(writeFile("nothing.json",
++                               "{\"clusters\": [{\"name\": \"g\", "
++                               "\"prefixes\": [\"no_such_cell\"], "
++                               "\"weight\": 1}]}")),
++            "GPL-0342");
++  EXPECT_EQ(error_of(writeFile(
++                "ok.json", "{\"clusters\": [{" + group + "\"weight\": 1}]}")),
++            "");
++}
++
++}  // namespace gpl
+-- 
+2.53.0
+

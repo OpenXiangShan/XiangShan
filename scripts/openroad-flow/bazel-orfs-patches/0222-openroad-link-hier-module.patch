@@ -1,0 +1,201 @@
+From 6b8cebfd2cddbc422440f1698d5ecd73eda5171e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Fri, 13 Nov 2026 23:28:09 +0100
+Subject: [PATCH] dbSta: link_hier_module adds a module to a loaded
+ hierarchical design
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+replace_hier_module switches a hierarchical instance to another module
+the design holds: one that link_design -hier found unused in the Verilog
+it read, linked into a child block of its own. A module read after the
+design was loaded (read_db -hier, then read_verilog) never got that far:
+read_verilog parses it, nothing links it, and replace_hier_module cannot
+find it (STA-0201).
+
+link_hier_module <module> links it as link_design links an unused
+module, so a design loaded once can have one module replaced by a new
+version of it, for example to time a module just synthesised again in
+the context of the rest of the design without reading the rest again.
+It stops when the design is not loaded (ORD-2025), already has the
+module (ORD-2026, ORD-2027) or the module does not link (ORD-2028).
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ include/ord/OpenRoad.hh                       |  3 ++
+ openroad/OpenRoad.cc                          |  8 +++
+ openroad/OpenRoad.i                           |  7 +++
+ .../dbSta/include/db_sta/dbReadVerilog.hh     |  8 +++
+ openroad/dbSta/src/dbReadVerilog.cc           | 52 +++++++++++++++++++
+ openroad/dbSta/src/dbReadVerilog.tcl          |  9 ++++
+ 6 files changed, 87 insertions(+)
+
+diff --git a/include/ord/OpenRoad.hh b/include/ord/OpenRoad.hh
+index 0af538b..a27e264 100644
+--- a/include/ord/OpenRoad.hh
++++ b/include/ord/OpenRoad.hh
+@@ -237,6 +237,9 @@ class OpenRoad
+   void linkDesign(const char* design_name,
+                   bool hierarchy,
+                   bool omit_filename_prop = false);
++  // Add a module of the Verilog read since to the loaded design, as a
++  // module a hierarchical instance can be switched to.
++  void linkModule(const char* module_name);
+   // Used if a design is created programmatically rather than loaded
+   // to notify the tools (eg dbSta, gui).
+   void designCreated();
+diff --git a/openroad/OpenRoad.cc b/openroad/OpenRoad.cc
+index 5670875..a5817d2 100644
+--- a/openroad/OpenRoad.cc
++++ b/openroad/OpenRoad.cc
+@@ -663,6 +663,14 @@ void OpenRoad::linkDesign(const char* design_name,
+   db_->triggerPostReadDb();
+ }
+ 
++void OpenRoad::linkModule(const char* module_name)
++{
++  if (!dbLinkModule(module_name, verilog_network_, db_, logger_)) {
++    logger_->error(
++        ORD, 2028, "link_hier_module: module {} did not link.", module_name);
++  }
++}
++
+ void OpenRoad::designCreated()
+ {
+   db_->triggerPostReadDb();
+diff --git a/openroad/OpenRoad.i b/openroad/OpenRoad.i
+index 2859848..f243423 100644
+--- a/openroad/OpenRoad.i
++++ b/openroad/OpenRoad.i
+@@ -447,6 +447,13 @@ link_design_db_cmd(const char *design_name,
+   ord->linkDesign(design_name, hierarchy, omit_filename_prop);
+ }
+ 
++void
++link_module_db_cmd(const char *module_name)
++{
++  OpenRoad *ord = getOpenRoad();
++  ord->linkModule(module_name);
++}
++
+ void
+ ensure_linked()
+ {
+diff --git a/openroad/dbSta/include/db_sta/dbReadVerilog.hh b/openroad/dbSta/include/db_sta/dbReadVerilog.hh
+index 44405d0..80c01ed 100644
+--- a/openroad/dbSta/include/db_sta/dbReadVerilog.hh
++++ b/openroad/dbSta/include/db_sta/dbReadVerilog.hh
+@@ -56,4 +56,12 @@ bool dbLinkDesign(const char* top_cell_name,
+                   bool hierarchy,
+                   bool omit_filename_prop = false);
+ 
++// Link a module read with read_verilog after the design was loaded into
++// that design, in a child block of its own like the unused modules
++// dbLinkDesign links, so replace_hier_module can switch an instance to it.
++bool dbLinkModule(const char* module_name,
++                  dbVerilogNetwork* verilog_network,
++                  odb::dbDatabase* db,
++                  utl::Logger* logger);
++
+ }  // namespace ord
+diff --git a/openroad/dbSta/src/dbReadVerilog.cc b/openroad/dbSta/src/dbReadVerilog.cc
+index c20f94c..8f107d1 100644
+--- a/openroad/dbSta/src/dbReadVerilog.cc
++++ b/openroad/dbSta/src/dbReadVerilog.cc
+@@ -142,6 +142,7 @@ class Verilog2db
+                           dbVerilogNetwork* verilog_network,
+                           bool link_make_black_boxes);
+   void restoreTopBlock(const char* orig_top_cell_name);
++  bool linkModule(const char* module_name, dbVerilogNetwork* verilog_network);
+ 
+  private:
+   struct LineInfo
+@@ -226,6 +227,19 @@ bool dbLinkDesign(const char* top_cell_name,
+   return success;
+ }
+ 
++bool dbLinkModule(const char* module_name,
++                  dbVerilogNetwork* verilog_network,
++                  dbDatabase* db,
++                  Logger* logger)
++{
++  // The loaded design's "src" property reads the database (dbSta's
++  // registerSrcAttributeProperties), not this Verilog network, so the
++  // Verilog source of the new module's instances is not recorded.
++  Verilog2db v2db(
++      verilog_network, db, logger, true, /*omit_filename_prop=*/true);
++  return v2db.linkModule(module_name, verilog_network);
++}
++
+ Verilog2db::Verilog2db(Network* network,
+                        dbDatabase* db,
+                        Logger* logger,
+@@ -1197,6 +1211,44 @@ void Verilog2db::processUnusedCells(const char* top_cell_name,
+   }
+ }
+ 
++//
++// linkModule: one module read after the design was loaded, linked into a
++// child block of the loaded design's top block, as processUnusedCells links
++// an unused module.
++//
++bool Verilog2db::linkModule(const char* module_name,
++                            dbVerilogNetwork* verilog_network)
++{
++  dbChip* chip = db_->getChip();
++  if (chip == nullptr || chip->getBlock() == nullptr) {
++    logger_->error(ORD, 2025, "link_hier_module: no design is loaded.");
++  }
++  dbBlock* top = chip->getBlock();
++  if (top->findModule(module_name) != nullptr) {
++    logger_->error(ORD,
++                   2026,
++                   "link_hier_module: the design already has a module {}.",
++                   module_name);
++  }
++  for (dbBlock* child : top->getChildren()) {
++    if (child->getName() == module_name) {
++      logger_->error(ORD,
++                     2027,
++                     "link_hier_module: module {} is already linked.",
++                     module_name);
++    }
++  }
++  if (!verilog_network->linkNetwork(
++          module_name, true, verilog_network->report())) {
++    return false;
++  }
++  top_block_ = top;
++  makeUnusedBlock(module_name);
++  makeUnusedDbNetlist();
++  block_ = top_block_;
++  return true;
++}
++
+ //
+ // makeUnusedBlock: create a separate block for each unused module
+ //
+diff --git a/openroad/dbSta/src/dbReadVerilog.tcl b/openroad/dbSta/src/dbReadVerilog.tcl
+index 0172255..2fec589 100644
+--- a/openroad/dbSta/src/dbReadVerilog.tcl
++++ b/openroad/dbSta/src/dbReadVerilog.tcl
+@@ -26,6 +26,15 @@ proc link_design { args } {
+   ord::link_design_db_cmd $top_cell_name $hierarchy $omit_filename_prop
+ }
+ 
++sta::define_cmd_args "link_hier_module" {module_name}
++
++# Link a module read with read_verilog after the design was loaded
++# (read_db -hier) into the design, so replace_hier_module can switch a
++# hierarchical instance to it.
++proc link_hier_module { module_name } {
++  ord::link_module_db_cmd $module_name
++}
++
+ sta::define_cmd_args "write_verilog" {[-sort] [-include_pwr_gnd]\
+ 					  [-remove_cells cells] filename}
+ 
+-- 
+2.53.0
+

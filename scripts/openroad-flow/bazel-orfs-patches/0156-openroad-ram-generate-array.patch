@@ -1,0 +1,228 @@
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] ram: generate_array -spec, a register-file spec as
+ generate_ram_netlist
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A spec names an array's words, bits and ports; each port is a row
+select, an op on the selected word and a reduction across words. A spec
+whose ports are decoded writes, masked or not, and decoded, multiplexed
+reads is a register file and builds through generate_ram_netlist with the
+options it states. Any other select, op or reduction stops with RAM-0124,
+RAM-0126 or RAM-0127, naming the part.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has generate_array.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/ram/src/ram.tcl                   | 119 +++++++++++++++++++++
+ openroad/ram/test/BUILD                    |   1 +
+ openroad/ram/test/generate_array_asap7.tcl |  54 ++++++++++
+ 3 files changed, 174 insertions(+)
+ create mode 100644 openroad/ram/test/generate_array_asap7.tcl
+
+diff --git a/openroad/ram/src/ram.tcl b/openroad/ram/src/ram.tcl
+index ead7122d1a..fd7e24afe4 100644
+--- a/openroad/ram/src/ram.tcl
++++ b/openroad/ram/src/ram.tcl
+@@ -576,3 +576,122 @@ proc generate_ram { args } {
+ 
+   ram::ram_routing
+ }
++
++sta::define_cmd_args "generate_array" {-spec file [generate_ram_netlist options]}
++
++# An array from a spec: words, bits and ports, each port a row select, an
++# op on the selected word and a reduction across words. A spec whose ports
++# are all decoded writes (masked or not) and decoded, multiplexed reads is
++# a register file: generate_ram_netlist builds it, with the options the
++# spec states. Any other part stops, naming it.
++proc generate_array { args } {
++  # -spec is this command's; the rest are generate_ram_netlist's
++  set i [lsearch -exact $args -spec]
++  if { $i < 0 || $i + 1 >= [llength $args] } {
++    utl::error RAM 120 "generate_array needs -spec file."
++  }
++  set spec [lindex $args [expr { $i + 1 }]]
++  set args [lreplace $args $i [expr { $i + 1 }]]
++  set netlist_args [ram::array_netlist_args [ram::read_array_spec $spec]]
++  generate_ram_netlist {*}$netlist_args {*}$args
++}
++
++namespace eval ram {
++
++# The spec as a dict: name, words, bits, ports (a list of dicts with
++# name, select, op, reduce and mask) and options (passed through).
++proc read_array_spec { file } {
++  set f [open $file r]
++  set spec [dict create name "" words 0 bits 0 ports {} options {}]
++  set line_no 0
++  while { [gets $f line] >= 0 } {
++    incr line_no
++    set line [string trim [regsub {#.*$} $line ""]]
++    if { $line eq "" } {
++      continue
++    }
++    set key [lindex $line 0]
++    switch -- $key {
++      name -
++      words -
++      bits {
++        dict set spec $key [lindex $line 1]
++      }
++      port {
++        set port [dict create name [lindex $line 1] select "" op "" reduce "" mask ""]
++        foreach field [lrange $line 2 end] {
++          if { ![regexp {^(select|op|reduce|mask)=(.+)$} $field -> k v] } {
++            close $f
++            utl::error RAM 121 "$file:$line_no: '$field' is not select=, op=, reduce= or mask=."
++          }
++          dict set port $k $v
++        }
++        dict lappend spec ports $port
++      }
++      option {
++        dict lappend spec options {*}[lrange $line 1 end]
++      }
++      default {
++        close $f
++        utl::error RAM 122 "$file:$line_no: '$key' is not name, words, bits, port or option."
++      }
++    }
++  }
++  close $f
++  foreach key { words bits } {
++    if { [dict get $spec $key] <= 0 } {
++      utl::error RAM 123 "$file: the spec states no $key."
++    }
++  }
++  return $spec
++}
++
++# generate_ram_netlist's options for a register-file spec; any port that
++# is not a decoded write or a decoded, multiplexed read is a part the
++# generator does not have yet, and stops naming it.
++proc array_netlist_args { spec } {
++  set reads 0
++  set writes 0
++  set mask ""
++  foreach port [dict get $spec ports] {
++    set what "[dict get $port name]: select=[dict get $port select]\
++      op=[dict get $port op] reduce=[dict get $port reduce]"
++    if { [dict get $port select] ne "decode" } {
++      utl::error RAM 124 "port $what: no array part for select\
++        '[dict get $port select]' yet; decode is built."
++    }
++    switch -- [dict get $port op] {
++      write {
++        incr writes
++        if { [dict get $port mask] ne "" } {
++          if { $mask ne "" && $mask != [dict get $port mask] } {
++            utl::error RAM 125 "port $what: write ports with different masks."
++          }
++          set mask [dict get $port mask]
++        }
++      }
++      read {
++        if { [dict get $port reduce] ni { "" mux } } {
++          utl::error RAM 126 "port $what: no array part for reduce\
++            '[dict get $port reduce]' yet; mux is built."
++        }
++        incr reads
++      }
++      default {
++        utl::error RAM 127 "port $what: no array part for op\
++          '[dict get $port op]' yet; write and read are built."
++      }
++    }
++  }
++  set args [list -word_size [dict get $spec bits] -num_words [dict get $spec words] \
++    -r_ports $reads -w_ports $writes]
++  if { $mask ne "" } {
++    lappend args -mask_size $mask
++  }
++  if { [dict get $spec name] ne "" } {
++    lappend args -name [dict get $spec name]
++  }
++  return [concat $args [dict get $spec options]]
++}
++
++}
+diff --git a/openroad/ram/test/BUILD b/openroad/ram/test/BUILD
+index 19b04e1b4f..8b2fecea3d 100644
+--- a/openroad/ram/test/BUILD
++++ b/openroad/ram/test/BUILD
+@@ -40,6 +40,7 @@ PASSFAIL_TESTS = [
+     "write_mask_groups_asap7",
+     "fold_ten_groups_asap7",
+     "fold_odd_groups_asap7",
++    "generate_array_asap7",
+ ]
+ 
+ ALL_TESTS = COMPULSORY_TESTS + PASSFAIL_TESTS
+diff --git a/openroad/ram/test/generate_array_asap7.tcl b/openroad/ram/test/generate_array_asap7.tcl
+new file mode 100644
+index 0000000000..90fc554d4f
+--- /dev/null
++++ b/openroad/ram/test/generate_array_asap7.tcl
+@@ -0,0 +1,54 @@
++# generate_array: a register-file spec is generate_ram_netlist with the
++# options it states, and the array it builds reads and writes; a part the
++# generator does not have stops, naming it.
++
++source "helpers.tcl"
++source "ram_sim.tcl"
++source "routed.tcl"
++
++routed::read_asap7
++
++proc write_spec { name text } {
++  set file [make_result_file $name]
++  set f [open $file w]
++  puts $f $text
++  close $f
++  return $file
++}
++
++set rf [write_spec rf.spec {
++name regfile
++words 8
++bits 16
++port w0 select=decode op=write mask=8
++port r0 select=decode op=read reduce=mux
++port r1 select=decode op=read
++option -storage_cell DFFHQNx1_ASAP7_75t_R
++}]
++set args [ram::array_netlist_args [ram::read_array_spec $rf]]
++set want [list -word_size 16 -num_words 8 -r_ports 2 -w_ports 1 -mask_size 8 \
++  -name regfile -storage_cell DFFHQNx1_ASAP7_75t_R]
++ram_sim::check { $args eq $want } "the spec's options are $args"
++
++generate_array -spec $rf -tapcell TAPCELL_ASAP7_75t_R -max_tap_dist 25
++ram_sim::check { [[ord::get_db_block] getName] eq "regfile" } \
++  "the block is [[ord::get_db_block] getName]"
++ram_sim::load
++ram_sim::exercise {
++  words 8 bits 16
++  writes {{addr_w D {we[0] we[1]}}}
++  reads {{addr_r0 Q0} {addr_r1 Q1}}
++}
++
++# each names the part it lacks in the message (the log), by its id here
++foreach {text id} {
++  "port w0 select=range op=clear" RAM-0124
++  "port w0 select=decode op=dec" RAM-0127
++  "port r0 select=decode op=read reduce=find_first" RAM-0126
++} {
++  set spec [write_spec part.spec "words 8\nbits 8\n$text"]
++  set rc [catch { ram::array_netlist_args [ram::read_array_spec $spec] } msg]
++  ram_sim::check { $rc && $msg eq $id } "'$text' stopped with $msg, not $id"
++}
++
++puts "pass"
+-- 
+2.53.0
+

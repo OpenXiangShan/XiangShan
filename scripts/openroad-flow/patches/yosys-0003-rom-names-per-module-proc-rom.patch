@@ -1,0 +1,67 @@
+yosys: proc_rom numbers its ROMs within their module
+
+proc_rom and memory_bmux2rom named each ROM they create, its
+$memrd/$meminit cells and proc_rom's read-data wire with NEW_ID:
+`$auto$proc_rom.cc:155:do_switch$12665`. The number is the design-wide
+autoidx, so it depends on every object yosys created before it anywhere
+in the design. The same module elaborated alone, or once per instance,
+or after a module with ROMs of its own, gets differently named ROMs,
+and a flow that synthesizes a module on its own and inside its design
+gets different netlists and memory lists for it.
+
+A ROM is now numbered within its module, in the order the pass creates
+them there: `$auto$proc_rom$<n>` and `$auto$memory_bmux2rom$<n>`, the
+first n whose name and derived names ($rdata, $rd, $init) are free in
+the module. Nothing else's naming changes.
+
+Upstream candidate for YosysHQ/yosys; not filed. Carried by bazel-orfs
+as four patches, one file each (Bazel applies one file per patch):
+yosys-0003..0006. Retires at the bump onto a BCR yosys that names ROMs
+within their module.
+
+--- a/passes/proc/proc_rom.cc
++++ b/passes/proc/proc_rom.cc
+@@ -33,9 +33,22 @@ struct RomWorker
+ 	SigMap sigmap;
+ 
+ 	int count = 0;
++	int next_rom = 0;
+ 
+ 	RomWorker(RTLIL::Module *mod) : module(mod), sigmap(mod) {}
+ 
++	// A ROM is numbered within its module, not by the design-wide autoidx,
++	// so the same module gets the same names whatever else the design holds.
++	std::string rom_id()
++	{
++		while (true) {
++			std::string id = stringf("$auto$proc_rom$%d", next_rom++);
++			if (!module->count_id(id) && !module->count_id(id + "$rdata") &&
++					!module->count_id(id + "$rd") && !module->count_id(id + "$init"))
++				return id;
++		}
++	}
++
+ 	void do_switch(RTLIL::SwitchRule *sw)
+ 	{
+ 		for (auto cs : sw->cases) {
+@@ -151,8 +164,9 @@ struct RomWorker
+ 		}
+ 
+ 		// Ok, let's do it.
+-		SigSpec rdata = module->addWire(NEW_ID, GetSize(lhs));
+-		Mem mem(module, NEW_ID, GetSize(lhs), 0, 1 << abits);
++		std::string id = rom_id();
++		SigSpec rdata = module->addWire(id + "$rdata", GetSize(lhs));
++		Mem mem(module, id, GetSize(lhs), 0, 1 << abits);
+ 		mem.attributes = sw->attributes;
+ 
+ 		Const::Builder builder(mem.size * GetSize(lhs));
+@@ -183,6 +197,8 @@ struct RomWorker
+ 		mem.rd_ports.push_back(std::move(rd));
+ 
+ 		mem.emit();
++		module->rename(mem.inits[0].cell, id + "$init");
++		module->rename(mem.rd_ports[0].cell, id + "$rd");
+ 
+ 		if (sw->has_attribute(ID::src)) {
+ 			mem.inits[0].cell->attributes[ID::src] = sw->attributes[ID::src];

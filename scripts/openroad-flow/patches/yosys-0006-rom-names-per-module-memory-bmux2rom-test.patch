@@ -1,0 +1,94 @@
+yosys: test memory_bmux2rom's ROM names alone and after earlier ROMs
+
+The test for yosys-0005: a module gets the same ROM names alone and
+after a module whose ROMs are created first, and a taken name is
+skipped.
+
+--- /dev/null
++++ b/tests/opt/memory_bmux2rom_names.ys
+@@ -0,0 +1,85 @@
++# memory_bmux2rom numbers a ROM within its module: the same module gets the
++# same names alone and after a module whose ROMs are created first.
++
++read_rtlil <<EOT
++module \top
++  wire width 4 input 0 \S
++  wire width 5 output 1 \Y
++  cell $bmux $0
++    parameter \WIDTH 5
++    parameter \S_WIDTH 4
++    connect \A 80'10110100011101110001110010001110101010111000110011111111111110100000110100111000
++    connect \S \S
++    connect \Y \Y
++  end
++end
++EOT
++memory_bmux2rom
++select -assert-count 1 top/m:*
++select -assert-count 1 top/m:$auto$memory_bmux2rom$0
++select -assert-count 1 top/c:$auto$memory_bmux2rom$0$rd t:$memrd_v2 %i
++select -assert-count 1 top/c:$auto$memory_bmux2rom$0$init t:$meminit %i
++
++design -reset
++
++read_rtlil <<EOT
++module \early
++  wire width 4 input 0 \S
++  wire width 5 output 1 \Y
++  wire width 5 output 2 \Z
++  cell $bmux $0
++    parameter \WIDTH 5
++    parameter \S_WIDTH 4
++    connect \A 80'10110100011101110001110010001110101010111000110011111111111110100000110100111000
++    connect \S \S
++    connect \Y \Y
++  end
++  cell $bmux $1
++    parameter \WIDTH 5
++    parameter \S_WIDTH 4
++    connect \A 80'00010100011101110001110010001110101010111000110011111111111110100000110100111001
++    connect \S \S
++    connect \Y \Z
++  end
++end
++
++module \top
++  wire width 4 input 0 \S
++  wire width 5 output 1 \Y
++  cell $bmux $0
++    parameter \WIDTH 5
++    parameter \S_WIDTH 4
++    connect \A 80'10110100011101110001110010001110101010111000110011111111111110100000110100111000
++    connect \S \S
++    connect \Y \Y
++  end
++end
++EOT
++memory_bmux2rom
++select -assert-count 1 top/m:*
++select -assert-count 1 top/m:$auto$memory_bmux2rom$0
++select -assert-count 1 top/c:$auto$memory_bmux2rom$0$rd t:$memrd_v2 %i
++select -assert-count 1 top/c:$auto$memory_bmux2rom$0$init t:$meminit %i
++select -assert-count 2 early/m:*
++select -assert-count 1 early/m:$auto$memory_bmux2rom$0
++select -assert-count 1 early/m:$auto$memory_bmux2rom$1
++
++design -reset
++
++# A name already taken in the module is skipped.
++read_rtlil <<EOT
++module \top
++  wire width 4 input 0 \S
++  wire width 5 output 1 \Y
++  wire $auto$memory_bmux2rom$0$rd
++  cell $bmux $0
++    parameter \WIDTH 5
++    parameter \S_WIDTH 4
++    connect \A 80'10110100011101110001110010001110101010111000110011111111111110100000110100111000
++    connect \S \S
++    connect \Y \Y
++  end
++end
++EOT
++memory_bmux2rom
++select -assert-count 1 top/m:$auto$memory_bmux2rom$1

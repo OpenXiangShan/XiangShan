@@ -1,0 +1,2082 @@
+odb: dissolve a placed block instance into its cells, nets and route guides
+
+dbInst::dissolve replaces a placed instance of a block master by the
+cells and nets of the block it was abstracted from (its die is the
+master's outline, its ports the master's pins), read from that block's
+own database. The instance goes, with any blockage or obstruction tied
+to it (a halo), and a module instance of the same name takes its place
+in the instance's module: a new module with a port per block port, its
+pins on the nets the instance's pins were on.
+
+Each source cell is created in the new module where the source placed
+it, through the instance's location and orientation (R0, MX, MY or
+R180), with its source placement status and source type (a TIMING buffer
+stays TIMING, so CTS leaves a dissolved clock tree as built). A source
+net on a port whose pin is on a net in the parent is that flat net,
+with a module net inside; any other, a net on ports the parent leaves
+open among them, is a new flat net named under the module instance.
+A source net on several ports (a feedthrough) joins the parent's nets
+on them into one, before any net is created: the net with a port of the
+parent's block when there is one, else the first, the parent's pins
+keeping their module nets and the guides of the nets that go moving to
+the one that is left. Two pins of the instance on one parent net share
+that net's module net in the parent. A dont_touch cell on a net that
+moves, or that gets its module net, is still dont_touch afterwards. A
+pin of the instance with no module net, on a net with a term outside
+the instance's module, is refused before anything is changed (ODB
+1238): the hierarchy is not the flat netlist's, and the timer's walk of
+the module nets would stop short of that term. Supply nets are left to
+the parent's global connections, which skip a dont_touch instance
+(ODB 383): the caller lifts the flag around them, as bazel-orfs's
+pdn.tcl does (its ORFS patch 0124).
+Masters are matched by name. Each source net's global route guides are
+copied onto its net in the parent through the same transform, in the
+source's net order, so a block dissolved after its global route keeps
+its routes: the parent's router restores a net from guides instead of
+routing it again.
+
+With strip_clock_buffers, the block's own clock tree stays behind: a
+TIMING instance of a named buffer master with clock nets on both sides
+is not copied and its output net joins its input net, and a TIMING dummy
+load on a clock net (nothing on its output, an inverter as often as a
+buffer) is not copied either, so the block's registers reach the parent's clock net
+through any clock gate or inverter of the block's, for the parent's CTS
+to build one tree over. Nets that touched a stripped cell lose their
+guides.
+
+dbModInst::getPortCones returns the leaf instances between a module
+instance's ports and the first sequential instance, that instance
+included. A port whose cone exceeds a bound (a clock, a reset) is left
+out and reported.
+
+Tcl: dissolve_macro -inst -db [-strip_clock_buffers masters],
+get_port_cones -modinst [-max_cone].
+gtest: TestDissolve, with the feedthroughs (two nets of the parent
+joined, one of them on a port of the parent, a chain from either end,
+three ports, an open end, both ends on one net, nets that carry guides,
+the nets of an earlier dissolve with its dont_touch cell), two pins on
+one parent net, a dont_touch cell of the parent, the refused pins, in a
+submodule and in the top module, each leaving the database as it was,
+and a macro that is in no module.
+
+Revived from bazel-orfs's unmerged xs-dissolve branch (patch 0100 there,
+dissolving after placement) and extended with the guides and the clock
+strip for the parent as a macro (//tools/carve). Carried by bazel-orfs;
+not upstreamed. Retires on a //:bump onto an OpenROAD that carries it.
+---
+ openroad/odb/README.md                 |   58 ++
+ openroad/odb/include/odb/db.h          |   38 +
+ openroad/odb/src/db/dbDissolve.cpp     |  681 +++++++++++++++
+ openroad/odb/src/swig/tcl/odb.tcl      |   52 ++
+ openroad/odb/test/cpp/BUILD            |   13 +
+ openroad/odb/test/cpp/TestDissolve.cpp | 1101 ++++++++++++++++++++++++
+ 6 files changed, 1943 insertions(+)
+ create mode 100644 openroad/odb/src/db/dbDissolve.cpp
+ create mode 100644 openroad/odb/test/cpp/TestDissolve.cpp
+
+diff --git a/openroad/odb/README.md b/openroad/odb/README.md
+index 6686f91..de662b6 100644
+--- a/openroad/odb/README.md
++++ b/openroad/odb/README.md
+@@ -393,6 +393,64 @@ write_macro_placement file_name
+ | ----- | ----- |
+ | `file_name` | Macro placement file name. |
+ 
++### Dissolve Macro
++
++This command replaces a placed instance of a hardened block by the block's
++own cells and nets, read from the block's ODB file, as a module instance
++of the same name. The block's die is the instance's master outline and its
++ports are the master's pins. Each cell lands where the block placed it,
++through the instance's location and orientation (R0, MX, MY or R180), with
++the placement status the block gave it; the block's port nets become the
++nets the instance's pins were on. Supply nets are left to the parent's
++global connections. The instance's halo goes with it. Returns the module
++instance.
++
++With `-strip_clock_buffers`, the block's own clock tree is left behind: a
++cell the block's CTS or repair inserted (source type TIMING) of one of the
++named buffer masters, with clock nets on its input and output, is not
++copied, and its output net joins its input net; a dummy load (a TIMING
++cell on a clock net with nothing on its output, an inverter as often as a
++buffer) is not copied either. The block's registers then come in on the
++parent's clock net, through any clock gate or inverter the block has, for
++the parent's CTS to build one tree over. Nets that touched a stripped
++cell lose their guides.
++
++```tcl
++dissolve_macro
++    -inst inst_name
++    -db odb_file
++    [-strip_clock_buffers masters]
++```
++
++#### Options
++
++| Switch Name | Description |
++| ----- | ----- |
++| `-inst` | The placed block instance. |
++| `-db` | The block's ODB file; its top block names the instance's master. |
++| `-strip_clock_buffers` | Buffer masters whose clock tree cells are left behind. |
++
++### Get Port Cones
++
++This command returns the leaf instances of a module instance that are on a
++path between one of its ports and the first sequential instance, that
++instance included: forward from an input port through the loads, backward
++from an output port through the drivers. A port whose cone has more than
++`-max_cone` instances, such as a clock or a reset, adds none.
++
++```tcl
++get_port_cones
++    -modinst path
++    [-max_cone count]
++```
++
++#### Options
++
++| Switch Name | Description |
++| ----- | ----- |
++| `-modinst` | The module instance's hierarchical name. |
++| `-max_cone` | The largest cone a port may have; the default is `1000`. |
++
+ ### Design Is Routed
+ 
+ This command checks if the design is completely routed.
+diff --git a/openroad/odb/include/odb/db.h b/openroad/odb/include/odb/db.h
+index 7f7ada8..dfdb618 100644
+--- a/openroad/odb/include/odb/db.h
++++ b/openroad/odb/include/odb/db.h
+@@ -3234,6 +3234,32 @@ class dbInst : public dbObject
+   ///
+   static void destroy(dbInst* inst);
+ 
++  ///
++  /// Dissolve a placed instance of a block master into the block's own
++  /// cells and nets. `source` is the block the master was abstracted from:
++  /// its die is the master's outline and its ports are the master's pins.
++  /// The instance is destroyed, with any blockage or obstruction tied to it,
++  /// and a module instance of the same name takes its place in the
++  /// instance's module, its ports on the nets the instance's pins were on.
++  /// Each source cell is created in the new module where the source placed
++  /// it, through the instance's location and orientation (R0, MX, MY or
++  /// R180), with its source placement status; each source net that leaves
++  /// the block through a port becomes the parent's net on that port, every
++  /// other net a new flat net named under the module instance. Supply nets
++  /// are not copied. The masters are looked up by name in this database.
++  /// strip_clock_buffers names buffer masters: a TIMING instance of one,
++  /// with clock nets on its input and output, is not copied, its output
++  /// net joins its input net and the nets it touched lose their guides,
++  /// so the parent's CTS builds one tree over the block's registers. A
++  /// TIMING dummy load on a clock net (no output net), of any master, is
++  /// not copied either when the list is not empty.
++  /// Returns the new module instance.
++  ///
++  static dbModInst* dissolve(
++      dbInst* inst,
++      dbBlock* source,
++      const std::vector<std::string>& strip_clock_buffers = {});
++
+   ///
+   /// Safely delete the inst from the block within an iterator
+   ///
+@@ -8780,6 +8806,18 @@ class dbModInst : public dbObject
+   // Recursive search a given dbModInst through child mod insts
+   bool containsDbModInst(dbModInst* mod_inst) const;
+ 
++  ///
++  /// The leaf instances on a path between one of this module instance's
++  /// ports and the first sequential instance, that instance included:
++  /// forward from an input port through the loads, backward from an output
++  /// port through the drivers. A port whose cone has more than max_cone
++  /// instances (a clock or a reset fanning out to the whole module) is left
++  /// out and, when skipped is given, appended to it.
++  ///
++  std::vector<dbInst*> getPortCones(size_t max_cone,
++                                    std::vector<dbModBTerm*>* skipped
++                                    = nullptr);
++
+   static dbModInst* create(dbModule* parentModule,
+                            dbModule* masterModule,
+                            const char* name);
+diff --git a/openroad/odb/src/db/dbDissolve.cpp b/openroad/odb/src/db/dbDissolve.cpp
+new file mode 100644
+index 0000000..48e85c2
+--- /dev/null
++++ b/openroad/odb/src/db/dbDissolve.cpp
+@@ -0,0 +1,681 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++// dbInst::dissolve: a placed instance of a block master replaced by the
++// block's own cells, nets and global route guides, as a module instance in
++// the parent's hierarchy. dbModInst::getPortCones: the leaf instances between the ports
++// of a module instance and the first sequential instance.
++
++#include <algorithm>
++#include <cstddef>
++#include <deque>
++#include <map>
++#include <string>
++#include <tuple>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++#include "dbBlock.h"
++#include "odb/db.h"
++#include "odb/dbTransform.h"
++#include "odb/dbTypes.h"
++#include "odb/geom.h"
++#include "utl/Logger.h"
++
++namespace odb {
++
++namespace {
++
++bool isSupplyNet(dbNet* net)
++{
++  return net->getSigType().isSupply();
++}
++
++bool isSupplyTerm(dbITerm* iterm)
++{
++  return iterm->getMTerm()->getSigType().isSupply();
++}
++
++// A dont_touch instance's pins cannot be connected, and the dissolve moves
++// the pins of a net to another net, or onto a module net, without changing
++// what they are connected to: the flag is lifted on the instances of the
++// net's pins meanwhile.
++class DontTouchLift
++{
++ public:
++  explicit DontTouchLift(dbNet* net)
++  {
++    for (dbITerm* iterm : net->getITerms()) {
++      dbInst* inst = iterm->getInst();
++      if (inst->isDoNotTouch()) {
++        inst->setDoNotTouch(false);
++        insts_.push_back(inst);
++      }
++    }
++  }
++  ~DontTouchLift()
++  {
++    for (dbInst* inst : insts_) {
++      inst->setDoNotTouch(true);
++    }
++  }
++  DontTouchLift(const DontTouchLift&) = delete;
++  DontTouchLift& operator=(const DontTouchLift&) = delete;
++
++ private:
++  std::vector<dbInst*> insts_;
++};
++
++// The target master of each source master, by name, and the target mterm of
++// each source mterm: the two databases share a library by name only.
++class MasterMap
++{
++ public:
++  MasterMap(dbDatabase* target, utl::Logger* logger)
++      : target_(target), logger_(logger)
++  {
++  }
++
++  dbMaster* master(dbInst* src)
++  {
++    dbMaster* src_master = src->getMaster();
++    auto it = masters_.find(src_master);
++    if (it != masters_.end()) {
++      return it->second;
++    }
++    dbMaster* master = target_->findMaster(src_master->getName().c_str());
++    if (master == nullptr) {
++      logger_->error(utl::ODB,
++                     1221,
++                     "dissolve: master {} of {} is not in the parent's "
++                     "libraries.",
++                     src_master->getName(),
++                     src->getName());
++    }
++    masters_[src_master] = master;
++    return master;
++  }
++
++  dbMTerm* mterm(dbMTerm* src_mterm, dbMaster* master)
++  {
++    auto it = mterms_.find(src_mterm);
++    if (it != mterms_.end()) {
++      return it->second;
++    }
++    dbMTerm* mterm = master->findMTerm(src_mterm->getName().c_str());
++    if (mterm == nullptr) {
++      logger_->error(utl::ODB,
++                     1222,
++                     "dissolve: master {} has no pin {}.",
++                     master->getName(),
++                     src_mterm->getName());
++    }
++    mterms_[src_mterm] = mterm;
++    return mterm;
++  }
++
++ private:
++  dbDatabase* target_;
++  utl::Logger* logger_;
++  std::unordered_map<dbMaster*, dbMaster*> masters_;
++  std::unordered_map<dbMTerm*, dbMTerm*> mterms_;
++};
++
++}  // namespace
++
++dbModInst* dbInst::dissolve(dbInst* inst,
++                            dbBlock* source,
++                            const std::vector<std::string>& strip_clock_buffers)
++{
++  dbBlock* block = inst->getBlock();
++  utl::Logger* logger = ((_dbBlock*) block)->getLogger();
++  const std::string inst_name = inst->getName();
++  dbMaster* macro = inst->getMaster();
++
++  if (!inst->isPlaced()) {
++    logger->error(utl::ODB, 1223, "dissolve: {} is not placed.", inst_name);
++  }
++  // Standard cells sit in rows: a quarter turn of the block would turn its
++  // cells across them.
++  const dbOrientType orient = inst->getOrient();
++  if (orient != dbOrientType::R0 && orient != dbOrientType::MX
++      && orient != dbOrientType::MY && orient != dbOrientType::R180) {
++    logger->error(utl::ODB,
++                  1224,
++                  "dissolve: {} has orientation {}; only R0, MX, MY and R180 "
++                  "keep the block's cells in rows.",
++                  inst_name,
++                  orient.getString());
++  }
++  // The master is the block's abstract: same outline as its die.
++  const Rect die = source->getDieArea();
++  if (static_cast<int64_t>(macro->getWidth()) != die.dx()
++      || static_cast<int64_t>(macro->getHeight()) != die.dy()) {
++    logger->error(utl::ODB,
++                  1225,
++                  "dissolve: master {} is {} x {}, block {}'s die {} x {}.",
++                  macro->getName(),
++                  macro->getWidth(),
++                  macro->getHeight(),
++                  source->getName(),
++                  die.dx(),
++                  die.dy());
++  }
++
++  // What the macro's pins were on in the parent, by pin name.
++  struct ParentConn
++  {
++    dbNet* net;
++    dbModNet* mod_net;
++  };
++  std::unordered_map<std::string, ParentConn> parent_conns;
++  for (dbITerm* iterm : inst->getITerms()) {
++    if (isSupplyTerm(iterm)) {
++      continue;
++    }
++    parent_conns[iterm->getMTerm()->getName()]
++        = {iterm->getNet(), iterm->getModNet()};
++  }
++
++  dbModule* parent = inst->getModule();
++  if (parent == nullptr) {
++    parent = block->getTopModule();
++  }
++
++  // A pin with no module net is on a net that stayed inside the parent's
++  // module, and that net gets its module net there below, with the terms
++  // connectTermsOf finds in the module. A net with a term outside the
++  // module did not stay inside: the hierarchy is not the flat netlist's,
++  // the term would be left off the new module net and the timer's walk
++  // would stop short of it. Such a dissolve is refused here, before
++  // anything is changed.
++  std::unordered_set<dbNet*> checked;
++  for (dbITerm* pin : inst->getITerms()) {
++    dbNet* net = pin->getNet();
++    if (isSupplyTerm(pin) || net == nullptr || pin->getModNet() != nullptr) {
++      continue;
++    }
++    // Only a pin that is a port of the block gets a module net.
++    dbBTerm* port = source->findBTerm(pin->getMTerm()->getName().c_str());
++    if (port == nullptr || port->getSigType().isSupply()
++        || !checked.insert(net).second) {
++      continue;
++    }
++    std::string outside;
++    for (dbITerm* iterm : net->getITerms()) {
++      if (iterm->getInst() != inst && iterm->getInst()->getModule() != parent) {
++        outside = iterm->getName();
++        break;
++      }
++    }
++    if (outside.empty() && block->getTopModule() != parent) {
++      for (dbBTerm* bterm : net->getBTerms()) {
++        outside = bterm->getName();
++        break;
++      }
++    }
++    if (!outside.empty()) {
++      logger->error(utl::ODB,
++                    1238,
++                    "dissolve: pin {} of {} has no module net and its net {} "
++                    "is on {}, outside {}.",
++                    pin->getMTerm()->getName(),
++                    inst_name,
++                    net->getName(),
++                    outside,
++                    parent->getName());
++    }
++  }
++
++  // Source coordinates to parent coordinates: the source die's corner is
++  // the master's origin, which the instance's transform places.
++  dbTransform to_parent(Point(-die.xMin(), -die.yMin()));
++  to_parent.concat(inst->getTransform());
++
++  // The macro's own placement blockages and obstructions (a halo) go with
++  // it; left behind they would name one of the new cells.
++  std::vector<dbBlockage*> blockages;
++  for (dbBlockage* blockage : block->getBlockages()) {
++    if (blockage->getInstance() == inst) {
++      blockages.push_back(blockage);
++    }
++  }
++  for (dbBlockage* blockage : blockages) {
++    dbBlockage::destroy(blockage);
++  }
++  std::vector<dbObstruction*> obstructions;
++  for (dbObstruction* obstruction : block->getObstructions()) {
++    if (obstruction->getInstance() == inst) {
++      obstructions.push_back(obstruction);
++    }
++  }
++  for (dbObstruction* obstruction : obstructions) {
++    dbObstruction::destroy(obstruction);
++  }
++
++  // The block's own clock tree, stripped on request: the buffers its CTS
++  // inserted (TIMING, a named buffer master, on clock nets on both sides)
++  // go, and each one's output net joins its input net, so the block's
++  // registers come in on one clock net for the parent's CTS to build a
++  // single tree over. Its dummy loads go too, whatever their master (an
++  // inverter as often as a buffer): a TIMING cell on a clock net with
++  // nothing on its output drives nothing. A data buffer repair_timing
++  // inserted is TIMING too, but not on a clock net; a cloned clock gate has
++  // two inputs; an inverter that drives something is not a buffer master.
++  // A net that touched a stripped cell loses its guides: its route changed.
++  const std::unordered_set<std::string> strip_masters(
++      strip_clock_buffers.begin(), strip_clock_buffers.end());
++  std::unordered_set<dbInst*> stripped;
++  std::unordered_map<dbNet*, dbNet*> alias;
++  std::unordered_set<dbNet*> rerouted;
++  for (dbInst* src : source->getInsts()) {
++    if (strip_masters.empty()
++        || src->getSourceType() != dbSourceType::TIMING) {
++      continue;
++    }
++    int inputs = 0;
++    int outputs = 0;
++    dbNet* in = nullptr;
++    dbNet* out = nullptr;
++    for (dbITerm* iterm : src->getITerms()) {
++      if (isSupplyTerm(iterm)) {
++        continue;
++      }
++      if (iterm->getIoType() == dbIoType::INPUT) {
++        ++inputs;
++        in = iterm->getNet();
++      } else if (iterm->getIoType() == dbIoType::OUTPUT) {
++        ++outputs;
++        out = iterm->getNet();
++      }
++    }
++    if (out != nullptr
++        && !strip_masters.contains(src->getMaster()->getName())) {
++      continue;
++    }
++    if (inputs != 1 || outputs != 1 || in == nullptr
++        || in->getSigType() != dbSigType::CLOCK
++        || (out != nullptr && out->getSigType() != dbSigType::CLOCK)) {
++      continue;
++    }
++    if (out != nullptr && !out->getBTerms().empty()) {
++      logger->error(utl::ODB,
++                    1236,
++                    "dissolve: clock buffer {} of {} drives port net {}; "
++                    "stripping it would join two ports.",
++                    src->getName(),
++                    source->getName(),
++                    out->getName());
++    }
++    stripped.insert(src);
++    rerouted.insert(in);
++    if (out != nullptr) {
++      alias[out] = in;
++      rerouted.insert(out);
++    }
++  }
++  auto root = [&alias](dbNet* net) {
++    for (auto it = alias.find(net); it != alias.end(); it = alias.find(net)) {
++      net = it->second;
++    }
++    return net;
++  };
++  if (!strip_masters.empty()) {
++    logger->info(utl::ODB,
++                 1237,
++                 "dissolve: stripped {} clock buffers from {}.",
++                 stripped.size(),
++                 source->getName());
++  }
++
++  // The module instance takes the macro's name in its module.
++  const char delimiter = block->getHierarchyDelimiter();
++  std::string base_name = inst_name;
++  if (!parent->isTop()) {
++    const std::string prefix = parent->getHierarchicalName() + delimiter;
++    if (base_name.starts_with(prefix)) {
++      base_name = base_name.substr(prefix.size());
++    }
++  }
++  dbInst::destroy(inst);
++
++  dbModule* module = dbModule::makeUniqueDbModule(
++      source->getName().c_str(), base_name.c_str(), block);
++  // Ports first, then the instance and its pins, as the Verilog reader
++  // builds a module.
++  std::vector<std::pair<dbBTerm*, dbModBTerm*>> ports;
++  for (dbBTerm* bterm : source->getBTerms()) {
++    if (bterm->getSigType().isSupply()) {
++      continue;
++    }
++    if (!parent_conns.contains(bterm->getName())) {
++      logger->error(utl::ODB,
++                    1226,
++                    "dissolve: master {} has no pin for {}'s port {}.",
++                    macro->getName(),
++                    source->getName(),
++                    bterm->getName());
++    }
++    dbModBTerm* mod_bterm = dbModBTerm::create(module, bterm->getName().c_str());
++    mod_bterm->setIoType(bterm->getIoType());
++    mod_bterm->setSigType(bterm->getSigType());
++    ports.emplace_back(bterm, mod_bterm);
++  }
++  dbModInst* mod_inst
++      = dbModInst::create(parent, module, base_name.c_str());
++  if (mod_inst == nullptr) {
++    logger->error(utl::ODB,
++                  1227,
++                  "dissolve: cannot create module instance {} in {}.",
++                  base_name,
++                  parent->getName());
++  }
++  const std::string path = mod_inst->getHierarchicalName() + delimiter;
++
++  // The parent side of each port: the net the macro's pin was on. A net
++  // that stayed inside the parent's module has no module net there yet;
++  // it now crosses into the new instance and gets one, with every term of
++  // the flat net in that module on it. Two pins on one such net share the
++  // module net: the timer walks module nets, and a second one would take
++  // the net's terms from the first and leave it on its pin alone.
++  std::unordered_map<dbBTerm*, dbNet*> port_flat;
++  std::unordered_map<dbNet*, dbModNet*> parent_mod_nets;
++  for (auto [bterm, mod_bterm] : ports) {
++    dbModITerm* mod_iterm
++        = dbModITerm::create(mod_inst, mod_bterm->getName(), mod_bterm);
++    const ParentConn& conn = parent_conns[bterm->getName()];
++    port_flat[bterm] = conn.net;
++    if (conn.net == nullptr) {
++      continue;
++    }
++    dbModNet* mod_net = conn.mod_net;
++    if (mod_net == nullptr) {
++      dbModNet*& made = parent_mod_nets[conn.net];
++      if (made == nullptr) {
++        made = dbModNet::create(parent,
++                                conn.net->getName().c_str(),
++                                dbNameUniquifyType::IF_NEEDED,
++                                conn.net);
++        const DontTouchLift lift(conn.net);
++        made->connectTermsOf(conn.net);
++      }
++      mod_net = made;
++    }
++    mod_iterm->connect(mod_net);
++  }
++
++  // A feedthrough, a source net on two or more ports, joins the parent's
++  // nets on those ports into one of them: one on a port of the parent's
++  // block, since Verilog names a port's net after the port, else the first.
++  // The module nets stay as they are, one on each side of the instance,
++  // joined through the module net inside. mergeNet destroys the net it
++  // merges, so every port that was on that net moves to the one that is
++  // left, and all of it before any net is created: a new net can take a
++  // destroyed net's place in the table, and with it its address. The
++  // guides of the net that goes, an earlier dissolve's routes, would go
++  // with it: they move to the net that is left, where the feedthrough's
++  // own guides join them to that net's. Its pins move with it, those of an
++  // earlier dissolve's dont_touch cells among them.
++  std::unordered_map<dbNet*, dbNet*> merged;
++  auto survivor = [&merged](dbNet* net) {
++    for (auto it = merged.find(net); it != merged.end();
++         it = merged.find(net)) {
++      net = it->second;
++    }
++    return net;
++  };
++  for (dbNet* src_net : source->getNets()) {
++    if (isSupplyNet(src_net) || alias.contains(src_net)) {
++      continue;
++    }
++    // The parent's nets on this net's ports, each once.
++    std::vector<dbNet*> joined;
++    for (dbBTerm* bterm : src_net->getBTerms()) {
++      if (bterm->getSigType().isSupply()) {
++        continue;
++      }
++      dbNet* parent_net = survivor(port_flat[bterm]);
++      if (parent_net != nullptr
++          && std::ranges::find(joined, parent_net) == joined.end()) {
++        joined.push_back(parent_net);
++      }
++    }
++    if (joined.size() < 2) {
++      continue;
++    }
++    dbNet* flat = joined.front();
++    for (dbNet* parent_net : joined) {
++      if (!parent_net->getBTerms().empty()) {
++        flat = parent_net;
++        break;
++      }
++    }
++    for (dbNet* parent_net : joined) {
++      if (parent_net != flat) {
++        for (dbGuide* guide : parent_net->getGuides()) {
++          dbGuide::create(flat,
++                          guide->getLayer(),
++                          guide->getViaLayer(),
++                          guide->getBox(),
++                          guide->isCongested());
++        }
++        const DontTouchLift lift(parent_net);
++        flat->mergeNet(parent_net);
++        merged[parent_net] = flat;
++      }
++    }
++  }
++  for (auto& [bterm, net] : port_flat) {
++    net = survivor(net);
++  }
++
++  // Nets. A source net on ports is the parent's flat net on them, one net
++  // by now, or a new one named under the instance when the parent leaves
++  // all of them open, with a module net inside the new module; a net on no
++  // port is a new flat net, named under the instance, with no module net,
++  // as the Verilog reader leaves a net that does not leave its module.
++  std::unordered_map<std::string, dbModBTerm*> mod_bterms;
++  for (auto [bterm, mod_bterm] : ports) {
++    mod_bterms[bterm->getName()] = mod_bterm;
++  }
++  struct Conn
++  {
++    dbNet* net;
++    dbModNet* mod_net;
++  };
++  std::unordered_map<dbNet*, Conn> nets;
++  for (dbNet* src_net : source->getNets()) {
++    if (isSupplyNet(src_net) || alias.contains(src_net)) {
++      continue;
++    }
++    dbNet* flat = nullptr;
++    dbModNet* mod_net = nullptr;
++    for (dbBTerm* bterm : src_net->getBTerms()) {
++      if (bterm->getSigType().isSupply()) {
++        continue;
++      }
++      if (mod_net == nullptr) {
++        mod_net = dbModNet::create(module, src_net->getName().c_str());
++      }
++      mod_bterms[bterm->getName()]->connect(mod_net);
++      if (flat == nullptr) {
++        flat = port_flat[bterm];
++      }
++    }
++    if (flat == nullptr) {
++      const std::string name = path + src_net->getName();
++      flat = dbNet::create(block, name.c_str());
++      if (flat == nullptr) {
++        logger->error(
++            utl::ODB, 1228, "dissolve: net {} already exists.", name);
++      }
++      flat->setSigType(src_net->getSigType());
++    }
++    nets[src_net] = {flat, mod_net};
++  }
++  for (auto [out, in] : alias) {
++    nets[out] = nets[root(in)];
++  }
++
++  // Cells, where the block placed them, through the macro's transform.
++  MasterMap masters(block->getDataBase(), logger);
++  for (dbInst* src : source->getInsts()) {
++    if (stripped.contains(src)) {
++      continue;
++    }
++    dbMaster* master = masters.master(src);
++    const std::string name = path + src->getName();
++    dbInst* cell = dbInst::create(
++        block, master, name.c_str(), src->isPhysicalOnly(), module);
++    if (cell == nullptr) {
++      logger->error(
++          utl::ODB, 1229, "dissolve: instance {} already exists.", name);
++    }
++    dbTransform t = src->getTransform();
++    t.concat(to_parent);
++    cell->setTransform(t);
++    cell->setPlacementStatus(src->getPlacementStatus());
++    // Keep TIMING: CTS skips a net a TIMING buffer drives (CTS-0105), so a
++    // dissolved clock tree is left as built instead of re-clustered.
++    cell->setSourceType(src->getSourceType());
++    for (dbITerm* src_iterm : src->getITerms()) {
++      dbNet* src_net = src_iterm->getNet();
++      if (src_net == nullptr || isSupplyNet(src_net)) {
++        continue;
++      }
++      const Conn& conn = nets[src_net];
++      dbITerm* iterm
++          = cell->getITerm(masters.mterm(src_iterm->getMTerm(), master));
++      if (conn.mod_net != nullptr) {
++        iterm->connect(conn.net, conn.mod_net);
++      } else {
++        iterm->connect(conn.net);
++      }
++    }
++    // After its pins: a dont_touch instance's pins cannot be connected.
++    if (src->isDoNotTouch()) {
++      cell->setDoNotTouch(true);
++    }
++  }
++
++  // The block's global route guides, through the macro's transform: the
++  // parent's router restores a net from its guides instead of routing it
++  // again, so a block dissolved after its global route keeps its routes.
++  // In the source's net order, so the parent's guides are the same every
++  // run.
++  dbTech* tech = block->getTech();
++  for (dbNet* src_net : source->getNets()) {
++    if (isSupplyNet(src_net) || rerouted.contains(src_net)) {
++      continue;
++    }
++    dbNet* net = nets[src_net].net;
++    for (dbGuide* guide : src_net->getGuides()) {
++      dbTechLayer* layer = tech->findLayer(guide->getLayer()->getName().c_str());
++      dbTechLayer* via_layer = nullptr;
++      if (guide->getViaLayer() != nullptr) {
++        via_layer = tech->findLayer(guide->getViaLayer()->getName().c_str());
++      }
++      Rect box = guide->getBox();
++      to_parent.apply(box);
++      dbGuide::create(net, layer, via_layer, box, guide->isCongested());
++    }
++  }
++  return mod_inst;
++}
++
++std::vector<dbInst*> dbModInst::getPortCones(
++    const size_t max_cone,
++    std::vector<dbModBTerm*>* skipped)
++{
++  dbModule* module = getMaster();
++  std::unordered_set<dbInst*> inside;
++  for (dbInst* inst : module->getLeafInsts()) {
++    inside.insert(inst);
++  }
++
++  std::vector<dbInst*> result;
++  std::unordered_set<dbInst*> in_result;
++  for (dbModBTerm* port : module->getModBTerms()) {
++    if (port->isBusPort() || port->getSigType().isSupply()) {
++      continue;
++    }
++    dbModNet* mod_net = port->getModNet();
++    if (mod_net == nullptr) {
++      continue;
++    }
++    dbNet* start = mod_net->findRelatedNet();
++    if (start == nullptr) {
++      continue;
++    }
++    const dbIoType io = port->getIoType();
++    // Forward from an input, backward from an output; an inout both ways.
++    const bool forward = io == dbIoType::INPUT || io == dbIoType::INOUT;
++    const bool backward = io == dbIoType::OUTPUT || io == dbIoType::INOUT;
++
++    std::vector<dbInst*> cone;
++    std::unordered_set<dbInst*> seen;
++    std::unordered_set<dbNet*> seen_nets;
++    std::deque<std::tuple<dbNet*, bool>> queue;
++    if (forward) {
++      queue.emplace_back(start, true);
++    }
++    if (backward) {
++      queue.emplace_back(start, false);
++    }
++    bool too_big = false;
++    while (!queue.empty() && !too_big) {
++      auto [net, fwd] = queue.front();
++      queue.pop_front();
++      for (dbITerm* iterm : net->getITerms()) {
++        if (isSupplyTerm(iterm)) {
++          continue;
++        }
++        const dbIoType dir = iterm->getIoType();
++        // Forward the loads on the net, backward its drivers.
++        if (fwd ? dir == dbIoType::OUTPUT : dir == dbIoType::INPUT) {
++          continue;
++        }
++        dbInst* inst = iterm->getInst();
++        if (!inside.contains(inst) || !seen.insert(inst).second) {
++          continue;
++        }
++        cone.push_back(inst);
++        if (cone.size() > max_cone) {
++          too_big = true;
++          break;
++        }
++        if (inst->getMaster()->isSequential()) {
++          continue;
++        }
++        for (dbITerm* next : inst->getITerms()) {
++          if (isSupplyTerm(next)) {
++            continue;
++          }
++          const dbIoType next_dir = next->getIoType();
++          if (fwd ? next_dir == dbIoType::INPUT : next_dir == dbIoType::OUTPUT) {
++            continue;
++          }
++          dbNet* next_net = next->getNet();
++          if (next_net != nullptr && seen_nets.insert(next_net).second) {
++            queue.emplace_back(next_net, fwd);
++          }
++        }
++      }
++    }
++    if (too_big) {
++      if (skipped != nullptr) {
++        skipped->push_back(port);
++      }
++      continue;
++    }
++    for (dbInst* inst : cone) {
++      if (in_result.insert(inst).second) {
++        result.push_back(inst);
++      }
++    }
++  }
++  return result;
++}
++
++}  // namespace odb
+diff --git a/openroad/odb/src/swig/tcl/odb.tcl b/openroad/odb/src/swig/tcl/odb.tcl
+index 160354a..dd46250 100644
+--- a/openroad/odb/src/swig/tcl/odb.tcl
++++ b/openroad/odb/src/swig/tcl/odb.tcl
+@@ -1450,3 +1450,55 @@ proc destroy_routes { } {
+   $block destroyRoutes
+ }
+ }
++
++sta::define_cmd_args "dissolve_macro" {-inst inst_name -db odb_file\
++                                         [-strip_clock_buffers masters]}
++
++proc dissolve_macro { args } {
++  sta::parse_key_args "dissolve_macro" args \
++    keys {-inst -db -strip_clock_buffers} flags {}
++  sta::check_argc_eq0 "dissolve_macro" $args
++  if { ![info exists keys(-inst)] || ![info exists keys(-db)] } {
++    utl::error ODB 1230 "dissolve_macro needs -inst and -db."
++  }
++  set block [ord::get_db_block]
++  set inst [$block findInst $keys(-inst)]
++  if { $inst == "NULL" } {
++    utl::error ODB 1231 "dissolve_macro: no instance $keys(-inst)."
++  }
++  set source_db [odb::read_db NULL $keys(-db)]
++  if { $source_db == "NULL" } {
++    utl::error ODB 1232 "dissolve_macro: cannot read $keys(-db)."
++  }
++  set source [[$source_db getChip] getBlock]
++  set strip [odb::vector_str]
++  if { [info exists keys(-strip_clock_buffers)] } {
++    foreach master $keys(-strip_clock_buffers) {
++      $strip push $master
++    }
++  }
++  set mod_inst [odb::dbInst_dissolve $inst $source $strip]
++  odb::dbDatabase_destroy $source_db
++  return $mod_inst
++}
++
++sta::define_cmd_args "get_port_cones" {-modinst path [-max_cone count]}
++
++proc get_port_cones { args } {
++  sta::parse_key_args "get_port_cones" args keys {-modinst -max_cone} flags {}
++  sta::check_argc_eq0 "get_port_cones" $args
++  if { ![info exists keys(-modinst)] } {
++    utl::error ODB 1233 "get_port_cones needs -modinst."
++  }
++  set block [ord::get_db_block]
++  set mod_inst [$block findModInst $keys(-modinst)]
++  if { $mod_inst == "NULL" } {
++    utl::error ODB 1234 "get_port_cones: no module instance $keys(-modinst)."
++  }
++  set max_cone 1000
++  if { [info exists keys(-max_cone)] } {
++    set max_cone $keys(-max_cone)
++    sta::check_positive_integer "-max_cone" $max_cone
++  }
++  return [$mod_inst getPortCones $max_cone NULL]
++}
+diff --git a/openroad/odb/test/cpp/BUILD b/openroad/odb/test/cpp/BUILD
+index ebdf3b0..52ebdfd 100644
+--- a/openroad/odb/test/cpp/BUILD
++++ b/openroad/odb/test/cpp/BUILD
+@@ -432,6 +432,19 @@ cc_test(
+     ],
+ )
+ 
++cc_test(
++    name = "TestDissolve",
++    srcs = [
++        "TestDissolve.cpp",
++    ],
++    deps = [
++        "//openroad/odb/src/db",
++        "//openroad/tst:db_fixture",
++        "@googletest//:gtest",
++        "@googletest//:gtest_main",
++    ],
++)
++
+ cc_test(
+     name = "TestSwapMasterLeaf",
+     srcs = [
+diff --git a/openroad/odb/test/cpp/TestDissolve.cpp b/openroad/odb/test/cpp/TestDissolve.cpp
+new file mode 100644
+index 0000000..5445dbb
+--- /dev/null
++++ b/openroad/odb/test/cpp/TestDissolve.cpp
+@@ -0,0 +1,1101 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++// Unit tests for dbInst::dissolve, a placed instance of a block master
++// replaced by the block's cells and nets as a module instance, and for
++// dbModInst::getPortCones.
++//
++// The source block lives in its own database, as a block read from its own
++// ODB does; the two share their library by name only.
++//
++//            +------------------------- blk ---------------------------+
++//   a  ---->| u1 (inv1) -n1-> r1 (dff) -n2-> u2 (and2) -n3-> r2 (dff)  |
++//           |                                         \-n3-> r3 (dff)  |
++//           |                       r2 -n4-> u3 (inv1) ----------------|----> y
++//   clk --->| ck of r1, r2, r3                                         |
++//            +---------------------------------------------------------+
++//
++// The master has more pins than this block has ports (b, fi, fo, gi, go);
++// a test that wants one adds the port: a second input, or a feedthrough, a
++// net of the block's on two of its ports.
++
++#include <algorithm>
++#include <cstddef>
++#include <memory>
++#include <set>
++#include <stdexcept>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "gtest/gtest.h"
++#include "odb/db.h"
++#include "odb/dbBlockCallBackObj.h"
++#include "odb/dbObject.h"
++#include "odb/dbTypes.h"
++#include "odb/geom.h"
++#include "tst/db_fixture.h"
++
++namespace odb {
++
++namespace {
++
++constexpr int kBlkWidth = 4000;
++constexpr int kBlkHeight = 2000;
++
++dbLib* makeLib(dbDatabase* db, bool with_block_master)
++{
++  dbTech* tech = dbTech::create(db, "tech");
++  dbTechLayer::create(tech, "L1", dbTechLayerType::MASTERSLICE);
++  dbLib* lib = dbLib::create(db, "lib1", tech, ',');
++
++  dbMaster* inv = dbMaster::create(lib, "inv1");
++  inv->setWidth(500);
++  inv->setHeight(1000);
++  inv->setType(dbMasterType::CORE);
++  dbMTerm::create(inv, "ip0", dbIoType::INPUT, dbSigType::SIGNAL);
++  dbMTerm::create(inv, "op0", dbIoType::OUTPUT, dbSigType::SIGNAL);
++  inv->setFrozen();
++
++  dbMaster* and2 = dbMaster::create(lib, "and2");
++  and2->setWidth(1000);
++  and2->setHeight(1000);
++  and2->setType(dbMasterType::CORE);
++  dbMTerm::create(and2, "a", dbIoType::INPUT, dbSigType::SIGNAL);
++  dbMTerm::create(and2, "b", dbIoType::INPUT, dbSigType::SIGNAL);
++  dbMTerm::create(and2, "o", dbIoType::OUTPUT, dbSigType::SIGNAL);
++  and2->setFrozen();
++
++  dbMaster* buf = dbMaster::create(lib, "buf");
++  buf->setWidth(500);
++  buf->setHeight(1000);
++  buf->setType(dbMasterType::CORE);
++  dbMTerm::create(buf, "a", dbIoType::INPUT, dbSigType::SIGNAL);
++  dbMTerm::create(buf, "z", dbIoType::OUTPUT, dbSigType::SIGNAL);
++  buf->setFrozen();
++
++  // A clock pin makes the master sequential.
++  dbMaster* dff = dbMaster::create(lib, "dff");
++  dff->setWidth(1000);
++  dff->setHeight(1000);
++  dff->setType(dbMasterType::CORE);
++  dbMTerm::create(dff, "d", dbIoType::INPUT, dbSigType::SIGNAL);
++  dbMTerm::create(dff, "ck", dbIoType::INPUT, dbSigType::CLOCK);
++  dbMTerm::create(dff, "q", dbIoType::OUTPUT, dbSigType::SIGNAL);
++  dff->setFrozen();
++
++  if (with_block_master) {
++    dbMaster* blk = dbMaster::create(lib, "blk");
++    blk->setWidth(kBlkWidth);
++    blk->setHeight(kBlkHeight);
++    blk->setType(dbMasterType::BLOCK);
++    dbMTerm::create(blk, "a", dbIoType::INPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "clk", dbIoType::INPUT, dbSigType::CLOCK);
++    dbMTerm::create(blk, "y", dbIoType::OUTPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "b", dbIoType::INPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "fi", dbIoType::INPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "fo", dbIoType::OUTPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "gi", dbIoType::INPUT, dbSigType::SIGNAL);
++    dbMTerm::create(blk, "go", dbIoType::OUTPUT, dbSigType::SIGNAL);
++    blk->setFrozen();
++  }
++  return lib;
++}
++
++// Counts the nets destroyed in a block.
++class NetDestroyCounter : public dbBlockCallBackObj
++{
++ public:
++  void inDbNetDestroy(dbNet* /* net */) override { ++count; }
++  int count = 0;
++};
++
++class DissolveTest : public tst::DbFixture
++{
++ protected:
++  void SetUp() override
++  {
++    lib_ = makeLib(db_.get(), true);
++    dbChip* chip = dbChip::create(db_.get(), db_->getTech());
++    block_ = dbBlock::create(chip, "top");
++    block_->setDieArea(Rect(0, 0, 100000, 100000));
++
++    source_db_ = dbDatabase::create();
++    source_db_->setLogger(&logger_);
++    dbLib* src_lib = makeLib(source_db_, false);
++    dbChip* src_chip = dbChip::create(source_db_, source_db_->getTech());
++    source_ = dbBlock::create(src_chip, "blk");
++    // The die's corner is not the origin: the abstract's origin is.
++    source_->setDieArea(Rect(100, 200, 100 + kBlkWidth, 200 + kBlkHeight));
++    makeSource(src_lib);
++  }
++
++  void TearDown() override { dbDatabase::destroy(source_db_); }
++
++  void makeSource(dbLib* lib)
++  {
++    dbBlock* b = source_;
++    dbNet* a = dbNet::create(b, "a");
++    dbNet* clk = dbNet::create(b, "clk");
++    clk->setSigType(dbSigType::CLOCK);
++    dbNet* y = dbNet::create(b, "y");
++    dbBTerm::create(a, "a")->setIoType(dbIoType::INPUT);
++    dbBTerm* clk_port = dbBTerm::create(clk, "clk");
++    clk_port->setIoType(dbIoType::INPUT);
++    clk_port->setSigType(dbSigType::CLOCK);
++    dbBTerm::create(y, "y")->setIoType(dbIoType::OUTPUT);
++    auto [n1, n2, n3, n4] = makeNets(b, "n1", "n2", "n3", "n4");
++
++    auto cell = [&](const char* master,
++                    const char* name,
++                    int x,
++                    int y_loc,
++                    dbOrientType orient) {
++      dbInst* inst = dbInst::create(b, lib->findMaster(master), name);
++      inst->setOrient(orient);
++      inst->setLocation(x, y_loc);
++      inst->setPlacementStatus(dbPlacementStatus::PLACED);
++      return inst;
++    };
++    dbInst* u1 = cell("inv1", "u1", 100, 200, dbOrientType::R0);
++    dbInst* r1 = cell("dff", "r1", 600, 200, dbOrientType::R0);
++    dbInst* u2 = cell("and2", "u2", 1600, 1200, dbOrientType::MX);
++    dbInst* r2 = cell("dff", "r2", 2600, 1200, dbOrientType::MX);
++    dbInst* r3 = cell("dff", "r3", 2600, 200, dbOrientType::R0);
++    dbInst* u3 = cell("inv1", "u3", 3600, 200, dbOrientType::MY);
++
++    u1->findITerm("ip0")->connect(a);
++    u1->findITerm("op0")->connect(n1);
++    r1->findITerm("d")->connect(n1);
++    r1->findITerm("q")->connect(n2);
++    u2->findITerm("a")->connect(n2);
++    u2->findITerm("b")->connect(n2);
++    u2->findITerm("o")->connect(n3);
++    r2->findITerm("d")->connect(n3);
++    r2->findITerm("q")->connect(n4);
++    r3->findITerm("d")->connect(n3);
++    u3->findITerm("ip0")->connect(n4);
++    u3->findITerm("op0")->connect(y);
++    for (dbInst* r : {r1, r2, r3}) {
++      r->findITerm("ck")->connect(clk);
++    }
++    u3->setDoNotTouch(true);
++  }
++
++  // The macro "m" of blk in `module`, its pins on na, nclk and ny.
++  dbInst* makeMacro(dbModule* module, const char* name, dbOrientType orient)
++  {
++    dbInst* m = dbInst::create(
++        block_, lib_->findMaster("blk"), name, false, module);
++    m->setOrient(orient);
++    m->setLocation(10000, 20000);
++    m->setPlacementStatus(dbPlacementStatus::PLACED);
++    return m;
++  }
++
++  // u2's b on `net` of the block instead of n2.
++  void moveU2b(dbNet* net)
++  {
++    dbITerm* pin = source_->findInst("u2")->findITerm("b");
++    pin->disconnect();
++    pin->connect(net);
++  }
++
++  // A second input port of the block, b, on u2's b.
++  void makePortB()
++  {
++    dbNet* b = dbNet::create(source_, "b");
++    dbBTerm::create(b, "b")->setIoType(dbIoType::INPUT);
++    moveU2b(b);
++  }
++
++  // A feedthrough of the block: one net on input port `in` and output port
++  // `out`.
++  dbNet* makeFeedthrough(const char* name, const char* in, const char* out)
++  {
++    dbNet* net = dbNet::create(source_, name);
++    dbBTerm::create(net, in)->setIoType(dbIoType::INPUT);
++    dbBTerm::create(net, out)->setIoType(dbIoType::OUTPUT);
++    return net;
++  }
++
++  // An inverter of the parent's own with `pin` on `net`.
++  dbITerm* makeInv(const char* name, const char* pin, dbNet* net)
++  {
++    dbInst* inv = dbInst::create(block_, lib_->findMaster("inv1"), name);
++    dbITerm* iterm = inv->findITerm(pin);
++    iterm->connect(net);
++    return iterm;
++  }
++
++  // The id of the error the dissolve of `inst` is refused with, "" when it
++  // is not refused.
++  std::string refusal(dbInst* inst)
++  {
++    try {
++      dbInst::dissolve(inst, source_);
++    } catch (const std::runtime_error& e) {
++      return e.what();
++    }
++    return "";
++  }
++
++  // What a refused dissolve leaves as it found it.
++  std::vector<size_t> census() const
++  {
++    return {block_->getInsts().size(),
++            block_->getNets().size(),
++            block_->getModules().size(),
++            block_->getModInsts().size(),
++            block_->getModNets().size(),
++            block_->getModITerms().size(),
++            block_->getBlockages().size()};
++  }
++
++  // The pins a module net reaches through the hierarchy, as the timer walks
++  // it: down through each pin of a module instance to the net on the port
++  // inside, up through each port to the net on the instance's pin.
++  static void reach(dbModNet* net,
++                    std::set<dbModNet*>& seen,
++                    std::set<dbObject*>& pins)
++  {
++    if (net == nullptr || !seen.insert(net).second) {
++      return;
++    }
++    for (dbITerm* iterm : net->getITerms()) {
++      pins.insert(iterm);
++    }
++    for (dbBTerm* bterm : net->getBTerms()) {
++      pins.insert(bterm);
++    }
++    for (dbModITerm* pin : net->getModITerms()) {
++      if (dbModBTerm* port = pin->getChildModBTerm()) {
++        reach(port->getModNet(), seen, pins);
++      }
++    }
++    for (dbModBTerm* port : net->getModBTerms()) {
++      if (dbModITerm* pin = port->getParentModITerm()) {
++        reach(pin->getModNet(), seen, pins);
++      }
++    }
++  }
++
++  // The timer walks a pin's module net, not its flat net: from every pin of
++  // `net`, the module nets reach all of the net's pins and no other.
++  static void expectModNetsConnect(dbNet* net)
++  {
++    std::set<dbObject*> flat;
++    for (dbITerm* iterm : net->getITerms()) {
++      flat.insert(iterm);
++    }
++    for (dbBTerm* bterm : net->getBTerms()) {
++      flat.insert(bterm);
++    }
++    auto from = [&flat](dbModNet* mod_net, const std::string& name) {
++      ASSERT_NE(mod_net, nullptr) << name << " has no module net";
++      std::set<dbModNet*> seen;
++      std::set<dbObject*> pins;
++      reach(mod_net, seen, pins);
++      EXPECT_EQ(pins, flat) << "from " << name;
++    };
++    for (dbITerm* iterm : net->getITerms()) {
++      from(iterm->getModNet(), iterm->getName());
++    }
++    for (dbBTerm* bterm : net->getBTerms()) {
++      from(bterm->getModNet(), bterm->getName());
++    }
++  }
++
++  dbLib* lib_ = nullptr;
++  dbBlock* block_ = nullptr;
++  dbDatabase* source_db_ = nullptr;
++  dbBlock* source_ = nullptr;
++};
++
++// In the top module: the macro becomes a module instance of its name, its
++// cells and nets under it, its ports on the parent's nets.
++TEST_F(DissolveTest, TopLevelMacroBecomesModuleInstance)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [na, nclk, ny] = makeNets(block_, "na", "nclk", "ny");
++  dbBTerm::create(na, "A")->setIoType(dbIoType::INPUT);
++  dbBTerm::create(nclk, "CLK")->setIoType(dbIoType::INPUT);
++  dbBTerm::create(ny, "Y")->setIoType(dbIoType::OUTPUT);
++  m->findITerm("a")->connect(na);
++  m->findITerm("clk")->connect(nclk);
++  m->findITerm("y")->connect(ny);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  ASSERT_NE(mi, nullptr);
++  EXPECT_STREQ(mi->getName(), "m");
++  EXPECT_EQ(mi->getParent(), block_->getTopModule());
++  EXPECT_STREQ(mi->getMaster()->getName(), "blk");
++  EXPECT_EQ(block_->findInst("m"), nullptr);
++  EXPECT_EQ(mi->getMaster()->getDbInstCount(), 6);
++
++  // Port nets are the parent's flat nets, with a module net on each side.
++  dbInst* u1 = block_->findInst("m/u1");
++  ASSERT_NE(u1, nullptr);
++  EXPECT_EQ(u1->getModule(), mi->getMaster());
++  EXPECT_EQ(u1->findITerm("ip0")->getNet(), na);
++  dbModNet* inner_a = u1->findITerm("ip0")->getModNet();
++  ASSERT_NE(inner_a, nullptr);
++  EXPECT_EQ(inner_a->getParent(), mi->getMaster());
++  EXPECT_EQ(inner_a->getModBTerms().size(), 1u);
++  dbModITerm* pin_a = mi->findModITerm("a");
++  ASSERT_NE(pin_a, nullptr);
++  dbModNet* outer_a = pin_a->getModNet();
++  ASSERT_NE(outer_a, nullptr);
++  EXPECT_EQ(outer_a->getParent(), block_->getTopModule());
++  EXPECT_EQ(outer_a->findRelatedNet(), na);
++  // The parent's own terms on the net joined the new module net.
++  EXPECT_EQ(block_->findBTerm("A")->getModNet(), outer_a);
++
++  // An internal net is a new flat net under the instance, no module net.
++  dbInst* u2 = block_->findInst("m/u2");
++  ASSERT_NE(u2, nullptr);
++  dbNet* n3 = u2->findITerm("o")->getNet();
++  ASSERT_NE(n3, nullptr);
++  EXPECT_EQ(n3->getName(), "m/n3");
++  EXPECT_EQ(u2->findITerm("o")->getModNet(), nullptr);
++  EXPECT_EQ(block_->findInst("m/r3")->findITerm("d")->getNet(), n3);
++
++  // The output port drives the parent's net, from a dont_touch cell.
++  EXPECT_EQ(block_->findInst("m/u3")->findITerm("op0")->getNet(), ny);
++  EXPECT_TRUE(block_->findInst("m/u3")->isDoNotTouch());
++  EXPECT_EQ(block_->findInst("m/r1")->findITerm("ck")->getNet(), nclk);
++}
++
++// Every cell lands where the block placed it, through the macro's location
++// and orientation, relative to the block's die corner.
++TEST_F(DissolveTest, CellsPlacedThroughMacroTransform)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::MY);
++  dbInst::dissolve(m, source_);
++
++  // u1: inv1 500 wide at source (100, 200) R0, the die's corner. Mirrored
++  // about the y axis within the 4000-wide block: x 4000 - 0 - 500.
++  dbInst* u1 = block_->findInst("m/u1");
++  EXPECT_EQ(u1->getOrient(), dbOrientType::MY);
++  EXPECT_EQ(u1->getBBox()->getBox(),
++            Rect(10000 + 3500, 20000, 10000 + 4000, 21000));
++  EXPECT_EQ(u1->getPlacementStatus(), dbPlacementStatus::PLACED);
++
++  // u2: and2 at (1500, 1000) relative, MX; mirrored about y it is R180.
++  dbInst* u2 = block_->findInst("m/u2");
++  EXPECT_EQ(u2->getOrient(), dbOrientType::R180);
++  EXPECT_EQ(u2->getBBox()->getBox(),
++            Rect(10000 + 1500, 21000, 10000 + 2500, 22000));
++
++  // u3: inv1 MY at (3500, 0) relative: back to R0 at the left edge.
++  dbInst* u3 = block_->findInst("m/u3");
++  EXPECT_EQ(u3->getOrient(), dbOrientType::R0);
++  EXPECT_EQ(u3->getBBox()->getBox(), Rect(10000, 20000, 10500, 21000));
++}
++
++// Inside a submodule whose net already crosses its boundary: the existing
++// module net is reused and the instance is named in the submodule.
++TEST_F(DissolveTest, MacroInSubmoduleUsesItsModuleNets)
++{
++  dbModule* sub = dbModule::create(block_, "sub");
++  dbModBTerm* sub_in = dbModBTerm::create(sub, "in");
++  sub_in->setIoType(dbIoType::INPUT);
++  dbModInst* sub_inst
++      = dbModInst::create(block_->getTopModule(), sub, "s");
++  dbModITerm* s_in = dbModITerm::create(sub_inst, "in", sub_in);
++
++  dbNet* na = dbNet::create(block_, "na");
++  dbModNet* top_na = dbModNet::create(block_->getTopModule(), "na");
++  dbBTerm* port_a = dbBTerm::create(na, "A");
++  port_a->setIoType(dbIoType::INPUT);
++  port_a->connect(top_na);
++  s_in->connect(top_na);
++  dbModNet* sub_na = dbModNet::create(sub, "in");
++  sub_in->connect(sub_na);
++
++  dbInst* m = makeMacro(sub, "s/m", dbOrientType::R0);
++  m->findITerm("a")->connect(na, sub_na);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_STREQ(mi->getName(), "m");
++  EXPECT_EQ(mi->getParent(), sub);
++  EXPECT_EQ(mi->getHierarchicalName(), "s/m");
++  EXPECT_EQ(mi->findModITerm("a")->getModNet(), sub_na);
++  dbInst* u1 = block_->findInst("s/m/u1");
++  ASSERT_NE(u1, nullptr);
++  EXPECT_EQ(u1->findITerm("ip0")->getNet(), na);
++  // y is on no net in the parent: inside it is a new flat net.
++  dbNet* y = block_->findInst("s/m/u3")->findITerm("op0")->getNet();
++  ASSERT_NE(y, nullptr);
++  EXPECT_EQ(y->getName(), "s/m/y");
++  expectModNetsConnect(na);
++}
++
++// A net with no module net in the macro's module stayed inside that module,
++// and gets one there. A pin with no module net on a net with a term outside
++// the module, a port of the block or a cell of another module, is on a net
++// that left it: the hierarchy is not the flat netlist's, the timer would
++// stop at the new module net, and the dissolve is refused (ODB 1238) before
++// anything is changed, the macro's halo included. A module net the net has
++// in the module does not help when the pin is not on it.
++TEST_F(DissolveTest, NetThatLeavesTheModuleWithNoModuleNetIsRefused)
++{
++  dbModule* sub = dbModule::create(block_, "sub");
++  dbModInst::create(block_->getTopModule(), sub, "s");
++  auto [inside, to_port, to_top, off_the_pin]
++      = makeNets(block_, "s/n", "na", "nb", "nc");
++  dbMaster* inv = lib_->findMaster("inv1");
++  dbInst* load = dbInst::create(block_, inv, "s/load", false, sub);
++  load->findITerm("ip0")->connect(inside);
++  dbBTerm::create(to_port, "A")->setIoType(dbIoType::INPUT);
++  makeInv("drv", "op0", to_top);
++  dbInst* load2 = dbInst::create(block_, inv, "s/load2", false, sub);
++  load2->findITerm("ip0")->connect(off_the_pin, dbModNet::create(sub, "nc"));
++  makeInv("drv2", "op0", off_the_pin);
++  dbInst* m0 = makeMacro(sub, "s/m0", dbOrientType::R0);
++  dbInst* m1 = makeMacro(sub, "s/m1", dbOrientType::R0);
++  dbInst* m2 = makeMacro(sub, "s/m2", dbOrientType::R0);
++  dbInst* m3 = makeMacro(sub, "s/m3", dbOrientType::R0);
++  dbBlockage::create(block_, 9000, 19000, 15000, 23000, m1);
++  m0->findITerm("y")->connect(inside);
++  m1->findITerm("a")->connect(to_port);
++  m2->findITerm("a")->connect(to_top);
++  m3->findITerm("a")->connect(off_the_pin);
++
++  dbModInst* mi = dbInst::dissolve(m0, source_);
++  dbModNet* mod_net = mi->findModITerm("y")->getModNet();
++  ASSERT_NE(mod_net, nullptr);
++  EXPECT_EQ(mod_net->getParent(), sub);
++  EXPECT_EQ(load->findITerm("ip0")->getModNet(), mod_net);
++  expectModNetsConnect(inside);
++
++  const std::vector<size_t> before = census();
++  const std::vector<std::pair<dbInst*, dbNet*>> refused
++      = {{m1, to_port}, {m2, to_top}, {m3, off_the_pin}};
++  for (auto [macro, net] : refused) {
++    const std::string name = macro->getName();
++    EXPECT_EQ(refusal(macro), "ODB-1238") << name;
++    ASSERT_EQ(block_->findInst(name.c_str()), macro) << name;
++    EXPECT_EQ(macro->findITerm("a")->getNet(), net) << name;
++    EXPECT_EQ(macro->findITerm("a")->getModNet(), nullptr) << name;
++    EXPECT_EQ(census(), before) << name;
++  }
++}
++
++// The same where the flow dissolves, in the top module: a cell of a child
++// module on the net of a pin with no module net.
++TEST_F(DissolveTest, NetIntoAChildModuleWithNoModuleNetIsRefused)
++{
++  dbModule* sub = dbModule::create(block_, "sub");
++  dbModInst::create(block_->getTopModule(), sub, "s");
++  dbNet* net = dbNet::create(block_, "n");
++  dbInst* load = dbInst::create(
++      block_, lib_->findMaster("inv1"), "s/load", false, sub);
++  load->findITerm("ip0")->connect(net);
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  m->findITerm("y")->connect(net);
++
++  const std::vector<size_t> before = census();
++  EXPECT_EQ(refusal(m), "ODB-1238");
++  ASSERT_EQ(block_->findInst("m"), m);
++  EXPECT_EQ(m->findITerm("y")->getNet(), net);
++  EXPECT_EQ(census(), before);
++}
++
++// A macro that is in no module, as a physical-only instance made in a child
++// module is, dissolves into the top module, and its own pins are not terms
++// outside it.
++TEST_F(DissolveTest, MacroInNoModuleDissolvesIntoTheTopModule)
++{
++  dbModule* sub = dbModule::create(block_, "sub");
++  dbModInst::create(block_->getTopModule(), sub, "s");
++  dbInst* m = dbInst::create(block_, lib_->findMaster("blk"), "m", true, sub);
++  m->setLocation(10000, 20000);
++  m->setPlacementStatus(dbPlacementStatus::PLACED);
++  ASSERT_EQ(m->getModule(), nullptr);
++  dbNet* na = dbNet::create(block_, "na");
++  dbBTerm::create(na, "A")->setIoType(dbIoType::INPUT);
++  m->findITerm("a")->connect(na);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(mi->getParent(), block_->getTopModule());
++  dbInst* u1 = block_->findInst("m/u1");
++  ASSERT_NE(u1, nullptr);
++  EXPECT_EQ(u1->findITerm("ip0")->getNet(), na);
++  expectModNetsConnect(na);
++}
++
++// Two instances of one block master: two modules, two sets of cells.
++TEST_F(DissolveTest, TwoInstancesOfOneMaster)
++{
++  dbInst* m1 = makeMacro(block_->getTopModule(), "m1", dbOrientType::R0);
++  dbInst* m2 = makeMacro(block_->getTopModule(), "m2", dbOrientType::MX);
++  dbModInst* mi1 = dbInst::dissolve(m1, source_);
++  dbModInst* mi2 = dbInst::dissolve(m2, source_);
++  EXPECT_NE(mi1->getMaster(), mi2->getMaster());
++  EXPECT_NE(block_->findInst("m1/u1"), nullptr);
++  EXPECT_NE(block_->findInst("m2/u1"), nullptr);
++}
++
++// A quarter turn would turn the block's cells across the rows.
++TEST_F(DissolveTest, RotatedMacroIsRefused)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R90);
++  EXPECT_EQ(refusal(m), "ODB-1224");
++  EXPECT_EQ(block_->findInst("m"), m);
++}
++
++// The macro's halo goes with it.
++TEST_F(DissolveTest, HaloBlockageRemoved)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbBlockage* halo = dbBlockage::create(block_, 9000, 19000, 15000, 23000, m);
++  ASSERT_EQ(halo->getInstance(), m);
++  dbInst::dissolve(m, source_);
++  EXPECT_EQ(block_->getBlockages().size(), 0u);
++}
++
++// Port cones: forward from an input to the first flop, backward from an
++// output to the first flop. The clock reaches every flop and is skipped.
++TEST_F(DissolveTest, PortConesStopAtTheFirstFlop)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  std::vector<dbModBTerm*> skipped;
++  std::vector<dbInst*> cones = mi->getPortCones(2, &skipped);
++  std::vector<std::string> names;
++  for (dbInst* inst : cones) {
++    names.push_back(inst->getName());
++  }
++  std::ranges::sort(names);
++  EXPECT_EQ(names, (std::vector<std::string>{"m/r1", "m/r2", "m/u1", "m/u3"}));
++  ASSERT_EQ(skipped.size(), 1u);
++  EXPECT_STREQ(skipped[0]->getName(), "clk");
++
++  // With room for the clock's three flops, it is a cone too.
++  skipped.clear();
++  EXPECT_EQ(mi->getPortCones(3, &skipped).size(), 5u);
++  EXPECT_TRUE(skipped.empty());
++}
++
++// The block's own clock tree stripped, as its CTS left it:
++//
++//   clk -> cb0 -c1-> cb1 -c2-> r1, r2 ck, dummy and dummy_inv (no output)
++//               \-c1-> gate (and2, a cloned clock gate; b is n1) -c3->
++//                       cinv (inv1) -c4-> r3 ck
++//   n1 -> rebuf (a data buffer repair_timing inserted) -n5-> nothing
++//
++// All of them TIMING. The buffers on clock nets go and their nets join the
++// clock; the gate, the inverter and the data buffer stay. The clock nets
++// they touched lose their guides; a data net keeps its own.
++TEST_F(DissolveTest, StripClockBuffers)
++{
++  dbLib* src_lib = source_db_->findLib("lib1");
++  auto [c1, c2, c3, c4] = makeNets(source_, "c1", "c2", "c3", "c4");
++  for (dbNet* net : {c1, c2, c3, c4}) {
++    net->setSigType(dbSigType::CLOCK);
++  }
++  dbNet* n5 = dbNet::create(source_, "n5");
++  auto timing = [&](const char* master, const char* name) {
++    dbInst* inst = dbInst::create(source_, src_lib->findMaster(master), name);
++    inst->setSourceType(dbSourceType::TIMING);
++    inst->setLocation(100, 200);
++    inst->setPlacementStatus(dbPlacementStatus::PLACED);
++    return inst;
++  };
++  dbInst* cb0 = timing("buf", "cb0");
++  cb0->findITerm("a")->connect(source_->findNet("clk"));
++  cb0->findITerm("z")->connect(c1);
++  dbInst* cb1 = timing("buf", "cb1");
++  cb1->findITerm("a")->connect(c1);
++  cb1->findITerm("z")->connect(c2);
++  timing("buf", "dummy")->findITerm("a")->connect(c2);
++  // CTS's dummy loads are inverters as often as buffers
++  timing("inv1", "dummy_inv")->findITerm("ip0")->connect(c2);
++  dbInst* gate = timing("and2", "gate");
++  gate->findITerm("a")->connect(c1);
++  gate->findITerm("b")->connect(source_->findNet("n1"));
++  gate->findITerm("o")->connect(c3);
++  dbInst* cinv = timing("inv1", "cinv");
++  cinv->findITerm("ip0")->connect(c3);
++  cinv->findITerm("op0")->connect(c4);
++  dbInst* rebuf = timing("buf", "rebuf");
++  rebuf->findITerm("a")->connect(source_->findNet("n1"));
++  rebuf->findITerm("z")->connect(n5);
++  source_->findInst("r1")->findITerm("ck")->connect(c2);
++  source_->findInst("r2")->findITerm("ck")->connect(c2);
++  source_->findInst("r3")->findITerm("ck")->connect(c4);
++  dbTechLayer* src_layer = source_db_->getTech()->findLayer("L1");
++  dbGuide::create(c2, src_layer, src_layer, Rect(100, 200, 600, 700), false);
++  dbGuide::create(source_->findNet("n3"),
++                  src_layer,
++                  src_layer,
++                  Rect(100, 200, 600, 700),
++                  false);
++
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [na, nclk, ny] = makeNets(block_, "na", "nclk", "ny");
++  m->findITerm("a")->connect(na);
++  m->findITerm("clk")->connect(nclk);
++  m->findITerm("y")->connect(ny);
++
++  dbInst::dissolve(m, source_, {"buf"});
++
++  for (const char* name : {"m/cb0", "m/cb1", "m/dummy", "m/dummy_inv"}) {
++    EXPECT_EQ(block_->findInst(name), nullptr) << name;
++  }
++  for (const char* name : {"m/gate", "m/cinv", "m/rebuf"}) {
++    EXPECT_NE(block_->findInst(name), nullptr) << name;
++  }
++  // Every register reaches the parent's clock through what is left.
++  EXPECT_EQ(block_->findInst("m/r1")->findITerm("ck")->getNet(), nclk);
++  EXPECT_EQ(block_->findInst("m/r2")->findITerm("ck")->getNet(), nclk);
++  EXPECT_EQ(block_->findInst("m/gate")->findITerm("a")->getNet(), nclk);
++  EXPECT_EQ(block_->findInst("m/r3")->findITerm("ck")->getNet(),
++            block_->findInst("m/cinv")->findITerm("op0")->getNet());
++  EXPECT_EQ(block_->findNet("m/c1"), nullptr);
++  EXPECT_EQ(block_->findNet("m/c2"), nullptr);
++  EXPECT_NE(block_->findInst("m/rebuf")->findITerm("z")->getNet(), nullptr);
++
++  EXPECT_TRUE(nclk->getGuides().empty());
++  EXPECT_EQ(block_->findNet("m/n3")->getGuides().size(), 1u);
++}
++
++// Without a list nothing is stripped, TIMING or not.
++TEST_F(DissolveTest, NoStripKeepsTimingBuffers)
++{
++  dbLib* src_lib = source_db_->findLib("lib1");
++  dbNet* c1 = dbNet::create(source_, "c1");
++  c1->setSigType(dbSigType::CLOCK);
++  dbInst* cb0 = dbInst::create(source_, src_lib->findMaster("buf"), "cb0");
++  cb0->setSourceType(dbSourceType::TIMING);
++  cb0->setLocation(100, 200);
++  cb0->setPlacementStatus(dbPlacementStatus::PLACED);
++  cb0->findITerm("a")->connect(source_->findNet("clk"));
++  cb0->findITerm("z")->connect(c1);
++  source_->findInst("r1")->findITerm("ck")->connect(c1);
++
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbInst::dissolve(m, source_);
++
++  dbInst* kept = block_->findInst("m/cb0");
++  ASSERT_NE(kept, nullptr);
++  EXPECT_EQ(kept->getSourceType(), dbSourceType::TIMING);
++  EXPECT_EQ(block_->findInst("m/r1")->findITerm("ck")->getNet(),
++            kept->findITerm("z")->getNet());
++}
++
++// A feedthrough joins the parent's nets on its two ports into one flat net,
++// and the other is destroyed once. The module nets stay, one on each side of
++// the instance, joined through the module net inside.
++TEST_F(DissolveTest, FeedthroughJoinsTheParentNets)
++{
++  makeFeedthrough("ft", "fi", "fo");
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [nin, nout] = makeNets(block_, "nin", "nout");
++  dbITerm* drv = makeInv("drv", "op0", nin);
++  dbITerm* load = makeInv("load", "ip0", nout);
++  m->findITerm("fi")->connect(nin);
++  m->findITerm("fo")->connect(nout);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 1);
++  EXPECT_NE(block_->findNet("nin") == nullptr,
++            block_->findNet("nout") == nullptr);
++  dbNet* net = drv->getNet();
++  ASSERT_NE(net, nullptr);
++  EXPECT_EQ(load->getNet(), net);
++  EXPECT_EQ(net->getITerms().size(), 2u);
++
++  dbModNet* outer_in = mi->findModITerm("fi")->getModNet();
++  dbModNet* outer_out = mi->findModITerm("fo")->getModNet();
++  ASSERT_NE(outer_in, nullptr);
++  ASSERT_NE(outer_out, nullptr);
++  EXPECT_NE(outer_in, outer_out);
++  EXPECT_EQ(outer_in->getParent(), block_->getTopModule());
++  EXPECT_EQ(outer_out->getParent(), block_->getTopModule());
++  EXPECT_EQ(outer_in->findRelatedNet(), net);
++  EXPECT_EQ(outer_out->findRelatedNet(), net);
++  EXPECT_EQ(drv->getModNet(), outer_in);
++  EXPECT_EQ(load->getModNet(), outer_out);
++  dbModNet* inner = mi->getMaster()->findModBTerm("fi")->getModNet();
++  ASSERT_NE(inner, nullptr);
++  EXPECT_EQ(inner->getParent(), mi->getMaster());
++  EXPECT_EQ(mi->getMaster()->findModBTerm("fo")->getModNet(), inner);
++  EXPECT_EQ(inner->getModBTerms().size(), 2u);
++  expectModNetsConnect(net);
++  const int warnings = logger_.getWarningCount();
++  net->checkSanityModNetConsistency();
++  EXPECT_EQ(logger_.getWarningCount(), warnings);
++}
++
++// The net that is left is the one on a port of the parent's block, whichever
++// end of the feedthrough it is on: Verilog names a port's net after the port.
++TEST_F(DissolveTest, FeedthroughKeepsThePortNet)
++{
++  makeFeedthrough("ft", "fi", "fo");
++  dbInst* m1 = makeMacro(block_->getTopModule(), "m1", dbOrientType::R0);
++  dbInst* m2 = makeMacro(block_->getTopModule(), "m2", dbOrientType::R0);
++  auto [in, n1, n2, out] = makeNets(block_, "IN", "n1", "n2", "OUT");
++  dbBTerm::create(in, "IN")->setIoType(dbIoType::INPUT);
++  dbBTerm::create(out, "OUT")->setIoType(dbIoType::OUTPUT);
++  dbITerm* load = makeInv("load", "ip0", n1);
++  dbITerm* drv = makeInv("drv", "op0", n2);
++  m1->findITerm("fi")->connect(in);
++  m1->findITerm("fo")->connect(n1);
++  m2->findITerm("fi")->connect(n2);
++  m2->findITerm("fo")->connect(out);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbInst::dissolve(m1, source_);
++  dbInst::dissolve(m2, source_);
++
++  EXPECT_EQ(destroyed.count, 2);
++  EXPECT_EQ(block_->findNet("n1"), nullptr);
++  EXPECT_EQ(block_->findNet("n2"), nullptr);
++  dbNet* kept_in = block_->findNet("IN");
++  dbNet* kept_out = block_->findNet("OUT");
++  ASSERT_NE(kept_in, nullptr);
++  ASSERT_NE(kept_out, nullptr);
++  EXPECT_EQ(block_->findBTerm("IN")->getNet(), kept_in);
++  EXPECT_EQ(load->getNet(), kept_in);
++  EXPECT_EQ(block_->findBTerm("OUT")->getNet(), kept_out);
++  EXPECT_EQ(drv->getNet(), kept_out);
++  expectModNetsConnect(kept_in);
++  expectModNetsConnect(kept_out);
++}
++
++// The net that goes is on other ports of the macro too, of source nets
++// before the feedthrough and after it: their cells land on the net that is
++// left.
++TEST_F(DissolveTest, FeedthroughMovesTheOtherPortsOfTheNetThatGoes)
++{
++  // The block's nets in order: a, ..., ft, b.
++  makeFeedthrough("ft", "fi", "fo");
++  makePortB();
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [nin, out] = makeNets(block_, "nin", "OUT");
++  dbBTerm::create(out, "OUT")->setIoType(dbIoType::OUTPUT);
++  dbITerm* drv = makeInv("drv", "op0", nin);
++  m->findITerm("a")->connect(nin);
++  m->findITerm("b")->connect(nin);
++  m->findITerm("fi")->connect(nin);
++  m->findITerm("fo")->connect(out);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 1);
++  EXPECT_EQ(block_->findNet("nin"), nullptr);
++  dbNet* kept = block_->findNet("OUT");
++  ASSERT_NE(kept, nullptr);
++  EXPECT_EQ(drv->getNet(), kept);
++  EXPECT_EQ(block_->findInst("m/u1")->findITerm("ip0")->getNet(), kept);
++  EXPECT_EQ(block_->findInst("m/u2")->findITerm("b")->getNet(), kept);
++  EXPECT_EQ(block_->findBTerm("OUT")->getNet(), kept);
++  EXPECT_EQ(kept->getITerms().size(), 3u);
++  expectModNetsConnect(kept);
++}
++
++// Two feedthroughs in a row: the net left by the first goes with the second,
++// and what was on either lands on the last one, a port of the macro on the
++// first net with them: its net went, and then the net that one joined.
++TEST_F(DissolveTest, FeedthroughChain)
++{
++  dbNet* ft1 = makeFeedthrough("ft1", "fi", "fo");
++  makeFeedthrough("ft2", "gi", "go");
++  moveU2b(ft1);
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [n1, n2, out] = makeNets(block_, "n1", "n2", "OUT");
++  dbBTerm::create(out, "OUT")->setIoType(dbIoType::OUTPUT);
++  dbITerm* drv = makeInv("drv", "op0", n1);
++  m->findITerm("a")->connect(n1);
++  m->findITerm("fi")->connect(n1);
++  m->findITerm("fo")->connect(n2);
++  m->findITerm("gi")->connect(n2);
++  m->findITerm("go")->connect(out);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 2);
++  EXPECT_EQ(block_->findNet("n1"), nullptr);
++  EXPECT_EQ(block_->findNet("n2"), nullptr);
++  dbNet* kept = block_->findNet("OUT");
++  ASSERT_NE(kept, nullptr);
++  EXPECT_EQ(drv->getNet(), kept);
++  EXPECT_EQ(block_->findInst("m/u1")->findITerm("ip0")->getNet(), kept);
++  EXPECT_EQ(block_->findInst("m/u2")->findITerm("b")->getNet(), kept);
++  EXPECT_EQ(block_->findBTerm("OUT")->getNet(), kept);
++  expectModNetsConnect(kept);
++}
++
++// The chain from the other end: the net the first feedthrough takes away is
++// the one the second finds on its port, and what is on the second's other
++// end joins the net the first left.
++TEST_F(DissolveTest, FeedthroughChainFromThePortNet)
++{
++  makeFeedthrough("ft1", "fi", "fo");
++  makeFeedthrough("ft2", "gi", "go");
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [in, n2, n3] = makeNets(block_, "IN", "n2", "n3");
++  dbBTerm::create(in, "IN")->setIoType(dbIoType::INPUT);
++  dbITerm* load = makeInv("load", "ip0", n3);
++  m->findITerm("fi")->connect(in);
++  m->findITerm("fo")->connect(n2);
++  m->findITerm("gi")->connect(n2);
++  m->findITerm("go")->connect(n3);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 2);
++  EXPECT_EQ(block_->findNet("n2"), nullptr);
++  EXPECT_EQ(block_->findNet("n3"), nullptr);
++  dbNet* kept = block_->findNet("IN");
++  ASSERT_NE(kept, nullptr);
++  EXPECT_EQ(load->getNet(), kept);
++  EXPECT_EQ(block_->findBTerm("IN")->getNet(), kept);
++  expectModNetsConnect(kept);
++}
++
++// A net of the block on three ports joins three nets of the parent.
++TEST_F(DissolveTest, FeedthroughOnThreePorts)
++{
++  dbNet* ft = makeFeedthrough("ft", "fi", "fo");
++  dbBTerm::create(ft, "go")->setIoType(dbIoType::OUTPUT);
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [nin, out, nfar] = makeNets(block_, "nin", "OUT", "nfar");
++  dbBTerm::create(out, "OUT")->setIoType(dbIoType::OUTPUT);
++  dbITerm* drv = makeInv("drv", "op0", nin);
++  dbITerm* load = makeInv("load", "ip0", nfar);
++  m->findITerm("fi")->connect(nin);
++  m->findITerm("fo")->connect(out);
++  m->findITerm("go")->connect(nfar);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 2);
++  EXPECT_EQ(block_->findNet("nin"), nullptr);
++  EXPECT_EQ(block_->findNet("nfar"), nullptr);
++  dbNet* kept = block_->findNet("OUT");
++  ASSERT_NE(kept, nullptr);
++  EXPECT_EQ(drv->getNet(), kept);
++  EXPECT_EQ(load->getNet(), kept);
++  dbModNet* inner = mi->getMaster()->findModBTerm("fi")->getModNet();
++  ASSERT_NE(inner, nullptr);
++  EXPECT_EQ(inner->getModBTerms().size(), 3u);
++  expectModNetsConnect(kept);
++}
++
++// A feedthrough with one end open in the parent, either end, joins nothing:
++// what is on it inside lands on the parent's net at the other end.
++TEST_F(DissolveTest, FeedthroughWithAnOpenEnd)
++{
++  moveU2b(makeFeedthrough("ft", "fi", "fo"));
++  dbInst* m1 = makeMacro(block_->getTopModule(), "m1", dbOrientType::R0);
++  dbInst* m2 = makeMacro(block_->getTopModule(), "m2", dbOrientType::R0);
++  auto [n1, n2] = makeNets(block_, "n1", "n2");
++  dbITerm* drv = makeInv("drv", "op0", n1);
++  dbITerm* load = makeInv("load", "ip0", n2);
++  m1->findITerm("fi")->connect(n1);
++  m2->findITerm("fo")->connect(n2);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbInst::dissolve(m1, source_);
++  dbInst::dissolve(m2, source_);
++
++  EXPECT_EQ(destroyed.count, 0);
++  EXPECT_EQ(block_->findNet("n1"), n1);
++  EXPECT_EQ(block_->findNet("n2"), n2);
++  EXPECT_EQ(drv->getNet(), n1);
++  EXPECT_EQ(load->getNet(), n2);
++  EXPECT_EQ(block_->findInst("m1/u2")->findITerm("b")->getNet(), n1);
++  EXPECT_EQ(block_->findInst("m2/u2")->findITerm("b")->getNet(), n2);
++  expectModNetsConnect(n1);
++  expectModNetsConnect(n2);
++}
++
++// Both ends on one net of the parent: nothing to join, and the two pins of
++// the instance are on one module net.
++TEST_F(DissolveTest, FeedthroughWithBothEndsOnOneNet)
++{
++  makeFeedthrough("ft", "fi", "fo");
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbNet* n = dbNet::create(block_, "n");
++  dbITerm* drv = makeInv("drv", "op0", n);
++  dbITerm* load = makeInv("load", "ip0", n);
++  m->findITerm("fi")->connect(n);
++  m->findITerm("fo")->connect(n);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_EQ(destroyed.count, 0);
++  EXPECT_EQ(block_->findNet("n"), n);
++  EXPECT_EQ(drv->getNet(), n);
++  EXPECT_EQ(load->getNet(), n);
++  dbModNet* outer = mi->findModITerm("fi")->getModNet();
++  ASSERT_NE(outer, nullptr);
++  EXPECT_EQ(mi->findModITerm("fo")->getModNet(), outer);
++  EXPECT_EQ(drv->getModNet(), outer);
++  EXPECT_EQ(load->getModNet(), outer);
++  expectModNetsConnect(n);
++}
++
++// The nets a feedthrough joins carry routes already, an earlier dissolve's:
++// the net that is left has the guides of both, as they were, and the
++// feedthrough's own between them.
++TEST_F(DissolveTest, FeedthroughKeepsTheGuidesOfTheNetsItJoins)
++{
++  dbNet* ft = makeFeedthrough("ft", "fi", "fo");
++  dbTechLayer* src_layer = source_db_->getTech()->findLayer("L1");
++  dbGuide::create(ft, src_layer, src_layer, Rect(100, 200, 600, 700), false);
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  auto [nin, nout] = makeNets(block_, "nin", "nout");
++  makeInv("drv", "op0", nin);
++  dbITerm* load = makeInv("load", "ip0", nout);
++  m->findITerm("fi")->connect(nin);
++  m->findITerm("fo")->connect(nout);
++  dbTechLayer* layer = db_->getTech()->findLayer("L1");
++  const Rect before(0, 0, 500, 500);
++  const Rect after(90000, 0, 90500, 500);
++  dbGuide::create(nin, layer, layer, before, false);
++  dbGuide::create(nout, layer, layer, after, true);
++
++  dbInst::dissolve(m, source_);
++
++  dbNet* net = load->getNet();
++  ASSERT_NE(net, nullptr);
++  std::vector<Rect> boxes;
++  int congested = 0;
++  for (dbGuide* guide : net->getGuides()) {
++    EXPECT_EQ(guide->getLayer(), layer);
++    EXPECT_EQ(guide->getViaLayer(), layer);
++    boxes.push_back(guide->getBox());
++    if (guide->isCongested()) {
++      ++congested;
++      EXPECT_EQ(guide->getBox(), after);
++    }
++  }
++  EXPECT_EQ(boxes.size(), 3u);
++  EXPECT_EQ(congested, 1);
++  // The macro is at (10000, 20000), its block's die corner at (100, 200).
++  for (const Rect& box : {before, after, Rect(10000, 20000, 10500, 20500)}) {
++    EXPECT_EQ(std::ranges::count(boxes, box), 1) << box;
++  }
++}
++
++// The net that goes is one an earlier dissolve left its cells on, a
++// dont_touch cell and its guide among them: the cell's pin moves with the
++// net and the cell is still dont_touch, the guide is on the net that is
++// left, and the two instances' pins share the module net between them.
++TEST_F(DissolveTest, FeedthroughJoinsTheNetsOfAnEarlierDissolve)
++{
++  makeFeedthrough("ft", "fi", "fo");
++  dbTechLayer* src_layer = source_db_->getTech()->findLayer("L1");
++  dbGuide::create(source_->findNet("y"),
++                  src_layer,
++                  src_layer,
++                  Rect(3600, 200, 4100, 700),
++                  false);
++  dbInst* m1 = makeMacro(block_->getTopModule(), "m1", dbOrientType::R0);
++  dbInst* m2 = makeMacro(block_->getTopModule(), "m2", dbOrientType::R0);
++  auto [n1, out] = makeNets(block_, "n1", "OUT");
++  dbBTerm::create(out, "OUT")->setIoType(dbIoType::OUTPUT);
++  dbITerm* load = makeInv("load", "ip0", n1);
++  m1->findITerm("y")->connect(n1);
++  m2->findITerm("fi")->connect(n1);
++  m2->findITerm("fo")->connect(out);
++  NetDestroyCounter destroyed;
++  destroyed.addOwner(block_);
++
++  dbModInst* mi1 = dbInst::dissolve(m1, source_);
++  dbModInst* mi2 = dbInst::dissolve(m2, source_);
++
++  EXPECT_EQ(destroyed.count, 1);
++  EXPECT_EQ(block_->findNet("n1"), nullptr);
++  dbNet* kept = block_->findNet("OUT");
++  ASSERT_NE(kept, nullptr);
++  dbInst* u3 = block_->findInst("m1/u3");
++  ASSERT_NE(u3, nullptr);
++  EXPECT_TRUE(u3->isDoNotTouch());
++  EXPECT_EQ(u3->findITerm("op0")->getNet(), kept);
++  EXPECT_EQ(load->getNet(), kept);
++  std::vector<Rect> boxes;
++  for (dbGuide* guide : kept->getGuides()) {
++    boxes.push_back(guide->getBox());
++  }
++  // m1 is at (10000, 20000), its block's die corner at (100, 200).
++  EXPECT_EQ(boxes, (std::vector<Rect>{Rect(13500, 20000, 14000, 20500)}));
++  dbModNet* between = mi1->findModITerm("y")->getModNet();
++  ASSERT_NE(between, nullptr);
++  EXPECT_EQ(mi2->findModITerm("fi")->getModNet(), between);
++  expectModNetsConnect(kept);
++}
++
++// Two pins of the macro on one net of the parent that had no module net:
++// they share the one it gets. With one each, the second takes the net's
++// terms and the first is left on its pin alone, cut off from the timer.
++TEST_F(DissolveTest, TwoPinsOnOneParentNetShareItsModuleNet)
++{
++  makePortB();
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbNet* na = dbNet::create(block_, "na");
++  dbBTerm* port_a = dbBTerm::create(na, "A");
++  port_a->setIoType(dbIoType::INPUT);
++  m->findITerm("a")->connect(na);
++  m->findITerm("b")->connect(na);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  dbModNet* outer = mi->findModITerm("a")->getModNet();
++  ASSERT_NE(outer, nullptr);
++  EXPECT_EQ(mi->findModITerm("b")->getModNet(), outer);
++  EXPECT_EQ(port_a->getModNet(), outer);
++  EXPECT_EQ(outer->getModITerms().size(), 2u);
++  EXPECT_EQ(block_->findInst("m/u1")->findITerm("ip0")->getNet(), na);
++  EXPECT_EQ(block_->findInst("m/u2")->findITerm("b")->getNet(), na);
++  expectModNetsConnect(na);
++  const int warnings = logger_.getWarningCount();
++  na->checkSanityModNetConsistency();
++  EXPECT_EQ(logger_.getWarningCount(), warnings);
++}
++
++// A dont_touch cell of the parent on a net that gets its module net: it
++// joins the module net like any other pin and is still dont_touch.
++TEST_F(DissolveTest, DontTouchCellOfTheParentJoinsTheModuleNet)
++{
++  dbInst* m = makeMacro(block_->getTopModule(), "m", dbOrientType::R0);
++  dbNet* na = dbNet::create(block_, "na");
++  dbITerm* drv = makeInv("drv", "op0", na);
++  drv->getInst()->setDoNotTouch(true);
++  m->findITerm("a")->connect(na);
++
++  dbModInst* mi = dbInst::dissolve(m, source_);
++
++  EXPECT_TRUE(drv->getInst()->isDoNotTouch());
++  dbModNet* outer = mi->findModITerm("a")->getModNet();
++  ASSERT_NE(outer, nullptr);
++  EXPECT_EQ(drv->getModNet(), outer);
++  expectModNetsConnect(na);
++}
++
++}  // namespace
++
++}  // namespace odb
+-- 
+2.53.0
+

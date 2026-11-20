@@ -1,0 +1,158 @@
+# XiangShan's Verilog, generated from this checkout's Chisel sources.
+#
+# The BUILD overlays for XiangShan and the repositories its build pulls in
+# as submodules are the *.BUILD.bazel files in this package, referenced
+# from MODULE.bazel; the patches MODULE.bazel applies to the copy of the
+# sources are patches/ (each header says why).
+
+load("@rules_chisel//chisel:defs.bzl", "chisel_binary")
+load("@rules_chisel//verilog:defs.bzl", "verilog_directory", "verilog_single_file_library")
+load(":clock_gate.bzl", "CLOCK_GATE_OPTS")
+
+package(default_visibility = ["//:__subpackages__"])
+
+exports_files(glob([
+    "*.BUILD.bazel",
+    "patches/*.patch",
+]))
+
+# The generator. Two entry points against one elaboration path: the
+# minimal configuration proves the pipeline in minutes, the flow's
+# configuration (FlowConfig) is the one that is hardened.
+[
+    chisel_binary(
+        name = "generator" + suffix,
+        srcs = ["src/FlowGenerator.scala"],
+        # Upstream's mill build asks for -Xmx40G and -Xss256m. The stack
+        # size is not negotiable: diplomacy elaboration recurses deeply.
+        # The heap is capped, so an overrun fails rather than swaps.
+        jvm_flags = [
+            "-Xmx24g",
+            "-Xss256m",
+        ],
+        main_class = "openroadflow.FlowGenerator" + main_suffix,
+        resource_strip_prefix = "verilog/resources",
+        resources = ["resources/gitStatus"],
+        # rules_chisel compiles with -Xcheckinit, which XiangShan's own
+        # build does not use: it inserts a runtime check on every field
+        # read and XiangShan reads fields that are legitimately still
+        # being initialized during elaboration.
+        scalacopts = ["-Xcheckinit:false"],
+        deps = [
+            # XSTileKey's parameters name types from XSCache, so the
+            # generator compiles against it directly.
+            "@xiangshan",
+            "@xs_cache//:xscache",
+            "@xs_rocket_chip//:macros",
+            "@xs_rocket_chip//:rocket_chip",
+            "@xs_utility//:utility",
+        ],
+    )
+    for suffix, main_suffix in [
+        ("", ""),
+        ("_minimal", "Minimal"),
+    ]
+]
+
+# Elaboration. A genrule rather than rules_chisel's fir_library for one
+# reason: Chisel's EspressoMinimizer runs an executable named `espresso`
+# found on PATH, and XiangShan names that minimizer explicitly, so
+# elaboration needs a PATH that fir_library does not offer a way to set.
+[
+    genrule(
+        name = "xiangshan_fir" + suffix,
+        outs = ["xiangshan_fir" + suffix + ".fir"],
+        cmd = " ".join([
+            "FIRTOOL_DIR=$$(dirname $$(realpath $(execpath @chisel_firtool//:bin/firtool)));",
+            "ESPRESSO_DIR=$$(dirname $$(realpath $(execpath @espresso//:bin/espresso)));",
+            "PATH=$$ESPRESSO_DIR:$$FIRTOOL_DIR:$$PATH",
+            "CHISEL_FIRTOOL_PATH=$$FIRTOOL_DIR",
+            "$(execpath :generator" + suffix + ")",
+            # No --repl-seq-mem. firtool already emits every inferred
+            # memory as its own ram_<depth>x<width> module with the ports
+            # ORFS's AUTO_MEMORIES converts; the flag replaces some of
+            # those with bodiless _ext blackboxes instead. Measured on
+            # XSCore: 38 convertible memories without it, 20 with.
+            #
+            # No verification layer. Chisel puts every assertion in a
+            # layer that firtool lowers to a module bound into its parent
+            # with hierarchical references (312 in XSCore); slang, which
+            # keeps the hierarchy the flow partitions on, refuses a
+            # hierarchical reference across a preserved module boundary.
+            "--default-layer-specialization=disable",
+            "-o $@",
+        ]),
+        tools = [
+            ":generator" + suffix,
+            "@chisel_firtool//:bin/firtool",
+            "@espresso//:bin/espresso",
+        ],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+# Split Verilog: one file per module, which makes XSTile addressable as a
+# synthesis top without carving it out of a single file.
+[
+    verilog_directory(
+        name = "xiangshan_sv" + suffix,
+        srcs = [":xiangshan_fir" + suffix],
+        opts = [
+            "--disable-all-randomization",
+            "--lowering-options=disallowPackedArrays,disallowLocalVariables,noAlwaysComb",
+        ] + CLOCK_GATE_OPTS,
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+# One file: the split output concatenated with ClockGate's body
+# (ClockGate.sv), and the `include lines dropped, since every included
+# file is already in the concatenation. xiangshan_flat is what the
+# surgery (//xstile/surgery) reads.
+[
+    verilog_single_file_library(
+        name = "xiangshan_concat" + suffix,
+        srcs = [
+            ":xiangshan_sv" + suffix,
+            "ClockGate.sv",
+        ],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+[
+    genrule(
+        name = "xiangshan_flat" + suffix,
+        srcs = [":xiangshan_concat" + suffix],
+        outs = ["xiangshan_flat" + suffix + ".sv"],
+        cmd = "grep -hvF '`include' $(location :xiangshan_concat" + suffix + ") > $@ || true",
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+# The port list of a generated module, as a readable artifact.
+[
+    genrule(
+        name = module + "_ports",
+        srcs = [":xiangshan_sv"],
+        outs = [module + "_ports.txt"],
+        cmd = "sed -n '/^module " + module + "/,/^  );/p' " +
+              "$(location :xiangshan_sv)/" + module + ".sv > $@",
+    )
+    for module in [
+        "XSTop",
+        "XSTile",
+    ]
+]

@@ -1,0 +1,88 @@
+From 58ed1df7731ef2da8a2de9935fa2b39197501aa2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Wed, 14 Oct 2026 22:09:54 +0200
+Subject: [PATCH] ClockGate: CIRCT's clock gate, so a constant enable folds
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ClockGate.apply instanced the ClockGate black box, whose function is
+Verilog text firtool cannot see, so a gate whose enable is constant
+survived as a gate. ExeUnit's CSR and fence units set their gate's
+enable to true.B (ckAlwaysEn); in an ASIC flow that maps ClockGate
+onto a library ICG, those become clock gates with the enable tied
+high (on ASAP7 that left every register behind them untimed,
+parallaxsw/OpenSTA#532).
+
+ClockGate.apply now emits the circt_clock_gate intrinsic with the test
+enable as its third operand. firtool folds a gate whose enable or test
+enable is constant 1 to its input clock, and with
+--ckg-name=ClockGate --ckg-input=CK --ckg-output=Q --ckg-enable=E
+--ckg-test-enable=TE it emits the rest as instances of a ClockGate
+module with the same ports as before. MbistClockGateCell, the one
+direct user of the black box, goes through ClockGate.apply too.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+Retires when Utility carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ src/main/scala/utility/ClockGate.scala             | 14 +++++++-------
+ .../scala/utility/mbist/MbistClockGateCell.scala   | 11 +++--------
+ 2 files changed, 10 insertions(+), 15 deletions(-)
+
+diff --git a/src/main/scala/utility/ClockGate.scala b/src/main/scala/utility/ClockGate.scala
+index 19f8dce..1149631 100644
+--- a/src/main/scala/utility/ClockGate.scala
++++ b/src/main/scala/utility/ClockGate.scala
+@@ -54,13 +54,13 @@ class ClockGateTeBundle extends Bundle {
+ 
+ object ClockGate {
+   private val teQueue = new mutable.Queue[ClockGateTeBundle]
+-  def apply(TE: Bool, E: Bool, CK: Clock) : Clock = {
+-    val clock_gate = Module(new ClockGate).io
+-    clock_gate.TE := TE
+-    clock_gate.E  := E
+-    clock_gate.CK := CK
+-    clock_gate.Q
+-  }
++  // CIRCT's clock gate rather than the ClockGate black box: firtool folds
++  // a gate whose enable or test enable is constant 1 to its input clock
++  // (seq.clock_gate's fold) and externalizes the rest; firtool's
++  // --ckg-name=ClockGate --ckg-input=CK --ckg-output=Q --ckg-enable=E
++  // --ckg-test-enable=TE keeps their module and ports as above.
++  def apply(TE: Bool, E: Bool, CK: Clock) : Clock =
++    IntrinsicExpr("circt_clock_gate", Clock())(CK, E, TE)
+ 
+   def genTeSink: ClockGateTeBundle = {
+     val te = Wire(new ClockGateTeBundle)
+diff --git a/src/main/scala/utility/mbist/MbistClockGateCell.scala b/src/main/scala/utility/mbist/MbistClockGateCell.scala
+index 617b6cc..fc7cd3d 100644
+--- a/src/main/scala/utility/mbist/MbistClockGateCell.scala
++++ b/src/main/scala/utility/mbist/MbistClockGateCell.scala
+@@ -42,19 +42,14 @@ class MbistClockGateCell(mcpCtl: Boolean) extends Module {
+   val dft = IO(new CgDftBundle)
+   val out_clock = IO(Output(Clock()))
+ 
+-  private val CG = Module(new ClockGate)
+-  CG.io.TE := dft.cgen
+-  CG.io.CK := clock
+-
+   if (mcpCtl) {
+-    CG.io.E := Mux(mbist.req, mbist.readen | mbist.writeen, E) && !dft.ram_mcp_hold
++    val gated = ClockGate(dft.cgen, Mux(mbist.req, mbist.readen | mbist.writeen, E) && !dft.ram_mcp_hold, clock)
+     val clockMux = Module(new ClockMux)
+-    clockMux.clk0 := CG.io.Q
++    clockMux.clk0 := gated
+     clockMux.clk1 := dft.ram_aux_clk.asClock
+     clockMux.sel := dft.ram_aux_ckbp
+     out_clock := clockMux.clkout
+   } else {
+-    CG.io.E := Mux(mbist.req, mbist.readen | mbist.writeen, E)
+-    out_clock := CG.io.Q
++    out_clock := ClockGate(dft.cgen, Mux(mbist.req, mbist.readen | mbist.writeen, E), clock)
+   }
+ }
+-- 
+2.53.0
+

@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 4/4] grt: page the database out where global route stops
+ reading it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+With a backing file (read_db -backing_file), global route now pages out
+each part of the database once it no longer reads it: the hierarchy and
+the guides it replaces when it starts, the power grid once it is turned
+into obstructions, and the rest once the nets are built, before routing,
+which reads the grid and not the database. Saving the guides and write_db
+read back what they touch.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/GlobalRouter.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index 5a11bbf..7bfd2c5 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -262,6 +262,8 @@ std::vector<Net*> GlobalRouter::initFastRoute(int min_routing_layer,
+   fastroute_->pageOutGrid();
+   std::vector<Net*> nets = initNets(check_pin_placement);
+   initNetlist(nets);
++  // Routing reads the grid, not the database.
++  db_->pageOut();
+   fastroute_->prefetchGrid();
+ 
+   initialized_ = true;
+@@ -275,6 +277,9 @@ void GlobalRouter::applyAdjustments(int min_routing_layer,
+   reportMacrosAndBlockages();
+   std::vector<int> track_space = grid_->getTrackPitches();
+   fastroute_->initBlockedIntervals(track_space);
++  // the power grid is an obstruction, read once above
++  block_->pageOut(odb::dbSBoxObj);
++  block_->pageOut(odb::dbSWireObj);
+   // Save global resources before add adjustment by layer
+   fastroute_->saveResourcesBeforeAdjustments();
+   computeUserGlobalAdjustments(min_routing_layer, max_routing_layer);
+@@ -536,6 +541,16 @@ void GlobalRouter::globalRoute(bool save_guides)
+   try {
+     clear();
+     block_ = db_->getChip()->getBlock();
++    // With a backing file (read_db -backing_file), the tables global route
++    // never reads wait in it: the hierarchy and the guides it replaces.
++    for (const odb::dbObjectType type : {odb::dbModuleObj,
++                                         odb::dbModInstObj,
++                                         odb::dbModNetObj,
++                                         odb::dbModITermObj,
++                                         odb::dbModBTermObj,
++                                         odb::dbGuideObj}) {
++      block_->pageOut(type);
++    }
+ 
+     int min_layer, max_layer;
+     getMinMaxLayer(min_layer, max_layer);
+-- 
+2.53.0
+

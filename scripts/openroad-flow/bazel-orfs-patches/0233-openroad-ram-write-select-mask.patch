@@ -1,0 +1,625 @@
+From bbf784926d9d37908b21a89dc8128a5f1c51e65f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Tue, 17 Nov 2026 12:17:42 +0100
+Subject: [PATCH] ram: -write_select mask, a write port's words named by a mask
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A write port named the word it writes by an address, decoded per word.
+A register file whose writes land on many words at once (one arriving
+value written to every entry whose tag matched) had no port for it:
+the array had to be flops and muxes outside the generator.
+
+-write_select mask makes each write port's input a mask with a bit a
+word, wsel (or wsel0, wsel1, ...) in place of addr_w. A word's select
+is its bit, through the word's select buffer, with no decoder or
+address inverters, so one write writes every word whose bit is set.
+we still enables the write, and where ports write the same word in a
+cycle -write_priority applies as for decoded writes. The behavioral
+model writes by the mask too.
+
+It needs the per-word selects of -decoder word or -banks, and write
+ports only: a read/write port's address is also read (RAM-0129).
+generate_array takes select=mask on its write ports, all of them alike
+(RAM-0130).
+
+Not upstreamed: on generate_array and the per-word decoder, carried
+with them. Retires at a //:bump onto an OpenROAD that carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/ram/include/ram/ram.h                |   7 +-
+ openroad/ram/src/ram.cpp                      | 117 +++++++++++++-----
+ openroad/ram/src/ram.i                        |   6 +-
+ openroad/ram/src/ram.tcl                      |  48 +++++--
+ openroad/ram/test/BUILD                       |   1 +
+ openroad/ram/test/generate_array_asap7.tcl    |   2 +
+ openroad/ram/test/option_errors_asap7.tcl     |   3 +
+ openroad/ram/test/ram_sim.tcl                 |  27 +++-
+ openroad/ram/test/write_select_mask_asap7.tcl |  45 +++++++
+ 9 files changed, 210 insertions(+), 46 deletions(-)
+ create mode 100644 openroad/ram/test/write_select_mask_asap7.tcl
+
+diff --git a/openroad/ram/include/ram/ram.h b/openroad/ram/include/ram/ram.h
+index c29ca14576..a3207e2c07 100644
+--- a/openroad/ram/include/ram/ram.h
++++ b/openroad/ram/include/ram/ram.h
+@@ -130,7 +130,8 @@ class RamGen
+                 const std::string& wrapper_verilog = "",
+                 int service_every = 0,
+                 int service_sites = 0,
+-                const std::string& bank_column_layout = "interleaved");
++                const std::string& bank_column_layout = "interleaved",
++                const std::string& write_select = "decode");
+ 
+   void ramPdngen(const char* power_net_name,
+                  const char* ground_net_name,
+@@ -428,6 +429,10 @@ class RamGen
+   // -write_priority or: where ports write the same word in a cycle, the
+   // word takes the OR of their data, not the last port's
+   bool write_or_{false};
++  // -write_select mask: a write port names the words it writes by a mask,
++  // a bit a word, wsel (or wsel0, wsel1, ...) for addr_w; each word's
++  // select is its mask bit, no decoder, and one write may write many words
++  bool write_mask_{false};
+   // -periphery unplaced: the periphery (address inverters and registers,
+   // decoders, select buffers, each word's select cell, the input
+   // buffers) left for a parent to place; the outline the placed core and
+diff --git a/openroad/ram/src/ram.cpp b/openroad/ram/src/ram.cpp
+index aa2c7ed68b..268ffce021 100644
+--- a/openroad/ram/src/ram.cpp
++++ b/openroad/ram/src/ram.cpp
+@@ -1101,8 +1101,10 @@ std::unique_ptr<Layout> RamGen::makeInverterColumn(
+ 
+   for (int bit = num_row_bits - 1; bit >= 0; --bit) {
+     for (int p = start_port; p < end_port; ++p) {
+-      // a banked read port's address is narrower than the others
+-      if (num_word_bits + bit >= static_cast<int>(addr_inputs_[p].size())) {
++      // a banked read port's address is narrower than the others; a mask
++      // has no inverters
++      if (num_word_bits + bit >= static_cast<int>(addr_inputs_[p].size())
++          || inv_addr_nets[p].empty()) {
+         cell_inv_layout->addCell(nullptr);
+         continue;
+       }
+@@ -2403,7 +2405,8 @@ void RamGen::generate(const int mask_size,
+                       const std::string& wrapper_verilog,
+                       const int service_every,
+                       const int service_sites,
+-                      const std::string& bank_column_layout)
++                      const std::string& bank_column_layout,
++                      const std::string& write_select)
+ {
+   if (banks < 1 || bank_columns < 1) {
+     logger_->error(RAM,
+@@ -2455,6 +2458,14 @@ void RamGen::generate(const int mask_size,
+   register_read_address_ = register_read_address;
+   write_mux_ = write_style == "mux";
+   write_or_ = write_priority == "or";
++  write_mask_ = write_select == "mask";
++  if (write_mask_ && (!banked_ || rw_ports > 0 || w_ports < 1)) {
++    logger_->error(RAM,
++                   129,
++                   "-write_select mask needs write ports, no read/write ports, "
++                   "and -banks or -decoder word: each word's select is its "
++                   "own mask bit.");
++  }
+   periphery_verilog_ = periphery == "verilog";
+   periphery_unplaced_ = periphery == "unplaced" || periphery_verilog_;
+   wrapper_verilog_ = wrapper_verilog;
+@@ -2879,7 +2890,8 @@ void RamGen::generate(const int mask_size,
+       port_prefix = "addr_rw";
+       rw_idx++;
+     } else if (p < rw_ports + w_ports) {
+-      port_prefix = num_write == 1 ? "addr_w" : fmt::format("addr_w{}", w_idx);
++      const std::string base = write_mask_ ? "wsel" : "addr_w";
++      port_prefix = num_write == 1 ? base : fmt::format("{}{}", base, w_idx);
+       w_idx++;
+     } else if (r_idx < r_ports) {
+       port_prefix = fmt::format("addr_r{}", r_idx++);
+@@ -2893,7 +2905,12 @@ void RamGen::generate(const int mask_size,
+     const int port_bank = p >= rw_ports + w_ports + r_ports
+                               ? (p - rw_ports - w_ports - r_ports) % banks_
+                               : -1;
+-    const int port_inputs = port_bank >= 0 ? bank_inputs : num_inputs;
++    // -write_select mask: a write port's inputs are its mask, a bit a word
++    const bool mask_port
++        = write_mask_ && p >= rw_ports && p < rw_ports + w_ports;
++    const int port_inputs = mask_port        ? num_words
++                            : port_bank >= 0 ? bank_inputs
++                                             : num_inputs;
+ 
+     addr_inputs_[p].resize(port_inputs);
+     inv_addr_nets[p].resize(port_inputs);
+@@ -2905,7 +2922,9 @@ void RamGen::generate(const int mask_size,
+     for (int i = 0; i < port_inputs; ++i) {
+       addr_inputs_[p][i]
+           = makeBTerm(fmt::format("{}[{}]", port_prefix, i), dbIoType::INPUT);
+-      if (registered && addr_flop_inverted_) {
++      if (mask_port) {
++        addr_true_[p][i] = addr_inputs_[p][i]->getNet();
++      } else if (registered && addr_flop_inverted_) {
+         // the flop holds the complement; the inverter makes the address
+         addr_flop_out_[p][i] = inv_addr_nets[p][i]
+             = makeNet(port_prefix, fmt::format("inv_addr[{}]", i));
+@@ -2933,6 +2952,10 @@ void RamGen::generate(const int mask_size,
+             literals.clear();  // a word of another bank: no decoder
+             continue;
+           }
++          if (mask_port) {
++            literals.clear();  // the word's mask bit is its select
++            continue;
++          }
+           // a banked read port decodes the word's index in its bank
+           const int word = port_bank >= 0 ? indexInBank(row) : wordAt(row, w);
+           literals.resize(port_inputs);
+@@ -3016,8 +3039,19 @@ void RamGen::generate(const int mask_size,
+ 
+     // output nets of each port decoder
+     const int num_selects = banked_ ? num_rows * column_mux_ratio : num_rows;
+-    decoder_output_nets[p]
+-        = makeDecoderOutputNets(fmt::format("decoder_p{}", p), num_selects);
++    if (mask_port) {
++      inv_addr_nets[p].clear();
++      decoder_output_nets[p].assign(num_selects, nullptr);
++      for (int row = 0; row < num_rows; ++row) {
++        for (int w = 0; w < column_mux_ratio; ++w) {
++          decoder_output_nets[p][row * column_mux_ratio + w]
++              = addr_true_[p][wordAt(row, w)];
++        }
++      }
++    } else {
++      decoder_output_nets[p]
++          = makeDecoderOutputNets(fmt::format("decoder_p{}", p), num_selects);
++    }
+     // output nets of each decoder buffers
+     // the write-capable ports first: the read-write port, then the
+     // write ports
+@@ -3560,7 +3594,10 @@ void RamGen::generate(const int mask_size,
+                        banked_ ? column_mux_ratio : 1);
+     }
+ 
+-    // decoder column creation
++    // decoder column creation; a mask's bits are the selects, no decoder
++    if (write_mask_ && p >= rw_ports && p < rw_ports + w_ports) {
++      continue;
++    }
+     if (banked_) {
+       makeWordDecoderColumn(fmt::format("decoder_p{}", p),
+                             num_rows,
+@@ -4273,7 +4310,7 @@ void RamGen::writeBehavioralVerilog(const std::string& filename,
+     port_list += ",\n  addr_rw";
+   } else {
+     for (int w = 0; w < w_ports; ++w) {
+-      port_list += ",\n  " + wbus("addr_w", w);
++      port_list += ",\n  " + wbus(write_mask_ ? "wsel" : "addr_w", w);
+     }
+   }
+   for (int i = 0; i < r_ports; i++) {
+@@ -4310,8 +4347,12 @@ void RamGen::writeBehavioralVerilog(const std::string& filename,
+         += fmt::format("  input [{}:0] addr_rw;\n", address_width - 1);
+   } else {
+     for (int w = 0; w < w_ports; ++w) {
+-      addr_declarations += fmt::format(
+-          "  input [{}:0] {};\n", address_width - 1, wbus("addr_w", w));
++      addr_declarations
++          += write_mask_ ? fmt::format(
++                 "  input [{}:0] {};\n", num_words - 1, wbus("wsel", w))
++                         : fmt::format("  input [{}:0] {};\n",
++                                       address_width - 1,
++                                       wbus("addr_w", w));
+     }
+   }
+   for (int i = 0; i < r_ports; i++) {
+@@ -4435,41 +4476,60 @@ void RamGen::writeBehavioralVerilog(const std::string& filename,
+   std::string data_declarations;
+   std::string enable_declarations;
+   std::string write_logic;
++  // -write_select mask: every word j whose mask bit is set
+   for (int w = 0; w < num_write; ++w) {
+     const std::string write_addr
+-        = rw_ports > 0 ? std::string("addr_rw") : wbus("addr_w", w);
++        = write_mask_  ? std::string("j")
++          : rw_ports > 0 ? std::string("addr_rw")
++                         : wbus("addr_w", w);
++    // whether port v writes the word this port does
++    auto writes_word = [&](const int v) {
++      return write_mask_ ? fmt::format("{}[j]", wbus("wsel", v))
++                         : fmt::format("{} == {}", wbus("addr_w", v), write_addr);
++    };
+     std::string write_data
+         = fmt::format("{}[i*{} +:{}]", wbus("D", w), mask_size, mask_size);
+     for (int v = 0; write_or_ && v < w; ++v) {
+-      write_data += fmt::format(
+-          "\n          | ({{{}{{{}[i] && {} == {}}}}} & {}[i*{} +:{}])",
+-          mask_size,
+-          wbus("we", v),
+-          wbus("addr_w", v),
+-          write_addr,
+-          wbus("D", v),
+-          mask_size,
+-          mask_size);
++      write_data
++          += fmt::format("\n          | ({{{}{{{}[i] && {}}}}} & {}[i*{} +:{}])",
++                         mask_size,
++                         wbus("we", v),
++                         writes_word(v),
++                         wbus("D", v),
++                         mask_size,
++                         mask_size);
+     }
+     data_declarations
+         += fmt::format("  input [{}:0] {};\n", word_size_bit - 1, wbus("D", w));
+     enable_declarations += fmt::format(
+         "  input [{}:0] {};\n", slices_per_word - 1, wbus("we", w));
+-    write_logic += fmt::format(
++    std::string condition = wbus("we", w) + "[i]";
++    if (write_mask_) {
++      condition += " && " + writes_word(w);
++    }
++    if (zero_word_ >= 0) {
++      condition += fmt::format(" && {} != {}", write_addr, zero_word_);
++    }
++    std::string port_logic = fmt::format(
+         R"(    for (i = 0; i < {}; i = i + 1) begin
+-      if ({}[i]{}) begin
++      if ({}) begin
+         mem[{}][i*{} +:{}] <= {};
+       end
+     end
+ )",
+         slices_per_word,
+-        wbus("we", w),
+-        zero_word_ >= 0 ? fmt::format(" && {} != {}", write_addr, zero_word_)
+-                        : std::string(),
++        condition,
+         write_addr,
+         mask_size,
+         mask_size,
+         write_data);
++    if (write_mask_) {
++      port_logic = fmt::format(
++          "    for (j = 0; j < {}; j = j + 1) begin\n{}    end\n",
++          num_words,
++          port_logic);
++    }
++    write_logic += port_logic;
+   }
+ 
+   std::string reset_declaration;
+@@ -4505,7 +4565,7 @@ void RamGen::writeBehavioralVerilog(const std::string& filename,
+   reg [{}:0] mem[0:{}];
+ 
+   // write logic
+-  integer i;
++  integer i;{}
+ {}{}  end
+ 
+   // read logic
+@@ -4521,6 +4581,7 @@ endmodule
+                                          enable_declarations,
+                                          word_size_bit - 1,
+                                          num_words - 1,
++                                         write_mask_ ? "\n  integer j;" : "",
+                                          always_head,
+                                          write_logic,
+                                          read_port_logic);
+diff --git a/openroad/ram/src/ram.i b/openroad/ram/src/ram.i
+index 10729eaa8e..505dad4c48 100644
+--- a/openroad/ram/src/ram.i
++++ b/openroad/ram/src/ram.i
+@@ -61,7 +61,8 @@ generate_ram_netlist_cmd(int mask_size,
+                          const char* wrapper_verilog,
+                          const int service_every,
+                          const int service_sites,
+-                         const char* bank_column_layout)
++                         const char* bank_column_layout,
++                         const char* write_select)
+ {
+   RamGen* ram_gen = ord::getRamGen();
+   odb::dbDatabase* db = ord::getDb();
+@@ -117,7 +118,8 @@ generate_ram_netlist_cmd(int mask_size,
+                     reset_value, banks, bank_columns, bank_order, rb_ports,
+                     register_read_address, write_style, write_priority, periphery, pin_layer, cells,
+                     name, decoder, bit_folds, wrapper_verilog,
+-                    service_every, service_sites, bank_column_layout);
++                    service_every, service_sites, bank_column_layout,
++                    write_select);
+ }
+ 
+ void ram_pdngen(const char* power_net_name, const char* ground_net_name,
+diff --git a/openroad/ram/src/ram.tcl b/openroad/ram/src/ram.tcl
+index fd7e24afe4..c4733ce319 100644
+--- a/openroad/ram/src/ram.tcl
++++ b/openroad/ram/src/ram.tcl
+@@ -17,6 +17,7 @@ sta::define_cmd_args "generate_ram_netlist" {[-mask_size bits]
+                                              [-register_read_address 0|1]
+                                              [-write_style clock_gate|mux]
+                                              [-write_priority last|or]
++                                             [-write_select decode|mask]
+                                              [-cells {role master ...}]
+                                              [-name name]
+                                              [-decoder row|word]
+@@ -41,7 +42,7 @@ proc generate_ram_netlist { args } {
+       -write_behavioral_verilog -read_style -zero_word -reset_value
+       -banks -bank_columns -bank_order -rb_ports -register_read_address -write_style -write_priority
+       -periphery -pin_layer -cells -name -decoder -bit_folds -wrapper_verilog -service_columns
+-      -bank_column_layout } flags {}
++      -bank_column_layout -write_select } flags {}
+ 
+   set column_mux_ratio 1
+   if { [info exists keys(-column_mux_ratio)] } {
+@@ -278,6 +279,17 @@ proc generate_ram_netlist { args } {
+     }
+   }
+ 
++  # How a write port names the words it writes: an address, decoded
++  # (decode), or a mask with a bit a word (mask), each word's select its
++  # bit, so one write may write many words.
++  set write_select decode
++  if { [info exists keys(-write_select)] } {
++    set write_select $keys(-write_select)
++    if { $write_select ni {decode mask} } {
++      utl::error RAM 128 "-write_select is decode or mask, not $write_select."
++    }
++  }
++
+   # -register_read_address 1: the read addresses registered.
+   set register_read_address 0
+   if { [info exists keys(-register_read_address)] } {
+@@ -303,7 +315,7 @@ proc generate_ram_netlist { args } {
+   foreach key {-read_style -zero_word -reset_value -banks -bank_columns -bank_order
+     -rb_ports -register_read_address -write_style -write_priority -cells -name
+     -decoder -bit_folds -periphery -pin_layer -wrapper_verilog -service_columns
+-    -bank_column_layout} {
++    -bank_column_layout -write_select} {
+     if { [info exists keys($key)] } {
+       lappend experimental $key
+     }
+@@ -322,7 +334,7 @@ proc generate_ram_netlist { args } {
+     $rb_ports $register_read_address $write_style $write_priority $periphery $pin_layer \
+     $cells $name \
+     $decoder $bit_folds $wrapper_verilog $service_every $service_sites \
+-    $bank_column_layout
++    $bank_column_layout $write_select
+ }
+ 
+ sta::define_cmd_args "generate_ram" {[-mask_size bits]
+@@ -344,6 +356,7 @@ sta::define_cmd_args "generate_ram" {[-mask_size bits]
+                                      [-register_read_address 0|1]
+                                      [-write_style clock_gate|mux]
+                                      [-write_priority last|or]
++                                     [-write_select decode|mask]
+                                      [-cells {role master ...}]
+                                      [-name name]
+                                      [-decoder row|word]
+@@ -378,7 +391,7 @@ proc generate_ram { args } {
+            -banks -bank_columns -bank_order -rb_ports -register_read_address
+            -write_style -write_priority
+            -cells -name -decoder -bit_folds -service_columns
+-           -bank_column_layout -periphery -wrapper_verilog -tracks } flags {}
++           -bank_column_layout -periphery -wrapper_verilog -tracks -write_select } flags {}
+ 
+   sta::check_argc_eq0 "generate_ram" $args
+ 
+@@ -439,7 +452,7 @@ proc generate_ram { args } {
+   foreach key {-banks -bank_columns -bank_order -rb_ports -register_read_address
+                -write_style -write_priority
+                -cells -name -decoder -bit_folds -service_columns
+-               -bank_column_layout -periphery -wrapper_verilog} {
++               -bank_column_layout -periphery -wrapper_verilog -write_select} {
+     if { [info exists keys($key)] } {
+       lappend ram_netlist_args $key $keys($key)
+     }
+@@ -581,9 +594,10 @@ sta::define_cmd_args "generate_array" {-spec file [generate_ram_netlist options]
+ 
+ # An array from a spec: words, bits and ports, each port a row select, an
+ # op on the selected word and a reduction across words. A spec whose ports
+-# are all decoded writes (masked or not) and decoded, multiplexed reads is
+-# a register file: generate_ram_netlist builds it, with the options the
+-# spec states. Any other part stops, naming it.
++# are all writes, decoded or selected by a mask with a bit a word (bit
++# masked or not), and decoded, multiplexed reads is a register file:
++# generate_ram_netlist builds it, with the options the spec states. Any
++# other part stops, naming it.
+ proc generate_array { args } {
+   # -spec is this command's; the rest are generate_ram_netlist's
+   set i [lsearch -exact $args -spec]
+@@ -647,22 +661,29 @@ proc read_array_spec { file } {
+ }
+ 
+ # generate_ram_netlist's options for a register-file spec; any port that
+-# is not a decoded write or a decoded, multiplexed read is a part the
+-# generator does not have yet, and stops naming it.
++# is not a decoded or mask-selected write or a decoded, multiplexed read
++# is a part the generator does not have yet, and stops naming it.
+ proc array_netlist_args { spec } {
+   set reads 0
+   set writes 0
+   set mask ""
++  set write_select ""
+   foreach port [dict get $spec ports] {
+     set what "[dict get $port name]: select=[dict get $port select]\
+       op=[dict get $port op] reduce=[dict get $port reduce]"
+-    if { [dict get $port select] ne "decode" } {
++    set select [dict get $port select]
++    # a write may also name its words by a mask, a bit a word
++    if { $select ne "decode" && !($select eq "mask" && [dict get $port op] eq "write") } {
+       utl::error RAM 124 "port $what: no array part for select\
+-        '[dict get $port select]' yet; decode is built."
++        '$select' yet; decode is built, and mask for writes."
+     }
+     switch -- [dict get $port op] {
+       write {
+         incr writes
++        if { $write_select ne "" && $write_select ne $select } {
++          utl::error RAM 130 "port $what: write ports with different selects."
++        }
++        set write_select $select
+         if { [dict get $port mask] ne "" } {
+           if { $mask ne "" && $mask != [dict get $port mask] } {
+             utl::error RAM 125 "port $what: write ports with different masks."
+@@ -688,6 +709,9 @@ proc array_netlist_args { spec } {
+   if { $mask ne "" } {
+     lappend args -mask_size $mask
+   }
++  if { $write_select eq "mask" } {
++    lappend args -write_select mask
++  }
+   if { [dict get $spec name] ne "" } {
+     lappend args -name [dict get $spec name]
+   }
+diff --git a/openroad/ram/test/BUILD b/openroad/ram/test/BUILD
+index 95b4ddedc8..aae4672ff9 100644
+--- a/openroad/ram/test/BUILD
++++ b/openroad/ram/test/BUILD
+@@ -42,6 +42,7 @@ PASSFAIL_TESTS = [
+     "fold_odd_groups_asap7",
+     "generate_array_asap7",
+     "read_drive_asap7",
++    "write_select_mask_asap7",
+ ]
+ 
+ ALL_TESTS = COMPULSORY_TESTS + PASSFAIL_TESTS
+diff --git a/openroad/ram/test/generate_array_asap7.tcl b/openroad/ram/test/generate_array_asap7.tcl
+index 90fc554d4f..19f10e0cf2 100644
+--- a/openroad/ram/test/generate_array_asap7.tcl
++++ b/openroad/ram/test/generate_array_asap7.tcl
+@@ -45,6 +45,8 @@ foreach {text id} {
+   "port w0 select=range op=clear" RAM-0124
+   "port w0 select=decode op=dec" RAM-0127
+   "port r0 select=decode op=read reduce=find_first" RAM-0126
++  "port r0 select=mask op=read" RAM-0124
++  "port w0 select=mask op=write\nport w1 select=decode op=write" RAM-0130
+ } {
+   set spec [write_spec part.spec "words 8\nbits 8\n$text"]
+   set rc [catch { ram::array_netlist_args [ram::read_array_spec $spec] } msg]
+diff --git a/openroad/ram/test/option_errors_asap7.tcl b/openroad/ram/test/option_errors_asap7.tcl
+index 2cdeab158c..48ceb079a0 100644
+--- a/openroad/ram/test/option_errors_asap7.tcl
++++ b/openroad/ram/test/option_errors_asap7.tcl
+@@ -32,6 +32,9 @@ foreach {id options} {
+   64 {-storage_cell DFFASRHQNx1_ASAP7_75t_R -reset_value -1}
+   64 {-storage_cell DFFASRHQNx1_ASAP7_75t_R -reset_value 0x}
+   100 {-storage_cell DFFASRHQNx1_ASAP7_75t_R -reset_value 0x1ff}
++  128 {-write_select onehot}
++  129 {-w_ports 2 -write_select mask}
++  129 {-decoder word -rw_ports 1 -w_ports 0 -write_select mask}
+ } {
+   set args [dict merge $base $options]
+   if { ![catch { generate_ram {*}$args } message] } {
+diff --git a/openroad/ram/test/ram_sim.tcl b/openroad/ram/test/ram_sim.tcl
+index 9191b4066f..df99ae7d2a 100644
+--- a/openroad/ram/test/ram_sim.tcl
++++ b/openroad/ram/test/ram_sim.tcl
+@@ -388,6 +388,8 @@ proc ram_sim::check { condition message } {
+ #                       whole word written) or independent (each drawn on
+ #                       its own: of n pins, pin i writes bits
+ #                       [i*bits/n, (i+1)*bits/n))
++#   select              decode, or mask: a write port's `addr` is a mask
++#                       with a bit a word, any number of them set
+ #   reads               ports: {addr data}
+ #   banked_reads        ports: {addr data bank}, the word that address in
+ #                       that bank holds given by `bank_word`
+@@ -401,7 +403,7 @@ proc ram_sim::check { condition message } {
+ proc ram_sim::exercise { options } {
+   set o [dict merge {writes {} reads {} banked_reads {} bank_word {}
+                      zero_word -1 latency 0 priority last mem {}
+-                     slices together cycles 200} $options]
++                     slices together select decode cycles 200} $options]
+   set independent [expr { [dict get $o slices] eq "independent" }]
+   set words [dict get $o words]
+   set bits [dict get $o bits]
+@@ -421,7 +423,6 @@ proc ram_sim::exercise { options } {
+       set a [expr { rand() < 0.33 ? $same : int(rand() * $words) }]
+       set d [random_bits $bits]
+       set e [expr { rand() < 0.7 }]
+-      set_bus $addr $abits $a
+       set_bus $data $bits $d
+       # the bits this port writes
+       set mask 0
+@@ -437,8 +438,28 @@ proc ram_sim::exercise { options } {
+         }
+         incr i
+       }
++      if { [dict get $o select] eq "mask" } {
++        # a few words, often the word `same` among them
++        set targets {}
++        for { set i 0 } { $i < $words } { incr i } {
++          if { $i == $a || rand() < 0.15 } {
++            lappend targets $i
++          }
++        }
++        if { rand() < 0.1 } {
++          set targets {}
++        }
++        for { set i 0 } { $i < $words } { incr i } {
++          set_port "$addr\[$i\]" [expr { $i in $targets }]
++        }
++      } else {
++        set targets [list $a]
++        set_bus $addr $abits $a
++      }
+       if { $mask } {
+-        lappend written $a $d $mask
++        foreach t $targets {
++          lappend written $t $d $mask
++        }
+       }
+     }
+     cycle clk
+diff --git a/openroad/ram/test/write_select_mask_asap7.tcl b/openroad/ram/test/write_select_mask_asap7.tcl
+new file mode 100644
+index 0000000000..0b7a02a587
+--- /dev/null
++++ b/openroad/ram/test/write_select_mask_asap7.tcl
+@@ -0,0 +1,45 @@
++# -write_select mask: a write port names the words it writes by a mask, a
++# bit a word; each word's select is its bit, through its select buffer,
++# with no decoder, and one write may write many words. Where both ports
++# write a word in a cycle the last port's data is kept.
++
++source "helpers.tcl"
++source "ram_sim.tcl"
++source "routed.tcl"
++
++routed::read_asap7
++
++set behavioral [make_result_file write_select_mask.v]
++generate_ram {*}$routed::asap7 \
++  -mask_size 8 -word_size 8 -num_words 16 -r_ports 2 -w_ports 2 \
++  -storage_cell DFFHQNx1_ASAP7_75t_R -decoder word -write_select mask \
++  -write_behavioral_verilog $behavioral
++routed::check
++
++set block [ord::get_db_block]
++foreach port {wsel0 wsel1} {
++  ram_sim::check { [$block findBTerm "$port\[15\]"] ne "NULL" } \
++    "no $port\[15\]"
++}
++ram_sim::check { [$block findBTerm "addr_w0\[0\]"] eq "NULL" } \
++  "a mask port has an address"
++foreach inst [$block getInsts] {
++  set name [$inst getName]
++  ram_sim::check { ![string match "decoder_p0*" $name] && ![string match "decoder_p1*" $name] } \
++    "$name: a mask port has a decoder"
++}
++
++set f [open $behavioral r]
++set model [read $f]
++close $f
++ram_sim::check { [string first {we1[i] && wsel1[j]} $model] >= 0 } \
++  "the behavioral model does not write by wsel1"
++
++ram_sim::load
++ram_sim::exercise {
++  words 16 bits 8 select mask cycles 300
++  writes {{wsel0 D0 {we0[0]}} {wsel1 D1 {we1[0]}}}
++  reads {{addr_r0 Q0} {addr_r1 Q1}}
++}
++
++puts "pass"
+-- 
+2.53.0
+

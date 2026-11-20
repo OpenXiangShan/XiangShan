@@ -1,0 +1,21 @@
+"""ChiselIOPMP: the IO physical memory protection unit."""
+
+load("@rules_chisel//chisel:defs.bzl", "chisel_library")
+
+package(default_visibility = ["//visibility:public"])
+
+chisel_library(
+    name = "chiseliopmp",
+    srcs = glob(["src/main/scala/**/*.scala"]),
+    scalacopts = [
+        "-Ymacro-annotations",
+        "-Xcheckinit:false",
+    ],
+    exports = ["@xs_rocket_chip//:rocket_chip"],
+    deps = [
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_rocket_chip//:macros",
+        "@xs_rocket_chip//:rocket_chip",
+        "@xs_utility//:utility",
+    ],
+)

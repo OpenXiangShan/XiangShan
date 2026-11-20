@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 4/5] grt: allocate the 2D maze's work arrays only for the
+ overflow iterations
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The 2D maze's distances, edges and flags per GCell were kept for the
+whole run, though only mazeRouteMSMDSequential, in the overflow
+iterations, uses them. They are now freed after the iterations, so they
+are gone in the 3D maze and while the routes are converted, where global
+route peaks; the next run allocates them again before its iterations.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ .../grt/src/fastroute/include/FastRoute.h     |  2 +
+ openroad/grt/src/fastroute/src/FastRoute.cpp  | 46 ++++++++++++++-----
+ 2 files changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index e646615..40c2432 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -243,6 +243,8 @@ class FastRouteCore
+   void setEdgeCapacity(int x1, int y1, int x2, int y2, int layer, int capacity);
+   int getDbNetLayerEdgeCost(odb::dbNet* db_net, int layer);
+   void initEdgesCapacityPerLayer();
++  void allocateMaze2D();
++  void freeMaze2D();
+   void allocateMaze3D();
+   void freeMaze3D();
+   // Backs the routing grid with a file at path; empty for memory only.
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index c9f1ce9..92d5bd3 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -337,10 +337,7 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+     last_row_h_capacity_3D_[i] = 0;
+   }
+ 
+-  hv_.resize(boost::extents[y_range_][x_range_]);
+-  hyper_v_.resize(boost::extents[y_range_][x_range_]);
+-  hyper_h_.resize(boost::extents[y_range_][x_range_]);
+-  corr_edge_.resize(boost::extents[y_range_][x_range_]);
++  allocateMaze2D();
+ 
+   in_region_.resize(boost::extents[y_range_][x_range_]);
+ 
+@@ -355,24 +352,47 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   cost_v_test_.resize(x_range_);    // Vertical segment cost
+   cost_tb_test_.resize(x_range_);   // Top and bottom boundary cost
+ 
+-  // maze2D variables
+-  int64 total_size = static_cast<int64>(y_grid_) * x_range_;
+-  pop_heap2_2D_.resize(total_size, false);
+-
+   // The heaps hold the search frontier only: setupHeap() clears them and
+   // they grow as the maze needs, rather than to a GCell each up front.
+   src_heap_2D_.clear();
+   dest_heap_2D_.clear();
+ 
+-  d1_2D_.resize(boost::extents[y_range_][x_range_]);
+-  d2_2D_.resize(boost::extents[y_range_][x_range_]);
+-
+-  // maze3D variables, allocated only while the 3D maze runs
++  // The maze3D variables are allocated only while the 3D maze runs
+   // (allocateMaze3D).
+   grid_hv_ = x_grid_ * y_grid_;
+   dest_heap_3D_.clear();
+ }
+ 
++// The 2D maze's per-GCell work arrays, used only by the overflow
++// iterations' mazeRouteMSMDSequential.
++void FastRouteCore::allocateMaze2D()
++{
++  if (hv_.shape()[0] == static_cast<size_t>(y_range_)
++      && hv_.shape()[1] == static_cast<size_t>(x_range_)) {
++    return;
++  }
++  hv_.resize(boost::extents[y_range_][x_range_]);
++  hyper_v_.resize(boost::extents[y_range_][x_range_]);
++  hyper_h_.resize(boost::extents[y_range_][x_range_]);
++  corr_edge_.resize(boost::extents[y_range_][x_range_]);
++  pop_heap2_2D_.resize(static_cast<int64>(y_grid_) * x_range_, false);
++  d1_2D_.resize(boost::extents[y_range_][x_range_]);
++  d2_2D_.resize(boost::extents[y_range_][x_range_]);
++}
++
++void FastRouteCore::freeMaze2D()
++{
++  hv_.resize(boost::extents[0][0]);
++  hyper_v_.resize(boost::extents[0][0]);
++  hyper_h_.resize(boost::extents[0][0]);
++  corr_edge_.resize(boost::extents[0][0]);
++  pop_heap2_2D_ = std::vector<bool>();
++  d1_2D_.resize(boost::extents[0][0]);
++  d2_2D_.resize(boost::extents[0][0]);
++  src_heap_2D_ = std::vector<double*>();
++  dest_heap_2D_ = std::vector<double*>();
++}
++
+ // The 3D maze's per-GCell and layer work arrays are needed only while
+ // mazeRouteMSMDOrder3D runs.
+ void FastRouteCore::allocateMaze3D()
+@@ -2491,6 +2511,7 @@ NetRouteMap FastRouteCore::run()
+         && overflow_iterations_ > 0) {
+       initial_sttrees = saveInitialRoutes();
+     }
++    allocateMaze2D();
+     while (total_overflow_ > 0 && i <= overflow_iterations_
+            && overflow_increases <= max_overflow_increases) {
+       if (verbose_) {
+@@ -2794,6 +2815,7 @@ NetRouteMap FastRouteCore::run()
+         saveCongestion(i);
+       }
+     }  // end overflow iterations
++    freeMaze2D();
+   }
+ 
+   // Debug mode Tree 2D after overflow iterations
+-- 
+2.53.0
+

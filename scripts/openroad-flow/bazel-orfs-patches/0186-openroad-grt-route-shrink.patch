@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: release a route's unmerged segments after merging them
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FastRoute hands a route over as one segment per GCell step, and
+mergeSegments merges the straight runs in place, but resize() keeps the
+vector's capacity: every routed net held its unmerged size for the rest
+of the run. On a design with 194 m of wire and 121 M vias that is on the
+order of 15 GB. The merged segments are the same.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/GlobalRouter.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index 4d187f0..f88db75 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -5236,6 +5236,8 @@ void GlobalRouter::mergeSegments(const std::vector<Pin>& pins, GRoute& route)
+   segments[write] = segments[read];
+ 
+   segments.resize(write + 1);
++  // The route arrives with a segment per GCell; keep only the merged ones.
++  segments.shrink_to_fit();
+ }
+ 
+ bool GlobalRouter::segmentsConnect(const GSegment& seg0,
+-- 
+2.53.0
+

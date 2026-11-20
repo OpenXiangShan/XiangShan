@@ -1,0 +1,253 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Wed, 21 Oct 2026 19:51:12 +0200
+Subject: [PATCH] sdc: path delay -to tested by hash before the -to's ordered
+ sets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Search::mutateTag asks, at every edge a path delay exception's state
+crosses, whether the edge's pin completes the exception's -to
+(Sdc::isCompleteTo). ExceptionTo::matches answers from the -to's PinSet
+and InstanceSet, ordered by network id, and on OpenROAD's dbNetwork an
+id is decoded from the odb object at every comparison. With ORFS's
+asap7 platform SDC (set_max_delay -from inputs -to [all_registers],
+-from [all_registers] -to [all_outputs]) nearly every path carries such
+a state and nearly no pin is a -to object: the lookup was 31 to 59 % of
+the samples of generate_abstract, CTS and global route repair on
+XiangShan blocks.
+
+Sdc now keeps the -to objects of every exception hashed by pointer
+(to_pin_exceptions_, to_inst_exceptions_), and isCompleteTo asks it
+first; ExceptionTo::matches still decides when the pin is a -to object.
+A path end asks the same (Sdc::exceptionMatchesTo, from
+Search::exceptionTo) unless the -to names clocks or no objects, which
+the hash does not hold; write_timing_model visits a path end at every
+endpoint of every input it propagates from.
+
+A path delay with a -to is never merged (PathDelay::mergeable); a merge
+of another exception type re-records the exception that gains the
+merged -to, so the index stays whole for every exception.
+
+Results are unchanged: the hash only rules out pins the ordered sets
+would also rule out. On XiangShan's VecRegionModule (3 runs each, 48
+threads), CTS 778 -> 681 s and global route 1,375 -> 1,250 s, the .odb
+byte-identical in every run.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA carries it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ include/sta/Sdc.hh          | 12 +++++++++
+ sdc/Sdc.cc                  | 49 +++++++++++++++++++++++++++++++++++++
+ test/path_delay_to_sets.tcl | 39 +++++++++++++++++++++++++++++
+ 3 files changed, 100 insertions(+)
+ create mode 100644 test/path_delay_to_sets.tcl
+
+diff --git a/openroad/sta/include/sta/Sdc.hh b/openroad/sta/include/sta/Sdc.hh
+index 8e89461..0e43d9d 100644
+--- a/openroad/sta/include/sta/Sdc.hh
++++ b/openroad/sta/include/sta/Sdc.hh
+@@ -1055,6 +1055,12 @@ public:
+                     const Pin *pin,
+                     const RiseFall *rf,
+                     const MinMax *min_max) const;
++  // False when pin cannot complete the exception's -to: neither the pin
++  // nor its instance is one of the -to's objects. Hashed, so a search
++  // step that is not at a -to object does not look into the -to's
++  // ordered sets.
++  bool mayCompleteTo(const ExceptionPath *exception,
++                     const Pin *pin) const;
+   bool isPathDelayInternalFrom(const Pin *pin) const;
+   bool isPathDelayInternalFromBreak(const Pin *pin) const;
+   const PinSet &pathDelayInternalFrom() const;
+@@ -1183,6 +1189,8 @@ protected:
+   void recordMergeHashes(ExceptionPath *exception);
+   void unrecordExceptionFirstPts(ExceptionPath *exception);
+   void unrecordExceptionPins(ExceptionPath *exception);
++  void recordExceptionTo(ExceptionPath *exception);
++  void unrecordExceptionTo(ExceptionPath *exception);
+   void unrecordExceptionClks(ExceptionPath *exception,
+                              ClockSet *clks,
+                              ClockExceptionsMap &exception_map);
+@@ -1457,6 +1465,10 @@ protected:
+   ClockExceptionsMap first_to_clk_exceptions_;
+   InstanceExceptionsMap first_to_inst_exceptions_;
+   PinExceptionsMap pin_exceptions_;
++  // -to pin/instance to the exceptions with it in their -to, for
++  // mayCompleteTo.
++  PinExceptionsMap to_pin_exceptions_;
++  InstanceExceptionsMap to_inst_exceptions_;
+   // Edges that traverse hierarchical exception pins.
+   EdgeExceptionsMap first_thru_edge_exceptions_;
+   // Exception hash with one missing from/thru/to point, used for merging.
+diff --git a/openroad/sta/sdc/Sdc.cc b/openroad/sta/sdc/Sdc.cc
+index 873e6b9..fee4208 100644
+--- a/openroad/sta/sdc/Sdc.cc
++++ b/openroad/sta/sdc/Sdc.cc
+@@ -483,6 +483,7 @@ Sdc::deleteInstanceBefore(const Instance *inst)
+   first_from_inst_exceptions_.erase(inst);
+   first_thru_inst_exceptions_.erase(inst);
+   first_to_inst_exceptions_.erase(inst);
++  to_inst_exceptions_.erase(inst);
+   return deleted;
+ }
+ 
+@@ -4889,6 +4890,7 @@ Sdc::recordException(ExceptionPath *exception)
+   recordMergeHashes(exception);
+   recordExceptionFirstPts(exception);
+   recordExceptionPins(exception);
++  recordExceptionTo(exception);
+   checkForThruHpins(exception);
+ }
+ 
+@@ -5114,6 +5116,8 @@ Sdc::findMergeMatch(ExceptionPath *exception)
+           unrecordMergeHashes(match);
+           missing_pt->mergeInto(match_missing_pt, network_);
+           recordMergeHashes(match);
++          // The merge adds to match's points, its -to's among them.
++          recordExceptionTo(match);
+           // The merged objects are recorded in the first point maps
+           // (all -through nets) and the pin map.
+           recordExceptionFirstPts(match);
+@@ -5155,6 +5159,8 @@ Sdc::deleteExceptions()
+   path_delay_internal_to_.clear();
+   path_delay_internal_to_break_.clear();
+   pin_exceptions_.clear();
++  to_pin_exceptions_.clear();
++  to_inst_exceptions_.clear();
+ 
+   exception_merge_hash_.clear();
+   exception_merge_hash_.clear();
+@@ -5221,6 +5227,7 @@ Sdc::unrecordException(ExceptionPath *exception)
+   unrecordMergeHashes(exception);
+   unrecordExceptionFirstPts(exception);
+   unrecordExceptionPins(exception);
++  unrecordExceptionTo(exception);
+   exceptions_.erase(exception);
+ }
+ 
+@@ -5314,6 +5321,26 @@ unrecordMapException(ExceptionsMap &exception_map,
+   }
+ }
+ 
++void
++Sdc::recordExceptionTo(ExceptionPath *exception)
++{
++  ExceptionTo *to = exception->to();
++  if (to) {
++    recordExceptionPins(exception, to->pins(), to_pin_exceptions_);
++    recordExceptionInsts(exception, to->instances(), to_inst_exceptions_);
++  }
++}
++
++void
++Sdc::unrecordExceptionTo(ExceptionPath *exception)
++{
++  ExceptionTo *to = exception->to();
++  if (to) {
++    unrecordExceptionPins(exception, to->pins(), to_pin_exceptions_);
++    unrecordExceptionInsts(exception, to->instances(), to_inst_exceptions_);
++  }
++}
++
+ void
+ Sdc::unrecordExceptionClks(ExceptionPath *exception,
+                            ClockSet *clks,
+@@ -5772,6 +5799,10 @@ Sdc::exceptionMatchesTo(ExceptionPath *exception,
+     && ((to == nullptr
+          && !require_to_pin)
+         || (to
++            // A -to with clocks, or with no objects, is not in the hash.
++            && (to->clks()
++                || (to->pins() == nullptr && to->instances() == nullptr)
++                || mayCompleteTo(exception, pin))
+             && to->matches(pin, clk_edge, rf, network_)));
+ }
+ 
+@@ -5800,9 +5831,26 @@ Sdc::isCompleteTo(ExceptionState *state,
+   return state->nextThru() == nullptr
+     && to
+     && exception->matches(min_max, true)
++    && mayCompleteTo(exception, pin)
+     && to->matches(pin, rf, network_);
+ }
+ 
++bool
++Sdc::mayCompleteTo(const ExceptionPath *exception,
++                   const Pin *pin) const
++{
++  ExceptionPath *path = const_cast<ExceptionPath*>(exception);
++  const ExceptionPathSet *exceptions = findKeyValuePtr(to_pin_exceptions_, pin);
++  if (exceptions && exceptions->contains(path))
++    return true;
++  if (!to_inst_exceptions_.empty()) {
++    exceptions = findKeyValuePtr(to_inst_exceptions_, network_->instance(pin));
++    if (exceptions && exceptions->contains(path))
++      return true;
++  }
++  return false;
++}
++
+ ////////////////////////////////////////////////////////////////
+ 
+ void
+@@ -6057,6 +6105,7 @@ Sdc::deletePinExceptions(const Pin *pin)
+   first_thru_pin_exceptions_.erase(pin);
+   first_to_pin_exceptions_.erase(pin);
+   pin_exceptions_.erase(pin);
++  to_pin_exceptions_.erase(pin);
+   return deleted;
+ }
+ 
+diff --git a/openroad/sta/test/path_delay_to_sets.tcl b/openroad/sta/test/path_delay_to_sets.tcl
+new file mode 100644
+index 0000000..cac4dee
+--- /dev/null
++++ b/openroad/sta/test/path_delay_to_sets.tcl
+@@ -0,0 +1,39 @@
++# set_max_delay with large -to pin and instance sets, two that differ
++# only in their -to, -to internal pins that paths go on past, and an
++# exception removed and redefined: every
++# endpoint's slack must stay what the -to sets say.
++read_liberty ../examples/sky130hd_tt.lib.gz
++read_verilog ../examples/gcd_sky130hd.v
++link_design gcd
++read_sdc ../examples/gcd_sky130hd.sdc
++
++set ins [all_inputs -no_clocks]
++set outs [all_outputs]
++set half [expr { [llength $outs] / 2 }]
++
++# -to instances
++set_max_delay 0.5 -from $ins -to [all_registers]
++# the same value, -from and type, two -to sets: a path delay with a -to
++# is not merged (PathDelay::mergeable), so these stay two exceptions
++set_max_delay 0.6 -from [all_registers] -to [lrange $outs 0 [expr { $half - 1 }]]
++set_max_delay 0.6 -from [all_registers] -to [lrange $outs $half end]
++# -to pins
++set_max_delay 0.3 -from $ins -to $outs
++# -to internal pins: the path goes on past them, and the exception's
++# state must end there (Sdc::isCompleteTo), not reach the endpoints beyond
++set internal [lsort [lmap p [get_pins */Y] { get_full_name $p }]]
++set_max_delay 0.4 -from [all_registers] -to [get_pins [lrange $internal 0 99]]
++
++report_checks -group_path_count 1000 -endpoint_path_count 1 -format end
++report_checks -to [get_pins [lrange $internal 0 9]] -format end
++report_tns
++report_wns
++# a path delay's state ends at its -to: past it, no tags for it
++puts "tags [sta::tag_count] tag groups [sta::tag_group_count]"
++
++# removed and redefined, tighter
++unset_path_exceptions -from [all_registers] -to $outs
++set_max_delay 0.2 -from [all_registers] -to $outs
++report_checks -group_path_count 1000 -endpoint_path_count 1 -format end
++report_tns
++report_wns
+-- 
+2.53.0
+

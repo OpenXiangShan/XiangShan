@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oyvind Harboe <oyvind.harboe@zylin.com>
+Date: Wed, 18 Nov 2026 00:00:00 +0000
+Subject: [PATCH] redirect: debug_runahead_checkpoint_id only in debug builds
+
+Redirect.debug_runahead_checkpoint_id is the difftest run-ahead hint
+(#1082). No logic reads it, but it is declared unconditionally, so in a
+build with difftest off it is still written from the load unit, the
+load-queue RAW and uncache rollbacks, and carried out of MemBlock as a
+64-bit port. Inside MemBlock its source is
+perfDebugInfo.runahead_checkpoint_id, stored per entry in
+LoadQueueReplay and LoadQueueRAW in a ring of registers with no reset
+(replay -> load unit -> queue write -> replay), so constant folding
+cannot prove it zero. With hierarchy kept, the port's only sinks are
+unused inputs in other modules, so nothing removes it: in bazel-orfs's
+XiangShan it is about 13 k flops in MemBlock and 64 pins on each of
+three hardened blocks.
+
+The field is now Option.when(backendParams.debugEn), the same gate the
+backend's own bundles use for perfDebugInfo, and the three writers
+assign it with foreach. Debug builds are unchanged.
+
+Upstream kunminghu-v3 still declares the field unconditionally.
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed. Retires
+when a XiangShan bump carries the same gate.
+---
+diff --git a/src/main/scala/xiangshan/Bundle.scala b/src/main/scala/xiangshan/Bundle.scala
+index b39b7f0..8cbd30c 100644
+--- a/src/main/scala/xiangshan/Bundle.scala
++++ b/src/main/scala/xiangshan/Bundle.scala
+@@ -217,7 +217,9 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
+     ftqIdx + 1.U
+   )
+ 
+-  val debug_runahead_checkpoint_id = UInt(64.W)
++  // Difftest run-ahead hint: no logic reads it, so it exists only in debug
++  // builds, like perfDebugInfo in backend/Bundles.scala.
++  val debug_runahead_checkpoint_id = Option.when(backendParams.debugEn)(UInt(64.W))
+   val debugIsCtrl = Bool()
+   val debugIsMemVio = Bool()
+ 
+diff --git a/src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAW.scala b/src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAW.scala
+index 049c928..68bcec8 100644
+--- a/src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAW.scala
++++ b/src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAW.scala
+@@ -388,7 +388,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
+     redirect.bits.stFtqOffset := stFtqOffset(i)
+     redirect.bits.level       := RedirectLevel.flush
+     redirect.bits.target      := rollbackLqWb(i).bits.pc
+-    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
++    redirect.bits.debug_runahead_checkpoint_id.foreach(_ := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id)
+     redirect
+   })
+   io.rollback := allRedirect
+diff --git a/src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala b/src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala
+index 19d5b99..e4471dc 100644
+--- a/src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala
++++ b/src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala
+@@ -605,7 +605,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
+     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
+     redirect.bits.level       := RedirectLevel.flush
+     redirect.bits.target      := reqSelUops(i).pc // TODO: check if need pc
+-    redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).perfDebugInfo.runahead_checkpoint_id
++    redirect.bits.debug_runahead_checkpoint_id.foreach(_ := reqSelUops(i).perfDebugInfo.runahead_checkpoint_id)
+     redirect
+   })
+   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
+diff --git a/src/main/scala/xiangshan/mem/pipeline/NewLoadUnit.scala b/src/main/scala/xiangshan/mem/pipeline/NewLoadUnit.scala
+index 2f2db1c..db20246 100644
+--- a/src/main/scala/xiangshan/mem/pipeline/NewLoadUnit.scala
++++ b/src/main/scala/xiangshan/mem/pipeline/NewLoadUnit.scala
+@@ -1756,7 +1756,7 @@ class LoadUnitS3(param: ExeUnitParams)(
+   io.rollback.bits.ftqOffset := uop.ftqOffset
+   io.rollback.bits.level := rollbackLevel
+   io.rollback.bits.target := uop.pc
+-  io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
++  io.rollback.bits.debug_runahead_checkpoint_id.foreach(_ := uop.perfDebugInfo.runahead_checkpoint_id)
+ 
+   io.exceptionInfo.valid := exceptionInfoValid
+   io.exceptionInfo.bits := exceptionInfo

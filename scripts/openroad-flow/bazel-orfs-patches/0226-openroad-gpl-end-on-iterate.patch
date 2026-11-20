@@ -1,0 +1,674 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 16 Nov 2026 20:25:11 +0100
+Subject: [PATCH 1/2] gpl: end on Nesterov's iterate, not on its look-ahead
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Each Nesterov iteration takes a gradient step from the look-ahead v_k to
+the iterate u_(k+1) (nextCoordi_), then extrapolates the next
+look-ahead, v_(k+1) = u_(k+1) + c_k (u_(k+1) - u_k) (nextSLPCoordi_),
+with c_k = (a_k - 1) / a_(k+1) about 0.994 by iteration 500. The
+density, the overflow and the HPWL are measured at v, the convergence
+test reads that overflow, and updateDb() writes the gcells' density
+centers, which are v. A run therefore ends one momentum step past the
+placement the descent reached, with that step's wirelength on top. The
+extrapolation also spreads the cells, so v is usually what crosses the
+target overflow first, and the stop lands wherever the cells' motion
+happens to be.
+
+On a synthetic design (20,000 cells, utilization 0.05, target density
+0.6) v's HPWL is 13 to 39 % above u's for the 222 iterations before the
+stop; it ended 0.7 % above u because the step length happened to be cut
+in the last three, while another design of the same kind ended 16 %
+above. On gpl's regression designs v is 0.0 to 2.3 % above u at the
+stop.
+
+Once the look-ahead is within 1.25 times the target overflow,
+NesterovBase::settleOnIterate() measures the iterate's overflow, and
+convergence is judged by that. When it is at the target, the region
+moves onto its iterate: the look-ahead is set to it, and the bins, pins,
+overflow and HPWL are the iterate's. The run converges there, so the
+placement written, the final table row, the trace's last entry and
+routability's pass at the target overflow (GPL-0124) all describe the
+iterate. No step is taken from a settled region, so its gradients are
+left as they were: it converges in that iteration, unless a revert later
+in it (routability, divergence) replaces its state with a snapshot's.
+
+Until the region settles, the unscaled overflow is the iterate's while
+the bins, the scaled overflow and the HPWL stay the look-ahead's, which
+the next step and the penalty schedule are computed from. Whatever
+compares the overflow with the target must read the iterate's, so that
+it reads at the target only once the region sits on it; the others read
+it next to the look-ahead's HPWL, one momentum step apart. The header
+says so, with the two places a reader sees it: the row printed every 10
+iterations shows the look-ahead's overflow, and a run that stops at its
+iteration limit inside the window reports the iterate's.
+
+Runs converge 0 to 3 iterations later, at an overflow at or below the
+target as before, so every placement moves. Of gpl's tests, the 30
+golden-log ones that change move by 0 to 2 iterations and -0.52 to
++0.02 % HPWL, the 11 :large_tests by 0 to 3 iterations and -0.05 to
+-2.19 % (macro03 3.903 M -> 3.818 M um), and every other placement that
+runs 30 iterations or more by -0.33 to +0.00 % (incremental03, which
+diverges by design, +0.43 %). Placements that stop within 25 iterations,
+tiny designs that start near the target overflow, move either way, -19 %
+to +9 % (known_answer_test, place_ios_test's few-cell cases): that early
+in a descent the momentum step shortens the wires as often as it
+lengthens them. Their .ok and .defok files are not updated here (the
+:large_tests logs already differ from them before this change).
+
+The window is there because the two differ by one momentum step. While
+the cells spread, the look-ahead is the further spread of the two and
+usually reaches the target first (at the stop of 149 synthetic runs, the
+iterate's overflow was the higher in 131), and the run ends on the
+iterate 0 to 3 iterations later. XiangShan's XSTile
+parent ends that way too, in a burst: in its five placements in two
+builds the look-ahead's overflow falls 2 to 5 times faster in the last
+iterations while its HPWL rises 3 to 47 %. There the iterate one or more
+iterations later is further into the burst, and whether ending on it
+saves wire is not measured. Only when the cells run away while the
+overflow stalls does the look-ahead overshoot into full bins and the
+iterate get there first: on a synthetic 1 M-cell design placed on
+2048 x 2048 bins (HPWL +23 % in 15 iterations from overflow 0.11) the
+iterate reaches 0.0992 at iteration 896 while the look-ahead is at
+0.1071, and the run ends there at 134.8 M um. This change does not stop
+a runaway; a momentum restart does.
+
+Tests:
+- end_of_descent_test places gcd from the core's center (355
+  iterations). ConvergedPlacementIsTheIterate pins the iterate with a
+  twin of the run, stopped by its iteration limit after the run's last
+  iteration (target overflow 0, so nothing converges or settles), and
+  checks the placement is that iterate and not its look-ahead;
+  TraceEndsOnTheIterate checks the last row's HPWL is the twin's
+  iterate's. Without this change the placement sits 569 DBU from the
+  iterate and within 1 DBU of the look-ahead, and the last row reads
+  the look-ahead's 5,193,967 DBU instead of the iterate's 5,190,358.
+- routability_minimum_test FirstPassAtTargetIsTheIterate: a region that
+  settles on its iterate at the target, with a settle wait open, runs
+  pass 1 there (GPL-0124); a phase whose minimum is that pass ends on it
+  (GPL-0125) with the density on the iterate and converges. With the
+  look-ahead left where it was when the region settles, the phase ends
+  with 317 gcells' density on the look-ahead.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/nesterovBase.cpp             |  45 ++++
+ openroad/gpl/src/nesterovBase.h               |  25 ++
+ openroad/gpl/src/nesterovPlace.cpp            |   1 +
+ openroad/gpl/test/BUILD                       |  21 ++
+ openroad/gpl/test/end_of_descent_test.cpp     | 250 ++++++++++++++++++
+ .../gpl/test/routability_minimum_test.cpp     | 123 +++++++++
+ 6 files changed, 465 insertions(+)
+ create mode 100644 openroad/gpl/test/end_of_descent_test.cpp
+
+diff --git a/openroad/gpl/src/nesterovBase.cpp b/openroad/gpl/src/nesterovBase.cpp
+index 8ceeb9b..c0da9a7 100644
+--- a/openroad/gpl/src/nesterovBase.cpp
++++ b/openroad/gpl/src/nesterovBase.cpp
+@@ -4034,6 +4034,51 @@ bool NesterovBase::isConvergenceDue() const
+              && sum_overflow_unscaled_ <= npVars_->targetOverflow);
+ }
+ 
++void NesterovBase::settleOnIterate(const int iter)
++{
++  if (isConverged_ || is_overflow_stale_
++      || sum_overflow_unscaled_ > kIterateWindow * npVars_->targetOverflow) {
++    return;
++  }
++  pullSlpFromDevice();
++
++  // The look-ahead extrapolates the cells' last move, and that move's
++  // wirelength comes on top of the iterate's. While the cells spread it is
++  // the further spread of the two and usually reaches the target overflow
++  // first; when they run away while the overflow stalls it overshoots into
++  // full bins and the iterate gets there first. Near the target, the
++  // overflow that convergence is judged by is the iterate's.
++  updateGCellDensityCenterLocation(curCoordi_);
++  const float denominator = getOverflowDenominator(iter);
++  sum_overflow_unscaled_ = getOverflowAreaUnscaled() / denominator;
++  if (sum_overflow_unscaled_ > npVars_->targetOverflow) {
++    // The next step starts from the look-ahead: put the density back on it.
++    // The overflow stays the iterate's (see the declaration).
++    updateGCellDensityCenterLocation(curSLPCoordi_);
++    return;
++  }
++
++  // The gradients stay the ones evaluated at the look-ahead: no step is
++  // taken from here. The region is at the target and converges in this
++  // iteration, unless a revert later in it (routability, divergence)
++  // replaces its state with a snapshot's.
++  curSLPCoordi_ = curCoordi_;
++  sum_overflow_ = getOverflowArea() / denominator;
++  prev_hpwl_ = nbc_->getHpwl();
++
++#ifdef ENABLE_GPU
++  if (nb_device_ctx_) {
++    nb_device_ctx_->syncCoordsToDevice(curSLPCoordi_,
++                                       prevSLPCoordi_,
++                                       curCoordi_,
++                                       curSLPSumGrads_,
++                                       prevSLPSumGrads_);
++    commitCoordsToDeviceState(SlpSlot::Cur);
++    host_coords_fresh_ = true;
++  }
++#endif
++}
++
+ bool NesterovBase::checkConvergence(int gpl_iter_count,
+                                     int routability_gpl_iter_count,
+                                     RouteBase* rb)
+diff --git a/openroad/gpl/src/nesterovBase.h b/openroad/gpl/src/nesterovBase.h
+index b0168a8..589d489 100644
+--- a/openroad/gpl/src/nesterovBase.h
++++ b/openroad/gpl/src/nesterovBase.h
+@@ -1291,6 +1291,27 @@ class NesterovBase
+                         RouteBase* rb);
+   // True when checkConvergence() would return true; no side effects.
+   bool isConvergenceDue() const;
++  // The loop measures a placement on its look-ahead coordinates (curSLP),
++  // where the gradient is evaluated, one momentum step past Nesterov's
++  // iterate (curCoordi_). Once the look-ahead is within kIterateWindow of
++  // the target overflow, the overflow is the iterate's instead. When that is
++  // at the target, the region moves onto its iterate, with the HPWL
++  // measured there.
++  //
++  // Until it settles, the unscaled overflow is the iterate's while the bins,
++  // the scaled overflow, the HPWL and minSumOverflow_ stay the look-ahead's,
++  // which the next step and the penalty schedule are computed from.
++  // Whatever compares the overflow with the target (convergence, the
++  // routability wait that convergence ends, GPL-0124, the trace) must read
++  // the iterate's, so that it reads at the target only once the region sits
++  // on it. The divergence checks and snapshot, the incremental penalty guard
++  // and the routability gates read it next to the look-ahead's HPWL; the two
++  // overflows differ by one momentum step (0.0014 median at the stop on
++  // synthetic designs, 0.008 in a runaway). The table row printed every 10
++  // iterations is printed before this, so it shows the look-ahead's
++  // overflow, and a run that stops at its iteration limit here reports the
++  // iterate's overflow for the look-ahead's placement.
++  void settleOnIterate(int iter);
+   void resetConverged() { isConverged_ = false; }
+ 
+   bool checkDivergence();
+@@ -1393,6 +1414,7 @@ class NesterovBase
+  private:
+   friend class TimingRepairIntegrationTest;
+   friend class RoutabilityMinimumTest;
++  friend class EndOfDescentTest;
+ 
+   NesterovBaseVars nbVars_;
+   std::shared_ptr<PlacerBase> pb_;
+@@ -1513,6 +1535,9 @@ class NesterovBase
+   // carries no bin size, no DBU constant, and no dependence on the penalty
+   // schedule's rate.
+   static constexpr float kSettleFraction = 0.6f;
++  // How far above the target overflow the look-ahead may be for the
++  // iterate's overflow to be measured: the two differ by one momentum step.
++  static constexpr float kIterateWindow = 1.25f;
+ 
+   // Nesterov loop data for each region, using parallel vectors
+   // SLP is Step Length Prediction.
+diff --git a/openroad/gpl/src/nesterovPlace.cpp b/openroad/gpl/src/nesterovPlace.cpp
+index 2be7108..3a1b7ab 100644
+--- a/openroad/gpl/src/nesterovPlace.cpp
++++ b/openroad/gpl/src/nesterovPlace.cpp
+@@ -1714,6 +1714,7 @@ void NesterovPlace::updateNextIter(int iter)
+   for (auto& nb : nbVec_) {
+     const bool updates = !nb->isConverged();
+     nb->updateNextIter(iter);
++    nb->settleOnIterate(iter);
+     if (updates) {
+       updated_hpwl = nb->getIterHpwl();
+     }
+diff --git a/openroad/gpl/test/BUILD b/openroad/gpl/test/BUILD
+index 3317172..809d2c1 100644
+--- a/openroad/gpl/test/BUILD
++++ b/openroad/gpl/test/BUILD
+@@ -433,6 +433,27 @@ cc_test(
+     ],
+ )
+ 
++# How global placement's Nesterov descent ends.
++cc_test(
++    name = "end_of_descent_test",
++    srcs = ["end_of_descent_test.cpp"],
++    data = [
++        "gcd.def",
++        "nangate45.lef",
++    ],
++    env = GPU_ENV_OFF,
++    deps = [
++        "//openroad/gpl:gpl_impl",
++        "//openroad/odb/src/db",
++        "//openroad/odb/src/defin",
++        "//openroad/odb/src/lefin",
++        "//openroad/tst",
++        "//openroad/utl",
++        "@googletest//:gtest",
++        "@googletest//:gtest_main",
++    ],
++)
++
+ cc_test(
+     name = "overflow_test",
+     srcs = ["overflow_test.cpp"],
+diff --git a/openroad/gpl/test/end_of_descent_test.cpp b/openroad/gpl/test/end_of_descent_test.cpp
+new file mode 100644
+index 0000000..5fe0508
+--- /dev/null
++++ b/openroad/gpl/test/end_of_descent_test.cpp
+@@ -0,0 +1,250 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++// How global placement's Nesterov descent ends.
++//
++// It ends on Nesterov's iterate, not on the look-ahead point one momentum
++// step past it.
++//
++// Each iteration takes a gradient step from the look-ahead v_k to the
++// iterate u_(k+1), then extrapolates the look-ahead
++// v_(k+1) = u_(k+1) + c_k (u_(k+1) - u_k), with c_k close to 1 late in a
++// run. The gradient is evaluated at v; the iterate u is the sequence the
++// method converges. A placement that ends on v carries one more step of the
++// cells' motion than the descent has taken, and its wirelength with it.
++
++#include <algorithm>
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "gpl/Replace.h"
++#include "gtest/gtest.h"
++#include "odb/db.h"
++#include "odb/dbTypes.h"
++#include "odb/defin.h"
++#include "odb/geom.h"
++#include "odb/lefin.h"
++#include "openroad/gpl/src/graphicsNone.h"
++#include "openroad/gpl/src/nesterovBase.h"
++#include "openroad/gpl/src/nesterovPlace.h"
++#include "openroad/gpl/src/placerBase.h"
++#include "openroad/gpl/src/point.h"
++#include "tst/fixture.h"
++#include "utl/deleter.h"
++
++namespace gpl {
++
++class EndOfDescentTest : public tst::Fixture
++{
++ protected:
++  // gcd (294 cells, 65 % utilization) with every movable cell starting at
++  // the core's center: a descent of a few hundred iterations, still moving
++  // when the overflow reaches the target.
++  struct Placer
++  {
++    // Declared first, so that it outlives the placer that points into it.
++    utl::UniquePtrWithDeleter<odb::dbDatabase> db;
++    std::shared_ptr<PlacerBaseCommon> pbc;
++    std::shared_ptr<NesterovBaseCommon> nbc;
++    std::vector<std::shared_ptr<PlacerBase>> pb_vec;
++    std::vector<std::shared_ptr<NesterovBase>> nb_vec;
++    std::unique_ptr<NesterovPlace> np;
++
++    NesterovBase& nb() const { return *nb_vec.front(); }
++  };
++
++  // gcd in a database of its own and a placer for it. Two placers made with
++  // the same options run the same descent.
++  std::unique_ptr<Placer> makePlacer(const PlaceOptions& options)
++  {
++    auto placer = std::make_unique<Placer>();
++    placer->db = utl::UniquePtrWithDeleter<odb::dbDatabase>(
++        odb::dbDatabase::create(), odb::dbDatabase::destroy);
++    placer->db->setLogger(&logger_);
++    const std::string dir = "_main/openroad/gpl/test/";
++    odb::lefin lef_reader(
++        placer->db.get(), &logger_, /* ignore_non_routing_layers = */ false);
++    odb::dbLib* lib = lef_reader.createTechAndLib(
++        "tech", "lib", getFilePath(dir + "nangate45.lef").c_str());
++    if (lib == nullptr) {
++      ADD_FAILURE() << "nangate45.lef did not load";
++      return nullptr;
++    }
++    odb::dbChip* chip = odb::dbChip::create(placer->db.get(), lib->getTech());
++    std::vector<odb::dbLib*> libs{lib};
++    odb::defin def_reader(placer->db.get(), &logger_);
++    if (!def_reader.readChip(
++            libs, getFilePath(dir + "gcd.def").c_str(), chip)) {
++      ADD_FAILURE() << "gcd.def did not load";
++      return nullptr;
++    }
++    odb::dbBlock* block = chip->getBlock();
++    const odb::Point center = block->getCoreArea().center();
++    for (odb::dbInst* inst : block->getInsts()) {
++      if (!inst->isFixed()) {
++        inst->setLocation(center.x(), center.y());
++        inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
++      }
++    }
++
++    const PlacerBaseVars pb_vars(options);
++    placer->pbc = std::make_shared<PlacerBaseCommon>(
++        placer->db.get(), pb_vars, &logger_);
++    placer->pb_vec.push_back(std::make_shared<PlacerBase>(
++        placer->db.get(), placer->pbc, &logger_, /* check_density = */ false));
++    const NesterovBaseVars nb_vars(options);
++    placer->nbc = std::make_shared<NesterovBaseCommon>(
++        nb_vars, placer->pbc, &logger_, /* num_threads = */ 1, Clusters{});
++    placer->nb_vec.push_back(std::make_shared<NesterovBase>(
++        nb_vars, placer->pb_vec[0], placer->nbc, &logger_));
++    const NesterovPlaceVars np_vars(options, placer->nbc->getHpwl());
++    placer->np
++        = std::make_unique<NesterovPlace>(np_vars,
++                                          placer->pbc,
++                                          placer->nbc,
++                                          placer->pb_vec,
++                                          placer->nb_vec,
++                                          /* rb = */ nullptr,
++                                          /* tb = */ nullptr,
++                                          /* cb = */ nullptr,
++                                          /* pwb = */ nullptr,
++                                          std::make_unique<GraphicsNone>(),
++                                          &logger_);
++    return placer;
++  }
++
++  // A twin of a run, stopped by the iteration limit right after `iteration`:
++  // at a target overflow of 0 nothing converges or settles, so its iterate
++  // and look-ahead are the descent's own. It does not revert to the minimum
++  // HPWL snapshot at the limit, which a run that converges never does either.
++  std::unique_ptr<Placer> runTwin(const int iteration)
++  {
++    PlaceOptions options = options_;
++    options.overflow = 0;
++    options.nesterovPlaceMaxIter = iteration + 1;
++    options.disableRevertIfDiverge = true;
++    std::unique_ptr<Placer> twin = makePlacer(options);
++    if (twin != nullptr) {
++      twin_result_ = twin->np->doNesterovPlace();
++    }
++    return twin;
++  }
++
++  static const std::vector<FloatPoint>& iterate(const Placer& placer)
++  {
++    return placer.nb().curCoordi_;
++  }
++  static const std::vector<FloatPoint>& lookAhead(const Placer& placer)
++  {
++    return placer.nb().curSLPCoordi_;
++  }
++
++  // The HPWL of a placer's iterate, with the density put there.
++  static int64_t iterateHpwl(const Placer& placer)
++  {
++    placer.nb().updateGCellDensityCenterLocation(placer.nb().curCoordi_);
++    return placer.nbc->getHpwl();
++  }
++
++  // The largest distance, in DBU on either axis, between an instance's
++  // density center in `placer` and `coordis`.
++  static float worstInstanceOffset(const Placer& placer,
++                                   const std::vector<FloatPoint>& coordis)
++  {
++    const NesterovBase& nb = placer.nb();
++    float worst = 0;
++    for (size_t i = 0; i < nb.nb_gcells_.size(); ++i) {
++      const GCell* gcell = nb.nb_gcells_[i];
++      if (!gcell->isInstance()) {
++        continue;
++      }
++      worst = std::max({worst,
++                        std::abs(gcell->dCx() - coordis[i].x),
++                        std::abs(gcell->dCy() - coordis[i].y)});
++    }
++    return worst;
++  }
++
++  // How many gcells' look-ahead is not their iterate.
++  static int lookAheadsApart(const Placer& placer)
++  {
++    const NesterovBase& nb = placer.nb();
++    int apart = 0;
++    for (size_t i = 0; i < nb.nb_gcells_.size(); ++i) {
++      if (nb.curSLPCoordi_[i].x != nb.curCoordi_[i].x
++          || nb.curSLPCoordi_[i].y != nb.curCoordi_[i].y) {
++        ++apart;
++      }
++    }
++    return apart;
++  }
++
++  PlaceOptions options_;
++  PlaceResult twin_result_;
++};
++
++// The placement gpl hands back, the one it measured the overflow and the
++// wirelength of, is the iterate the descent reached on its last iteration:
++// the one a twin of the run, stopped there, has.
++TEST_F(EndOfDescentTest, ConvergedPlacementIsTheIterate)
++{
++  const std::unique_ptr<Placer> run = makePlacer(options_);
++  ASSERT_NE(run, nullptr);
++  const PlaceResult result = run->np->doNesterovPlace();
++  ASSERT_EQ(result.stop, PlaceStop::kConverged);
++  EXPECT_LE(result.overflow, options_.overflow);
++  ASSERT_GE(result.final_iteration, 50) << "a descent long enough for the "
++                                           "momentum to have built up";
++
++  const std::unique_ptr<Placer> twin = runTwin(result.final_iteration);
++  ASSERT_NE(twin, nullptr);
++  ASSERT_EQ(twin_result_.stop, PlaceStop::kIterationLimit);
++  ASSERT_EQ(twin_result_.trace.size(), result.trace.size());
++  for (size_t i = 0; i + 1 < result.trace.size(); ++i) {
++    ASSERT_EQ(twin_result_.trace[i].hpwl, result.trace[i].hpwl)
++        << "the twin must run the same descent, iteration "
++        << result.trace[i].iteration;
++  }
++  ASSERT_GT(lookAheadsApart(*twin), 0)
++      << "the descent's last look-ahead must differ from its iterate for "
++         "this test to tell them apart";
++
++  // Coordinates are rounded to DBU when the gcells take them.
++  EXPECT_LE(worstInstanceOffset(*run, iterate(*twin)), 1.0f)
++      << "every instance must sit on the descent's last iterate";
++  EXPECT_GT(worstInstanceOffset(*run, lookAhead(*twin)), 1.0f)
++      << "the placement is the look-ahead point, a momentum step past the "
++         "iterate";
++  // The look-ahead was brought back to the iterate.
++  EXPECT_EQ(lookAheadsApart(*run), 0)
++      << "gcells whose look-ahead is not their iterate";
++}
++
++// The final row of the trace, the one convergence was judged on, has the
++// iterate's wirelength, and the overflow the run reports.
++TEST_F(EndOfDescentTest, TraceEndsOnTheIterate)
++{
++  const std::unique_ptr<Placer> run = makePlacer(options_);
++  ASSERT_NE(run, nullptr);
++  const PlaceResult result = run->np->doNesterovPlace();
++  ASSERT_EQ(result.stop, PlaceStop::kConverged);
++  ASSERT_FALSE(result.trace.empty());
++  EXPECT_EQ(result.trace.back().overflow, result.overflow);
++  EXPECT_EQ(result.trace.back().hpwl, run->nbc->getHpwl());
++
++  const std::unique_ptr<Placer> twin = runTwin(result.final_iteration);
++  ASSERT_NE(twin, nullptr);
++  ASSERT_EQ(twin_result_.stop, PlaceStop::kIterationLimit);
++  const int64_t look_ahead_hpwl = twin_result_.trace.back().hpwl;
++  const int64_t iterate_hpwl = iterateHpwl(*twin);
++  ASSERT_NE(look_ahead_hpwl, iterate_hpwl);
++  EXPECT_EQ(result.trace.back().hpwl, iterate_hpwl)
++      << "the last row must measure the iterate, not the look-ahead ("
++      << look_ahead_hpwl << ")";
++}
++
++}  // namespace gpl
+diff --git a/openroad/gpl/test/routability_minimum_test.cpp b/openroad/gpl/test/routability_minimum_test.cpp
+index fbd2c53..f211c97 100644
+--- a/openroad/gpl/test/routability_minimum_test.cpp
++++ b/openroad/gpl/test/routability_minimum_test.cpp
+@@ -167,6 +167,43 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+     region.updateDensityFieldBin();
+   }
+ 
++  // Every gcell, standard cells and fillers, on a uniform grid over the core,
++  // where the density is about the target everywhere and the overflow low.
++  // The look-ahead and the rest of the Nesterov state as placeCells(0) sets
++  // them.
++  void spreadCells()
++  {
++    NesterovBase& region = nb();
++    const odb::Rect core = block_->getCoreArea();
++    std::vector<size_t> placed;
++    for (size_t i = 0; i < region.nb_gcells_.size(); ++i) {
++      if (region.nb_gcells_[i]->isStdInstance()
++          || region.nb_gcells_[i]->isFiller()) {
++        placed.push_back(i);
++      }
++    }
++    const int columns = static_cast<int>(std::ceil(
++        std::sqrt(placed.size() * static_cast<double>(core.dx()) / core.dy())));
++    const int rows = static_cast<int>((placed.size() + columns - 1) / columns);
++    const float value = 10.0f;
++    for (size_t k = 0; k < placed.size(); ++k) {
++      const size_t i = placed[k];
++      const FloatPoint coordi(
++          core.xMin() + (k % columns + 0.5f) * core.dx() / columns,
++          core.yMin() + (k / columns + 0.5f) * core.dy() / rows);
++      region.curCoordi_[i] = coordi;
++      region.curSLPCoordi_[i]
++          = FloatPoint(coordi.x + kSlpShift * kSiteWidth, coordi.y);
++      region.curSLPSumGrads_[i] = FloatPoint(value, 2 * value);
++      region.prevSLPSumGrads_[i] = FloatPoint(3 * value, 4 * value);
++    }
++    region.densityPenalty_ = 1e-4f * value;
++    region.stepLength_ = 0.5f * value;
++    region.prev_hpwl_ = 1000000 * static_cast<int64_t>(value);
++    region.updateGCellDensityCenterLocation(region.curSLPCoordi_);
++    region.updateDensityFieldBin();
++  }
++
+   // What the iteration's updateNextIter() measures, set by hand: the overflow
+   // of the placement as it now is.
+   void measure(const float overflow)
+@@ -181,6 +218,24 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+     np_->overflow_update_is_stale_ = false;
+   }
+ 
++  // What the iteration's updateNextIter() measures near the target overflow:
++  // the look-ahead's overflow, set by hand, then the iterate's, which
++  // NesterovBase::settleOnIterate() measures on the cells, and the average
++  // NesterovPlace::updateNextIter() takes from the regions after it.
++  void measureNearTarget(const float look_ahead_overflow)
++  {
++    measure(look_ahead_overflow);
++    float sum = 0;
++    float sum_unscaled = 0;
++    for (const auto& region : nb_vec_) {
++      region->settleOnIterate(iter_);
++      sum += region->getSumOverflow();
++      sum_unscaled += region->getSumOverflowUnscaled();
++    }
++    np_->average_overflow_ = sum / nb_vec_.size();
++    np_->average_overflow_unscaled_ = sum_unscaled / nb_vec_.size();
++  }
++
+   // Cells moving at the given fraction of their peak displacement.
+   void setDisplacementRatio(const float ratio)
+   {
+@@ -266,6 +321,15 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+     });
+   }
+ 
++  // Where the density would see each gcell on its iterate.
++  std::map<std::string, odb::Point> iterateCenters() const
++  {
++    return perGCell<odb::Point>([this](const size_t i) {
++      const FloatPoint& coordi = nb().curCoordi_[i];
++      return odb::Point(static_cast<int>(coordi.x), static_cast<int>(coordi.y));
++    });
++  }
++
+   std::map<std::string, CellState> cellStates() const
+   {
+     return perGCell<CellState>([this](const size_t i) {
+@@ -448,6 +512,65 @@ TEST_F(RoutabilityMinimumTest, FirstPassMinimumAtTargetEndsOnItsPlacement)
+   EXPECT_FLOAT_EQ(rb_->getRudyAverage(), first_pass_rc);
+ }
+ 
++// Near the target overflow an iteration measures Nesterov's iterate, and at
++// the target the region moves onto it (NesterovBase::settleOnIterate()). A
++// settle wait still open there ends by convergence (GPL-0124); pass 1, the
++// snapshot of it and the end of a phase whose minimum is that pass
++// (GPL-0125) are all of the iterate, and the placement converges on it.
++TEST_F(RoutabilityMinimumTest, FirstPassAtTargetIsTheIterate)
++{
++  // A target the iterate below reaches: on a uniform grid the overflow is
++  // about 0.12, from the bins' sampling of the cells' sizes.
++  options_.overflow = 0.2f;
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  // The iterate spread over the core and the look-ahead a site right of it,
++  // with the density on the look-ahead, which reads within the window above
++  // the target.
++  spreadCells();
++  const auto iterate_centers = iterateCenters();
++  ASSERT_NE(countDiffering(centers(), iterate_centers), 0)
++      << "the density must start on the look-ahead";
++  measureNearTarget(1.2f * options_.overflow);
++  ASSERT_LE(nb().getSumOverflowUnscaled(), options_.overflow)
++      << "the iterate must be at the target for the region to settle on it";
++  ASSERT_EQ(countDiffering(centers(), iterate_centers), 0)
++      << "the region must settle on its iterate";
++  const auto first_pass_cells = cellStates();
++  const RegionState first_pass_region = regionState();
++  const int64_t first_pass_hpwl = nb().getIterHpwl();
++  ASSERT_EQ(first_pass_hpwl, nbc_->getHpwl());
++  const float first_pass_overflow = nb().getSumOverflowUnscaled();
++
++  // The cells still moving: the wait that opens ends by convergence, and
++  // pass 1 runs on the iterate.
++  setDisplacementRatio(1.0f);
++  logger_.teeStringBegin();
++  ASSERT_FALSE(runIteration(kWidth, current_a));
++  ASSERT_EQ(passes_, 1);
++  ASSERT_TRUE(rb_->isMinRc());
++  ASSERT_TRUE(routabilityNeeded());
++
++  const bool converged = runPassesWithoutImprovement(current_a);
++  const std::string log = logger_.teeStringEnd();
++  ASSERT_FALSE(routabilityNeeded());
++  ASSERT_NE(log.find("GPL-0124"), std::string::npos);
++  ASSERT_NE(log.find("GPL-0054"), std::string::npos);
++  EXPECT_NE(log.find("GPL-0125"), std::string::npos);
++
++  EXPECT_EQ(countDiffering(centers(), iterate_centers), 0)
++      << "the phase must end with the density on the iterate pass 1 measured";
++  expectNesterovState(first_pass_cells, first_pass_region);
++  EXPECT_EQ(countDiffering(withoutFillers(cellStates()),
++                           withoutFillers(first_pass_cells)),
++            0);
++  EXPECT_FLOAT_EQ(nb().getSumOverflowUnscaled(), first_pass_overflow);
++  EXPECT_EQ(nb().getIterHpwl(), first_pass_hpwl);
++  EXPECT_TRUE(converged) << "the iterate pass 1 measured must converge";
++}
++
+ // Above the target overflow, a phase whose minimum is its first pass goes on
+ // from that pass's placement, with the overflow measured there and the
+ // Nesterov state the loop had there, not from the routability snapshot.
+-- 
+2.53.0
+

@@ -1,0 +1,3 @@
+# Patches on BCR modules, copied from bazel-orfs at the commit MODULE.bazel
+# pins and synced by hand on a bump (README.md, "Keeping up with bazel-orfs").
+exports_files(glob(["*.patch"]))

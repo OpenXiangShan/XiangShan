@@ -1,0 +1,10 @@
+--- private/extensions/maven.bzl
++++ private/extensions/maven.bzl
+@@ -349,7 +349,0 @@
+-    for (repo_name, known_names) in repo_name_2_module_name.items():
+-        if len(known_names) > 1:
+-            print("The maven repository '%s' has contributions from multiple bzlmod modules, and will be resolved together: %s" % (
+-                repo_name,  # e.g. "maven"
+-                sorted(known_names),  # e.g. bzl_module_bar, bzl_module_bar
+-            ))
+-

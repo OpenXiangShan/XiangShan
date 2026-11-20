@@ -1,0 +1,108 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load(":surgery.bzl", "kept_cells", "xs_surgery_chain")
+
+package(default_visibility = ["//:__subpackages__"])
+
+# Netlist surgery on the generated Verilog, before synthesis: the branch and
+# jump units' compares without the adder (xs_bju_surgery.py), then the
+# constants XiangShan ties into the modules this flow keeps, folded by
+# xs_surgery.py from manifest.json, each entry's precondition checked
+# exactly (xs_surgery.py says how). Function is kept: bazel-orfs proves the
+# branch-unit edit with kepler-formal (its surgery/BUILD.bazel, bju_lec_tests).
+
+py_binary(
+    name = "xs_surgery",
+    srcs = [
+        "constant_outputs.py",
+        "xs_surgery.py",
+    ],
+)
+
+py_test(
+    name = "xs_surgery_test",
+    size = "small",
+    srcs = [
+        "xs_surgery.py",
+        "xs_surgery_test.py",
+    ],
+    main = "xs_surgery_test.py",
+)
+
+# The branch and jump units' mispredict compares without the adder
+# (xs_bju_surgery.py): the first edit of the elaborated core, so every
+# flow reads it, whichever part holds ExuBlock.
+py_binary(
+    name = "xs_bju_surgery",
+    srcs = [
+        "xs_bju_surgery.py",
+        "xs_surgery.py",
+    ],
+)
+
+py_test(
+    name = "xs_bju_surgery_test",
+    size = "small",
+    srcs = [
+        "xs_bju_surgery.py",
+        "xs_bju_surgery_test.py",
+        "xs_surgery.py",
+    ],
+    main = "xs_bju_surgery_test.py",
+)
+
+genrule(
+    name = "xiangshan_bju",
+    srcs = ["//verilog:xiangshan_flat"],
+    outs = ["xiangshan_bju.sv"],
+    cmd = "$(execpath :xs_bju_surgery) $< $@",
+    tools = [":xs_bju_surgery"],
+)
+
+# XiangShan's flat Verilog after the surgery: what every XiangShan flow
+# synthesises (XS_VERILOG), xiangshan_surgered.sv. XSTile's own ports are
+# protected.
+xs_surgery_chain(
+    name = "xiangshan_surgered",
+    src = ":xiangshan_bju",
+    manifest = "manifest.json",
+    protect = ["XSTile"],
+    rounds = 5,
+)
+
+# The surgered file is still SystemVerilog slang elaborates under XSTile,
+# the way the flow's canonicalisation reads it. Manual: a minute, the
+# whole core.
+genrule(
+    name = "xiangshan_surgered_elaborates",
+    srcs = [":xiangshan_surgered"],
+    outs = ["xiangshan_surgered_elaborates.log"],
+    cmd = "$(execpath @yosys//:yosys) -q -m $(execpath @sv-elab//src/yosys_plugin:slang.so) " +
+          "-p 'read_slang --keep-hierarchy --top XSTile $(location :xiangshan_surgered); hierarchy -top XSTile; tee -o $@ stat -top XSTile' > /dev/null",
+    tags = ["manual"],
+    tools = [
+        "@sv-elab//src/yosys_plugin:slang.so",
+        "@yosys",
+    ],
+)
+
+py_binary(
+    name = "constant_outputs",
+    srcs = ["constant_outputs.py"],
+)
+
+py_binary(
+    name = "kept_cells",
+    srcs = ["kept_cells.py"],
+)
+
+# What the surgery removes before synthesis maps anything: cells and flop
+# bits of every kept module without it and with it.
+kept_cells(
+    name = "kept_cells_before",
+    src = "//verilog:xiangshan_flat",
+)
+
+kept_cells(
+    name = "kept_cells_after",
+    src = ":xiangshan_surgered",
+)

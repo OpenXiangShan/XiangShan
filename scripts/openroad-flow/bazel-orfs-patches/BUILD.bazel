@@ -1,0 +1,3 @@
+# Copied from bazel-orfs at the commit MODULE.bazel pins; //:bump keeps
+# them in step (README.md, "Keeping up with bazel-orfs").
+exports_files(glob(["*.patch"]))

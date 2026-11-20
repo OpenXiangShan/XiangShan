@@ -1,0 +1,88 @@
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] Number a module's ports where they are declared
+
+A module's ports had no port_id, and yosys's fixup_ports orders such
+ports by IdString, which compares the order in which the names were
+first interned in the whole process, not the names. A module's port
+order therefore depended on the modules elaborated before it: with
+--keep-hierarchy the same definition came out with one port order as the
+top and another under a parent that declares the same port names in a
+different order. AUTO_MEMORIES reads a firtool memory's pins in port
+order, so a memory found in one kept module elaborated on its own named
+its pins in another order than in the whole design.
+
+Each port now takes its declaration's source offset as port_id, as the
+black boxes already number theirs, and fixup_ports renumbers them 1..n
+in declaration order. The edits are confined to the yosys-only branches
+and keep every line where it was, so a backend built with SLANG_NO_YOSYS
+compiles the same code.
+---
+ src/slang_frontend.cc | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/slang_frontend.cc b/src/slang_frontend.cc
+index 0bb88e7..c031316 100644
+--- a/src/slang_frontend.cc
++++ b/src/slang_frontend.cc
+@@ -2183,7 +2183,7 @@ public:
+ 				return;
+ 			}
+ 			netlist.register_driven(*symbol.internalSymbol);
+-			w->port_input = true;
++			w->port_input = true; w->port_id = (int)symbol.location.offset() + 1;
+ 			break;
+ 		case ast::ArgumentDirection::InOut:
+ 			if (is_special_net(*symbol.internalSymbol)) {
+@@ -2193,11 +2193,11 @@ public:
+ 				return;
+ 			}
+ 			netlist.register_driven(*symbol.internalSymbol);
+-			w->port_input = true;
++			w->port_input = true; w->port_id = (int)symbol.location.offset() + 1;
+ 			w->port_output = true;
+ 			break;
+ 		case ast::ArgumentDirection::Out:
+-			w->port_output = true;
++			w->port_output = true; w->port_id = (int)symbol.location.offset() + 1;
+ 			break;
+ 		case ast::ArgumentDirection::Ref:
+ 			netlist.add_diag(diag::RefUnsupported, symbol.location);
+@@ -2828,14 +2828,14 @@ public:
+ 				switch (port.direction) {
+ 				case ast::ArgumentDirection::In:
+ 					netlist.register_driven(Variable::from_symbol(&port));
+-					w->port_input = true;
++					w->port_input = true; w->port_id = (int)port.location.offset() + 1;
+ 					break;
+ 				case ast::ArgumentDirection::Out:
+-					w->port_output = true;
++					w->port_output = true; w->port_id = (int)port.location.offset() + 1;
+ 					break;
+ 				case ast::ArgumentDirection::InOut:
+ 					netlist.register_driven(Variable::from_symbol(&port));
+-					w->port_input = true;
++					w->port_input = true; w->port_id = (int)port.location.offset() + 1;
+ 					w->port_output = true;
+ 					break;
+ 				case ast::ArgumentDirection::Ref:
+@@ -3686,14 +3686,14 @@ void NetlistContext::prepare_interface_ports()
+ 				switch (port.direction) {
+ 				case ast::ArgumentDirection::In:
+ 					register_driven(Variable::from_symbol(&port));
+-					w->port_input = true;
++					w->port_input = true; w->port_id = (int)port.location.offset() + 1;
+ 					break;
+ 				case ast::ArgumentDirection::Out:
+-					w->port_output = true;
++					w->port_output = true; w->port_id = (int)port.location.offset() + 1;
+ 					break;
+ 				case ast::ArgumentDirection::InOut:
+ 					register_driven(Variable::from_symbol(&port));
+-					w->port_input = true;
++					w->port_input = true; w->port_id = (int)port.location.offset() + 1;
+ 					w->port_output = true;
+ 					break;
+ 				case ast::ArgumentDirection::Ref:
+-- 
+2.53.0
+

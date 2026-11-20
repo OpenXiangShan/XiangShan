@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenROAD <openroad@openroad.tools>
+Date: Sat, 7 Nov 2026 00:00:00 +0000
+Subject: [PATCH] build: avoid duplicate header paths in common_srcs and
+ frontend_hdrs
+
+frontend_hdrs used `strip_include_prefix = "src"`, which stages headers
+under `bazel-out/.../external/sv-elab+/_virtual_includes/frontend_hdrs/`,
+while common_srcs also included `src/*.h` at `external/sv-elab+/src/`.
+
+When compiling `src/{builder,procedural,slang_frontend}.cc` in a consumer
+that depends on both `common_srcs` and `frontend_hdrs`:
+  - `#include "backend_builder.h"` resolves in the consumer package, whose
+    `#include "slang_frontend.h"` resolves via `-isystem` to
+    `_virtual_includes/frontend_hdrs/slang_frontend.h`.
+  - `#include "slang_frontend.h"` directly from `src/*.cc` (or `statements.h`)
+    resolves via same-directory lookup to `external/sv-elab+/src/slang_frontend.h`.
+
+On Remote Execution (where `_virtual_includes` symlinks are materialized as
+distinct files rather than symlinks to the same inode), `#pragma once` cannot
+deduplicate the two paths and compilation fails with redefinition errors.
+
+Expose `frontend_hdrs` via `includes = ["src"]` instead of
+`strip_include_prefix = "src"` and keep `common_srcs` to `src/*.cc` so every
+include resolves to a single path.
+---
+diff --git a/BUILD.bazel b/BUILD.bazel
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -75,14 +75,14 @@
+ 
+ filegroup(
+     name = "common_srcs",
+-    srcs = glob(["src/*.cc", "src/*.h"]),
++    srcs = glob(["src/*.cc"]),
+     visibility = ["//visibility:public"],
+ )
+ 
+ cc_library(
+     name = "frontend_hdrs",
+     hdrs = glob(["src/*.h"]),
+-    strip_include_prefix = "src",
++    includes = ["src"],
+     visibility = ["//visibility:public"],
+ )
+ 

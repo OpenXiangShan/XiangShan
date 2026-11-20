@@ -1,0 +1,337 @@
+From 87c5804c58d62559e5edb52a13d330a0dde6ed8c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Wed, 18 Nov 2026 19:53:46 +0100
+Subject: [PATCH] sdc: deleting an instance from an exception is linear, not
+ quadratic
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Deleting a pin, instance or net goes through Sdc::editExceptions, which
+unrecorded and re-recorded every exception naming the object in full:
+its first point index and its pin index, walking every object of every
+point. With the common block constraint
+
+  set_max_delay -from [all_inputs] -to [all_registers]
+  set_max_delay -from [all_registers] -to [all_outputs]
+
+each exception names every register, so deleting registers one at a
+time, as dead logic elimination does, costs the number of deleted
+registers times the number of registers.
+
+A removal only takes an object out of the points: the index entries of
+every object that stays are unchanged, and the callers already erase
+the removed object's own keys. editExceptions takes whether the edit is
+a removal; a removal records the merge hashes again (the points hash as
+a whole, incrementally) and leaves the indices alone. An exception
+whose -through holds pin pairs derived from its objects is recorded
+again in full, since those pairs are keyed by pins the callers do not
+erase, as is every edit that moves constraints to another object.
+
+Deleting all but one of N registers under the two constraints above:
+
+      N   before    after
+   2000    4.2 s   0.12 s
+   4000   17.2 s   0.25 s
+   8000   75.5 s   0.52 s
+  16000  348.0 s   1.06 s
+
+sdc_delete_exception_insts deletes instances from -from, -to and
+-through exceptions one at a time and checks that the paths of the
+instances that remain keep the slacks they had, and that an exception
+left with no instance is deleted. A removal that drops the remaining
+instances' index entries fails it (no path from the remaining
+registers).
+
+Upstream: The-OpenROAD-Project/OpenSTA#482 (draft). Carried in
+bazel-orfs; retires on the //:bump onto an OpenROAD whose OpenSTA has it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ BUILD.bazel                         |  4 ++
+ include/sta/Sdc.hh                  |  1 +
+ sdc/Sdc.cc                          | 58 +++++++++++++++++-----
+ test/CMakeLists.txt                 |  1 +
+ test/sdc_delete_exception_insts.tcl | 75 +++++++++++++++++++++++++++++
+ test/sdc_delete_exception_insts.v   | 20 ++++++++
+ 6 files changed, 147 insertions(+), 12 deletions(-)
+ create mode 100644 test/sdc_delete_exception_insts.tcl
+ create mode 100644 test/sdc_delete_exception_insts.v
+
+diff --git a/openroad/sta/BUILD.bazel b/openroad/sta/BUILD.bazel
+index fbe25f06..70c69acc 100644
+--- a/openroad/sta/BUILD.bazel
++++ b/openroad/sta/BUILD.bazel
+@@ -520,6 +520,10 @@ STA_TESTS = [
+         "test/check_setup_launch_edge_modes",
+         False,
+     ),
++    (
++        "test/sdc_delete_exception_insts",
++        False,
++    ),
+ ] + [
+     (
+         ok.removesuffix(".ok"),
+diff --git a/openroad/sta/include/sta/Sdc.hh b/openroad/sta/include/sta/Sdc.hh
+index 8e89461f..770af0aa 100644
+--- a/openroad/sta/include/sta/Sdc.hh
++++ b/openroad/sta/include/sta/Sdc.hh
+@@ -1270,6 +1270,7 @@ protected:
+   void deleteDataChecks(const Pin *pin);
+   void deleteDataCheck(DataCheck *check);
+   bool editExceptions(const ExceptionPathSeq &exceptions,
++                      bool removal,
+                       const ExceptionPtEdit &edit);
+   bool deletePinExceptions(const Pin *pin);
+   bool deleteSrcPinClocks(const Pin *pin);
+diff --git a/openroad/sta/sdc/Sdc.cc b/openroad/sta/sdc/Sdc.cc
+index 873e6b9b..ea3e7caf 100644
+--- a/openroad/sta/sdc/Sdc.cc
++++ b/openroad/sta/sdc/Sdc.cc
+@@ -369,19 +369,51 @@ hasEmptyPt(ExceptionPath *exception,
+   return to && to_had_objects && !to->hasObjects();
+ }
+ 
++// True if a -through of exception holds pin pairs derived from its
++// nets, instances or hierarchical pins (first_thru_edge_exceptions_).
++static bool
++hasThruEdges(const ExceptionPath *exception)
++{
++  ExceptionThruSeq *thrus = exception->thrus();
++  if (thrus) {
++    for (ExceptionThru *thru : *thrus) {
++      EdgePinsSet *edges = thru->edges();
++      if (edges && !edges->empty())
++        return true;
++    }
++  }
++  return false;
++}
++
+ // Apply edit to the from/thru/to points of exceptions.
+ // Exceptions left with an empty from/thru/to no longer apply to any
+ // path and are deleted. Return true if any exception was deleted.
++//
++// The first point and pin indices are keyed by the objects of the
++// exception points. A removal only takes an object out of the points,
++// so the entries of every object that stays are unchanged, and the
++// caller erases the removed object's keys; recording them all again
++// for each removal costs the size of the exception, and deleting the
++// registers of set_max_delay -to [all_registers] one by one costs the
++// square of it. A removal records only the merge hashes again, which
++// hash the points as a whole. Pin pairs derived from -through objects
++// are keyed by pins the caller does not erase, so an exception with
++// them is recorded again in full, as is any edit that adds objects.
+ bool
+ Sdc::editExceptions(const ExceptionPathSeq &exceptions,
++                    bool removal,
+                     const ExceptionPtEdit &edit)
+ {
+   bool deleted = false;
+   for (ExceptionPath *exception : exceptions) {
+-    // The indices and merge hashes depend on the exception points.
++    bool reindex = !removal || hasThruEdges(exception);
++    // The merge hashes, and the indices of an edit that reindexes,
++    // depend on the exception points.
+     unrecordMergeHashes(exception);
+-    unrecordExceptionFirstPts(exception);
+-    unrecordExceptionPins(exception);
++    if (reindex) {
++      unrecordExceptionFirstPts(exception);
++      unrecordExceptionPins(exception);
++    }
+     ExceptionTo *to = exception->to();
+     bool to_had_objects = to && to->hasObjects();
+     ExceptionPtIterator pt_iter(exception);
+@@ -394,9 +426,11 @@ Sdc::editExceptions(const ExceptionPathSeq &exceptions,
+     }
+     else {
+       recordMergeHashes(exception);
+-      recordExceptionFirstPts(exception);
+-      recordExceptionPins(exception);
+-      checkForThruHpins(exception);
++      if (reindex) {
++        recordExceptionFirstPts(exception);
++        recordExceptionPins(exception);
++        checkForThruHpins(exception);
++      }
+     }
+   }
+   return deleted;
+@@ -446,7 +480,7 @@ Sdc::deleteNetBefore(const Net *net)
+       NetSet *nets = pt->nets();
+       return nets && nets->contains(net);
+     });
+-  bool deleted = editExceptions(exceptions, [this, net](ExceptionPt *pt) {
++  bool deleted = editExceptions(exceptions, true, [this, net](ExceptionPt *pt) {
+     pt->replaceNet(net, nullptr, network_);
+   });
+   first_thru_net_exceptions_.erase(net);
+@@ -477,7 +511,7 @@ Sdc::deleteInstanceBefore(const Instance *inst)
+       InstanceSet *insts = pt->instances();
+       return insts && insts->contains(inst);
+     });
+-  bool deleted = editExceptions(exceptions, [this, inst](ExceptionPt *pt) {
++  bool deleted = editExceptions(exceptions, true, [this, inst](ExceptionPt *pt) {
+     pt->deleteInstance(inst, network_);
+   });
+   first_from_inst_exceptions_.erase(inst);
+@@ -6050,7 +6084,7 @@ Sdc::deletePinExceptions(const Pin *pin)
+         exceptions.push_back(exception);
+     }
+   }
+-  bool deleted = editExceptions(exceptions, [this, pin](ExceptionPt *pt) {
++  bool deleted = editExceptions(exceptions, true, [this, pin](ExceptionPt *pt) {
+     pt->deletePinBefore(pin, network_);
+   });
+   first_from_pin_exceptions_.erase(pin);
+@@ -6181,7 +6215,7 @@ Sdc::moveConstraints(const Pin *from,
+   if (pin_itr != pin_exceptions_.end()) {
+     // Editing the exceptions edits pin_exceptions_.
+     ExceptionPathSeq exceptions(pin_itr->second.begin(), pin_itr->second.end());
+-    editExceptions(exceptions, [this, from, to](ExceptionPt *pt) {
++    editExceptions(exceptions, false, [this, from, to](ExceptionPt *pt) {
+       pt->replacePin(from, to, network_);
+     });
+     moved = true;
+@@ -6233,7 +6267,7 @@ Sdc::moveConstraints(const Instance *from,
+       InstanceSet *insts = pt->instances();
+       return insts && insts->contains(from);
+     });
+-  editExceptions(exceptions, [this, from, to](ExceptionPt *pt) {
++  editExceptions(exceptions, false, [this, from, to](ExceptionPt *pt) {
+     InstanceSet *insts = pt->instances();
+     if (insts && insts->contains(from)) {
+       pt->deleteInstance(from, network_);
+@@ -6304,7 +6338,7 @@ Sdc::moveConstraints(const Net *from,
+       NetSet *nets = pt->nets();
+       return nets && nets->contains(from);
+     });
+-  editExceptions(exceptions, [this, from, to](ExceptionPt *pt) {
++  editExceptions(exceptions, false, [this, from, to](ExceptionPt *pt) {
+     pt->replaceNet(from, to, network_);
+   });
+   moved |= !exceptions.empty();
+diff --git a/openroad/sta/test/CMakeLists.txt b/openroad/sta/test/CMakeLists.txt
+index 90652d02..f375b29c 100644
+--- a/openroad/sta/test/CMakeLists.txt
++++ b/openroad/sta/test/CMakeLists.txt
+@@ -48,6 +48,7 @@ endforeach()
+ # with no .ok.
+ sta_tcl_test(check_setup_launch_edge)
+ sta_tcl_test(check_setup_launch_edge_modes)
++sta_tcl_test(sdc_delete_exception_insts)
+ 
+ # Auto-detect example tests: register all *.tcl files in examples/
+ file(GLOB example_tcl_files "${EXAMPLES_DIR}/*.tcl")
+diff --git a/openroad/sta/test/sdc_delete_exception_insts.tcl b/openroad/sta/test/sdc_delete_exception_insts.tcl
+new file mode 100644
+index 00000000..be8b064e
+--- /dev/null
++++ b/openroad/sta/test/sdc_delete_exception_insts.tcl
+@@ -0,0 +1,75 @@
++# Instances deleted one at a time from exceptions that name many of them,
++# as set_max_delay -from/-to [all_registers] does: the exceptions keep
++# applying to the instances that remain, exactly as before, and an
++# exception left with no -to instance is deleted.
++source helpers.tcl
++read_liberty asap7_small.lib.gz
++read_verilog sdc_delete_exception_insts.v
++link_design sdc_delete_exception_insts
++create_clock -name clk -period 1000 [get_ports clk]
++# -to instances, -from instances, and instances -through (whose pin pairs
++# are indexed by pin).
++set_max_delay 100 -from [all_inputs] -to [get_cells {r1 r2 r3 r4}]
++set_max_delay 200 -from [get_cells {r1 r2 r3 r4}] -to [all_outputs]
++set_max_delay 50 -through [get_cells {ob1 ob4}] -to [get_ports {out1 out4}]
++
++# The slack of the worst path, or "none" when no path is found.
++proc slack { args } {
++  set paths [find_timing_paths {*}$args]
++  if { $paths eq {} } {
++    return none
++  }
++  return [get_property [lindex $paths 0] slack]
++}
++proc endpoint_slacks {} {
++  set slacks {}
++  foreach reg {r2 r3 r4} {
++    lappend slacks [slack -to $reg/D] [slack -from $reg -to [get_ports out[string index $reg 1]]]
++  }
++  lappend slacks [slack -through [get_cells ob4] -to [get_ports out4]]
++  return $slacks
++}
++
++set failed 0
++proc check { what ok } {
++  global failed
++  if { !$ok } {
++    puts "FAIL: $what"
++    set failed 1
++  }
++}
++
++# Every path is under its set_max_delay, not the 1000 period: its slack
++# is less than half the period.
++set before [endpoint_slacks]
++foreach s $before {
++  check "slack $s is not from a set_max_delay" \
++    [expr { [string is double $s] && $s < 500 }]
++}
++
++# Delete one instance of each exception: the rest keep their exceptions.
++delete_instance r1
++delete_instance ob1
++set after [endpoint_slacks]
++check "slacks changed by deleting r1 and ob1: $before -> $after" \
++  [expr { $before eq $after }]
++
++# A -to left with no instance: the exception goes, its paths are timed
++# against the clock.
++delete_instance r2
++delete_instance r3
++set s [slack -to r4/D]
++check "r4 lost its -to exception while it is named: slack $s" \
++  [expr { [string is double $s] && $s < 500 }]
++delete_instance r4
++set sdc_file [make_result_file sdc_delete_exception_insts.sdc]
++write_sdc -no_timestamp $sdc_file
++set f [open $sdc_file]
++set text [read $f]
++close $f
++# With every register gone, both register exceptions are gone; the
++# -through exception, whose ob4 remains, is kept.
++check "register exceptions kept with no register left, or -through lost:\n$text" \
++  [expr { [regexp -all {set_max_delay} $text] == 1
++          && [string first {-through [get_cells {ob4}]} $text] >= 0 }]
++exit $failed
+diff --git a/openroad/sta/test/sdc_delete_exception_insts.v b/openroad/sta/test/sdc_delete_exception_insts.v
+new file mode 100644
+index 00000000..afc35b2b
+--- /dev/null
++++ b/openroad/sta/test/sdc_delete_exception_insts.v
+@@ -0,0 +1,20 @@
++// Four registers capture in through a buffer each and drive an output
++// through a buffer each.
++module sdc_delete_exception_insts (clk, in, out1, out2, out3, out4);
++  input clk, in;
++  output out1, out2, out3, out4;
++  wire d1, d2, d3, d4, q1, q2, q3, q4;
++
++  BUFx2_ASAP7_75t_R ib1 (.A(in), .Y(d1));
++  BUFx2_ASAP7_75t_R ib2 (.A(in), .Y(d2));
++  BUFx2_ASAP7_75t_R ib3 (.A(in), .Y(d3));
++  BUFx2_ASAP7_75t_R ib4 (.A(in), .Y(d4));
++  DFFHQx4_ASAP7_75t_R r1 (.D(d1), .CLK(clk), .Q(q1));
++  DFFHQx4_ASAP7_75t_R r2 (.D(d2), .CLK(clk), .Q(q2));
++  DFFHQx4_ASAP7_75t_R r3 (.D(d3), .CLK(clk), .Q(q3));
++  DFFHQx4_ASAP7_75t_R r4 (.D(d4), .CLK(clk), .Q(q4));
++  BUFx2_ASAP7_75t_R ob1 (.A(q1), .Y(out1));
++  BUFx2_ASAP7_75t_R ob2 (.A(q2), .Y(out2));
++  BUFx2_ASAP7_75t_R ob3 (.A(q3), .Y(out3));
++  BUFx2_ASAP7_75t_R ob4 (.A(q4), .Y(out4));
++endmodule
+-- 
+2.53.0
+
