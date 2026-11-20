@@ -7,6 +7,7 @@ import json
 import pytest
 
 from env.core.frontend_env import FrontendEnv
+from env.funcov.recorder import FrontendFuncovSampleHub
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import TranslationScenarioBuilder
 
@@ -14,9 +15,54 @@ from . import native_runtime_binding as binding
 from .coverage_gap_audit import _definitions_from_campaign, build_gap_inventory
 from .funcov_compare import build_report, load_artifact
 from .test_native_funcov_adapter import native
-from .test_random_bin_trace_dut import _arm_strict_translation, _oracle_health
+from .test_random_bin_trace_dut import (
+    _arm_strict_translation,
+    _configure_translation_coverage,
+    _oracle_health,
+    _require_translation_coverage_mapping,
+)
 from .test_latest_environment_compatibility import mixed_pbmt_scenario
 from .trusted_funcov import build_trusted_report, SAMPLER_SOURCES
+
+
+@pytest.mark.parametrize(
+    "recorder",
+    [
+        None,
+        object(),
+        FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub),
+        NS(configure_program_address_mapping=None),
+    ],
+)
+def test_missing_translation_coverage_api_is_not_a_bound_mapping(recorder):
+    assert _configure_translation_coverage(recorder, ("page",)) is False
+
+
+def test_translation_coverage_forwards_exact_page_outcomes_and_propagates_errors():
+    pages = ({"va": 0x80000000, "pa": 0x80400000, "ok": True},)
+    calls = []
+    recorder = NS(configure_program_address_mapping=calls.append)
+
+    assert _configure_translation_coverage(recorder, pages) is True
+    assert calls == [pages]
+
+    def reject(_outcomes):
+        raise ValueError("invalid page mapping")
+
+    with pytest.raises(ValueError, match="invalid page mapping"):
+        _configure_translation_coverage(
+            NS(configure_program_address_mapping=reject), pages
+        )
+
+
+@pytest.mark.parametrize("applied", [None, False, 0, 1, "true"])
+def test_translation_coverage_mapping_requires_exact_true(applied):
+    with pytest.raises(AssertionError, match="coverage mapping is unavailable"):
+        _require_translation_coverage_mapping(applied)
+
+
+def test_translation_coverage_mapping_accepts_only_bound_true():
+    assert _require_translation_coverage_mapping(True) is None
 
 
 def test_strict_random_translation_uses_public_api_and_keeps_missing_checks():

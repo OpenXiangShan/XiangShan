@@ -90,6 +90,21 @@ def _arm_strict_translation(env, state):
     )
 
 
+def _configure_translation_coverage(recorder, page_outcomes) -> bool:
+    configure = getattr(recorder, "configure_program_address_mapping", None)
+    if not callable(configure):
+        return False
+    configure(page_outcomes)
+    return True
+
+
+def _require_translation_coverage_mapping(applied) -> None:
+    if applied is not True:
+        raise AssertionError(
+            "strict translation replay completed, but native coverage mapping is unavailable"
+        )
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
 def test_random_bin_trace(env):
@@ -168,10 +183,10 @@ def test_random_bin_trace(env):
                 translation_scenario
             )
             coordinator.configure_translation_pages(translation_state.expected_page_outcomes)
-            if env.functional_coverage is not None:
-                env.functional_coverage.configure_program_address_mapping(
-                    translation_state.expected_page_outcomes
-                )
+            coverage_mapping_applied = _configure_translation_coverage(
+                env.functional_coverage, translation_state.expected_page_outcomes
+            )
+            timeline_details["translation_coverage_mapping_applied"] = coverage_mapping_applied
             pbmte_record = env.set_translation_pbmte(
                 machine=translation_scenario.ptw_machine_pbmte,
                 hypervisor=translation_scenario.ptw_hypervisor_pbmte,
@@ -260,6 +275,7 @@ def test_random_bin_trace(env):
             # A passing golden-trace/checker run is insufficient: the translation
             # oracle validates PTW context, translated fetches, and cfVec faults.
             env.assert_translation_scenario()
+            _require_translation_coverage_mapping(coverage_mapping_applied)
         verify_runtime_contract(native_contract_path, native_pin)
         timeline_details["native_runtime_postcheck"] = True
         execution_status = "REALIZED"
