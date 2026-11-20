@@ -82,6 +82,7 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val sret = Input(Bool())
   val dret = Input(Bool())
   val redirectFlush = Input(Bool())
+  val inRedirectFlush = Input(Bool())
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
@@ -259,6 +260,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // flush
   val redirectFlush = io.in.bits.redirectFlush
+  val inRedirectFlush = io.in.bits.inRedirectFlush
 
   val hasTrap = io.fromRob.trap.valid
   val trapVec = io.fromRob.trap.bits.trapVec
@@ -1060,7 +1062,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   /** State machine of newCSR */
   switch(state) {
     is(s_idle) {
-      when(valid && redirectFlush) {
+      when(valid && inRedirectFlush) {
         stateNext := s_idle
       }.elsewhen(valid && asyncAccess) {
         stateNext := s_waitIMSIC
