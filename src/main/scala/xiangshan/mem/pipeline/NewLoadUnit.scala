@@ -822,6 +822,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     val pmp = Flipped(new PMPRespBundle)
     // TLB Hint
     val tlbHint = Flipped(new TlbHintReq)
+    val earlyWakeup = ValidIO(new LqWriteBundle)
 
     // DCache request: s2 kill signal
     val dcacheKill = Output(Bool())
@@ -1133,6 +1134,31 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_SMF) := troubleMaker && forwardInvalid
   val causeOrR = cause.asUInt.orR
   val shouldReplay = causeOrR || in.shouldFastReplay.get // including fast replay
+
+  // shortcut: scalar requests without head/tail splitting; extend after validating shared replay ownership.
+  val earlyWakeup = WireDefault(0.U.asTypeOf(new LqWriteBundle))
+  earlyWakeup.uop := uop
+  earlyWakeup.vaddr := in.vaddr
+  earlyWakeup.fullva := in.fullva
+  earlyWakeup.paddr := paddr
+  earlyWakeup.mask := in.mask
+  earlyWakeup.specialModeRequest := specialModeReplay
+  earlyWakeup.alignedType := in.size
+  earlyWakeup.isLoadReplay := LoadEntrance.isReplay(entrance)
+  earlyWakeup.handledByMSHR := io.dcacheResp.bits.handled
+  earlyWakeup.schedIndex := in.replayQueueIdx.get
+  earlyWakeup.rep_info.mshr_id := io.dcacheResp.bits.mshr_id
+  earlyWakeup.rep_info.data_inv_sq_idx := sqDataInvalidSqIdx
+  earlyWakeup.rep_info.addr_inv_sq_idx := sqAddrInvalidSqIdx
+  earlyWakeup.rep_info.last_beat := paddr(log2Up(refillBytes))
+  earlyWakeup.rep_info.need_rep := causeOrR
+  earlyWakeup.rep_info.cause := PriorityEncoderOH(cause)
+  earlyWakeup.rep_info.debug := uop.perfDebugInfo
+  earlyWakeup.rep_info.tlb_id := io.tlbHint.id
+  earlyWakeup.rep_info.tlb_full := io.tlbHint.full
+  io.earlyWakeup.valid := pipeIn.fire && !kill && accessType.isScalar() && !isUnalign &&
+    !exception && !isUncacheReplay && causeOrR && !cause(C_UNCACHE)
+  io.earlyWakeup.bits := earlyWakeup
 
   def hasHigherPriorityCauses(cause: Vec[Bool], index: Int): Bool = {
     if (index == 0) false.B
@@ -2016,6 +2042,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val ldout = new MemWriteBack(param)
   val vldout = new NewExuOutput(param)
   val lqWrite = DecoupledIO(new LqWriteBundle)
+  val earlyWakeup = ValidIO(new LqWriteBundle)
   // TLB / PMA / PMP
   val tlb = new TlbRequestIO(2)
   val tlbHint = Flipped(new TlbHintReq)
@@ -2171,6 +2198,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)
   s2.io.csrCtrl := io.csrCtrl
   s2.io.stdDataWrite := io.stdDataWrite
+  io.earlyWakeup := s2.io.earlyWakeup
 
   // S3
   s3.io.redirect := io.redirect

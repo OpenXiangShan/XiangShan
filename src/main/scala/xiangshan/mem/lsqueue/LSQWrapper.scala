@@ -96,6 +96,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
       val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
       val rarNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRARNukeQuery()))
       val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+      val earlyWakeup = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle))) // from load_s2
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO))) // from store_s1

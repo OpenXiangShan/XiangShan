@@ -176,6 +176,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
       val rarNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRARNukeQuery()))
       val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+      val earlyWakeup = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle))) // from load_s2
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO))) // from store_s1
@@ -299,6 +300,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.lrqAllocIndex                   := loadQueueReplay.io.allocIndex
   io.lrqCreditUpdate                 := loadQueueReplay.io.creditUpdate
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
+  loadQueueReplay.io.earlyWakeup      <> io.ldu.earlyWakeup
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup
   loadQueueReplay.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr

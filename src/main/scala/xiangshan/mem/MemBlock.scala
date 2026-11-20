@@ -981,6 +981,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s3)
     lsq.io.ldu.ldin(i) <> newLoadUnits(i).io.lqWrite
+    lsq.io.ldu.earlyWakeup(i) <> newLoadUnits(i).io.earlyWakeup
     lsq.io.l2_hint <> l2_hint
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
