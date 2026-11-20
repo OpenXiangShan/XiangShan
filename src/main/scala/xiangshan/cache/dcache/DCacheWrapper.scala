@@ -966,8 +966,8 @@ class SpecMissFabricResolve(implicit p: Parameters) extends DCacheBundle {
 
 class SpecMissFabricIO(implicit p: Parameters) extends DCacheBundle {
   val candidate = Vec(LoadPipelineWidth, DecoupledIO(new SpecMissFabricRequest))
+  // Resolution commits or cancels an already reserved slot and cannot be backpressured.
   val resolve = Vec(LoadPipelineWidth, ValidIO(new SpecMissFabricResolve))
-  val committed = Input(Vec(LoadPipelineWidth, Bool()))
 }
 
 class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
@@ -1662,12 +1662,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         fabric.candidate(w).bits := missQueue.io.spec_fabric.candidate(w).bits
         missQueue.io.spec_fabric.candidate(w).ready := fabric.candidate(w).ready
         fabric.resolve(w) := missQueue.io.spec_fabric.resolve(w)
-        missQueue.io.spec_fabric.committed(w) := fabric.committed(w)
       }
     case None =>
       for (w <- 0 until LoadPipelineWidth) {
         missQueue.io.spec_fabric.candidate(w).ready := false.B
-        missQueue.io.spec_fabric.committed(w) := false.B
       }
   }
   io.cmoOpReq <> missQueue.io.cmo_req

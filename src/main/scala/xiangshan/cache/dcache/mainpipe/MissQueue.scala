@@ -1720,8 +1720,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
       parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
+      // Commit transfers Acquire ownership locally; the fabric checks its reserved slot.
       acquire_owned_by_fabric(i) := (if (i > 0 && i <= LoadPipelineWidth) {
-        io.spec_fabric.committed(i - 1)
+        reserve_valid(i - 1) && reserved_commit(i - 1)
       } else {
         false.B
       })
