@@ -188,6 +188,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.cancel := io.lsu.s2_kill
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.pcValid := false.B
+  io.miss_req.bits.prefetchPC.valid := true.B
+  io.miss_req.bits.prefetchPC.bits := io.lsu.s2_pc
 
   /**
     * update replacer, for now, disable this

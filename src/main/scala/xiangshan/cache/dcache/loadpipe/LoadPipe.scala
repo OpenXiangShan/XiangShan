@@ -434,6 +434,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_btot_occupy_fail
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.pcValid := s2_instrtype === LOAD_SOURCE.U
+  io.miss_req.bits.prefetchPC := 0.U.asTypeOf(io.miss_req.bits.prefetchPC)
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
   io.miss_req.bits.occupy_way := s2_tag_match_way

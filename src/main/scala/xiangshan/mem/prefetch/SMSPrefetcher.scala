@@ -147,6 +147,7 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
     val stride_en = Input(Bool())
     val s0_lookup = Flipped(new ValidIO(new Bundle() {
       val pc = UInt(STRIDE_PC_BITS.W)
+      val triggerPC = UInt(VAddrBits.W)
       val vaddr = UInt(VAddrBits.W)
       val paddr = UInt(PAddrBits.W)
     }))
@@ -182,6 +183,7 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
   val s1_hit = GatedValidRegNext(s0_hit) && io.s1_valid
   val s1_alloc = GatedValidRegNext(s0_miss) && io.s1_valid
   val s1_vaddr = RegEnable(io.s0_lookup.bits.vaddr, s0_valid)
+  val s1_triggerPC = RegEnable(io.s0_lookup.bits.triggerPC, s0_valid)
   val s1_paddr = RegEnable(io.s0_lookup.bits.paddr, s0_valid)
   val s1_conf = RegEnable(s0_matched_conf, s0_valid)
   val s1_last_addr = RegEnable(s0_matched_last_addr, s0_valid)
@@ -259,6 +261,7 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
   io.s2_gen_req.bits.paddr_valid := s2_pf_gen_paddr_valid
   io.s2_gen_req.bits.decr_mode := false.B
   io.s2_gen_req.bits.debug_source_type := HW_PREFETCH_STRIDE.U
+  io.s2_gen_req.bits.triggerPC := RegEnable(s1_triggerPC, s1_hit && s1_stride_match)
 
 }
 
@@ -283,6 +286,7 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val decr_mode = Bool()
   val alias_bits = UInt(2.W)
   val debug_source_type = UInt(log2Up(nSourceType).W)
+  val triggerPC = UInt(VAddrBits.W)
 }
 
 class AGTEvictReq()(implicit p: Parameters) extends XSBundle {
@@ -305,6 +309,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       val region_m1_cross_page = Bool()
       val region_paddr = UInt(REGION_ADDR_BITS.W)
       val region_vaddr = UInt(REGION_ADDR_BITS.W)
+      val triggerPC = UInt(VAddrBits.W)
     }))
     // dcache has released a block, evict it from agt
     val s0_dcache_evict = Flipped(DecoupledIO(new AGTEvictReq))
@@ -514,6 +519,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s1_pht_lookup.region_paddr := s1_region_paddr
   s1_pht_lookup.region_offset := s1_region_offset
   s1_pht_lookup.region_bit_single := s1_bit_region_signal
+  s1_pht_lookup.triggerPC := prev_lookup.triggerPC
 
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
@@ -547,6 +553,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s2_pf_gen_req.bits.decr_mode := s2_pf_gen_decr_mode
   io.s2_pf_gen_req.valid := false.B
   io.s2_pf_gen_req.bits.debug_source_type := HW_PREFETCH_AGT.U
+  io.s2_pf_gen_req.bits.triggerPC := RegEnable(prev_lookup.triggerPC, s1_pf_gen_valid)
 
   io.s2_pht_lookup.valid := s2_pht_lookup_valid
   io.s2_pht_lookup.bits := s2_pht_lookup
@@ -579,6 +586,7 @@ class PhtLookup()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelp
   val region_vaddr = UInt(REGION_ADDR_BITS.W)
   val region_offset = UInt(REGION_OFFSET.W)
   val region_bit_single = UInt(REGION_BLKS.W)
+  val triggerPC = UInt(VAddrBits.W)
 }
 
 class PhtEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -671,6 +679,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_decr_mode = RegEnable(s0_decr_mode, s1_reg_en)
   val s1_region_paddr = RegEnable(s0_region_paddr, s1_reg_en)
   val s1_region_vaddr = RegEnable(s0_region_vaddr, s1_reg_en)
+  val s1_triggerPC = RegEnable(lookup.bits.triggerPC, s1_reg_en)
   val s1_region_offset = RegEnable(s0_region_offset, s1_reg_en)
   val s1_single_update = RegEnable(s0_single_update, s1_reg_en)
   val s1_has_been_single_update = RegEnable(s0_has_been_single_update, s1_reg_en)
@@ -703,6 +712,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   // pipe s2: generate ram write addr/data
   val s2_valid = GatedValidRegNext(s1_valid && !s1_wait, false.B)
   val s2_reg_en = s1_valid && !s1_wait
+  val s2_triggerPC = RegEnable(s1_triggerPC, s2_reg_en)
   val s2_hist_update_mask = RegEnable(s1_hist_update_mask, s2_reg_en)
   val s2_single_update = RegEnable(s1_single_update, s2_reg_en)
   val s2_has_been_single_update = RegEnable(s1_has_been_single_update, s2_reg_en)
@@ -767,6 +777,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)
   val s3_region_paddr = RegEnable(s2_region_paddr, s2_valid)
   val s3_region_vaddr = RegEnable(s2_region_vaddr, s2_valid)
+  val s3_triggerPC = RegEnable(s2_triggerPC, s2_valid)
   val s3_pht_tag = RegEnable(s2_tag, s2_valid)
   val s3_hit_vec = s2_hit_vec.map(h => RegEnable(h, s2_valid))
   val s3_hit = Cat(s3_hit_vec).orR
@@ -865,6 +876,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     s4_pf_gen_cur_region.region_bits := s3_cur_region_bits
     s4_pf_gen_cur_region.paddr_valid := true.B
     s4_pf_gen_cur_region.decr_mode := false.B
+    s4_pf_gen_cur_region.triggerPC := s3_triggerPC
   }
   s4_pf_gen_incr_region_valid := s3_incr_region_valid ||
     (!pf_gen_req_arb.io.in(1).ready && s4_pf_gen_incr_region_valid)
@@ -875,6 +887,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     s4_pf_gen_incr_region.region_bits := s3_incr_region_bits
     s4_pf_gen_incr_region.paddr_valid := !s3_incr_crosspage
     s4_pf_gen_incr_region.decr_mode := false.B
+    s4_pf_gen_incr_region.triggerPC := s3_triggerPC
   }
   s4_pf_gen_decr_region_valid := s3_decr_region_valid ||
     (!pf_gen_req_arb.io.in(2).ready && s4_pf_gen_decr_region_valid)
@@ -885,6 +898,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     s4_pf_gen_decr_region.region_bits := s3_decr_region_bits
     s4_pf_gen_decr_region.paddr_valid := !s3_decr_crosspage
     s4_pf_gen_decr_region.decr_mode := true.B
+    s4_pf_gen_decr_region.triggerPC := s3_triggerPC
   }
 
   pf_gen_req_arb.io.in.head.valid := s4_pf_gen_cur_region_valid
@@ -923,6 +937,9 @@ class PrefetchFilterEntry()(implicit p: Parameters) extends XSBundle with HasSMS
   val paddr_valid = Bool()
   val decr_mode = Bool()
   val debug_source_type = UInt(log2Up(nSourceType).W)
+  val triggerPC = UInt(VAddrBits.W)
+  // Only blocks attributed to this entry's trigger PC have a valid signature.
+  val triggerPCMask = UInt(REGION_BLKS.W)
 }
 
 class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -931,6 +948,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val tlb_req = new TlbRequestIO(2)
     val pmp_resp = Flipped(new PMPRespBundle())
     val l2_pf_addr = DecoupledIO(UInt(PAddrBits.W))
+    val triggerPC = Output(Valid(UInt(VAddrBits.W)))
     val pf_alias_bits = Output(UInt(2.W))
     val debug_source_type = Output(UInt(log2Up(nSourceType).W))
   })
@@ -945,6 +963,10 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val pf_req_arb = Module(new TwoLevelRRArbiter(UInt(PAddrBits.W), smsParams.pf_filter_size))
 
   io.l2_pf_addr <> pf_req_arb.io.out
+  val selectedEntry = VecInit(entries)(pf_req_arb.io.chosen)
+  val selectedBlock = block_addr(io.l2_pf_addr.bits)(REGION_OFFSET - 1, 0)
+  io.triggerPC.valid := selectedEntry.triggerPCMask(selectedBlock)
+  io.triggerPC.bits := selectedEntry.triggerPC
   io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
     case (entry, i) => (i.U === pf_req_arb.io.chosen) -> entry.alias_bits
   }))
@@ -1040,6 +1062,8 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+  s1_alloc_entry.triggerPC := s1_gen_req.triggerPC
+  s1_alloc_entry.triggerPCMask := s1_gen_req.region_bits
   io.tlb_req.req.valid := s1_tlb_req_valid && !((s1_tlb_fire_vec & s1_replace_vec).orR && s1_valid && !s1_hit)
   io.tlb_req.req.bits := s1_tlb_req_bits
   io.tlb_req.resp.ready := true.B
@@ -1084,6 +1108,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     }
     when(update){
       ent.region_bits := ent.region_bits | s1_gen_req.region_bits
+      when(ent.triggerPC === s1_gen_req.triggerPC) {
+        ent.triggerPCMask := ent.triggerPCMask | s1_gen_req.region_bits
+      }
     }
     when(pf_fired){
       val curr_bit = UIntToOH(block_addr(pf_req_arb.io.in(i).bits)(REGION_OFFSET - 1, 0))
@@ -1198,12 +1225,14 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   active_gen_table.io.s0_lookup.bits.region_m1_cross_page := train_region_m1_cross_page_s0
   active_gen_table.io.s0_lookup.bits.region_paddr := train_region_paddr_s0
   active_gen_table.io.s0_lookup.bits.region_vaddr := train_region_vaddr_s0
+  active_gen_table.io.s0_lookup.bits.triggerPC := train_s0.pc
   active_gen_table.io.s2_stride_hit := stride.io.s2_gen_req.valid
   active_gen_table.io.s0_dcache_evict <> io_dcache_evict
 
   stride.io.stride_en := io_stride_en
   stride.io.s0_lookup.valid := train_vld_s0
   stride.io.s0_lookup.bits.pc := train_s0.pc(STRIDE_PC_BITS - 1, 0)
+  stride.io.s0_lookup.bits.triggerPC := train_s0.pc
   stride.io.s0_lookup.bits.vaddr := Cat(
     train_region_vaddr_s0, train_region_offset_s0, 0.U(log2Up(dcacheParameters.blockBytes).W)
   )
@@ -1234,6 +1263,11 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
   io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+  io.l2_req.bits.triggerPC := pf_filter.io.triggerPC
+  io.l2_req.bits.sdbpSource := MuxLookup(pf_filter.io.debug_source_type, xscache.coupledL2.SDBPSource.L2Pht)(Seq(
+    HW_PREFETCH_AGT.U -> xscache.coupledL2.SDBPSource.L2SmsAgt,
+    HW_PREFETCH_STRIDE.U -> xscache.coupledL2.SDBPSource.L2Stride
+  ))
   pf_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   // for now, sms will not send l1 prefetch requests
@@ -1242,6 +1276,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l1_req.bits.is_store := true.B
   io.l1_req.bits.confidence := 1.U
   io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_NULL
+  io.l1_req.bits.triggerPC := 0.U.asTypeOf(io.l1_req.bits.triggerPC)
   io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){

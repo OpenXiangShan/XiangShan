@@ -70,6 +70,8 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
 class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val addr = UInt(PAddrBits.W)
   val source = UInt(MemReqSource.reqSourceBits.W)
+  val triggerPC = Valid(UInt(VAddrBits.W))
+  val sdbpSource = xscache.coupledL2.SDBPSource()
 }
 
 class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq

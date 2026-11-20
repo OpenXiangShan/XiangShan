@@ -83,11 +83,12 @@ class SDBPTest extends AnyFlatSpec {
   }
 
   behavior of "SDBP sampler"
+  private val sdbpSources = SDBPSource.predictorSources(split = true)
   for (sets <- Seq(2, 64, 128, 512); ways <- Seq(1, 3, 6, 8, 12)) {
     it should s"preserve entries, true LRU, and training with $sets sets and $ways ways" in {
       val params = SDBPParams(samplerSets = sets, samplerWays = Some(ways), predictorEntries = 64)
       case class Entry(var valid: Boolean = false, var tag: Int = 0, var sig: Int = 0,
-        var sigValid: Boolean = false, var dead: Boolean = false, var age: Int = 0)
+        var source: Int = 0, var dead: Boolean = false, var age: Int = 0)
       val model = Array.fill(sets, ways)(Entry())
       val random = new Random(sets * 31 + ways)
       val sampledSets = (0 until 512).filter { set =>
@@ -102,7 +103,7 @@ class SDBPTest extends AnyFlatSpec {
           val tag = if (step <= ways) step else random.nextInt(ways + 3)
           val sig = random.nextInt(32768)
           val pcValid = step % 7 != 0
-          val prefetch = step % 5 == 0
+          val source = step % sdbpSources.size
           val dead = step % 3 == 0
           val entries = model(set & (sets - 1))
           val hit = entries.indexWhere(e => e.valid && e.tag == tag)
@@ -111,30 +112,30 @@ class SDBPTest extends AnyFlatSpec {
           val way = if (hit >= 0) hit else if (invalid >= 0) invalid else if (deadWay >= 0) deadWay
             else entries.indices.minBy(i => entries(i).age)
           val old = entries(way)
-          val update = !(prefetch && hit >= 0)
-          val train = update && old.valid && old.sigValid
-          dut.io.read.valid.poke(true.B)
+          val update = pcValid
+          val train = update && old.valid
+          dut.io.read.valid.poke(pcValid.B)
           dut.io.read.bits.set.poke(set.U); dut.io.read.bits.tag.poke(tag.U)
           dut.clock.step()
           dut.io.read.valid.poke(false.B); dut.clock.step()
-          dut.io.commit.valid.poke(true.B)
+          dut.io.commit.valid.poke(pcValid.B)
           dut.io.commit.bits.signature.poke(sig.U)
-          dut.io.commit.bits.signatureValid.poke(pcValid.B)
-          dut.io.commit.bits.prefetch.poke(prefetch.B)
+          dut.io.commit.bits.source.poke(sdbpSources(source))
           dut.io.commit.bits.dead.poke(dead.B)
-          dut.io.selectedWay.expect(way.U)
-          dut.io.hit.expect((hit >= 0).B)
+          if (update) dut.io.selectedWay.expect(way.U)
+          dut.io.hit.expect((update && hit >= 0).B)
           dut.io.writeEnable.expect(update.B)
           dut.io.training.valid.expect(train.B)
           if (train) {
             dut.io.training.bits.dead.expect((hit < 0).B)
+            dut.io.training.bits.source.expect(sdbpSources(old.source))
             for (table <- 0 until 3) dut.io.training.bits.indices(table).expect(index(old.sig, table, 64).U)
           }
           dut.clock.step()
           dut.io.commit.valid.poke(false.B)
           if (update) {
             old.valid = true; old.tag = tag; old.sig = sig
-            old.sigValid = pcValid && !prefetch; old.dead = dead && old.sigValid; old.age = step
+            old.source = source; old.dead = dead; old.age = step
           }
         }
       }
@@ -148,30 +149,32 @@ class SDBPTest extends AnyFlatSpec {
     intercept[IllegalArgumentException] { SDBPParams(samplerWays = Some(-1)) }
   }
 
-  it should "match sampler selections and training events exported by the actual ROOT core" in {
+  it should "match sampler selections and training sources exported by GEM5" in {
     val params = SDBPParams(samplerSets = 128, samplerWays = Some(6))
     val source = scala.io.Source.fromResource("sdbp-root-sampler-vectors.csv")
     val events = try source.getLines().map(_.split(',').map(_.toInt)).toVector finally source.close()
+    val banksById = sdbpSources.map(source => source.litValue.toInt -> source).toMap
     simulate(new SDBPSampler(512, 8, params)) { dut =>
       dut.io.read.valid.poke(false.B); dut.io.commit.valid.poke(false.B)
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
       for (event <- events) {
-        val Array(set, tag, prefetch, pcValid, sig, prediction, sampled, hit, evicted, oldDead, oldValid, oldSig) = event
-        dut.io.read.valid.poke(true.B)
+        val Array(set, tag, requestSource, pcValid, sig, prediction, sampled, hit, evicted,
+          oldDead, oldValid, oldSig, oldSource) = event
+        dut.io.read.valid.poke((pcValid != 0).B)
         dut.io.read.bits.set.poke(set.U); dut.io.read.bits.tag.poke(tag.U)
         dut.clock.step(); dut.io.read.valid.poke(false.B); dut.clock.step()
-        dut.io.commit.valid.poke(true.B)
-        dut.io.commit.bits.prefetch.poke((prefetch != 0).B)
-        dut.io.commit.bits.signatureValid.poke((pcValid != 0).B)
+        dut.io.commit.valid.poke((pcValid != 0).B)
+        dut.io.commit.bits.source.poke(banksById(requestSource))
         dut.io.commit.bits.signature.poke(sig.U)
         dut.io.commit.bits.dead.poke((prediction != 0).B)
-        val training = sampled != 0 && oldValid != 0 && ((hit != 0 && prefetch == 0) || evicted != 0)
-        dut.io.writeEnable.expect((sampled != 0 && !(hit != 0 && prefetch != 0)).B)
+        val training = sampled != 0 && oldValid != 0 && (hit != 0 || evicted != 0)
+        dut.io.writeEnable.expect((sampled != 0).B)
         dut.io.hit.expect((hit != 0).B)
         dut.io.training.valid.expect(training.B)
         if (sampled != 0 && (hit != 0 || evicted != 0)) dut.io.previousDead.expect((oldDead != 0).B)
         if (training) {
           dut.io.training.bits.dead.expect((hit == 0).B)
+          dut.io.training.bits.source.expect(banksById(oldSource))
           for (table <- 0 until 3) dut.io.training.bits.indices(table).expect(index(oldSig, table, 4096).U)
         }
         dut.clock.step(); dut.io.commit.valid.poke(false.B)
@@ -201,7 +204,7 @@ class SDBPTest extends AnyFlatSpec {
   behavior of "SCArray"
   it should "snapshot before same-cycle training and preserve independent colliding updates" in {
     val params = SDBPParams(predictorEntries = 64)
-    val golden = Array.fill(3, 64)(0)
+    val golden = Array.fill(sdbpSources.size, 3, 64)(0)
     val random = new Random(108)
     simulate(new SCArray(params)) { dut =>
       dut.io.query.valid.poke(false.B); dut.io.training.valid.poke(false.B)
@@ -213,34 +216,40 @@ class SDBPTest extends AnyFlatSpec {
         val indices = (0 until 3).map(t => if (cycle < 24 || random.nextBoolean()) t else random.nextInt(64))
         val trainIndices = (0 until 3).map(t => if (cycle < 24 || random.nextBoolean()) t else random.nextInt(64))
         val dead = if (cycle < 24) cycle < 8 || cycle >= 16 else random.nextInt(3) != 0
+        val querySource = if (cycle < 24) 0 else random.nextInt(sdbpSources.size)
+        val trainingSource = if (cycle < 24) 0 else random.nextInt(sdbpSources.size)
         dut.io.query.valid.poke(query.B)
+        dut.io.query.bits.source.poke(sdbpSources(querySource))
         dut.io.training.valid.poke(training.B)
         dut.io.training.bits.dead.poke(dead.B)
+        dut.io.training.bits.source.poke(sdbpSources(trainingSource))
         for (table <- 0 until 3) {
-          dut.io.query.bits(table).poke(indices(table).U)
+          dut.io.query.bits.indices(table).poke(indices(table).U)
           dut.io.training.bits.indices(table).poke(trainIndices(table).U)
         }
-        val expected = (0 until 3).map(t => golden(t)(indices(t)))
+        val expected = (0 until 3).map(t => golden(querySource)(t)(indices(t)))
         dut.clock.step()
         dut.io.response.valid.expect(query.B)
         if (query) for (table <- 0 until 3) dut.io.response.bits(table).expect(expected(table).U)
         if (training) for (table <- 0 until 3) {
-          val old = golden(table)(trainIndices(table))
-          golden(table)(trainIndices(table)) = if (dead) math.min(3, old + 1)
+          val old = golden(trainingSource)(table)(trainIndices(table))
+          golden(trainingSource)(table)(trainIndices(table)) = if (dead) math.min(3, old + 1)
             else if ((table & 1) != 0) old >> 1 else math.max(0, old - 1)
         }
       }
       // Read every trained entry after the last update, then reset and recheck.
       dut.io.training.valid.poke(false.B); dut.io.query.valid.poke(true.B)
-      for (entry <- 0 until 64) {
-        dut.io.query.bits.foreach(_.poke(entry.U)); dut.clock.step()
-        for (table <- 0 until 3) dut.io.response.bits(table).expect(golden(table)(entry).U)
+      for (source <- sdbpSources.indices; entry <- 0 until 64) {
+        dut.io.query.bits.source.poke(sdbpSources(source))
+        dut.io.query.bits.indices.foreach(_.poke(entry.U)); dut.clock.step()
+        for (table <- 0 until 3) dut.io.response.bits(table).expect(golden(source)(table)(entry).U)
       }
       dut.io.query.valid.poke(false.B)
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
       dut.io.response.valid.expect(false.B); dut.io.query.valid.poke(true.B)
-      for (entry <- 0 until 64) {
-        dut.io.query.bits.foreach(_.poke(entry.U)); dut.clock.step()
+      for (source <- sdbpSources; entry <- 0 until 64) {
+        dut.io.query.bits.source.poke(source)
+        dut.io.query.bits.indices.foreach(_.poke(entry.U)); dut.clock.step()
         dut.io.response.bits.foreach(_.expect(0.U))
       }
     }

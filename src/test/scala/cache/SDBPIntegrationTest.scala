@@ -41,61 +41,82 @@ class SDBPIntegrationTest extends AnyFlatSpec {
     assert(baseline.EnableCachePrefetch)
   }
 
+  it should "enable cache prefetch in the split-source performance preset" in {
+    val (config, _, _) = ArgParser.parse(Array("--config", "SDBPDataPrefetchConfig"))
+    val core = config(XSTileKey).head
+    val baseline = (new SDBPConfig(1))(XSTileKey).head
+    assert(core.EnableCachePrefetch)
+    assert(core.prefetcher == baseline.prefetcher)
+    assert(core.L2CacheParamsOpt == baseline.L2CacheParamsOpt)
+    assert(core.L2CacheParamsOpt.get.sdbp.splitPrefetchSources)
+  }
+
   behavior of "SDBP three-stage commits"
-  it should "train only accepted hits and installations, preserving prefetch hits" in {
+  it should "predict by current source and train by the displaced or hit sampler entry's source" in {
+    import SDBPSource.{Demand, L1Stream, L2Stream, L2SmsAgt, L2Pht, Other}
     val params = SDBPParams(samplerSets = 2, samplerWays = Some(1), predictorEntries = 64)
     val resource = scala.io.Source.fromResource("sdbp-root-hash-vectors.csv")
     val indices = try resource.getLines().next().split(',').drop(2).map(_.toInt & 63) finally resource.close()
-    var counters = Array(0, 0, 0)
+    val counters = SDBPSource.predictorSources(params.splitPrefetchSources).map(_ -> Array(0, 0, 0)).toMap
     simulate(new SDBP(8, 4, params)) { dut =>
       dut.io.read.valid.poke(false.B); dut.io.commit.valid.poke(false.B)
       dut.io.read.bits.candidate.poke(false.B)
       dut.io.read.bits.signatureValid.poke(false.B)
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
-      def access(tag: Int, accepted: Boolean, refill: Boolean, prefetch: Boolean = false,
-        pcValid: Boolean = true, training: Option[Boolean] = None, set: Int = 0,
+      def access(tag: Int, accepted: Boolean, refill: Boolean, source: SDBPSource.Type = Demand,
+        pcValid: Boolean = true, training: Option[(SDBPSource.Type, Boolean)] = None, set: Int = 0,
         samplerWrite: Boolean = true, candidate: Boolean = true): Unit = {
         dut.io.read.bits.set.poke(set.U); dut.io.read.bits.tag.poke(tag.U)
         dut.io.read.bits.candidate.poke(candidate.B)
         dut.io.read.bits.signature.poke(0.U) // PC zero is valid, not a missing-PC sentinel.
         dut.io.read.bits.signatureValid.poke(pcValid.B)
-        dut.io.read.bits.prefetch.poke(prefetch.B)
+        dut.io.read.bits.source.poke(source)
         for (table <- 0 until 3) dut.io.read.bits.indices(table).poke(indices(table).U)
-        val prediction = pcValid && !prefetch && counters.sum >= 8
+        val predicts = pcValid && source != Other
+        val prediction = predicts && counters(source).sum >= 8
         dut.io.read.valid.poke(true.B); dut.clock.step()
         dut.io.read.valid.poke(false.B); dut.clock.step()
         dut.io.commit.valid.poke(accepted.B)
         dut.io.commit.bits.set.poke(set.U); dut.io.commit.bits.way.poke(2.U)
         dut.io.commit.bits.refill.poke(refill.B)
-        dut.io.liveTraining.expect(training.contains(false).B)
-        dut.io.deadTraining.expect(training.contains(true).B)
-        dut.io.samplerWrite.expect((accepted && samplerWrite).B)
-        val deadWrite = accepted && (refill || !prefetch)
+        dut.io.liveTraining.expect(training.exists(!_._2).B)
+        dut.io.deadTraining.expect(training.exists(_._2).B)
+        dut.io.samplerWrite.expect((accepted && predicts && samplerWrite).B)
+        val deadWrite = accepted && (refill || predicts || source == Demand)
         dut.io.deadWrite.valid.expect(deadWrite.B)
         if (deadWrite) dut.io.deadWrite.bits.dead.expect(prediction.B)
         dut.clock.step(); dut.io.commit.valid.poke(false.B)
-        training.foreach { dead =>
-          counters = counters.zipWithIndex.map { case (old, table) =>
-            if (dead) math.min(3, old + 1) else if (table == 1) old >> 1 else math.max(0, old - 1)
+        training.foreach { case (previousSource, dead) =>
+          for (table <- 0 until 3) {
+            val old = counters(previousSource)(table)
+            counters(previousSource)(table) =
+              if (dead) math.min(3, old + 1) else if (table == 1) old >> 1 else math.max(0, old - 1)
           }
         }
       }
       access(1, accepted = false, refill = false) // Initial miss: no allocation/training.
       access(2, accepted = true, refill = true)
       access(3, accepted = false, refill = true) // Retry/denied/cancelled installation.
-      access(2, accepted = true, refill = false, training = Some(false))
-      access(3, accepted = true, refill = true, training = Some(true))
-      access(4, accepted = true, refill = true, training = Some(true))
-      access(5, accepted = true, refill = true, training = Some(true))
+      access(2, accepted = true, refill = false, training = Some(Demand -> false))
+      access(3, accepted = true, refill = true, training = Some(Demand -> true))
+      access(4, accepted = true, refill = true, training = Some(Demand -> true))
+      access(5, accepted = true, refill = true, training = Some(Demand -> true))
       access(6, accepted = true, refill = false, set = 1, samplerWrite = false) // Unsampled still predicts.
-      access(5, accepted = true, refill = false, prefetch = true, pcValid = false, samplerWrite = false)
-      access(5, accepted = true, refill = false, training = Some(false)) // Prefetch did not erase old PC.
-      access(5, accepted = true, refill = false, pcValid = false, training = Some(false))
-      access(5, accepted = true, refill = false, pcValid = false)
-      access(6, accepted = true, refill = true, prefetch = true, pcValid = false)
-      access(6, accepted = true, refill = false) // Prefetch insertion's old signature is invalid.
-      access(7, accepted = true, refill = true, prefetch = true, pcValid = false, training = Some(true))
-      access(8, accepted = false, refill = false, candidate = false, samplerWrite = false)
+      access(5, accepted = true, refill = false, source = L1Stream, pcValid = false)
+      access(5, accepted = true, refill = false, source = L1Stream, training = Some(Demand -> false))
+      access(5, accepted = true, refill = false, source = L2Stream, training = Some(L1Stream -> false))
+      access(8, accepted = true, refill = true, source = L2SmsAgt, training = Some(L2Stream -> true))
+      for (tag <- 9 to 12) {
+        access(tag, accepted = true, refill = true, source = L2SmsAgt, training = Some(L2SmsAgt -> true))
+      }
+      access(12, accepted = true, refill = false, source = Other)
+      access(12, accepted = true, refill = true, source = L2Pht, pcValid = false)
+      access(12, accepted = true, refill = false, pcValid = false)
+      for (source <- Seq(L2SmsAgt, L2Stream, L2Pht, L1Stream, Demand)) {
+        access(13, accepted = true, refill = false, source = source, set = 1, samplerWrite = false)
+      }
+      access(12, accepted = true, refill = false, source = L2Pht, training = Some(L2SmsAgt -> false))
+      access(14, accepted = false, refill = false, candidate = false, samplerWrite = false)
     }
   }
 }

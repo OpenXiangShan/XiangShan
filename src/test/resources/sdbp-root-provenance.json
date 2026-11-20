@@ -6,7 +6,13 @@
     "src/mem/cache/replacement_policies/sdbp_core.hh": "d61e899825efedc79194dc5c0bf0d4e88b4cb3ffd3ce229ea6a73cac7c359be0",
     "src/mem/cache/replacement_policies/sdbp_core.cc": "cd3a52d7d073e2cf51b238fec35e456ff6767dadd2a87b94bc41e82f1b0e0b41",
     "src/mem/cache/replacement_policies/sdbp_rp.cc": "1d34bff8b024b6cc8f7549e64d7ac09c88a4de2e968758ceee6ea1410e3c7be9",
-    "src/test/resources/sdbp-root-hash-vectors.csv": "b52ad7c24009cbe30cc6106e262e922e1b267cd9886f2f0182d028b4d7029e1f",
-    "src/test/resources/sdbp-root-sampler-vectors.csv": "16e742acd96e8ffb73f35694827253c07ffe115ee39d626371a47e29fc39291c"
+    "src/test/resources/sdbp-root-hash-vectors.csv": "b52ad7c24009cbe30cc6106e262e922e1b267cd9886f2f0182d028b4d7029e1f"
+  },
+  "sampler_vectors": {
+    "reference": "GEM5 codex/rtl-default-data-pf-20261120 at 208cab1562401deb478fc2955aba8d5957b78015",
+    "files": {
+      "src/mem/cache/replacement_policies/sdbp_core.cc": "43cc3888bcab1bf84363ac32d28de144422d6c613c7b5093f9779b155aed1209",
+      "src/test/resources/sdbp-root-sampler-vectors.csv": "f705f60fe99640ed6a536f72787a408169afb5a7f2da38ae0c97a985e066876f"
+    }
   }
 }

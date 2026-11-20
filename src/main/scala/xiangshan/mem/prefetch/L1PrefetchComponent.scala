@@ -10,6 +10,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.{L1PrefetchReq, L1PrefetchSource}
+import xscache.coupledL2.SDBPSource
 
 case class StreamStrideParams() extends PrefetcherParams{
   override def name = "StreamStride"
@@ -224,6 +225,9 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val source = new L1PrefetchSource()
   val debug_va_region = UInt(REGION_TAG_BITS.W)
   val confidence = UInt(1.W)
+  val triggerPC = UInt(VAddrBits.W)
+  // Requests merged into a region can contribute blocks from a different PC.
+  val triggerPCMask = UInt(BIT_VEC_WITDH.W)
 
   def reset(index: Int) = {
     tag := region_hash_tag(index.U)
@@ -235,6 +239,8 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     source.value := L1_HW_PREFETCH_NULL
     debug_va_region := 0.U
     confidence := 0.U
+    triggerPC := 0.U
+    triggerPCMask := 0.U
   }
 
   def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
@@ -242,8 +248,11 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     (tag === new_tag) && valid1 && valid2
   }
 
-  def update(update_bit_vec: UInt, update_sink: UInt) = {
+  def update(update_bit_vec: UInt, update_sink: UInt, updateTriggerPC: UInt) = {
     bit_vec := bit_vec | update_bit_vec
+    when(updateTriggerPC === triggerPC) {
+      triggerPCMask := triggerPCMask | update_bit_vec
+    }
     when(update_sink < sink) {
       bit_vec := (bit_vec & ~sent_vec) | update_bit_vec
       sink := update_sink
@@ -295,6 +304,8 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res.source := x.source
     res.debug_va_region := x.region
     res.confidence := x.confidence
+    res.triggerPC := x.trigger_pc
+    res.triggerPCMask := x.bit_vec
 
     res
   }
@@ -420,7 +431,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   }.elsewhen(s1_l1_update) {
     l1_array(s1_l1_index).update(
       update_bit_vec = s1_l1_prefetch_req.bit_vec,
-      update_sink = s1_l1_prefetch_req.sink
+      update_sink = s1_l1_prefetch_req.sink,
+      updateTriggerPC = s1_l1_prefetch_req.triggerPC
     )
   }
 
@@ -470,7 +482,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   }.elsewhen(s1_l2_update) {
     l2_array(s1_l2_index).update(
       update_bit_vec = s1_l2_prefetch_req.bit_vec,
-      update_sink = s1_l2_prefetch_req.sink
+      update_sink = s1_l2_prefetch_req.sink,
+      updateTriggerPC = s1_l2_prefetch_req.triggerPC
     )
   }
 
@@ -680,6 +693,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
+    l1_pf_req_arb.io.in(i).bits.req.triggerPC.valid :=
+      (PriorityEncoderOH(l1_array(i).bit_vec & ~forward_sent_vec) & l1_array(i).triggerPCMask).orR
+    l1_pf_req_arb.io.in(i).bits.req.triggerPC.bits := l1_array(i).triggerPC
     l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
@@ -746,6 +762,13 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))
     l2_pf_req_arb.io.in(i).bits.debug_vaddr := l2_array(i).get_pf_vaddr(forward_sent_vec)
+    l2_pf_req_arb.io.in(i).bits.req.triggerPC.valid :=
+      (PriorityEncoderOH(l2_array(i).bit_vec & ~forward_sent_vec) & l2_array(i).triggerPCMask).orR
+    l2_pf_req_arb.io.in(i).bits.req.triggerPC.bits := l2_array(i).triggerPC
+    l2_pf_req_arb.io.in(i).bits.req.sdbpSource := MuxLookup(l2_array(i).source.value, SDBPSource.L2None)(Seq(
+      L1_HW_PREFETCH_STRIDE -> SDBPSource.L2Stride,
+      L1_HW_PREFETCH_STREAM -> SDBPSource.L2Stream
+    ))
   }
 
   // s1: send out to l2 and update sent_vec
@@ -808,6 +831,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L3Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L3Stream.id.U
     ))
+    l3_pf_req_arb.io.in(i).bits.triggerPC := 0.U.asTypeOf(l3_pf_req_arb.io.in(i).bits.triggerPC)
+    l3_pf_req_arb.io.in(i).bits.sdbpSource := SDBPSource.Other
   }
 
   // s1: send out to l3 and update sent_vec

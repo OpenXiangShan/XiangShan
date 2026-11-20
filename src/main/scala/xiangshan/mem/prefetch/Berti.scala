@@ -694,6 +694,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
     val pline = UInt(PLineWidth.W)
     val pvalid = Bool()
     val target = UInt(PrefetchTarget.PfTgtBits.W)
+    val triggerPC = UInt(VAddrBits.W)
 
     def getPrefetchVA: UInt = Cat(vline, 0.U(LineOffsetWidth.W))
     def getPrefetchPA: UInt = Cat(pline, 0.U(LineOffsetWidth.W))
@@ -703,6 +704,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
       this.pline := 0.U
       this.pvalid := false.B
       this.target := src.prefetchTarget
+      this.triggerPC := src.triggerPC
     }
     def updateEntryMerge(target: UInt): Unit = {
       when(target < this.target){
@@ -888,12 +890,17 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
       io.l1_req.bits.confidence := 1.U
       io.l1_req.bits.is_store := false.B
       io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BERTI
+      io.l1_req.bits.triggerPC.valid := true.B
+      io.l1_req.bits.triggerPC.bits := entries(pfIdx).triggerPC
     }
     is(PrefetchTarget.L2.id.U){
       pfIdxArb.io.out.ready := io.l2_req.ready
       io.l2_req.valid := pfIdxArb.io.out.valid
       io.l2_req.bits.addr := entries(pfIdx).getPrefetchPA
       io.l2_req.bits.source := MemReqSource.Prefetch2L2Berti.id.U
+      io.l2_req.bits.triggerPC.valid := true.B
+      io.l2_req.bits.triggerPC.bits := entries(pfIdx).triggerPC
+      io.l2_req.bits.sdbpSource := xscache.coupledL2.SDBPSource.L2Berti
     }
     is(PrefetchTarget.L3.id.U){
       pfIdxArb.io.out.ready := io.l3_req.ready

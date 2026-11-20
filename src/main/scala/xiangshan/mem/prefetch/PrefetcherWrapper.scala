@@ -13,6 +13,7 @@ import xiangshan.cache.mmu._
 import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle}
 import xiangshan.mem._
 import xiangshan.mem.trace._
+import xscache.coupledL2.SDBPHash
 
 object TLBPlace extends Enumeration{
   /* now only support dtlb_ld and dtlb_st */
@@ -331,6 +332,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.addr_valid := cachePrefetchEnable && l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
+  io.l1_pf_to_l2.sdbpSignature.valid := l2_pf_req.bits.triggerPC.valid
+  io.l1_pf_to_l2.sdbpSignature.bits := SDBPHash.signature(l2_pf_req.bits.triggerPC.bits)
+  io.l1_pf_to_l2.sdbpSource := l2_pf_req.bits.sdbpSource
   io.l1_pf_to_l2.l2_pf_en := cachePrefetchEnable && RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)

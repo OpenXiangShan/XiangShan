@@ -16,6 +16,8 @@ The current ROOT core retains those default algorithm rules; its optional
 - `SDBPLRUConfig`: the same geometry and prefetch controls, using true LRU.
 - `WithL2SDBP(SDBPParams(...))`: configure sampler geometry, predictor entries
   and dead threshold. Both sampler and predictor use registers.
+- `splitPrefetchSources` defaults to `true`. Set it to `false` to use the
+  three coarse demand, L1 prefetch, and L2 prefetch banks.
 - Use Constantin `cache_prefetch_enable<hartId>` to control prefetch at simulator
   startup. Build with `--with-constantin` and pass `--cst-file` when running.
   ICache FDIP retains its normal CSR control.
@@ -26,11 +28,17 @@ mostly inclusive GEM5 configuration or reproduce its performance score.
 
 ## Algorithm and timing
 
-Each slice owns a sampler and predictor. There is no bypass path, sampler
-request queue or multi-cycle sampler transaction lock. The sampler is a
-register array. Per the updated implementation scope, SCArray also uses
-registers; conversion to SRAM is deferred. No training queue, port arbitration
-or additional predictor-ready gating is present.
+Each slice owns one register sampler and independent register predictor banks.
+The bank IDs follow `codex/rtl-default-data-pf-20261120` in GEM5 at
+`208cab1562`. Demand has bank 0. Each prefetch bank is selected by both the
+level where it issues and the algorithm that generated it. Requests issued
+through the L2 prefetch receiver use L2 banks. PBOP and VBOP share `HWP_BOP`.
+Each level has a `PF_NONE` bank for unclassified algorithms.
+
+RTL instantiates 13 banks corresponding to its supported origins. GEM5
+allocates 35 banks, including algorithms absent from RTL. Each bank has three
+tables of `predictorEntries` two-bit counters. The default logical counter
+storage is 39 KiB per slice. All banks share the sampler and its recency state.
 Its independent set/way parameters support non-power-of-two associativity.
 A single sampler way omits LRU state.
 
@@ -45,17 +53,19 @@ ROOT's unsigned 64-bit `mixed` hash and golden-ratio seeds. Counters start at
 zero. A sum of at least eight predicts dead. Dead training saturatingly
 increments all three counters; live training decrements tables zero/two and
 right-shifts table one. Hash arithmetic explicitly truncates products to
-64 bits. Current indices travel with requests before s1; the sampler's old
-signature indices are computed in s2 for s3 training.
+64 bits. The current source selects the prediction bank at s1. The sampler
+stores the request's source with its signature. An eligible sampler hit trains
+that old source live, and an eviction trains it dead. The old signature
+indices are computed in s2 for s3 training.
 
 Directory and SDBP share the s1 acceptance event. Sampler snapshots and
 predictor results are latched through s2, and MainPipe commits actual tag
 hits and successful tag installations in s3. Initial misses, retries,
 denied/corrupt requests and permission-only completions do not commit a
-second sampler access. A missing PC can train an old valid signature but
-stores an invalid new signature and clears its prediction. Prefetch sampler
-hits leave the sampler and its recency unchanged; prefetch misses may train
-a victim dead but insert an invalid signature and clear dead.
+second sampler access. Only eligible accesses with a valid signature update
+the sampler. A prefetch with a valid trigger PC can update dead bits on a hit
+or refill. Without a valid PC, a prefetch hit preserves the resident dead bit,
+while a demand hit and a new installation clear it.
 
 Prediction observes the state at s1, excluding training newly committed in
 that same cycle. Training independently reads the old signature's current
@@ -79,15 +89,19 @@ check the victim again during validHold, including an occupied invalid way.
 are sign-extended to RV64 canonical form before signature folding. PC zero is valid when the
 valid bit is asserted. Load requests carry their PC; requests without a
 single attributable PC, including Store Buffer requests, mark it invalid.
-MissQueue preserves the first valid demand PC when requests merge,
-including compressed enqueue groups and a load merging while Acquire fires.
-Metadata reflects demands accepted before or alongside the outgoing Acquire;
-a demand hidden inside L1 after that transfer cannot retroactively update L2.
+MissQueue keeps the trigger PC on a pure prefetch and uses the first valid
+demand PC when a demand merges, including compressed enqueue groups and a
+load merging while Acquire fires. A demand accepted after the outgoing L1
+Acquire can only affect L2 if L2 sees a separate request. When demand merges
+into an L2 prefetch MSHR, refill uses the demand source and its PC validity.
 
-L1 prefetch Acquires are identified by request source as well as opcode;
-they are distinct from demand accesses without PCs. MSHR normal and merged
-refills preserve the final signature, validity, indices and request type.
-A merged demand also retains its request source through output arbitration.
+Stream, Stride, Berti and SMS forward attributable trigger PCs on their
+prefetch paths. Region filters retain the first trigger PC and track which
+blocks it generated. SMS carries its algorithm tag separately from the
+existing `Prefetch2L2SMS` request source so PHT and AGT select separate banks.
+BOP and NextLine carry the demand signature through
+their request buffers. Temporal Prefetch replay responses have no trigger
+PC metadata, so those requests carry an invalid signature.
 
 D-copy protection uses Directory `clients`, which can be more conservative
 than GEM5's instantaneous tag check. I-copy protection mirrors accepted

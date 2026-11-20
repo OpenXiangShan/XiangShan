@@ -71,6 +71,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  val prefetchPC = Valid(UInt(VAddrBits.W))
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -117,6 +118,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.miss_fail_cause_evict_btot := false.B
     req.pf_source := prefetch.pf_source.value
+    req.prefetchPC := prefetch.triggerPC
     req.access := false.B
     req.id := 0.U
     req
@@ -930,6 +932,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
   miss_req.pcValid := false.B
+  miss_req.prefetchPC.valid := s2_req.isPrefetch && !s2_req.miss && s2_req.prefetchPC.valid
+  miss_req.prefetchPC.bits := s2_req.prefetchPC.bits
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm

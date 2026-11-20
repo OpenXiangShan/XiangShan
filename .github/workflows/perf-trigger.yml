@@ -32,6 +32,7 @@ on:
           - BackendV2Config
           - KunminghuV2Config
           - SDBPConfig
+          - SDBPDataPrefetchConfig
           - SDBPLRUConfig
         default: DefaultConfig
       benchmark_type:

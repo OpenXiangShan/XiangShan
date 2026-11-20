@@ -166,6 +166,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc_hash = RegEnable(s0_pc_hash, s0_valid)
+  val s1_pc = RegEnable(s0_pc, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
   val s1_hit = RegEnable(s0_hit, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
@@ -201,6 +202,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   // s2: calculate L1 & L2 pf addr
   val s2_valid = GatedValidRegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
+  val s2_pc = RegEnable(s1_pc, s1_valid && s1_can_send_pf)
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
   val s2_decr_mode = RegEnable(s1_decr_mode, s1_valid && s1_can_send_pf)
   val s2_l1_depth = s2_stride << l1_stride_ratio
@@ -219,9 +221,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
-    // TODO: add stride debug db, not useful for now
-    t_pc = 0xdeadbeefL.U,
-    t_va = 0xdeadbeefL.U
+    t_pc = s2_pc,
+    t_va = s2_vaddr
     )
   val s2_l2_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
@@ -231,9 +232,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
-    // TODO: add stride debug db, not useful for now
-    t_pc = 0xdeadbeefL.U,
-    t_va = 0xdeadbeefL.U
+    t_pc = s2_pc,
+    t_va = s2_vaddr
     )
 
   // s3: send l1 pf out

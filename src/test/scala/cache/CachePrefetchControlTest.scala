@@ -109,6 +109,8 @@ class CachePrefetchRuntimeHarness extends Module {
   prefetcher.io.recv_addr.valid := io.receive
   prefetcher.io.recv_addr.bits.addr := io.address
   prefetcher.io.recv_addr.bits.pfSource := MemReqSource.Prefetch2L2Stream.id.U
+  prefetcher.io.recv_addr.bits.sdbpSignature := 0.U.asTypeOf(prefetcher.io.recv_addr.bits.sdbpSignature)
+  prefetcher.io.recv_addr.bits.sdbpSource := SDBPSource.L2Stream
   prefetcher.io.tlb_req.req.ready := true.B
   prefetcher.io.tlb_req.resp.valid := false.B
   prefetcher.io.tlb_req.resp.bits := 0.U.asTypeOf(prefetcher.io.tlb_req.resp.bits)

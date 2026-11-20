@@ -15,16 +15,18 @@ import utility._
 import xscache.chi.{CHIAddrWidthKey, CHIIssue}
 import xscache.common.BankBitsKey
 import xscache.coupledL2._
+import xscache.coupledL2.prefetch.PrefetchReceiverParams
 
 class SDBPMetadataTest extends AnyFlatSpec {
   private def parameters: Parameters = {
     val clients = TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = "dcache", sourceId = IdRange(0, 4), supportsProbe = TransferSizes(64))),
-      requestFields = Seq(PCField(48), PCValidField(), ReqSourceField()))
+      requestFields = Seq(PCField(48), PCValidField(), ReqSourceField(), SDBPSourceField()))
     val managers = TLSlavePortParameters.v1(Seq(TLSlaveParameters.v1(
       address = Seq(AddressSet(0, (BigInt(1) << 48) - 1)), regionType = RegionType.TRACKED,
       supportsAcquireB = TransferSizes(64), supportsAcquireT = TransferSizes(64),
-      supportsGet = TransferSizes(1, 64))), beatBytes = 32, endSinkId = 4, requestKeys = Seq(PCKey, PCValidKey, ReqSourceKey))
+      supportsGet = TransferSizes(1, 64))), beatBytes = 32, endSinkId = 4,
+      requestKeys = Seq(PCKey, PCValidKey, ReqSourceKey, SDBPSourceKey))
     val base = Parameters.empty.alterPartial {
       case L2ParamKey => L2Param(sets = 8, ways = 4, sdbp = SDBPParams(samplerSets = 2),
         clientCaches = Seq(L1Param(pcBitOpt = Some(48))), enablePerf = false,
@@ -47,6 +49,8 @@ class SDBPMetadataTest extends AnyFlatSpec {
     case vector: Vec[_] => vector.foreach(zeroInputs)
     case bit: Bool if DataMirror.directionOf(bit) == ActualDirection.Input => bit.poke(false.B)
     case uint: UInt if DataMirror.directionOf(uint) == ActualDirection.Input => uint.poke(0.U)
+    case source: SDBPSource.Type if DataMirror.directionOf(source) == ActualDirection.Input =>
+      source.poke(SDBPSource.Demand)
     case _ =>
   }
   behavior of "SDBP MSHR metadata"
@@ -62,9 +66,9 @@ class SDBPMetadataTest extends AnyFlatSpec {
         dut.io.alloc.bits.task.opcode.poke(if (prefetch) TLMessages.Hint else TLMessages.AcquireBlock)
         dut.io.alloc.bits.task.param.poke(0.U)
         dut.io.alloc.bits.task.pc.get.poke(pc.U)
-        dut.io.alloc.bits.task.pcValid.poke((!prefetch).B)
+        dut.io.alloc.bits.task.pcValid.poke(true.B)
         dut.io.alloc.bits.task.signature.poke(signature.U)
-        dut.io.alloc.bits.task.sdbpPrefetch.poke(prefetch.B)
+        dut.io.alloc.bits.task.sdbpSource.poke(if (prefetch) SDBPSource.L2SmsAgt else SDBPSource.Demand)
         for (table <- 0 until 3) dut.io.alloc.bits.task.indices(table).poke((11 + table).U)
         dut.io.alloc.valid.poke(true.B); dut.clock.step(); dut.io.alloc.valid.poke(false.B)
       }
@@ -73,13 +77,14 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.tasks.mainpipe.bits.pc.get.expect(0.U)
       dut.io.tasks.mainpipe.bits.pcValid.expect(true.B)
       dut.io.tasks.mainpipe.bits.signature.expect(17.U)
-      dut.io.tasks.mainpipe.bits.sdbpPrefetch.expect(false.B)
+      dut.io.tasks.mainpipe.bits.sdbpSource.expect(SDBPSource.Demand)
       for (table <- 0 until 3) dut.io.tasks.mainpipe.bits.indices(table).expect((11 + table).U)
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
       zeroInputs(dut.io)
-      allocate(prefetch = true, pc = 0, signature = 0)
-      dut.io.tasks.mainpipe.bits.pcValid.expect(false.B)
-      dut.io.tasks.mainpipe.bits.sdbpPrefetch.expect(true.B)
+      allocate(prefetch = true, pc = 0, signature = 7)
+      dut.io.tasks.mainpipe.bits.pcValid.expect(true.B)
+      dut.io.tasks.mainpipe.bits.signature.expect(7.U)
+      dut.io.tasks.mainpipe.bits.sdbpSource.expect(SDBPSource.L2SmsAgt)
       dut.io.aMergeTask.bits.channel.poke(1.U)
       dut.io.aMergeTask.bits.opcode.poke(TLMessages.AcquireBlock)
       dut.io.aMergeTask.bits.pc.get.poke("h81234567".U)
@@ -93,7 +98,7 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.tasks.mainpipe.bits.pc.get.expect("h81234567".U)
       dut.io.tasks.mainpipe.bits.pcValid.expect(true.B)
       dut.io.tasks.mainpipe.bits.signature.expect(23.U)
-      dut.io.tasks.mainpipe.bits.sdbpPrefetch.expect(false.B)
+      dut.io.tasks.mainpipe.bits.sdbpSource.expect(SDBPSource.Demand)
       dut.io.tasks.mainpipe.bits.reqSource.expect(MemReqSource.CPULoadData.id.U)
       for (table <- 0 until 3) dut.io.tasks.mainpipe.bits.indices(table).expect((31 + table).U)
     }
@@ -195,7 +200,10 @@ class SDBPMetadataTest extends AnyFlatSpec {
 
   behavior of "SDBP request classification"
   it should "distinguish L1 prefetch Acquires, missing PCs and PC zero" in {
-    implicit val p: Parameters = parameters
+    val base = parameters
+    implicit val p: Parameters = base.alterPartial {
+      case L2ParamKey => base(L2ParamKey).copy(prefetch = Seq(PrefetchReceiverParams(4)))
+    }
     simulate(new SinkA) { dut =>
       zeroInputs(dut.io)
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
@@ -206,23 +214,49 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.a.bits.user(ReqSourceKey).poke(MemReqSource.CPULoadData.id.U)
       dut.io.task.bits.pcValid.expect(true.B)
       dut.io.task.bits.signature.expect(0.U)
-      dut.io.task.bits.sdbpPrefetch.expect(false.B)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.Demand)
       dut.io.a.bits.user(PCKey).poke(((BigInt(1) << 48) - 1).U)
       dut.io.task.bits.signature.expect(7.U) // ROOT signature of canonical RV64 PC -1.
       dut.io.a.bits.user(PCKey).poke(0.U)
-      for (source <- Seq(MemReqSource.L1DataPrefetch, MemReqSource.L1InstPrefetch)) {
-        dut.io.a.bits.user(ReqSourceKey).poke(source.id.U)
-        dut.io.task.bits.sdbpPrefetch.expect(true.B)
-        dut.io.task.bits.pcValid.expect(false.B)
-      }
+      dut.io.a.bits.user(ReqSourceKey).poke(MemReqSource.L1DataPrefetch.id.U)
+      dut.io.a.bits.user(SDBPSourceKey).poke(SDBPSource.L1Stride)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.L1Stride)
+      dut.io.task.bits.pcValid.expect(true.B)
+      dut.io.task.bits.signature.expect(0.U)
+      dut.io.a.bits.user(ReqSourceKey).poke(MemReqSource.L1InstPrefetch.id.U)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.Other)
+      dut.io.task.bits.pcValid.expect(false.B)
       dut.io.a.bits.opcode.poke(TLMessages.Hint)
       dut.io.a.bits.user(ReqSourceKey).poke(MemReqSource.NoWhere.id.U)
-      dut.io.task.bits.sdbpPrefetch.expect(true.B)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.Other)
       dut.io.task.bits.pcValid.expect(false.B)
       dut.io.a.bits.opcode.poke(TLMessages.Get)
       dut.io.a.bits.user(ReqSourceKey).poke(MemReqSource.PTW.id.U)
       dut.io.a.bits.user(PCValidKey).poke(false.B)
-      dut.io.task.bits.sdbpPrefetch.expect(false.B)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.Other)
+      dut.io.task.bits.pcValid.expect(false.B)
+
+      dut.io.a.valid.poke(false.B)
+      val prefetch = dut.io.prefetchReq.get
+      prefetch.valid.poke(true.B)
+      prefetch.bits.sdbpSignature.valid.poke(true.B)
+      prefetch.bits.sdbpSignature.bits.poke(23.U)
+      prefetch.bits.pfSource.poke(MemReqSource.Prefetch2L2PBOP.id.U)
+      prefetch.bits.sdbpSource.poke(SDBPSource.L2Bop)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.L2Bop)
+      dut.io.task.bits.pcValid.expect(true.B)
+      dut.io.task.bits.signature.expect(23.U)
+      prefetch.bits.pfSource.poke(MemReqSource.Prefetch2L2Stream.id.U)
+      prefetch.bits.sdbpSource.poke(SDBPSource.L2Stream)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.L2Stream)
+      prefetch.bits.pfSource.poke(MemReqSource.Prefetch2L2SMS.id.U)
+      for (source <- Seq(SDBPSource.L2SmsAgt, SDBPSource.L2Pht)) {
+        prefetch.bits.sdbpSource.poke(source)
+        dut.io.task.bits.sdbpSource.expect(source)
+      }
+      prefetch.bits.sdbpSource.poke(SDBPSource.Other)
+      dut.io.task.bits.sdbpSource.expect(SDBPSource.L2None)
+      prefetch.bits.sdbpSignature.valid.poke(false.B)
       dut.io.task.bits.pcValid.expect(false.B)
     }
   }
@@ -240,7 +274,7 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.sinkA.valid.poke(true.B)
       dut.io.sinkA.bits.channel.poke(1.U)
       dut.io.sinkA.bits.opcode.poke(TLMessages.Hint)
-      dut.io.sinkA.bits.sdbpPrefetch.poke(true.B)
+      dut.io.sinkA.bits.sdbpSource.poke(SDBPSource.L2Stream)
       dut.io.sinkA.bits.set.poke(0.U)
       dut.io.sinkA.ready.expect(true.B); dut.clock.step()
       dut.io.sinkA.ready.expect(false.B)
@@ -250,7 +284,7 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.sinkA.ready.expect(true.B); dut.clock.step()
       dut.io.sinkA.ready.expect(true.B)
       dut.io.sinkA.bits.opcode.poke(TLMessages.Get)
-      dut.io.sinkA.bits.sdbpPrefetch.poke(false.B)
+      dut.io.sinkA.bits.sdbpSource.poke(SDBPSource.Demand)
       dut.clock.step(); dut.io.sinkA.ready.expect(false.B)
       dut.io.sinkA.valid.poke(false.B); dut.clock.step()
       dut.io.sinkA.valid.poke(true.B); dut.io.dirRead_s1.ready.poke(false.B)

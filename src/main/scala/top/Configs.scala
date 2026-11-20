@@ -645,6 +645,12 @@ class SDBPConfig(n: Int = 1) extends Config(
     WithNKBL1D(64, ways = 4) ++ new BaseConfig(n)
 )
 
+class SDBPDataPrefetchConfig(n: Int = 1) extends Config(
+  new Config((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(_.copy(EnableCachePrefetch = true))
+  }) ++ new SDBPConfig(n)
+)
+
 class SDBPLRUConfig(n: Int = 1) extends Config(
   new Config((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(core => core.copy(
