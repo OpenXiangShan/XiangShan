@@ -41,10 +41,13 @@ _ENTRY_SEND_RESP = 3
 _PBMT_NC = 1
 _PBMT_IO = 2
 
+# Keep semantic RTL storage ahead of Verilator's toggle-coverage bookkeeping.
+# The __Vtogcov__ fields may reflect coverage history rather than the value of
+# the live IFU wire in the cycle being sampled.
 _IFU_PREFIXES = (
-    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu.",
     "Frontend_top.Frontend._inner_ifu_",
+    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
 )
 _UNCACHE_PREFIXES = (
     "uncacheUnit.",

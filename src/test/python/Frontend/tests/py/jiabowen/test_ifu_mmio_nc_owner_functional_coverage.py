@@ -58,6 +58,17 @@ def test_signal_inventory_name_decoder_handles_yaml_quoted_aliases():
     ) == "Frontend_top.Frontend.inner_ifu.s2_valid"
 
 
+def test_ifu_readers_prefer_semantic_storage_over_toggle_shadow():
+    semantic = "Frontend_top.Frontend.inner_ifu.s2_flush"
+    shadow = "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_flush"
+
+    recorder = _Recorder({semantic: 0, shadow: 1})
+    assert owner._read_ifu(recorder, object(), "s2_flush") == 0
+
+    recorder = _Recorder({shadow: 1})
+    assert owner._read_ifu(recorder, object(), "s2_flush") == 1
+
+
 def test_snapshot_reads_current_verilator_derived_aliases():
     recorder = _Recorder(
         {
