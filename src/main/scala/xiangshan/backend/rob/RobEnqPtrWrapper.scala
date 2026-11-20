@@ -45,11 +45,7 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   for ((ptr, i) <- enqPtrVec.zipWithIndex) {
     when(in.redirect.valid) {
-      ptr := Mux(
-        in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself(),
-        in.redirect.bits.robIdx.addEntries(i.U).asFormer,
-        in.redirect.bits.robIdx.addEntries((i + 1).U).asFormer
-      )
+      ptr := in.redirect.bits.robIdxForFlush.addEntries((i + 1).U).asFormer
     }.otherwise {
       ptr := ptr.addEntries(dispatchNum).asFormer
     }
