@@ -9,7 +9,7 @@ from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.funcov.toffee_runtime import create_toffee_runtime
 from tests.py.jiabowen.test_ifu_nc_dual_suppression_v3_dut import (
     _BASE, _candidate_paths, _nc_loop_trace, _second_block_taken_loop,
-    _dual_nc_candidate, _check_single_nc_response, _check_target_acceptance,
+    _dual_nc_candidate, _check_single_nc_response, _check_target_delivery,
 )
 
 
@@ -97,8 +97,8 @@ def test_nc_response_must_be_single_and_keep_input_identity(wrong):
         _check_single_nc_response(request, response)
 
 
-@pytest.mark.parametrize("fault", [None, "missing_hit", "wrong_cycle", "no_acceptance"])
-def test_target_lookup_uses_runtime_key_and_requires_matching_acceptance(tmp_path, fault):
+@pytest.mark.parametrize("fault", [None, "missing_hit", "wrong_cycle", "no_delivery"])
+def test_target_lookup_uses_runtime_key_and_requires_matching_delivery(tmp_path, fault):
     recorder = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(), testcase_name="nc_target_lookup_unit",
         artifact_tag="nc_target_lookup_unit", output_dir=tmp_path,
@@ -108,7 +108,7 @@ def test_target_lookup_uses_runtime_key_and_requires_matching_acceptance(tmp_pat
     create_toffee_runtime(recorder, sink)
     key = recorder.definition_by_bin_id["BIN-904"].key
     assert isinstance(key, tuple) and len(key) == 3
-    checkpoints = [] if fault == "no_acceptance" else [{"cycle": 708}]
+    checkpoints = [] if fault == "no_delivery" else [{"cycle": 708}]
     if fault != "missing_hit":
         sink.mark_native(
             key[0],
@@ -117,6 +117,6 @@ def test_target_lookup_uses_runtime_key_and_requires_matching_acceptance(tmp_pat
         )
     if fault:
         with pytest.raises(AssertionError):
-            _check_target_acceptance(recorder, checkpoints)
+            _check_target_delivery(recorder, checkpoints)
     else:
-        _check_target_acceptance(recorder, checkpoints)
+        _check_target_delivery(recorder, checkpoints)

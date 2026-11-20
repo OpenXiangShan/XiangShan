@@ -117,7 +117,7 @@ def test_phase_expectation_rejects_mapping_pbmt_disagreement():
 
 @pytest.mark.parametrize("wrong", [None, "valid0", "valid1", "pbmt", "pmp_mmio",
                                   "exception", "flag", "index", "start"])
-def test_pma_response_requires_pbmt0_pmp1_and_exact_adjacent_input_identity(wrong):
+def test_pma_response_requires_pbmt0_pmp1_and_exact_input_identity(wrong):
     request = dict(first_ftq_flag=0, first_ftq_value=27, first_start=0x40000030)
     response = dict(valid0=1, valid1=0, pbmt=0, pmp_mmio=1,
                     exception=0, flag=0, index=27, start=0x40000030)

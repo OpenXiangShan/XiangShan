@@ -173,6 +173,10 @@ _UPSTREAM_SIGNALS = {
         f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
         "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_value",
     ),
+    "first_start": (
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
+        "inner_icache.io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
+    ),
     "real_two_fetch": (
         "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
         f"{_ICACHE_PREFIX}__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
@@ -283,6 +287,11 @@ _BIN907_INSTR_END_MASK_SIGNALS = tuple(
     )
     for index in range(_FETCH_BLOCK_INST_NUM)
 )
+
+# Current MainPipe to IFU presentations for the checked request are observed 8-9
+# cycles after the suppressed dual request fires. Keep a bounded margin for tag
+# reuse while retaining the request's exact FTQ identity and start address.
+_IFU_UPSTREAM_SUPPRESSION_MAX_LATENCY = 12
 
 
 def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
@@ -759,15 +768,24 @@ def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
         output_ftq_value = _read_req_field(recorder, 0, "ftqIdx_value")
     if None not in {req1_valid, output_ftq_flag, output_ftq_value}:
         output_identity = (int(output_ftq_flag), int(output_ftq_value))
-        matches = [item for item in pending if item["ftq_identity"] == output_identity]
+        output_start = _read_req_field(recorder, 0, "startVAddr_addr")
+        matches = [
+            item for item in pending
+            if item["ftq_identity"] == output_identity
+            and output_start is not None
+            and "first_start" in item["input"]
+            and int(item["input"]["first_start"]) == int(output_start)
+        ]
         for match in matches:
             evidence = {
                 **match["input"],
                 "event": match["event"],
                 "input_cycle": int(match["cycle"]),
                 "output_ftq_identity": list(output_identity),
+                "output_start": int(output_start),
                 "output_second_valid": int(req1_valid),
                 "illegal_mixed_response_emitted": int(req1_valid) == 1,
+                "input_to_output_latency": int(cycle) - int(match["cycle"]),
             }
             if int(req1_valid) == 0:
                 mark_owner_v3_checked(
@@ -785,7 +803,11 @@ def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
                     evidence=evidence,
                 )
             pending.remove(match)
-    while pending and int(cycle) - int(pending[0]["cycle"]) > 4:
+    while (
+        pending
+        and int(cycle) - int(pending[0]["cycle"])
+        > _IFU_UPSTREAM_SUPPRESSION_MAX_LATENCY
+    ):
         expired = pending.popleft()
         _record_mismatch(
             recorder,

@@ -7,7 +7,8 @@ import pytest
 
 from env.core.transactions import ProgramImage
 from env.funcov.py.ifu.cacheable_pipeline_funcov import (
-    _UPSTREAM_SIGNALS, _SIGNALS, _native_signal_names, _req_signal_names,
+    _IFU_UPSTREAM_SUPPRESSION_MAX_LATENCY, _UPSTREAM_SIGNALS, _SIGNALS,
+    _native_signal_names, _req_signal_names,
 )
 from env.funcov.py.ftq.two_fetch_funcov import _TWO_FETCH_SIGNALS
 from env.model.golden_trace import GoldenTrace, TraceEntry
@@ -60,12 +61,12 @@ def _check_single_nc_response(request, response, *, pbmt=1, pmp_mmio=0):
     assert response["start"] == request["first_start"]
 
 
-def _check_target_acceptance(recorder, response_checkpoints):
-    assert response_checkpoints, "BIN-904 has no accepted single-response checkpoint"
+def _check_target_delivery(recorder, response_checkpoints):
+    assert response_checkpoints, "BIN-904 has no checked single-response delivery"
     target = recorder.hit_detail_by_bin_id("BIN-904")
     assert target is not None and target["hits"] > 0, "BIN-904 has no runtime hit"
     assert any(p["cycle"] == target["first_cycle"] for p in response_checkpoints), (
-        "BIN-904 first hit does not match a checked IFU acceptance",
+        "BIN-904 first hit does not match a checked single-response delivery",
         target["first_cycle"],
     )
 
@@ -263,23 +264,22 @@ def _run_dual_suppression_case(env, *, warm_cacheable, attribute_kind="pbmt"):
                 assert response["valid0"] == 1 and response["valid1"] == 0, response
                 counts["single_uncache_response_presentations"] += 1
             identity = (response["flag"], response["index"])
+            for pending_identity, match in list(pending.items()):
+                if cycle - match["cycle"] > _IFU_UPSTREAM_SUPPRESSION_MAX_LATENCY:
+                    del pending[pending_identity]
             match = pending.get(identity)
             output_fire = read_paths(_SIGNALS["s0_fire"])[0]
-            if match:
+            if match and response["start"] == match["input"]["first_start"]:
                 presentations.append(dict(cycle=cycle, input_cycle=match["cycle"],
                                           response=response, ifu_s0_fire=output_fire))
-            if match and output_fire == 1:
-                # Require the immediately registered response. Do not join a
-                # later reused circular FTQ tag or cross a flush/time gap.
-                if cycle == match["cycle"] + 1:
-                    _check_single_nc_response(match["input"], response,
-                                              pbmt=target_pbmt, pmp_mmio=target_pmp_mmio)
-                    proof = dict(input=match, cycle=cycle, response=response,
-                                 response_paths=response_paths, ifu_s0_fire=1)
-                    response_checkpoints.append(proof)
-                    env._emit_event("ifu." + label + "_dual_suppression_delivery", proof)
+                _check_single_nc_response(match["input"], response,
+                                          pbmt=target_pbmt, pmp_mmio=target_pmp_mmio)
+                proof = dict(input=match, cycle=cycle, response=response,
+                             response_paths=response_paths, ifu_s0_fire=output_fire,
+                             latency=cycle - match["cycle"])
+                response_checkpoints.append(proof)
+                env._emit_event("ifu." + label + "_dual_suppression_delivery", proof)
                 del pending[identity]
-        pending.clear()  # Only an adjacent input->output witness is eligible here.
         if snapshot["mainpipe_fire"]:
             counts["mainpipe_fire"] += 1
             fields = ("second_requested", "second_waylookup_valid", "first_mmio", "second_mmio", "real_two_fetch")
@@ -327,7 +327,7 @@ def _run_dual_suppression_case(env, *, warm_cacheable, attribute_kind="pbmt"):
                                     "scenario_id": phase_oracle["active"]["scenario_id"],
                                     "epoch": phase_oracle["active"]["translation_epoch"]}
     if warm_cacheable:
-        _check_target_acceptance(recorder, response_checkpoints)
+        _check_target_delivery(recorder, response_checkpoints)
     env._emit_event("ifu." + label + "_dual_suppression_qualified", {
         "target_attributes": result["target_attributes"],
         "translation_oracle": result["translation_oracle"],

@@ -33,6 +33,7 @@ _NATIVE_2958 = {
     ),
     "first_ftq_flag": "inner_icache.io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
     "first_ftq_value": "inner_icache.io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
+    "first_start": "inner_icache.io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
     "real_two_fetch": "inner_icache.io_toFtq_fromMainPipe_realTwoFetchValid",
 }
 
