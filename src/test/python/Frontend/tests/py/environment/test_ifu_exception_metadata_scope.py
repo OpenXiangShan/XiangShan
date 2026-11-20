@@ -75,13 +75,21 @@ def test_valid_dual_block_without_fault_is_accepted():
 def test_satp_diagnostic_uses_scope_and_preserves_context_checks(monkeypatch):
     from tests.py.jiabowen import test_ifu_exception_metadata_v3_dut as diagnostic
 
+    expected_new_va = 0x8123_ABC0
     record = {**_window(), "io_toIBuffer_bits_hasSatpFlush": 1,
               "s2_icacheMeta_0_hasSatpFlush": 1, "io_toIBuffer_bits_isBackendException": 0,
-              "s2_fetchBlock_0_startVAddr_addr": diagnostic.context._NEW_VA >> 1}
+              "s2_fetchBlock_0_startVAddr_addr": expected_new_va >> 1}
     called = []
     monkeypatch.setattr(diagnostic, "_capture_metadata", lambda env: [record])
-    monkeypatch.setattr(diagnostic.context, "test_satp_asid_switch_restarts_translation_from_live_cfvec",
-                        lambda env: called.append("context"))
+    def context_probe(_env):
+        called.append("context")
+        return expected_new_va
+
+    monkeypatch.setattr(
+        diagnostic.context,
+        "test_satp_asid_switch_restarts_translation_from_live_cfvec",
+        context_probe,
+    )
     monkeypatch.setattr(diagnostic, "_save_review", lambda env, records, component: called.append(component))
     diagnostic.test_ifu_exception_metadata_satp_without_fault_diagnostic(object())
     assert called == ["context", "satp_without_fault"]

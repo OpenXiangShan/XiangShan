@@ -32,8 +32,8 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_satp_asid_switch_restarts_translation_from_live_cfvec(env) -> None:
-    run_satp_asid_switch(env)
+def test_satp_asid_switch_restarts_translation_from_live_cfvec(env) -> int:
+    return run_satp_asid_switch(env)
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")

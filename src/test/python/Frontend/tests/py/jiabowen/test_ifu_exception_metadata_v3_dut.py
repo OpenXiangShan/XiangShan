@@ -143,14 +143,14 @@ def _save_review(env, records, component):
 def test_ifu_exception_metadata_satp_without_fault_diagnostic(env):
     records = _capture_metadata(env)
     # Retain the existing independent translation/PC/context-switch assertions.
-    context.test_satp_asid_switch_restarts_translation_from_live_cfvec(env)
+    new_va = context.test_satp_asid_switch_restarts_translation_from_live_cfvec(env)
     delivered = [r for r in records if r["io_toIBuffer_ready"] and r["io_toIBuffer_bits_hasSatpFlush"]]
     assert delivered, {"reason": "no accepted satp-flush metadata"}
     assert all(r["s2_icacheMeta_0_hasSatpFlush"] == 1 for r in delivered)
     for record in delivered:
         record["effective_exception_scope"] = assert_no_effective_ifu_exception(record)
     assert all(r["io_toIBuffer_bits_isBackendException"] == 0 for r in delivered)
-    assert delivered[0]["s2_fetchBlock_0_startVAddr_addr"] << 1 == context._NEW_VA
+    assert delivered[0]["s2_fetchBlock_0_startVAddr_addr"] << 1 == new_va
     _save_review(env, records, "satp_without_fault")
 
 

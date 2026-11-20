@@ -150,7 +150,7 @@ def same_vpn_context_scenarios(env) -> tuple[TranslationScenario, TranslationSce
     return old, new
 
 
-def run_satp_asid_switch(env) -> None:
+def run_satp_asid_switch(env) -> int:
     old_scenario, new_scenario = satp_switch_scenarios(env)
     old = randomize_context_timing(
         env, old_scenario
@@ -216,3 +216,4 @@ def run_satp_asid_switch(env) -> None:
     assert active["expected_ptw_requests"][0]["vpn"] == new.va >> 12
     assert any(int(observation.pc) == new.va for observation in env.monitor.observations)
     assert not env.get_errors()
+    return new.va
