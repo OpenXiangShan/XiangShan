@@ -67,10 +67,13 @@ class _FakeBackendModel:
 class _FakeCoordinatorEnv:
     def __init__(self, previous_event_sink) -> None:
         self.event_sink = previous_event_sink
-        self.backend_ctrl_if = type(
-            "BackendControl",
+        self.backend_to_ftq_if = type(
+            "BackendToFtq",
             (),
-            {"can_accept": _FakeSignal(1), "redirect_valid": _FakeSignal(0)},
+            {"redirect_valid": _FakeSignal(0)},
+        )()
+        self.backend_to_ibuf_if = type(
+            "BackendToIBuf", (), {"decode_can_accept": _FakeSignal(1)}
         )()
         self.frontend_info_if = type(
             "FrontendInfo",
@@ -91,7 +94,7 @@ class _FakeCoordinatorEnv:
         )()
         self.icache_agent = _FakeICacheAgent()
         self.uncache_agent = _FakeUncacheAgent(self.uncache_if)
-        self.backend_model = _FakeBackendModel(self.backend_ctrl_if.can_accept)
+        self.backend_model = _FakeBackendModel(self.backend_to_ibuf_if.decode_can_accept)
         self.dut = None
         self.cycle_observers: list = []
         self.pre_drive_cycle_observers: list = []

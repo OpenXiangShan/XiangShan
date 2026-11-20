@@ -19,6 +19,43 @@ from .test_translation_attributes import attribute_plan_from_dict, TRANSLATION_S
 from .translation_timing import build_translation_scenario
 
 
+def test_random_callbacks_use_the_actual_split_frontend_backend_interfaces():
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    coordinator = ScenarioCoordinator(
+        scenario_id="current-public-bundles",
+        timing_plan=TimingPlan.from_seed(7, "translation_timing_cross"),
+        program_map={"binary_text_verified": True, "binary_sha256": "fixture", "instructions": []},
+    )
+    assert not hasattr(env, "backend_ctrl_if")
+    assert not hasattr(env, "backend_observe_if")
+    env.dut.reset.value = 0
+    env.backend_to_ibuf_if.decode_can_accept.value = 0
+    env.backend_to_ftq_if.redirect_valid.value = 0
+    env.backend_from_ftq_if.io_backend_fromFtq_wen.value = 0
+    for signal in env.backend_cfvec_if.cfvec_valid:
+        signal.value = 0
+    coordinator.observe_translation_edge(7, env)
+    coordinator.observe_cycle(7, env)
+    assert coordinator._last_can_accept == 0
+    env.backend_to_ibuf_if.decode_can_accept.value = 1
+    coordinator.observe_cycle(8, env)
+    assert coordinator._last_can_accept == 1
+
+
+@pytest.mark.parametrize("attribute", ["backend_to_ibuf_if", "backend_to_ftq_if", "backend_cfvec_if"])
+def test_random_native_observer_rejects_missing_current_interface(attribute):
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    env.dut.reset.value = 0
+    coordinator = ScenarioCoordinator(
+        scenario_id="missing-public-bundle",
+        timing_plan=TimingPlan.from_seed(7, "translation_timing_cross"),
+        program_map={"binary_text_verified": True, "binary_sha256": "fixture", "instructions": []},
+    )
+    delattr(env, attribute)
+    with pytest.raises(AttributeError):
+        coordinator.observe_translation_edge(7, env)
+
+
 def test_native_snapshot_begins_after_backend_drive_before_random_observers(monkeypatch):
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     order = []

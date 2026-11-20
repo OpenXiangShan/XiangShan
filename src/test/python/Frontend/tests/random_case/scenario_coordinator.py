@@ -347,8 +347,17 @@ def _read_signal(signal: Any, default: int = 0) -> int:
         return default
 
 
-def _read_ibuffer_full(env: Any) -> int:
-    """Read IBuffer full from direct RTL state when the wrapper pin is absent."""
+def _read_optional_binary(signal: Any) -> int | None:
+    """Missing/unreadable pins never become a measured zero."""
+    try:
+        value = signal.value
+        return int(value) if value is not None and value in (0, 1) else None
+    except Exception:
+        return None
+
+
+def _read_ibuffer_full(env: Any) -> int | None:
+    """Return unknown if neither the raw allowEnq nor optional wrapper is readable."""
     dut = getattr(env, "dut", None)
     if dut is not None and callable(read_internal_signal):
         for name in (
@@ -356,11 +365,34 @@ def _read_ibuffer_full(env: Any) -> int:
             "Frontend_top.Frontend._inner_ibuffer_allowEnq",
         ):
             allow_enq = read_internal_signal(dut, name)
-            if allow_enq is not None:
-                return 0 if int(allow_enq) else 1
-    return _read_signal(
-        getattr(getattr(env, "frontend_info_if", None), "io_frontendInfo_ibufFull", None),
-        default=0,
+            if allow_enq in (0, 1):
+                return 1 - int(allow_enq)
+    return _read_optional_binary(
+        getattr(getattr(env, "frontend_info_if", None), "io_frontendInfo_ibufFull", None)
+    )
+
+
+def _record_pressure_sample(action: dict[str, Any], cycle: int, can_accept: int | None) -> None:
+    """Record sampled post-drive input windows; never infer a held interval."""
+    samples = action.setdefault("pressure_samples", [])
+    samples.append({"cycle": int(cycle), "can_accept": can_accept})
+    action["pressure_sampling_phase"] = "post_drive_input; not edge handshake proof"
+    counts = Counter(sample["cycle"] for sample in samples)
+    observed = {sample["cycle"]: sample["can_accept"] for sample in samples}
+    low = sorted(c for c, value in observed.items() if value == 0 and counts[c] == 1)
+    windows = []
+    for c in low:
+        if windows and windows[-1]["end_cycle_inclusive"] == c - 1:
+            windows[-1]["end_cycle_inclusive"] = c
+            windows[-1]["cycles"] += 1
+        else:
+            windows.append({"start_cycle": c, "end_cycle_inclusive": c, "cycles": 1})
+    action["observed_low_windows"] = windows
+    action["confirmed_low_cycles"] = len(low)
+    expected = list(range(int(action["start_cycle"]), int(action["end_cycle_inclusive"]) + 1))
+    action["pressure_window_confirmed"] = (
+        [sample["cycle"] for sample in samples] == expected
+        and all(sample["can_accept"] == 0 for sample in samples)
     )
 
 
@@ -453,6 +485,7 @@ class ScenarioCoordinator:
         self._last_redirect_cycle: int | None = None
         self._last_can_accept: int | None = None
         self._last_ibuffer_full: int | None = None
+        self._last_ibuffer_probe_available: bool | None = None
         self._translation_pages: dict[int, int] | None = None
         self._translation_mapping_valid = False
         self._bin951_history: list[dict[str, Any]] = []
@@ -719,8 +752,8 @@ class ScenarioCoordinator:
 
         if read(env.clock_reset.reset):
             return
-        control = env.backend_ctrl_if
-        observation = env.backend_observe_if
+        control = env.backend_to_ftq_if
+        observation = env.backend_cfvec_if
         from_ftq = env.backend_from_ftq_if
 
         def record(kind: str, payload: dict[str, Any]) -> None:
@@ -737,7 +770,7 @@ class ScenarioCoordinator:
                 "start_pc_addr_raw": read(from_ftq.io_backend_fromFtq_startPc_addr),
             })
         redirect_valid = read(control.redirect_valid)
-        can_accept = read(control.can_accept)
+        can_accept = read(env.backend_to_ibuf_if.decode_can_accept)
         if redirect_valid:
             record("redirect", {
                 "ftq_flag": read(control.redirect_bits_ftq_idx_flag),
@@ -1267,7 +1300,7 @@ class ScenarioCoordinator:
         # clock-edge callbacks.  Use BackendModel's edge snapshot for any
         # relation involving DUT state sampled on this edge; retain the live
         # value only to confirm that a timing action actually held ready low.
-        live_can_accept = _read_signal(env.backend_ctrl_if.can_accept, default=1)
+        live_can_accept = _read_optional_binary(env.backend_to_ibuf_if.decode_can_accept)
         backend_model = getattr(env, "backend_model", None)
         edge_snapshot = getattr(backend_model, "can_accept_at_edge", None)
         if callable(edge_snapshot):
@@ -1277,7 +1310,7 @@ class ScenarioCoordinator:
                 can_accept_at_edge = live_can_accept
         else:
             can_accept_at_edge = live_can_accept
-        live_redirect_valid = _read_signal(env.backend_ctrl_if.redirect_valid, default=0)
+        live_redirect_valid = _read_signal(env.backend_to_ftq_if.redirect_valid, default=0)
         redirect_snapshot = getattr(backend_model, "redirect_valid_at_edge", None)
         if callable(redirect_snapshot):
             try:
@@ -1288,16 +1321,22 @@ class ScenarioCoordinator:
             redirect_valid_at_edge = live_redirect_valid
         ibuffer_full = _read_ibuffer_full(env)
         self._sample_bin951(cycle, env)
-        if self._last_can_accept != live_can_accept:
+        if live_can_accept is not None and self._last_can_accept != live_can_accept:
             self._record_signal_transition("dut.backend_can_accept", cycle, live_can_accept)
             self._last_can_accept = live_can_accept
-        if self._last_ibuffer_full != ibuffer_full:
+        available = ibuffer_full is not None
+        if self._last_ibuffer_probe_available != available:
+            self._append_timeline({"type": "audit.ibuffer_full_probe", "cycle": int(cycle),
+                                   "payload": {"available": available, "value": ibuffer_full}})
+            self._last_ibuffer_probe_available = available
+        if available and self._last_ibuffer_full != ibuffer_full:
             self._record_signal_transition("dut.ibuffer_full", cycle, ibuffer_full)
-            self._last_ibuffer_full = ibuffer_full
+        self._last_ibuffer_full = ibuffer_full
 
         active = self._active_action
+        if active is not None:
+            _record_pressure_sample(active, cycle, live_can_accept)
         if active is not None and live_can_accept == 0:
-            active["confirmed_low_cycles"] = int(active["confirmed_low_cycles"]) + 1
             self._observe_realized("dut.backend_backpressure_cycle", cycle)
             if self._last_icache_response_cycle == int(cycle):
                 self._observe_realized(
@@ -1320,7 +1359,9 @@ class ScenarioCoordinator:
             self._observe_realized("dut.ibuffer_full_x_backend_backpressure", cycle)
 
         if active is not None and int(cycle) >= int(active["end_cycle_inclusive"]):
-            active["status"] = "REALIZED" if int(active["confirmed_low_cycles"]) > 0 else "NOT_REALIZED"
+            active["status"] = "REALIZED" if active["pressure_window_confirmed"] else "NOT_REALIZED"
+            if active["status"] != "REALIZED":
+                active["failure_reason"] = "requested_pressure_window_not_fully_observed"
             active["completion_cycle"] = int(cycle)
             if active["status"] == "REALIZED":
                 self._observe_realized("dut.backend_backpressure_window", cycle)
@@ -1359,6 +1400,7 @@ class ScenarioCoordinator:
         self._last_redirect_cycle = None
         self._last_can_accept = None
         self._last_ibuffer_full = None
+        self._last_ibuffer_probe_available = None
         self._translation_mapping_valid = False
 
     def _relation_summary(self) -> list[dict[str, Any]]:
