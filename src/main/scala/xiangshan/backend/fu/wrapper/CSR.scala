@@ -94,13 +94,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val wdataReg = RegEnable(wdata, 0.U(64.W), io.in.fire)
 
   private val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
-  private val thisRobIdx = Wire(new RobPtr)
-  when (io.in.valid) {
-    thisRobIdx := io.in.bits.ctrl.robIdx
-  }.otherwise {
-    thisRobIdx := robIdxReg
-  }
-  private val redirectFlush = thisRobIdx.needFlush(io.flush)
+  private val redirectFlush = robIdxReg.needFlush(io.flush)
+  private val inRedirectFlush = io.in.bits.ctrl.robIdx.needFlush(io.flush)
 
   csrMod.io.in match {
     case in =>
@@ -116,6 +111,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.sret := isSret
       in.bits.dret := isDret
       in.bits.redirectFlush := redirectFlush
+      in.bits.inRedirectFlush := inRedirectFlush
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
