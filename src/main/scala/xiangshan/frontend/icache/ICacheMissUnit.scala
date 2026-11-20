@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
+import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
@@ -164,14 +165,16 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   private val readBeatCnt = RegInit(UInt(log2Up(refillCycles).W), 0.U)
   private val respDataReg = RegInit(VecInit(Seq.fill(refillCycles)(0.U(beatBits.W))))
 
+  private val grantDataFire = io.memGrant.fire && edge.hasData(io.memGrant.bits)
+
   private val waitLast = readBeatCnt === (refillCycles - 1).U
-  when(io.memGrant.fire && edge.hasData(io.memGrant.bits)) {
+  when(grantDataFire) {
     respDataReg(readBeatCnt) := io.memGrant.bits.data
     readBeatCnt              := Mux(waitLast, 0.U, readBeatCnt + 1.U)
   }
 
   // last transition finish or corrupt
-  private val lastFire = io.memGrant.fire && edge.hasData(io.memGrant.bits) && waitLast
+  private val lastFire = grantDataFire && waitLast
 
   private val (_, _, refillDone, _) = edge.addr_inc(io.memGrant)
   assert(!(refillDone ^ lastFire), "refill not done!")
@@ -180,21 +183,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   private val lastFireNext = RegNext(lastFire)
   private val idNext       = RegNext(io.memGrant.bits.source)
 
-  private val corruptReg = RegInit(false.B)
-  private val deniedReg  = RegInit(false.B)
-  when(io.memGrant.fire && edge.hasData(io.memGrant.bits)) {
-    // Set corruptReg / deniedReg when any beat is corrupt / denied
-    corruptReg := corruptReg || io.memGrant.bits.corrupt
-    deniedReg  := deniedReg || io.memGrant.bits.denied
-  }.elsewhen(lastFireNext) {
-    // Clear corruptReg / deniedReg when response it sent to mainPipe
-    // This used to be io.resp.valid (lastFireNext && mshrValid) but when mshr is flushed by io.flush/fencei,
-    // mshrValid is false.B and corruptReg will never be cleared, that's not correct
-    // so we remove mshrValid here, and the condition leftover is lastFireNext
-    // or, actually, io.resp.valid || (lastFireNext && !mshrValid)
-    corruptReg := false.B
-    deniedReg  := false.B
-  }
+  private val corruptReg = ValidHold(grantDataFire && io.memGrant.bits.corrupt, lastFireNext)
+  private val deniedReg  = ValidHold(grantDataFire && io.memGrant.bits.denied, lastFireNext)
 
   /**
     ******************************************************************************
