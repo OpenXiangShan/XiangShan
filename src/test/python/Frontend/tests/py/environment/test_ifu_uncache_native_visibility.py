@@ -1,5 +1,7 @@
 """Real native evaluator/hub/sink state identity and reset order, offline."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from env.funcov.native_toffee import EvaluateFlagRecorder
@@ -193,7 +195,10 @@ def test_instr_uncache_response_missing_remains_unknown(tmp_path):
 
     hub, _env, dut, _model = _runtime(tmp_path)
     delattr(dut, _INSTR + "io_toIfu_resp_bits_data")
-    dut.set("Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data", 0xFFFFFFFF)
+    # Keep a stale toggle under its literal alias; _FakeDut.set() folds the
+    # toggle spelling into the canonical name and would recreate the probe.
+    stale_toggle = "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data"
+    setattr(dut, stale_toggle, SimpleNamespace(value=0xFFFFFFFF))
     hub._dut_signal_cache.clear()
     hub._first_signal_candidate_cache.clear()
     hub.begin_cycle_snapshot(1)
