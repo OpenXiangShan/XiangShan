@@ -971,14 +971,16 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     private val hasAccessFault   = RegInit(false.B)
     /*================================================================================================================*/
     /*================================================= CBO.FSM ======================================================*/
-    /*                                           zero
-    *                           + ----------------------------------- +
-    *                           |                                     |
-    *       clean/flush/inval   |                                     v
+    /*
+    *       clean/flush/inval
     *  idle ----------------> flushSb --> sednReq --> waitResp --> writeback
-    *   |                       ^
-    *   |   zero                |
-    *   + -------> writeZero -- +
+    *   |                       ^                                     ^
+    *   |   zero                |  zero (only waits for the zero      |
+    *   + -------> writeZero -- +        line to reach the sbuffer) - +
+    *
+    * cbo.zero is a full-line store of zeros: once its line is in the sbuffer it is ordered like any other store
+    * (same-line requests wait for an in-flight line, loads forward from the full-mask entry), so it does not wait
+    * for the sbuffer and the store MSHRs to drain. Draining here serialised one AcquirePerm round trip per line.
     * */
     /*================================================================================================================*/
 
@@ -1000,7 +1002,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         }
       }
       is(CboState.flushSb) {
-        when(io.sbufferCtrl.resp.empty && dataQueue.io.empty) { // Ensure there are no in-flight request.
+        // cbo.zero: the zero line has left the data queue for the sbuffer; other CBOs: no in-flight store at all.
+        when(dataQueue.io.empty && (isCboZero(headDataEntry.cboType) || io.sbufferCtrl.resp.empty)) {
           cboStateNext := Mux(isCboZero(headDataEntry.cboType), CboState.writeback, CboState.sendReq)
         }
       }
@@ -1022,7 +1025,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     // cbo handle connection
-    io.sbufferCtrl.req.flush     := cboState === CboState.flushSb
+    io.sbufferCtrl.req.flush     := cboState === CboState.flushSb && !isCboZero(headDataEntry.cboType)
 
     io.toDCache.req.valid        := cboState === CboState.sendReq
     io.toDCache.req.bits.address := headDataEntry.paddr
