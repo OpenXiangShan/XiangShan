@@ -36,10 +36,8 @@ import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO,
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
 import xiangshan.backend.vector.{Decoder, VecIssueQueue}
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
@@ -153,7 +151,6 @@ class CtrlBlockImp(
 
   // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
-  val s3_s5_redirect = RegNextWithEnable(s2_s4_redirect)
 
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
@@ -175,7 +172,6 @@ class CtrlBlockImp(
       (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
-  val wbData = io.fromWB.wbData
   val needPerfCounterExuName = Seq("ALU", "BJU", "LDU", "FEX", "STA", "STD")
   needPerfCounterExuName.map { name =>
     val exuWBValid = params.allExuParams.zip(delayedWriteBack).filter(_._1.name.contains(name)).map(_._2).map(_.valid)
@@ -184,47 +180,6 @@ class CtrlBlockImp(
       XSPerfAccumulate(s"${name}_SameWBNum_$i", PopCount(exuWBValid) === i.U)
     }
   }
-  val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
-  val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
-  val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VecScheduler])
-  val intScheNonStoreWbData = intScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val fpScheNonStoreWbData  = fpScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val vecScheNonStoreWbData = vfScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
-  val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
-  private val delayedNotFlushedWriteBackNums = wbData.map(x => {
-    val valid = x.valid
-    val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
-    val killedByOlder = x.bits.robIdx.needFlush(oldestRedirect)
-    val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
-    // delayed.valid := GatedValidRegNext(valid)
-    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
-    val isIntSche = intScheWbData.contains(x)
-    val isFpSche = fpScheWbData.contains(x)
-    val isVfSche = vfScheWbData.contains(x)
-    val isi2v = i2vWbData.contains(x)
-    val isStore = storeWbData.contains(x)
-
-    val canSameRobidxWbData = if(isVfSche && !isStore) {
-      i2vWbData ++ vecScheNonStoreWbData
-    } else if(isi2v) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData ++ vecScheNonStoreWbData
-    } else if (isIntSche && !isStore) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData
-    } else if (isFpSche) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData
-    } else if (isStore) {
-      storeWbData
-    } else {
-      Seq(x)
-    }
-    val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
-      val killedByOlderThat = wb.bits.robIdx.needFlush(oldestRedirect)
-      wb.bits.robIdx.isSameEntry(x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
-    }).toSeq)
-    delayed.bits := RegEnable(PopCount(sameRobidxBools), x.valid)
-    delayed
-  }).toSeq
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
@@ -863,7 +818,6 @@ class CtrlBlockImp(
   rob.in.redirect := s1_s3_redirect
   rob.in.writeback := delayedNotFlushedWriteBack
   rob.in.exuWriteback := delayedWriteBack
-  rob.in.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.in.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.out.readGPAMemData := gpaMem.io.exceptionReadData
   rob.in.fromVecExcpMod.busy := io.fromVecExcpMod.busy
