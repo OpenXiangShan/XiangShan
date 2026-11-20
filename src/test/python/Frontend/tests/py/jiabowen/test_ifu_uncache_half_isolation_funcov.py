@@ -13,7 +13,7 @@ def _samples():
         io_fromFtq_redirect_valid=0, wbRedirect_valid=0,
         s2_valid_valid=1, s2_useUncacheFetch=1,
     )
-    initial["uncacheUnit.__Vtogcov__io_resp_bits_uncacheData"] = 0x313
+    initial["uncacheUnit.io_resp_bits_uncacheData"] = 0x313
     saved = dict(uncacheRedirect_valid=0, s0_prevEndIsHalfRvi=1,
                  s1_prevEndHalfRviInfo_bits_pc_addr=old_pc,
                  s1_prevEndHalfRviInfo_bits_data=0x313)

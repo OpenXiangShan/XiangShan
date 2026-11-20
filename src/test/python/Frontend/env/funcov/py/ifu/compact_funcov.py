@@ -3887,7 +3887,7 @@ def _sample_uncache_half_isolation(recorder, dut, cycle: int) -> None:
             pc = read("uncachePc_addr")
             # This semantic response port drives uncacheRedirect.halfRviInfo
             # directly in current generated Ifu.sv (the bundle is optimized).
-            data = read("uncacheUnit.__Vtogcov__io_resp_bits_uncacheData") & 0xFFFF
+            data = read("uncacheUnit.io_resp_bits_uncacheData") & 0xFFFF
             if (pc << 1) & 0xFFF != 0xFFE or data & 3 != 3:
                 return
             recorder._ifu_uncache_half_isolation = dict(
