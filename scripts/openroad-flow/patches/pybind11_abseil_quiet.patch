@@ -1,0 +1,11 @@
+--- MODULE.bazel
++++ MODULE.bazel
+@@ -58,7 +58,7 @@
+     python = "python_versions",
+ )
+ 
+-pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
++pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip", dev_dependency = True)
+ [
+   pip.parse(
+     hub_name = "pypi",

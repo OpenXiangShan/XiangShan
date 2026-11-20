@@ -1,0 +1,287 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oyvind Harboe <oyvind.harboe@zylin.com>
+Date: Wed, 17 Sep 2026 00:00:00 +0000
+Subject: [PATCH] rob: RobEntryCell takes its shared inputs as one bus
+
+Every RobEntryCell reads the same enqueue, writeback, commit and redirect
+signals; only its index differs. As separate ports that was 443 pins per
+cell, 156 k over the 352 instances, and OpenROAD's hierarchical
+link_design spent eighteen minutes on them. RobEntryCellIn gathers those
+inputs into one bundle that RobImp builds once and each cell receives as
+a UInt; the entry comes back the same way. Three ports per cell, the
+same logic inside. Behaviour is unchanged.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+---
+diff -ruN a/src/main/scala/xiangshan/backend/rob/Rob.scala b/src/main/scala/xiangshan/backend/rob/Rob.scala
+--- a/src/main/scala/xiangshan/backend/rob/Rob.scala
++++ b/src/main/scala/xiangshan/backend/rob/Rob.scala
+@@ -180,7 +180,7 @@
+   val robEntryCells = Seq.fill(RobSize)(Module(new RobEntryCell(
+     exuWBs.length, exceptionWBs.length, fflagsWBs.length, vxsatWBs.length, branchWBs.length,
+     io.writebackNums.head.bits.getWidth)))
+-  val robEntries = VecInit(robEntryCells.map(_.io.entry))
++  val robEntries = VecInit(robEntryCells.map(_.io.entry.asTypeOf(new RobEntryBundle)))
+   // pointers
+   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
+   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
+@@ -1106,39 +1106,46 @@
+       !FuType.isCsr(req.bits.fuType) &&
+       !FuType.isVset(req.bits.fuType) &&
+       !FuType.isAMO(req.bits.fuType)))
++  val robEntryCellIn = Wire(new RobEntryCellIn(
++    exuWBs.length, exceptionWBs.length, fflagsWBs.length, vxsatWBs.length, branchWBs.length,
++    io.writebackNums.head.bits.getWidth))
++  robEntryCellIn.enq.zip(io.enq.req).foreach { case (c, req) => c.valid := req.valid; c.bits := req.bits }
++  robEntryCellIn.enqCanAccept := io.enq.canAccept
++  robEntryCellIn.allocatePtr := VecInit(allocatePtrVec.map(_.value))
++  robEntryCellIn.allowInterrupt := allowInterruptVec
++  robEntryCellIn.redirectValid := io.redirect.valid
++  robEntryCellIn.redirectValidReg := redirectValidReg
++  robEntryCellIn.redirectBegin := redirectBegin
++  robEntryCellIn.redirectEnd := redirectEnd
++  robEntryCellIn.redirectAll := redirectAll
++  robEntryCellIn.isCommit := io.commits.isCommit
++  robEntryCellIn.commitValid := io.commits.commitValid
++  robEntryCellIn.deqPtr := VecInit(deqPtrVec.map(_.value))
++  robEntryCellIn.exuWb.zip(exuWBs).foreach { case (c, wb) => c.valid := wb.valid; c.bits := wb.bits.robIdx.value }
++  robEntryCellIn.writebackNums := VecInit(io.writebackNums.map(_.bits))
++  robEntryCellIn.excWb.zip(exceptionWBs).foreach { case (c, wb) => c.valid := wb.valid; c.bits := wb.bits.robIdx.value }
++  robEntryCellIn.writebackNeedFlush := io.writebackNeedFlush
++  robEntryCellIn.fflagsWb.zip(fflagsWBs).foreach { case (c, wb) =>
++  c.valid := wb.valid
++  c.bits.robIdx := wb.bits.robIdx.value
++  c.bits.wen := wb.bits.fflagsWen.getOrElse(false.B)
++  c.bits.fflags := wb.bits.fflags.get
++  }
++  robEntryCellIn.vxsatWb.zip(vxsatWBs).foreach { case (c, wb) =>
++  c.valid := wb.valid
++  c.bits.robIdx := wb.bits.robIdx.value
++  c.bits.vxsat := wb.bits.vxsat.get
++  }
++  robEntryCellIn.branchTaken.zip(branchWBs).foreach { case (c, wb) =>
++  c.valid := wb.valid && wb.bits.redirect.get.bits.taken
++  c.bits := wb.bits.robIdx.value
++  }
++  // A named wire, kept: otherwise firtool inlines the concatenation into
++  // every one of the 352 instance connections.
++  val robEntryCellInBits = dontTouch(WireInit(robEntryCellIn.asUInt))
+   robEntryCells.zipWithIndex.foreach { case (cell, i) =>
+     cell.io.idx := i.U
+-    cell.io.enq.zip(io.enq.req).foreach { case (c, req) => c.valid := req.valid; c.bits := req.bits }
+-    cell.io.enqCanAccept := io.enq.canAccept
+-    cell.io.allocatePtr := VecInit(allocatePtrVec.map(_.value))
+-    cell.io.allowInterrupt := allowInterruptVec
+-    cell.io.redirectValid := io.redirect.valid
+-    cell.io.redirectValidReg := redirectValidReg
+-    cell.io.redirectBegin := redirectBegin
+-    cell.io.redirectEnd := redirectEnd
+-    cell.io.redirectAll := redirectAll
+-    cell.io.isCommit := io.commits.isCommit
+-    cell.io.commitValid := io.commits.commitValid
+-    cell.io.deqPtr := VecInit(deqPtrVec.map(_.value))
+-    cell.io.exuWb.zip(exuWBs).foreach { case (c, wb) => c.valid := wb.valid; c.bits := wb.bits.robIdx.value }
+-    cell.io.writebackNums := VecInit(io.writebackNums.map(_.bits))
+-    cell.io.excWb.zip(exceptionWBs).foreach { case (c, wb) => c.valid := wb.valid; c.bits := wb.bits.robIdx.value }
+-    cell.io.writebackNeedFlush := io.writebackNeedFlush
+-    cell.io.fflagsWb.zip(fflagsWBs).foreach { case (c, wb) =>
+-      c.valid := wb.valid
+-      c.bits.robIdx := wb.bits.robIdx.value
+-      c.bits.wen := wb.bits.fflagsWen.getOrElse(false.B)
+-      c.bits.fflags := wb.bits.fflags.get
+-    }
+-    cell.io.vxsatWb.zip(vxsatWBs).foreach { case (c, wb) =>
+-      c.valid := wb.valid
+-      c.bits.robIdx := wb.bits.robIdx.value
+-      c.bits.vxsat := wb.bits.vxsat.get
+-    }
+-    cell.io.branchTaken.zip(branchWBs).foreach { case (c, wb) =>
+-      c.valid := wb.valid && wb.bits.redirect.get.bits.taken
+-      c.bits := wb.bits.robIdx.value
+-    }
++    cell.io.in := robEntryCellInBits
+   }
+ 
+   /**
+@@ -1884,6 +1891,35 @@
+ }
+ 
+ 
++/** Everything a RobEntryCell reads that is the same for every entry, as one
++  * bundle: RobImp builds it once and hands each cell its asUInt, so a cell
++  * has three ports (index in, this in, entry out) instead of 443. The
++  * hierarchical linker's cost is pins times instances; 352 x 443 was
++  * eighteen minutes of link_design for the Rob block.
++  */
++class RobEntryCellIn(numExuWb: Int, numExcWb: Int, numFflagsWb: Int, numVxsatWb: Int, numBranchWb: Int, wbNumWidth: Int)(implicit p: Parameters, params: BackendParams) extends XSBundle {
++  private val idxWidth = log2Up(RobSize)
++  val enq = Vec(RenameWidth, ValidIO(new EnqRobUop))
++  val enqCanAccept = Bool()
++  val allocatePtr = Vec(RenameWidth, UInt(idxWidth.W))
++  val allowInterrupt = Vec(RenameWidth, Bool())
++  val redirectValid = Bool()
++  val redirectValidReg = Bool()
++  val redirectBegin = UInt(idxWidth.W)
++  val redirectEnd = UInt(idxWidth.W)
++  val redirectAll = Bool()
++  val isCommit = Bool()
++  val commitValid = Vec(CommitWidth, Bool())
++  val deqPtr = Vec(CommitWidth, UInt(idxWidth.W))
++  val exuWb = Vec(numExuWb, ValidIO(UInt(idxWidth.W)))
++  val writebackNums = Vec(numExuWb, UInt(wbNumWidth.W))
++  val excWb = Vec(numExcWb, ValidIO(UInt(idxWidth.W)))
++  val writebackNeedFlush = Vec(numExcWb, Bool())
++  val fflagsWb = Vec(numFflagsWb, ValidIO(new RobEntryCellFflagsWb(idxWidth)))
++  val vxsatWb = Vec(numVxsatWb, ValidIO(new RobEntryCellVxsatWb(idxWidth)))
++  val branchTaken = Vec(numBranchWb, ValidIO(UInt(idxWidth.W)))
++}
++
+ /** One reorder-buffer entry: its RobEntryBundle register and every write to
+   * it -- enqueue (connectEnq, mmio, vls, interrupt_safe), the valid
+   * state machine, the writeback counting (uopNum, realDestSize), the
+@@ -1913,81 +1949,64 @@
+   private val idxWidth = log2Up(RobSize)
+   val io = IO(new Bundle {
+     val idx = Input(UInt(idxWidth.W))
+-    val enq = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
+-    val enqCanAccept = Input(Bool())
+-    val allocatePtr = Vec(RenameWidth, Input(UInt(idxWidth.W)))
+-    val allowInterrupt = Vec(RenameWidth, Input(Bool()))
+-    val redirectValid = Input(Bool())
+-    val redirectValidReg = Input(Bool())
+-    val redirectBegin = Input(UInt(idxWidth.W))
+-    val redirectEnd = Input(UInt(idxWidth.W))
+-    val redirectAll = Input(Bool())
+-    val isCommit = Input(Bool())
+-    val commitValid = Vec(CommitWidth, Input(Bool()))
+-    val deqPtr = Vec(CommitWidth, Input(UInt(idxWidth.W)))
+-    val exuWb = Vec(numExuWb, Flipped(ValidIO(UInt(idxWidth.W))))
+-    val writebackNums = Vec(numExuWb, Input(UInt(wbNumWidth.W)))
+-    val excWb = Vec(numExcWb, Flipped(ValidIO(UInt(idxWidth.W))))
+-    val writebackNeedFlush = Vec(numExcWb, Input(Bool()))
+-    val fflagsWb = Vec(numFflagsWb, Flipped(ValidIO(new RobEntryCellFflagsWb(idxWidth))))
+-    val vxsatWb = Vec(numVxsatWb, Flipped(ValidIO(new RobEntryCellVxsatWb(idxWidth))))
+-    val branchTaken = Vec(numBranchWb, Flipped(ValidIO(UInt(idxWidth.W))))
+-    val entry = Output(new RobEntryBundle)
++    val in = Input(UInt((new RobEntryCellIn(numExuWb, numExcWb, numFflagsWb, numVxsatWb, numBranchWb, wbNumWidth)).getWidth.W))
++    val entry = Output(UInt((new RobEntryBundle).getWidth.W))
+   })
++  private val in = io.in.asTypeOf(new RobEntryCellIn(numExuWb, numExcWb, numFflagsWb, numVxsatWb, numBranchWb, wbNumWidth))
+ 
+   val entry = RegInit((new RobEntryBundle).Lit(_.valid -> false.B))
+-  io.entry := entry
++  io.entry := entry.asUInt
+ 
+   // enqueue
+-  val canEnqueue = VecInit(io.enq.map(req => req.valid && req.bits.firstUop && io.enqCanAccept))
+-  val enqOH = VecInit(canEnqueue.zip(io.allocatePtr.map(_ === io.idx)).map(x => x._1 && x._2))
++  val canEnqueue = VecInit(in.enq.map(req => req.valid && req.bits.firstUop && in.enqCanAccept))
++  val enqOH = VecInit(canEnqueue.zip(in.allocatePtr.map(_ === io.idx)).map(x => x._1 && x._2))
+   val enqHit = enqOH.asUInt.orR
+   assert(PopCount(enqOH) < 2.U, "robEntries enqOH is not one hot")
+-  when(enqHit && !io.redirectValid) {
+-    connectEnq(entry, Mux1H(enqOH, io.enq.map(_.bits)))
++  when(enqHit && !in.redirectValid) {
++    connectEnq(entry, Mux1H(enqOH, in.enq.map(_.bits)))
+   }
+   when(enqHit) {
+     entry.mmio := false.B
+-    entry.vls := Mux1H(enqOH, io.enq.map(_.bits.vlsInstr))
++    entry.vls := Mux1H(enqOH, in.enq.map(_.bits.vlsInstr))
+   }
+ 
+   // valid
+-  val commitCond = io.isCommit && io.commitValid.zip(io.deqPtr.map(_ === io.idx)).map(x => x._1 && x._2).reduce(_ || _)
+-  val needFlushRedirect = io.redirectValidReg && (Mux(
+-    io.redirectEnd > io.redirectBegin,
+-    (io.idx > io.redirectBegin) && (io.idx < io.redirectEnd),
+-    (io.idx > io.redirectBegin) || (io.idx < io.redirectEnd)
+-  ) || io.redirectAll)
++  val commitCond = in.isCommit && in.commitValid.zip(in.deqPtr.map(_ === io.idx)).map(x => x._1 && x._2).reduce(_ || _)
++  val needFlushRedirect = in.redirectValidReg && (Mux(
++    in.redirectEnd > in.redirectBegin,
++    (io.idx > in.redirectBegin) && (io.idx < in.redirectEnd),
++    (io.idx > in.redirectBegin) || (io.idx < in.redirectEnd)
++  ) || in.redirectAll)
+   when(commitCond) {
+     entry.valid := false.B
+-  }.elsewhen(enqHit && !io.redirectValid) {
++  }.elsewhen(enqHit && !in.redirectValid) {
+     entry.valid := true.B
+   }.elsewhen(needFlushRedirect) {
+     entry.valid := false.B
+   }
+ 
+   // writebacked state
+-  val uopEnqValidSeq = io.enq.map(req => io.enqCanAccept && req.valid)
+-  val instEnqValidSeq = io.enq.map(req => io.enqCanAccept && req.valid && req.bits.firstUop)
+-  val robIdxMatchSeq = io.enq.map(_.bits.robIdx.value === io.idx)
++  val uopEnqValidSeq = in.enq.map(req => in.enqCanAccept && req.valid)
++  val instEnqValidSeq = in.enq.map(req => in.enqCanAccept && req.valid && req.bits.firstUop)
++  val robIdxMatchSeq = in.enq.map(_.bits.robIdx.value === io.idx)
+   val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+   val instCanEnqSeq = instEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+   val instCanEnqFlag = Cat(instCanEnqSeq).orR
+   val isFirstEnq = !entry.valid && instCanEnqFlag
+-  val realDestEnqNum = PopCount(io.enq.map(_.bits.needEnqRab).zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
++  val realDestEnqNum = PopCount(in.enq.map(_.bits.needEnqRab).zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
+   when(isFirstEnq) {
+     entry.realDestSize := realDestEnqNum
+   }.elsewhen(entry.valid && Cat(uopCanEnqSeq).orR) {
+     entry.realDestSize := entry.realDestSize + realDestEnqNum
+   }
+-  val enqWBNum = PriorityMux(instCanEnqSeq, io.enq.map(_.bits.numWB))
++  val enqWBNum = PriorityMux(instCanEnqSeq, in.enq.map(_.bits.numWB))
+ 
+-  val canWbSeq = io.exuWb.map(wb => wb.valid && wb.bits === io.idx)
+-  val wbCnt = Mux1H(canWbSeq, io.writebackNums)
++  val canWbSeq = in.exuWb.map(wb => wb.valid && wb.bits === io.idx)
++  val wbCnt = Mux1H(canWbSeq, in.writebackNums)
+ 
+-  val canWbExceptionSeq = io.excWb.map(wb => wb.valid && wb.bits === io.idx)
++  val canWbExceptionSeq = in.excWb.map(wb => wb.valid && wb.bits === io.idx)
+   val needFlush = entry.needFlush
+-  val needFlushWriteBack = Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
++  val needFlushWriteBack = Mux1H(canWbExceptionSeq, in.writebackNeedFlush)
+   when(entry.valid) {
+     entry.needFlush := needFlush || needFlushWriteBack
+   }
+@@ -2004,16 +2023,16 @@
+     assert(!(entry.uopNum - wbCnt > entry.uopNum), "robEntries uopNum is overflow!")
+   }
+ 
+-  val fflagsCanWbSeq = io.fflagsWb.map(wb => wb.valid && wb.bits.robIdx === io.idx && wb.bits.wen)
+-  val fflagsRes = fflagsCanWbSeq.zip(io.fflagsWb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags, 0.U) }.fold(0.U(5.W))(_ | _)
++  val fflagsCanWbSeq = in.fflagsWb.map(wb => wb.valid && wb.bits.robIdx === io.idx && wb.bits.wen)
++  val fflagsRes = fflagsCanWbSeq.zip(in.fflagsWb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags, 0.U) }.fold(0.U(5.W))(_ | _)
+   when(isFirstEnq) {
+     entry.fflags := 0.U
+   }.elsewhen(fflagsRes.orR) {
+     entry.fflags := entry.fflags | fflagsRes
+   }
+ 
+-  val vxsatCanWbSeq = io.vxsatWb.map(wb => wb.valid && wb.bits.robIdx === io.idx)
+-  val vxsatRes = vxsatCanWbSeq.zip(io.vxsatWb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat, false.B) }.fold(false.B)(_ | _)
++  val vxsatCanWbSeq = in.vxsatWb.map(wb => wb.valid && wb.bits.robIdx === io.idx)
++  val vxsatRes = vxsatCanWbSeq.zip(in.vxsatWb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat, false.B) }.fold(false.B)(_ | _)
+   when(isFirstEnq) {
+     entry.vxsat := 0.U
+   }.elsewhen(vxsatRes) {
+@@ -2021,7 +2040,7 @@
+   }
+ 
+   // trace
+-  val taken = io.branchTaken.map(wb => wb.valid && wb.bits === io.idx).reduce(_ || _)
++  val taken = in.branchTaken.map(wb => wb.valid && wb.bits === io.idx).reduce(_ || _)
+   when(entry.valid && Itype.isNonTaken(entry.traceBlockInPipe.itype) && taken) {
+     // BranchType code(notaken itype = 4) must be correctly replaced!
+     entry.traceBlockInPipe.itype := Itype.Taken
+@@ -2029,6 +2048,6 @@
+ 
+   // interrupt_safe
+   when(enqHit) {
+-    entry.interrupt_safe := Mux1H(enqOH, io.allowInterrupt)
++    entry.interrupt_safe := Mux1H(enqOH, in.allowInterrupt)
+   }
+ }
+\ No newline at end of file

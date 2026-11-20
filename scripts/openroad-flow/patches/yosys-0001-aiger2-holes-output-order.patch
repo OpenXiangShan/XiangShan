@@ -1,0 +1,49 @@
+yosys: write_xaiger2 writes the holes outputs in port order
+
+AigerWriter::write() numbers a module's inputs and counts its outputs in
+port order, then collects the output literals by iterating the module's
+wires, which is hash-dict order. For an ordinary module that only
+permutes outputs the caller matches by name. For the holes module that
+write_xaiger2 embeds in the .xaig (the 'a' extension: the logic of every
+white box, one output per box output, in box order), the order is the
+contract: ABC rebuilds box i from the outputs at box i's position.
+
+With two or more white boxes, ABC's &verify -- on by default since yosys
+#5620 -- rebuilds a box from another box's logic and reaches an input
+the box does not have: Gia_ManDupCollapse_rec asserts Gia_ObjIsAnd
+(exit 134) or, without asserts, segfaults (139). abc9_exe sees
+output.aig already written and logs only a warning, so every abc_new
+run with boxes -- every ORFS design with SWAP_ARITH_OPERATORS -- has
+skipped its post-mapping equivalence check without saying so. The
+mapped netlist is not affected: mock-alu's is byte-identical with and
+without this patch.
+
+test/yosys_abc_new_boxes reproduces it with two boxes of different
+shapes.
+
+Fixed on yosys main by 569e454cc ("Fix box models and output order"),
+part of YosysHQ/yosys#6174, merged 2026-09-14, after v0.69; no release
+carries it. This is that commit's output-order hunk alone. Not
+upstreamed by bazel-orfs; carried in MODULE.bazel on yosys's
+single_version_override. Retires at the bump onto a BCR yosys that
+contains 569e454cc.
+
+--- a/backends/aiger2/aiger.cc
++++ b/backends/aiger2/aiger.cc
+@@ -814,13 +814,15 @@
+ 
+ 		// now the guts
+ 		std::vector<std::pair<SigBit, int>> outputs;
+-		for (auto w : top->wires())
++		for (auto id : top->ports) {
++			Wire *w = top->wire(id);
+ 			if (w->port_output) {
+ 				for (auto bit : SigSpec(w))
+ 					// Each call to eval_po eventually reaches emit_gate and
+ 					// encode which writes to f.
+ 					outputs.push_back({bit, eval_po(bit)});
+ 			}
++		}
+ 
+ 		auto data_end = f->tellp();
+ 

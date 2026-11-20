@@ -1,0 +1,61 @@
+yosys: memory_bmux2rom numbers its ROMs within their module
+
+proc_rom and memory_bmux2rom named each ROM they create, its
+$memrd/$meminit cells and proc_rom's read-data wire with NEW_ID:
+`$auto$proc_rom.cc:155:do_switch$12665`. The number is the design-wide
+autoidx, so it depends on every object yosys created before it anywhere
+in the design. The same module elaborated alone, or once per instance,
+or after a module with ROMs of its own, gets differently named ROMs,
+and a flow that synthesizes a module on its own and inside its design
+gets different netlists and memory lists for it.
+
+A ROM is now numbered within its module, in the order the pass creates
+them there: `$auto$proc_rom$<n>` and `$auto$memory_bmux2rom$<n>`, the
+first n whose name and derived names ($rdata, $rd, $init) are free in
+the module. Nothing else's naming changes.
+
+Upstream candidate for YosysHQ/yosys; not filed. Carried by bazel-orfs
+as four patches, one file each (Bazel applies one file per patch):
+yosys-0003..0006. Retires at the bump onto a BCR yosys that names ROMs
+within their module.
+
+--- a/passes/memory/memory_bmux2rom.cc
++++ b/passes/memory/memory_bmux2rom.cc
+@@ -46,6 +46,18 @@ struct MemoryBmux2RomPass : public Pass {
+ 		extra_args(args, argidx, design);
+ 
+ 		for (auto module : design->selected_modules()) {
++			// A ROM is numbered within its module, not by the design-wide
++			// autoidx, so the same module gets the same names whatever else
++			// the design holds.
++			int next_rom = 0;
++			auto rom_id = [&]() {
++				while (true) {
++					std::string id = stringf("$auto$memory_bmux2rom$%d", next_rom++);
++					if (!module->count_id(id) && !module->count_id(id + "$rd") &&
++							!module->count_id(id + "$init"))
++						return id;
++				}
++			};
+ 			for (auto cell : module->selected_cells()) {
+ 				if (cell->type != ID($bmux))
+ 					continue;
+@@ -60,7 +72,8 @@ struct MemoryBmux2RomPass : public Pass {
+ 					continue;
+ 
+ 				// Ok, let's do it.
+-				Mem mem(module, NEW_ID, width, 0, 1 << abits);
++				std::string id = rom_id();
++				Mem mem(module, id, width, 0, 1 << abits);
+ 				mem.attributes = cell->attributes;
+ 
+ 				MemInit init;
+@@ -78,6 +91,8 @@ struct MemoryBmux2RomPass : public Pass {
+ 				mem.rd_ports.push_back(std::move(rd));
+ 
+ 				mem.emit();
++				module->rename(mem.inits[0].cell, id + "$init");
++				module->rename(mem.rd_ports[0].cell, id + "$rd");
+ 				module->remove(cell);
+ 			}
+ 		}

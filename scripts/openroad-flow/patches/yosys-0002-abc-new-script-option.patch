@@ -1,0 +1,46 @@
+yosys: abc_new tells a given -script from "-script" in a path
+
+abc_new collects every option that takes a value, values included,
+into one string and decided whether -script was given by searching that
+string for "-script". A liberty path under a directory such as
+OpenROAD-flow-scripts, a -constr path or a -dont_use name containing
+"-script" therefore switched off abc_new's default script: abc9_exe
+fell back to abc9.script.default, a LUT script (&if -v; &mfs), and
+mapping to cells failed ("ABC returned unmapped node") or produced no
+mapping ("Missing mapping (no 'M' section)").
+
+The argument loop now records that it parsed -script.
+
+Reported as YosysHQ/yosys#6320, with a reproducer; YosysHQ asks for
+issues, not LLM-written fixes, so this patch is carried here only.
+test/yosys_abc_new_script_path reproduces it. bazel-orfs's own paths
+never contain "-script", so no flow here changes; ORFS's layout does,
+which is what ORFS #4664's CI tripped over. Retires at the bump onto a
+BCR yosys that fixes #6320.
+
+--- a/passes/techmap/abc_new.cc
++++ b/passes/techmap/abc_new.cc
+@@ -100,11 +100,14 @@
+ 		std::string run_from, run_to;
+ 		cleanup = true;
+ 		size_t argidx;
++		bool script_given = false;
+ 		for (argidx = 1; argidx < args.size(); argidx++) {
+ 			if (args[argidx] == "-exe" || args[argidx] == "-script" ||
+ 					args[argidx] == "-D" ||
+ 					args[argidx] == "-constr" || args[argidx] == "-dont_use" ||
+ 					args[argidx] == "-liberty" || args[argidx] == "-genlib") {
++				if (args[argidx] == "-script")
++					script_given = true;
+ 				abc_exe_options += " " + args[argidx] + " " + args[argidx + 1];
+ 				argidx++;
+ 			} else if (args[argidx] == "-run" && argidx + 1 < args.size()) {
+@@ -122,7 +125,7 @@
+ 		extra_args(args, argidx, d);
+ 
+ 		// If no script provided, use a default.
+-		if (abc_exe_options.find("-script") == std::string::npos) {
++		if (!script_given) {
+ 			d->scratchpad_set_string("abc9.script", RTLIL::constpad["abc_new.script.speed"]);
+ 		}
+ 

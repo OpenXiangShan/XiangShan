@@ -1,0 +1,7 @@
+# XiangShan's CommitIDModule bakes this into a CSR; upstream's mill build
+# writes it by running git in the source tree. Here it is written out:
+# the commit this branch is based on, as bazel-orfs wrote it for the same
+# commit, so the Verilog matches the reference run byte for byte. A
+# rebase updates it (README.md, "Things to fix").
+SHA=aa6b52033add528a504bdb2c2b726100d89f070a
+dirty=0

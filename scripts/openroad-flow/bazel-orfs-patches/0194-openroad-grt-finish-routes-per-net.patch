@@ -1,0 +1,225 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 5/5] grt: finish each route as FastRoute hands it over
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FastRoute hands a route over as one segment per GCell step, and
+findRouting then added the remaining guides, connected the pad pins and
+merged the segments, net by net, only once every net's route had been
+built: for a moment the unmerged segments of all the nets existed at
+once. On a design with 194 m of wire and 121 M vias that is on the order
+of 15 GB, where global route peaks.
+
+getRoutes now calls a finisher for each net's route as it builds it, and
+findRouting finishes the route there. Each step reads only its own net:
+the routes are the same. The nets FastRoute did not route are finished
+afterwards, as before.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/include/grt/GlobalRouter.h       |  6 ++
+ openroad/grt/src/GlobalRouter.cpp             | 99 ++++++++++++++-----
+ .../grt/src/fastroute/include/FastRoute.h     | 10 ++
+ openroad/grt/src/fastroute/src/FastRoute.cpp  |  3 +
+ 4 files changed, 91 insertions(+), 27 deletions(-)
+
+diff --git a/openroad/grt/include/grt/GlobalRouter.h b/openroad/grt/include/grt/GlobalRouter.h
+index 823154b..7038dcd 100644
+--- a/openroad/grt/include/grt/GlobalRouter.h
++++ b/openroad/grt/include/grt/GlobalRouter.h
+@@ -527,6 +527,12 @@ class GlobalRouter
+                           int min_routing_layer,
+                           int max_routing_layer);
+   void connectPadPins(NetRouteMap& routes);
++  void connectPadPins(odb::dbNet* db_net, GRoute& route);
++  bool needsRemainingGuides(Net* net);
++  void addRemainingGuides(Net* net,
++                          GRoute& route,
++                          int min_routing_layer,
++                          int max_routing_layer);
+   bool segmentsConnect(const GSegment& seg0,
+                        const GSegment& seg1,
+                        GSegment& new_seg,
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index b5b0cf8..3a10f74 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -907,13 +907,43 @@ NetRouteMap GlobalRouter::findRouting(std::vector<Net*>& nets,
+   NetRouteMap routes;
+   if (!nets.empty()) {
+     fastroute_->setAllowCongestion(allow_congestion_);
++    // Each route is finished (its remaining guides, pad pin connections,
++    // merged segments) as FastRoute hands it over in one segment per GCell,
++    // so the unmerged segments of every net never exist at once. Each step
++    // reads only its own net, so the routes are those of finishing all the
++    // nets afterwards.
++    std::unordered_set<odb::dbNet*> to_finish;
++    for (Net* net : nets) {
++      to_finish.insert(net->getDbNet());
++    }
++    auto finish = [&](odb::dbNet* db_net, GRoute& route) {
++      Net* net = db_net_map_[db_net];
++      if (to_finish.erase(db_net) != 0 && needsRemainingGuides(net)) {
++        addRemainingGuides(net, route, min_routing_layer, max_routing_layer);
++      }
++      connectPadPins(db_net, route);
++      mergeSegments(net->getPins(), route);
++    };
++    // The finisher captures this frame: cleared on every exit, a throw too.
++    struct ClearFinisher
++    {
++      FastRouteCore* fastroute;
++      ~ClearFinisher() { fastroute->setRouteFinisher(nullptr); }
++    } clear_finisher{fastroute_};
++    fastroute_->setRouteFinisher(finish);
+     routes = fastroute_->run();
+-    addRemainingGuides(routes, nets, min_routing_layer, max_routing_layer);
+-    connectPadPins(routes);
+-    for (auto& net_route : routes) {
+-      std::vector<Pin>& pins = db_net_map_[net_route.first]->getPins();
+-      GRoute& route = net_route.second;
+-      mergeSegments(pins, route);
++    // The nets FastRoute did not route, local nets among them.
++    for (Net* net : nets) {
++      odb::dbNet* db_net = net->getDbNet();
++      if (!to_finish.contains(db_net)) {
++        continue;
++      }
++      if (needsRemainingGuides(net)) {
++        GRoute& route = routes[db_net];
++        addRemainingGuides(net, route, min_routing_layer, max_routing_layer);
++        connectPadPins(db_net, route);
++        mergeSegments(net->getPins(), route);
++      }
+     }
+   }
+ 
+@@ -4274,34 +4304,49 @@ void GlobalRouter::addRemainingGuides(NetRouteMap& routes,
+                                       int max_routing_layer)
+ {
+   for (Net* net : nets) {
+-    int min_layer, max_layer;
+-    getNetLayerRange(net->getDbNet(), min_layer, max_layer);
+-    odb::dbTechLayer* max_tech_layer
+-        = db_->getTech()->findRoutingLayer(max_layer);
+-    if (net->getNumPins() > 1
+-        && (!net->hasWires() || net->hasStackedVias(max_tech_layer))) {
+-      odb::dbNet* db_net = net->getDbNet();
+-      GRoute& route = routes[db_net];
+-      if (route.empty()) {
+-        addGuidesForLocalNets(
+-            db_net, route, min_routing_layer, max_routing_layer);
+-      } else {
+-        connectTopLevelPins(db_net, route);
+-      }
++    if (needsRemainingGuides(net)) {
++      addRemainingGuides(
++          net, routes[net->getDbNet()], min_routing_layer, max_routing_layer);
+     }
+   }
+ }
+ 
++bool GlobalRouter::needsRemainingGuides(Net* net)
++{
++  int min_layer, max_layer;
++  getNetLayerRange(net->getDbNet(), min_layer, max_layer);
++  odb::dbTechLayer* max_tech_layer
++      = db_->getTech()->findRoutingLayer(max_layer);
++  return net->getNumPins() > 1
++         && (!net->hasWires() || net->hasStackedVias(max_tech_layer));
++}
++
++void GlobalRouter::addRemainingGuides(Net* net,
++                                      GRoute& route,
++                                      int min_routing_layer,
++                                      int max_routing_layer)
++{
++  odb::dbNet* db_net = net->getDbNet();
++  if (route.empty()) {
++    addGuidesForLocalNets(db_net, route, min_routing_layer, max_routing_layer);
++  } else {
++    connectTopLevelPins(db_net, route);
++  }
++}
++
+ void GlobalRouter::connectPadPins(NetRouteMap& routes)
+ {
+   for (auto& net_route : routes) {
+-    odb::dbNet* db_net = net_route.first;
+-    GRoute& route = net_route.second;
+-    Net* net = getNet(db_net);
+-    if (pad_pins_connections_.contains(db_net) && net->getNumPins() > 1) {
+-      for (GSegment& segment : pad_pins_connections_[db_net]) {
+-        route.push_back(segment);
+-      }
++    connectPadPins(net_route.first, net_route.second);
++  }
++}
++
++void GlobalRouter::connectPadPins(odb::dbNet* db_net, GRoute& route)
++{
++  Net* net = getNet(db_net);
++  if (pad_pins_connections_.contains(db_net) && net->getNumPins() > 1) {
++    for (GSegment& segment : pad_pins_connections_[db_net]) {
++      route.push_back(segment);
+     }
+   }
+ }
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index 40c2432..5f4622e 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -5,6 +5,7 @@
+ 
+ #include <array>
+ #include <cstdint>
++#include <functional>
+ #include <limits>
+ #include <memory>
+ #include <set>
+@@ -289,6 +290,14 @@ class FastRouteCore
+   void initBlockedIntervals(std::vector<int>& track_space);
+   void initAuxVar();
+   NetRouteMap run();
++  // Called for each net's route as getRoutes builds it, with the route still
++  // in one segment per GCell, so the caller can finish it (merge it) before
++  // the next net's is built; empty for none.
++  using RouteFinisher = std::function<void(odb::dbNet*, GRoute&)>;
++  void setRouteFinisher(RouteFinisher finisher)
++  {
++    route_finisher_ = std::move(finisher);
++  }
+   int totalOverflow() const { return total_overflow_; }
+   bool has2Doverflow() const { return has_2D_overflow_; }
+   int getSnapshotBatchCount() const { return snapshot_batch_count_; }
+@@ -1069,6 +1078,7 @@ class FastRouteCore
+   bool snapshot_cleanup_active_ = false;
+   bool has_non_soft_ndr_nets_ = false;
+   std::string backing_file_;
++  RouteFinisher route_finisher_;
+   FileBacking backing_;
+   int detour_penalty_;
+ };
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index 92d5bd3..645df25 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -1573,6 +1573,9 @@ NetRouteMap FastRouteCore::getRoutes()
+         }
+       }
+     }
++    if (route_finisher_) {
++      route_finisher_(db_net, route);
++    }
+   }
+ 
+   return routes;
+-- 
+2.53.0
+

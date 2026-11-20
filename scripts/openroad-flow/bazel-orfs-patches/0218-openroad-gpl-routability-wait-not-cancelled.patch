@@ -1,0 +1,330 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Tue, 10 Nov 2026 19:49:28 +0100
+Subject: [PATCH 2/2] gpl: a waiting routability pass is not cancelled by
+ convergence
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Routability-driven global placement runs its routability pass once the
+average overflow is at or below routability_check_overflow (0.30 by
+default) and the cells have settled: in every region, the displacement
+per iteration is at or below 60% of its running peak. While the
+overflow gate is open and the cells are still moving,
+NesterovPlace::runRoutability logs GPL-0099 once and waits. The
+convergence test that follows it in the same iteration does not look at
+the wait: it ends the placement once every region's overflow is at or
+below the target overflow (0.10 by default). A wait still open on that
+iteration ends with the placement, and global placement finishes with
+exit status 0 without the pending routability pass and without the
+inflation it would have made. The log shows GPL-0099 and then the usual
+end messages from GPL-1001 on, with no GPL-0103 and no GPL-0040 after
+the GPL-0099.
+
+On a large hierarchical design (XiangShan's XSTile parent, in
+bazel-orfs), 1.8 million movable instances, the log has GPL-0099 at
+iter = 474, with the cells at 83% of their peak displacement, and
+GPL-1001 at iteration 550, converged at overflow 0.0936 with no pass
+at all. A later build of that parent did the same: GPL-0099 at
+iter = 438 at 91%, GPL-1001 at iteration 507, no pass. Another run of
+the same design closed seven waits at overflows between 0.118 and
+0.137, just above the target, so on a design of that size the race is
+close.
+
+A wait still open on the iteration the placement would converge now
+ends there, and the pass runs on that placement. GPL-0124 says so, with
+the overflow, the target and how fast the cells are still moving.
+"Would converge" is NesterovBase::isConvergenceDue(), the test
+checkConvergence() itself uses, asked of every region as isConverged()
+asks it. A wait ends this way only when a routability snapshot is
+saved, since the pass goes back to it when it finds congestion. When
+that pass reverts, the previous change keeps the placement from
+converging on the overflow of the placement it replaced, and it goes
+down from the snapshot again.
+
+What does not change: a design whose cells settle before the overflow
+reaches the target runs its passes where it ran them before.
+
+What changes beyond the pass, and what is left:
+
+- A pass that ended a wait at the target and reverted sends the
+  placement down from the snapshot again and, if the cells are still
+  moving at the routability gate then, down to the target once more
+  before the next pass. The passes are bounded as before by RouteBase:
+  the congestion target, no improvement, the density limit, the
+  inflation budget (GPL-0097) and the revert limit.
+- Only the iterations from the snapshot down to the routability gate
+  extend the iteration limit. Each descent from the gate to the target
+  counts against it, so a design that converged near its limit with no
+  pass can now stop at GPL-1010 above the target.
+- The timing-driven iterations are keyed to overflow thresholds that
+  are each used once (64 and 20 percent by default). A pass after the
+  last of them, which a wait ended at the target always is with the
+  default thresholds and target, is followed by a descent without one.
+  That is so today for a wait that closes below the last threshold.
+- A routability-driven run that is already at or below the target on
+  its first iteration, as a placement that starts from a placed design
+  can be, opens the wait and ends it on that iteration: GPL-0099, then
+  GPL-0124 after 0 extra iterations. It runs the pass where it
+  converged with none before.
+- A wait can still end with no pass: when the placement ends for
+  another reason, the iteration limit (GPL-1010), a divergence that
+  stops it (GPL-0997, GPL-0307) or an invalid gradient or step
+  (GPL-0306, GPL-0305); when it converges with no routability snapshot
+  saved, which takes a snapshot overflow set below the target
+  overflow; and when a divergence recovery (GPL-0112) goes back to the
+  snapshot, after which the wait opens again.
+- With several regions, a region that converges before its cells settle
+  keeps its last displacement ratio, and the settle test asks every
+  region. No later wait settles then, and every later pass comes from a
+  wait ended at the target (GPL-0124). Before, such a run had no
+  further passes at all.
+- A region that reaches the target before the others is locked by
+  checkConvergence() as before.
+
+Two tests drive the real controller in the main loop's order:
+routabilitySnapshot(), runRoutability(), isConverged().
+TimingRepairIntegrationTest.OpenSettleWaitStillRunsRoutabilityAtTargetOverflow:
+the wait opens at the routability gate with the cells at their peak
+displacement. The average at the target with a region still above it
+leaves the wait open; the fixture's one region stands in for that
+region, and no test has two, so none tells every region from the
+first. With every region at the target and the cells still moving,
+without the change the pass count stays 0 and the placement converges;
+with it the pass runs, inflates and reverts, and the placement goes on.
+TimingRepairIntegrationTest.OpenSettleWaitWithoutSnapshotDoesNotRunRoutability:
+with a snapshot overflow below the target no snapshot is taken, the
+wait stays open at the target and the placement converges with no pass.
+It holds without the change too; it pins the snapshot term of the new
+condition.
+
+Of the other tests,
+PowerDrivenPlacement.WorksWithTimingAndRoutabilityDriven expects a pass
+and keeps it: up to a run's first pass nothing changes. No compared
+regression golden prints GPL-0099: simple01-rd to simple04-rd run one
+pass with no wait, so none changes. upf_aes, place_ios_rd and
+congestion_inflation_default are the pass/fail tests that run
+routability-driven placement; the metrics-checked flow tests
+(test/flow.tcl) run it too and were not run.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/nesterovPlace.cpp            | 55 +++++++++---
+ openroad/gpl/src/nesterovPlace.h              |  3 +
+ .../test/congestion_buffers_timing_test.cpp   | 86 +++++++++++++++++++
+ 3 files changed, 132 insertions(+), 12 deletions(-)
+
+diff --git a/openroad/gpl/src/nesterovPlace.cpp b/openroad/gpl/src/nesterovPlace.cpp
+index bc16347..076b14e 100644
+--- a/openroad/gpl/src/nesterovPlace.cpp
++++ b/openroad/gpl/src/nesterovPlace.cpp
+@@ -941,8 +941,10 @@ void NesterovPlace::runRoutability(int iter,
+   // placement that no longer exists by the time it lands. Wait for the motion
+   // to come off its peak as well.
+   //
+-  // This can only ever delay the trigger, so a design already settled at its
+-  // overflow gate is unaffected.
++  // The wait only ever delays the pass: a design already settled at its
++  // overflow gate runs it there. Reaching the target overflow does not cancel
++  // a waiting pass either: a wait still open on the iteration the placement
++  // would converge ends there, and the pass runs on that placement.
+   const bool is_routability_active
+       = npVars_.routability_driven_mode && is_routability_need_
+         && average_overflow_unscaled_ <= npVars_.routability_end_overflow;
+@@ -964,17 +966,36 @@ void NesterovPlace::runRoutability(int iter,
+                NesterovBase::getSettleFraction() * 100.0f);
+   }
+ 
+-  if (is_routability_settled) {
++  // A pass can only revert to a saved snapshot, hence the third term.
++  const bool is_wait_ended_by_convergence
++      = is_routability_active && !is_routability_settled
++        && is_routability_snapshot_saved_ && isConvergenceDue();
++
++  if (is_routability_settled || is_wait_ended_by_convergence) {
+     if (routability_settle_wait_start_iter_ != -1) {
+-      log_->info(GPL,
+-                 103,
+-                 "Routability end extension finished at iter = {} after {} "
+-                 "extra iterations: overflow {:.4f}, cells moving at {:.0f}% "
+-                 "of peak displacement.",
+-                 iter + 1,
+-                 iter - routability_settle_wait_start_iter_,
+-                 average_overflow_unscaled_,
+-                 getWorstSettleRatio() * 100.0f);
++      if (is_routability_settled) {
++        log_->info(GPL,
++                   103,
++                   "Routability end extension finished at iter = {} after {} "
++                   "extra iterations: overflow {:.4f}, cells moving at {:.0f}% "
++                   "of peak displacement.",
++                   iter + 1,
++                   iter - routability_settle_wait_start_iter_,
++                   average_overflow_unscaled_,
++                   getWorstSettleRatio() * 100.0f);
++      } else {
++        log_->info(GPL,
++                   124,
++                   "Routability end extension ended at iter = {} after {} "
++                   "extra iterations: overflow {:.4f} reached the target "
++                   "overflow {:.4f} before the cells settled, at {:.0f}% of "
++                   "peak displacement.",
++                   iter + 1,
++                   iter - routability_settle_wait_start_iter_,
++                   average_overflow_unscaled_,
++                   npVars_.targetOverflow,
++                   getWorstSettleRatio() * 100.0f);
++      }
+       routability_settle_wait_start_iter_ = -1;
+     }
+ 
+@@ -1147,6 +1168,16 @@ bool NesterovPlace::isConverged(int gpl_iter_count,
+   return false;
+ }
+ 
++bool NesterovPlace::isConvergenceDue() const
++{
++  for (const auto& nb : nbVec_) {
++    if (!nb->isConvergenceDue()) {
++      return false;
++    }
++  }
++  return true;
++}
++
+ NesterovBase* NesterovPlace::getTopLevelNB() const
+ {
+   if (nbVec_.empty()) {
+diff --git a/openroad/gpl/src/nesterovPlace.h b/openroad/gpl/src/nesterovPlace.h
+index 76b829e..6437ab9 100644
+--- a/openroad/gpl/src/nesterovPlace.h
++++ b/openroad/gpl/src/nesterovPlace.h
+@@ -159,6 +159,9 @@ class NesterovPlace
+   bool isRoutabilityGplIter() const;
+ 
+   bool isConverged(int gpl_iter_count, int routability_gpl_iter_count);
++  // True when isConverged() would end the placement on this iteration; no
++  // side effects.
++  bool isConvergenceDue() const;
+   // Re-derives densityPenalty_ for every region via
+   // NesterovBase::updateDensityPenaltyFromRatio() - the same formula
+   // NesterovBase::initDensity2() uses at true init, just re-triggered
+diff --git a/openroad/gpl/test/congestion_buffers_timing_test.cpp b/openroad/gpl/test/congestion_buffers_timing_test.cpp
+index 4697298..81552b3 100644
+--- a/openroad/gpl/test/congestion_buffers_timing_test.cpp
++++ b/openroad/gpl/test/congestion_buffers_timing_test.cpp
+@@ -301,6 +301,15 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
+     }
+   }
+ 
++  // Sets only the regions' overflow, leaving their average: with several
++  // regions, one can be above the target when the average is at it.
++  void setRegionOverflow(float overflow)
++  {
++    for (const auto& nb : nb_vec_) {
++      nb->sum_overflow_unscaled_ = overflow;
++    }
++  }
++
+   // Cells moving at the given fraction of their peak displacement.
+   void setDisplacementRatio(float ratio)
+   {
+@@ -319,6 +328,10 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
+     ASSERT_TRUE(np_->is_routability_snapshot_saved_);
+   }
+ 
++  bool routabilitySnapshotSaved() const
++  {
++    return np_->is_routability_snapshot_saved_;
++  }
+   bool placementSettled() const { return np_->isPlacementSettled(); }
+   // True when the last RUDY average, computed by a pass or at convergence, is
+   // below the congestion target. A pass that finds it so does not revert.
+@@ -588,6 +601,79 @@ TEST_F(TimingRepairIntegrationTest,
+       << "a measured placement at the target overflow must converge";
+ }
+ 
++// The settle wait holds the routability pass back while the cells are still
++// moving. Reaching the target overflow must not cancel the pass: a wait still
++// open on the iteration the placement would converge ends there, and the pass
++// runs on that placement.
++TEST_F(TimingRepairIntegrationTest,
++       OpenSettleWaitStillRunsRoutabilityAtTargetOverflow)
++{
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  // Through the routability gate with the cells at their peak displacement:
++  // the pass waits.
++  setDisplacementRatio(1.0f);
++  setOverflow(options_.routabilityCheckOverflow);
++  ASSERT_FALSE(placementSettled());
++  ASSERT_FALSE(runRoutabilityThenConvergence(1, current_a));
++  ASSERT_EQ(ordinary_iterations_, 0);
++  ASSERT_EQ(settleWaitStart(), 1);
++
++  // The average at the target with a region still above it is not
++  // convergence, which takes every region: the wait stays open. The fixture's
++  // one region stands in for the region above the target.
++  setOverflow(options_.overflow);
++  setRegionOverflow(1.5f * options_.overflow);
++  ASSERT_FALSE(runRoutabilityThenConvergence(2, current_a));
++  ASSERT_EQ(ordinary_iterations_, 0)
++      << "the wait must not end before every region is at the target";
++  ASSERT_EQ(settleWaitStart(), 1);
++
++  // Still moving when every region reaches the target: the iteration the main
++  // loop would end the placement on.
++  setOverflow(options_.overflow);
++  ASSERT_FALSE(placementSettled());
++  const bool converged = runRoutabilityThenConvergence(3, current_a);
++  ASSERT_EQ(ordinary_iterations_, 1)
++      << "reaching the target overflow must not cancel the waiting pass";
++  EXPECT_EQ(settleWaitStart(), -1);
++  // The fixture's wire width makes a pass find congestion, so this one
++  // inflated cells and went back to the snapshot, which has yet to be placed.
++  ASSERT_TRUE(routabilityNeeded());
++  ASSERT_GT(rb_->getTotalInflation(), 0);
++  EXPECT_FALSE(converged)
++      << "the placement must not end on the iteration of a pass that reverted";
++}
++
++// A pass that finds congestion goes back to the routability snapshot, so a
++// wait is only ended at the target overflow when there is one. Without a
++// snapshot the wait stays open and the placement converges with no pass.
++TEST_F(TimingRepairIntegrationTest,
++       OpenSettleWaitWithoutSnapshotDoesNotRunRoutability)
++{
++  // A snapshot overflow below the target overflow: no snapshot is taken.
++  options_.routabilitySnapshotOverflow = 0.5f * options_.overflow;
++  makePlacer();
++  float current_a = 1.0f;
++
++  setDisplacementRatio(1.0f);
++  setOverflow(options_.routabilityCheckOverflow);
++  ASSERT_FALSE(runRoutabilityThenConvergence(1, current_a));
++  ASSERT_EQ(ordinary_iterations_, 0);
++  ASSERT_EQ(settleWaitStart(), 1);
++
++  setOverflow(options_.overflow);
++  ASSERT_FALSE(placementSettled());
++  const bool converged = runRoutabilityThenConvergence(2, current_a);
++  ASSERT_FALSE(routabilitySnapshotSaved());
++  EXPECT_EQ(ordinary_iterations_, 0)
++      << "a pass with no snapshot to go back to must not run";
++  EXPECT_EQ(settleWaitStart(), 1);
++  EXPECT_TRUE(converged);
++}
++
+ TEST_F(TimingRepairIntegrationTest,
+        SynchronousCallbacksPrecedeInflationAndOptimizerInitialization)
+ {
+-- 
+2.53.0
+

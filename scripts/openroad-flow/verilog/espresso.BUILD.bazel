@@ -1,0 +1,29 @@
+"""espresso, the Berkeley two-level logic minimizer.
+
+Chisel's EspressoMinimizer shells out to an executable named `espresso`
+found on PATH, and XiangShan names that minimizer explicitly in its
+vector decoder and its rename compressor. Without it, elaboration stops
+with EspressoNotFoundException.
+
+Upstream builds with CMake. This is thirty flat C files, so a cc_binary
+over a glob builds the same tool with no build system in between --
+which also keeps //:host_tools happy, since cmake is not a thing a
+consumer of this repository may be asked to have.
+"""
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_binary(
+    # The target is under bin/ because the source directory is already
+    # called espresso/ and a target may not collide with it.
+    name = "bin/espresso",
+    srcs = glob([
+        "espresso/*.c",
+        "espresso/*.h",
+    ]),
+    # Vintage Berkeley C: K&R-era idioms throughout, and the warnings are
+    # not ours to fix.
+    copts = ["-w"],
+)

@@ -1,0 +1,439 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 16 Nov 2026 11:43:40 +0100
+Subject: [PATCH] gpl: after a revert to the minimum, the area is the cells' as
+ they are
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+revertToMinCongestion() puts the cells back at the sizes of the
+routability pass that measured the least congestion, and the target
+density, fillers and net weights with them. It left the standard-cell
+area, which only updateAreas() computes, as it was: the sum of the
+sizes the cells had just left. Every way out of the routability loop
+that reverts leaves it so:
+
+- GPL-0053, GPL-0091 and GPL-0054 return before routability()'s
+  updateAreas() loop and keep the sum from before the last pass
+  inflated;
+- GPL-0097 runs that loop and then reverts, and keeps the last pass's
+  inflated sum;
+- a divergence recovery (GPL-0112) reverts between passes.
+
+The bins measure the reverted cells, since the revert ends in
+updateDensitySize(), but getOverflowDenominator() divides by the stale
+area. From the revert on, every overflow reads off by the ratio of the
+two areas, and with it the wirelength coefficient, the timing-driven
+thresholds, the convergence test and the GPL-1002 and GPL-1014
+reports. On XiangShan's XSTile parent the two areas were 279,365 and
+259,295 um^2, a ratio of 1.077: it converged at a reported overflow of
+0.0980 that was 0.106, and GPL-1014 reported +7.74 % of area with no
+inflation left.
+
+revertToMinCongestion() now calls updateAreas() and sets the movable
+area from the white space and the restored target density, as
+cutFillerCells() does, before updateDensitySize().
+
+What changes: every placement whose routability phase reverts to its
+minimum, from the revert on. Placements with no pass, or whose passes
+meet the congestion target (GPL-0090), do not revert and do not change.
+
+RevertToMinimumTest.MeasuresOverflowOnTheCellsAsTheyAre, in the new
+routability_minimum_test, drives the real controller on gcd in the
+main loop's order (routabilitySnapshot(), runRoutability(),
+isConverged()), with friend access standing in for the Nesterov steps
+between the passes. Its minimum is pass 2, and the phase ends through
+GPL-0054 in one case and GPL-0097 in the other. Without the change the
+standard-cell area is that of the sizes the cells left (+14 % and +8 %),
+and so is the overflow's denominator.
+
+No compared regression golden prints a revert: simple01-rd to
+simple04-rd run one pass that ends in GPL-0090. Of the pass/fail tests
+that run routability, upf_aes changes: its phase ends through GPL-0097
+with its minimum at pass 9 of 10. GPL-1014 now reports +25.71 %, the
+inflation GPL-1012 reports, instead of +30.00 % for the sizes of pass
+10; the top region converges one iteration sooner at a final weighted
+congestion of 1.0500 instead of 1.0678, and HPWL is +0.06 %.
+place_ios_rd goes back to its minimum through GPL-0054, after passes
+that inflated nothing, and its log is byte-identical, as are
+congestion_inflation_default's and place_ios_td's.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/nesterovBase.h               |   1 +
+ openroad/gpl/src/nesterovPlace.h              |   1 +
+ openroad/gpl/src/routeBase.cpp                |   8 +
+ openroad/gpl/src/routeBase.h                  |   1 +
+ openroad/gpl/test/BUILD                       |  19 ++
+ .../gpl/test/routability_minimum_test.cpp     | 269 ++++++++++++++++++
+ 6 files changed, 299 insertions(+)
+ create mode 100644 openroad/gpl/test/routability_minimum_test.cpp
+
+diff --git a/openroad/gpl/src/nesterovBase.h b/openroad/gpl/src/nesterovBase.h
+index f6697f1..dd39182 100644
+--- a/openroad/gpl/src/nesterovBase.h
++++ b/openroad/gpl/src/nesterovBase.h
+@@ -1384,6 +1384,7 @@ class NesterovBase
+ 
+  private:
+   friend class TimingRepairIntegrationTest;
++  friend class RoutabilityMinimumTest;
+ 
+   NesterovBaseVars nbVars_;
+   std::shared_ptr<PlacerBase> pb_;
+diff --git a/openroad/gpl/src/nesterovPlace.h b/openroad/gpl/src/nesterovPlace.h
+index 6437ab9..676883e 100644
+--- a/openroad/gpl/src/nesterovPlace.h
++++ b/openroad/gpl/src/nesterovPlace.h
+@@ -108,6 +108,7 @@ class NesterovPlace
+ 
+  private:
+   friend class TimingRepairIntegrationTest;
++  friend class RoutabilityMinimumTest;
+ 
+   void updateIterGraphics(int iter,
+                           const std::string& reports_dir,
+diff --git a/openroad/gpl/src/routeBase.cpp b/openroad/gpl/src/routeBase.cpp
+index 7d6ed1e..e1db0e1 100644
+--- a/openroad/gpl/src/routeBase.cpp
++++ b/openroad/gpl/src/routeBase.cpp
+@@ -305,6 +305,14 @@ void RouteBase::revertToMinCongestion()
+ 
+     nbVec_[j]->setTargetDensity(minRcTargetDensity_[j]);
+     nbVec_[j]->restoreRemovedFillers();
++    // The cells are back at the minimum's sizes, and the overflow is a
++    // fraction of their area: without this it would be measured against the
++    // sizes the cells just left. The same bookkeeping routability() does
++    // after inflating.
++    nbVec_[j]->updateAreas();
++    nbVec_[j]->setMovableArea(static_cast<int64_t>(
++        nbVec_[j]->getWhiteSpaceArea() * nbVec_[j]->getTargetDensity()));
++    nbVec_[j]->checkConsistency();
+     nbVec_[j]->updateDensitySize();
+     accumulatedInflatedAreaDelta_[j] = minRcInflatedAreaDelta_[j];
+   }
+diff --git a/openroad/gpl/src/routeBase.h b/openroad/gpl/src/routeBase.h
+index 2a894e5..5b77c46 100644
+--- a/openroad/gpl/src/routeBase.h
++++ b/openroad/gpl/src/routeBase.h
+@@ -214,6 +214,7 @@ class RouteBase
+ 
+  private:
+   friend class TimingRepairIntegrationTest;
++  friend class RoutabilityMinimumTest;
+ 
+   RouteBaseVars rbVars_;
+   odb::dbDatabase* db_ = nullptr;
+diff --git a/openroad/gpl/test/BUILD b/openroad/gpl/test/BUILD
+index ace4726..631410b 100644
+--- a/openroad/gpl/test/BUILD
++++ b/openroad/gpl/test/BUILD
+@@ -401,6 +401,25 @@ cc_test(
+     ],
+ )
+ 
++# A routability phase that ends by going back to the pass with the least
++# congestion, on gcd, driving the real controller.
++cc_test(
++    name = "routability_minimum_test",
++    srcs = ["routability_minimum_test.cpp"],
++    data = ["gcd.def"],
++    env = GPU_ENV_OFF,
++    deps = [
++        "//openroad/dbSta",
++        "//openroad/gpl:gpl_impl",
++        "//openroad/grt",
++        "//openroad/odb/src/db",
++        "//openroad/tst:integrated_fixture",
++        "//openroad/utl",
++        "@googletest//:gtest",
++        "@googletest//:gtest_main",
++    ],
++)
++
+ cc_test(
+     name = "overflow_test",
+     srcs = ["overflow_test.cpp"],
+diff --git a/openroad/gpl/test/routability_minimum_test.cpp b/openroad/gpl/test/routability_minimum_test.cpp
+new file mode 100644
+index 0000000..1e235cb
+--- /dev/null
++++ b/openroad/gpl/test/routability_minimum_test.cpp
+@@ -0,0 +1,269 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "gpl/Replace.h"
++#include "grt/Rudy.h"
++#include "gtest/gtest.h"
++#include "odb/db.h"
++#include "odb/dbTypes.h"
++#include "odb/geom.h"
++#include "openroad/gpl/src/graphicsNone.h"
++#include "openroad/gpl/src/nesterovBase.h"
++#include "openroad/gpl/src/nesterovPlace.h"
++#include "openroad/gpl/src/placerBase.h"
++#include "openroad/gpl/src/point.h"
++#include "openroad/gpl/src/routeBase.h"
++#include "tst/IntegratedFixture.h"
++
++namespace gpl {
++
++// A routability phase measures the congestion of one placement per pass and
++// keeps the sizes of the pass that measured the least. These tests drive the
++// real controller in the main loop's order, routabilitySnapshot(),
++// runRoutability() and isConverged(), on gcd with routability on and timing
++// off. Friend access stands in for the Nesterov steps between the passes: it
++// places the cells and sets the overflow the iteration measured on them.
++// RUDY's wire width sets each pass's congestion: a wider wire reads worse.
++class RoutabilityMinimumTest : public tst::IntegratedFixture
++{
++ protected:
++  // A wire width that reads as congested on every placement below.
++  static constexpr int kWidth = 200;
++  // The placements: cell centers on a lattice, in instance order, shifted
++  // right by a number of sites. The routability snapshot's is left of the
++  // passes', and each pass's is its own.
++  static constexpr int kSnapshotShift = -8;
++  static constexpr int kColumns = 17;
++  static constexpr int kSiteWidth = 380;
++  static constexpr int kRowHeight = 2800;
++
++  RoutabilityMinimumTest() : IntegratedFixture(Technology::kNangate45, "") {}
++
++  void SetUp() override
++  {
++    block_ = readDef(getFilePath("_main/openroad/gpl/test/gcd.def"), {lib_});
++    ASSERT_NE(block_, nullptr);
++    const odb::Point center = block_->getCoreArea().center();
++    for (odb::dbInst* inst : block_->getInsts()) {
++      inst->setLocation(center.x(), center.y());
++      inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
++    }
++    sta_->postReadDb(db_.get());
++    sta_->postReadDef(block_);
++    grt_.setMinRoutingLayer(2);
++    grt_.setMaxRoutingLayer(6);
++    options_.routabilityDrivenMode = true;
++    options_.timingDrivenMode = false;
++  }
++
++  void makePlacer()
++  {
++    pbc_ = std::make_shared<PlacerBaseCommon>(
++        db_.get(), PlacerBaseVars(options_), &logger_);
++    pb_vec_.push_back(std::make_shared<PlacerBase>(
++        db_.get(), pbc_, &logger_, false, nullptr));
++    const NesterovBaseVars nb_vars(options_);
++    nbc_ = std::make_shared<NesterovBaseCommon>(
++        nb_vars, pbc_, &logger_, 1, Clusters{});
++    nb_vec_.push_back(
++        std::make_shared<NesterovBase>(nb_vars, pb_vec_[0], nbc_, &logger_));
++    rb_ = std::make_shared<RouteBase>(
++        RouteBaseVars(options_), db_.get(), &grt_, nbc_, nb_vec_, &logger_);
++    np_ = std::make_unique<NesterovPlace>(
++        NesterovPlaceVars(options_, nbc_->getHpwl()),
++        pbc_,
++        nbc_,
++        pb_vec_,
++        nb_vec_,
++        rb_,
++        nullptr,
++        nullptr,
++        nullptr,
++        std::make_unique<GraphicsNone>(),
++        &logger_);
++  }
++
++  NesterovBase& nb() const { return *nb_vec_.front(); }
++
++  // Puts every standard cell on the lattice shifted by `shift` sites, as the
++  // Nesterov steps between two passes would have moved them.
++  void placeCells(const int shift)
++  {
++    NesterovBase& region = nb();
++    const odb::Rect core = block_->getCoreArea();
++    const int x0
++        = core.xMin() + core.dx() / 2 - (kColumns / 2) * 3 * kSiteWidth;
++    const int y0 = core.yMin() + 2 * kRowHeight + kRowHeight / 2;
++    int index = 0;
++    for (size_t i = 0; i < region.nb_gcells_.size(); ++i) {
++      if (!region.nb_gcells_[i]->isStdInstance()) {
++        continue;
++      }
++      const FloatPoint center(
++          x0 + (index % kColumns) * 3 * kSiteWidth + shift * kSiteWidth,
++          y0 + (index / kColumns) * kRowHeight);
++      region.curCoordi_[i] = center;
++      region.curSLPCoordi_[i] = center;
++      ++index;
++    }
++    region.updateGCellDensityCenterLocation(region.curCoordi_);
++    region.updateDensityFieldBin();
++  }
++
++  // What the iteration's updateNextIter() measures, set by hand: the overflow
++  // of the placement as it now is.
++  void measure(const float overflow)
++  {
++    for (const auto& region : nb_vec_) {
++      region->sum_overflow_ = overflow;
++      region->sum_overflow_unscaled_ = overflow;
++      region->is_overflow_stale_ = false;
++    }
++    np_->average_overflow_ = overflow;
++    np_->average_overflow_unscaled_ = overflow;
++    np_->overflow_update_is_stale_ = false;
++  }
++
++  // Cells moving at the given fraction of their peak displacement.
++  void setDisplacementRatio(const float ratio)
++  {
++    for (const auto& region : nb_vec_) {
++      region->peak_coordi_distance_ = 1.0f;
++      region->coordiDistance_ = ratio;
++    }
++  }
++
++  // One iteration of the main loop from the routability snapshot on, with
++  // RUDY at the given wire width. Returns whether the placement converged.
++  bool runIteration(const int width, float& current_a)
++  {
++    grt_.getRudy()->setWireWidth(width);
++    np_->routabilitySnapshot(iter_, current_a, "", passes_, 0);
++    np_->runRoutability(iter_, 0, "", passes_, current_a);
++    return np_->isConverged(iter_++, 0);
++  }
++
++  // Takes the routability snapshot on the snapshot's placement, at the
++  // snapshot overflow, as the main loop does on the way down.
++  void saveRoutabilitySnapshot(float& current_a)
++  {
++    placeCells(kSnapshotShift);
++    measure(options_.routabilitySnapshotOverflow);
++    ASSERT_FALSE(runIteration(kWidth, current_a));
++    ASSERT_TRUE(np_->is_routability_snapshot_saved_);
++    ASSERT_EQ(passes_, 0);
++  }
++
++  bool routabilityNeeded() const { return np_->is_routability_need_; }
++
++  int64_t cellAreaSum() const
++  {
++    int64_t area = 0;
++    for (const auto& cell : nb().getGCells()) {
++      if (cell->isStdInstance()) {
++        area += static_cast<int64_t>(cell->dx()) * cell->dy();
++      }
++    }
++    return area;
++  }
++
++  PlaceOptions options_;
++  std::shared_ptr<PlacerBaseCommon> pbc_;
++  std::shared_ptr<NesterovBaseCommon> nbc_;
++  std::vector<std::shared_ptr<PlacerBase>> pb_vec_;
++  std::vector<std::shared_ptr<NesterovBase>> nb_vec_;
++  std::shared_ptr<RouteBase> rb_;
++  std::unique_ptr<NesterovPlace> np_;
++  int iter_ = 0;
++  int passes_ = 0;
++};
++
++// The ways a routability phase ends by going back to its minimum, with the
++// minimum at a later pass than the first.
++enum class Ending
++{
++  // Three passes in a row do not improve on the minimum (GPL-0054).
++  kNoImprovement,
++  // The inflation budget is spent (GPL-0097). Every third pass improves, so
++  // no three in a row fail to.
++  kBudgetSpent
++};
++
++class RevertToMinimumTest : public RoutabilityMinimumTest,
++                            public ::testing::WithParamInterface<Ending>
++{
++ protected:
++  // Pass 1 is congested and pass 2 less so: an inflation helped. The other
++  // passes read as pass 1 does, except that, when the budget is to end the
++  // phase, every third pass improves on the one three before it.
++  static int widthFor(const Ending ending, const int pass)
++  {
++    if (pass % 3 == 2 && (pass == 2 || ending == Ending::kBudgetSpent)) {
++      return static_cast<int>(2 * kWidth * std::pow(0.9, (pass - 2) / 3));
++    }
++    return 4 * kWidth;
++  }
++};
++
++// After the phase goes back to its minimum the cells have the minimum's
++// sizes, and the overflow from there on is measured against their area, not
++// the area of the sizes they just left.
++TEST_P(RevertToMinimumTest, MeasuresOverflowOnTheCellsAsTheyAre)
++{
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  constexpr int kMaxPasses = 20;
++  int64_t min_area = 0;
++  int min_pass = 0;
++  logger_.teeStringBegin();
++  while (routabilityNeeded() && passes_ < kMaxPasses) {
++    const int pass = passes_ + 1;
++    placeCells(2 * pass);
++    measure(options_.routabilityCheckOverflow);
++    setDisplacementRatio(0.0f);
++    const int64_t area = cellAreaSum();
++    ASSERT_FALSE(runIteration(widthFor(GetParam(), pass), current_a));
++    ASSERT_EQ(passes_, pass) << "every iteration must run a pass";
++    if (rb_->isMinRc()) {
++      min_area = area;
++      min_pass = pass;
++    }
++  }
++  const std::string log = logger_.teeStringEnd();
++  ASSERT_FALSE(routabilityNeeded());
++  ASSERT_NE(
++      log.find(GetParam() == Ending::kNoImprovement ? "GPL-0054" : "GPL-0097"),
++      std::string::npos);
++  ASSERT_NE(log.find("GPL-0089"), std::string::npos)
++      << "the phase must end by going back to its minimum";
++  ASSERT_GE(min_pass, 2);
++
++  const NesterovBase& region = nb();
++  EXPECT_EQ(cellAreaSum(), min_area)
++      << "the cells must have the sizes of pass " << min_pass;
++  EXPECT_EQ(region.getStdInstArea(), cellAreaSum())
++      << "the standard-cell area must be that of the cells as they are";
++  EXPECT_EQ(region.getMovableArea(),
++            static_cast<int64_t>(region.getWhiteSpaceArea()
++                                 * region.getTargetDensity()));
++  EXPECT_FLOAT_EQ(
++      region.getCurrentSumOverflowUnscaled(iter_),
++      region.getOverflowAreaUnscaled() / static_cast<float>(cellAreaSum()))
++      << "the overflow must be a fraction of the cells' area as they are";
++}
++
++INSTANTIATE_TEST_SUITE_P(Endings,
++                         RevertToMinimumTest,
++                         ::testing::Values(Ending::kNoImprovement,
++                                           Ending::kBudgetSpent));
++
++}  // namespace gpl
+-- 
+2.53.0
+

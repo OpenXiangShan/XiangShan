@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oyvind Harboe <oyvind.harboe@zylin.com>
+Date: Wed, 17 Sep 2026 00:00:00 +0000
+Subject: [PATCH] rob: the rename buffer as a register-file module
+
+RenameBuffer keeps 352 entries of about 30 bits in a Reg(Vec), written at
+RenameWidth allocate pointers and read through one-hot selects for walk,
+commit and vcfg: twenty 352:1 read muxes of 30 bits, a 20-minute
+synthesis partition on its own. It is now a RegVecFile (patch 0002's
+utility) named RenameBufferFile, the one-hot selects encoded to addresses
+at the read ports, so a physical flow can replace it by a register-file
+macro from the module name while simulation keeps the behavioural model.
+Same storage and last-connect write semantics.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+---
+diff -ruN a/src/main/scala/xiangshan/backend/rob/Rab.scala b/src/main/scala/xiangshan/backend/rob/Rab.scala
+--- a/src/main/scala/xiangshan/backend/rob/Rab.scala
++++ b/src/main/scala/xiangshan/backend/rob/Rab.scala
+@@ -93,8 +93,19 @@
+   // may shift [0, 2) steps
+   val vcfgPtrOHSeq = Seq.tabulate(2)(vcfgPtrOHShift.left)
+   // Regs
+-  val renameBuffer = Reg(Vec(size, new RenameBufferEntry))
+-  val renameBufferEntries = VecInit((0 until size) map (i => renameBuffer(i)))
++  // The buffer is a register file with explicit ports (utils.RegVecFile):
++  // RenameWidth writes at the allocate pointers, one read per one-hot
++  // pointer the walk, commit and vcfg selects carried. Same storage and
++  // write semantics as the Reg(Vec) it replaces; the one-hot selects are
++  // encoded to addresses at the ports. The module boundary is what lets
++  // a physical flow hand the array to a register-file generator instead
++  // of synthesising RabCommitWidth-way 352:1 read muxes.
++  private val numWalkReads = RabCommitWidth + 1
++  private val numDeqReads = RabCommitWidth + 1
++  private val numVcfgReads = 2
++  val renameBuffer = Module(new RegVecFile(new RenameBufferEntry, size,
++    numRead = numWalkReads + numDeqReads + numVcfgReads, numWrite = RenameWidth, "RenameBufferFile"))
++  renameBuffer.idle()
+ 
+   val vecLoadExcp = Reg(io.fromRob.vecLoadExcp.cloneType)
+ 
+@@ -158,9 +169,12 @@
+ 
+   walkPtr := walkPtrNext
+ 
+-  val walkCandidates   = VecInit(walkPtrOHSeq.map(sel => Mux1H(sel, renameBufferEntries)))
+-  val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+-  val vcfgCandidates   = VecInit(vcfgPtrOHSeq.map(sel => Mux1H(sel, renameBufferEntries)))
++  val walkCandidates   = VecInit(walkPtrOHSeq.zipWithIndex.map { case (sel, i) =>
++    renameBuffer.read(i, OHToUInt(sel)) })
++  val commitCandidates = VecInit(deqPtrOHVec.zipWithIndex.map { case (sel, i) =>
++    renameBuffer.read(numWalkReads + i, OHToUInt(sel)) })
++  val vcfgCandidates   = VecInit(vcfgPtrOHSeq.zipWithIndex.map { case (sel, i) =>
++    renameBuffer.read(numWalkReads + numDeqReads + i, OHToUInt(sel)) })
+ 
+   // update vcfg pointer
+   vcfgPtrOH := (deqPtr + newCommitSize).toOH
+@@ -195,10 +209,12 @@
+   deqPtrVec := deqPtrVecNext
+ 
+   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(realNeedAlloc.take(i))).value))
+-  allocatePtrVec.zip(io.req).zip(realNeedAlloc).map{ case((allocatePtr, req), realNeedAlloc) =>
++  allocatePtrVec.zip(io.req).zip(realNeedAlloc).zipWithIndex.map{ case (((allocatePtr, req), realNeedAlloc), i) =>
+     when(realNeedAlloc){
+-      renameBuffer(allocatePtr).info := req.bits
+-      renameBuffer(allocatePtr).robIdx.foreach(_ := req.bits.robIdx)
++      val entry = Wire(new RenameBufferEntry)
++      entry.info := req.bits
++      entry.robIdx.foreach(_ := req.bits.robIdx)
++      renameBuffer.write(i, allocatePtr, entry)
+     }
+   }
+ 

@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 26 Oct 2026 18:19:42 +0100
+Subject: [PATCH] search: a thread collects its filtered arrivals, Search adds
+ them after the visit
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Search::setVertexArrivals inserted every vertex whose tag group has a
+filter tag into filtered_arrivals_, an id-ordered VertexSet, under
+filtered_arrivals_lock_. A search with a -from filter gives nearly
+every vertex it reaches such a tag, and write_timing_model runs one
+for each input, so the threads of the arrival search queued on that
+lock for an ordered-set insert per vertex (OpenROAD#11999).
+
+ArrivalVisitor's copies, one per thread of a parallel visit, now
+collect those vertices in a vector of their own and add them to
+filtered_arrivals_ when the copy is deleted, at the end of the visit.
+Every reader of filtered_arrivals_ runs on the main thread between
+visits, so it sees the same set, in the same order, as before. The
+visitor the main thread uses inserts as before.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ include/sta/Search.hh |  7 ++++++-
+ search/Search.cc      | 31 +++++++++++++++++++++++++------
+ 2 files changed, 31 insertions(+), 7 deletions(-)
+
+diff --git a/openroad/sta/include/sta/Search.hh b/openroad/sta/include/sta/Search.hh
+index 19a106b..45a084f 100644
+--- a/openroad/sta/include/sta/Search.hh
++++ b/openroad/sta/include/sta/Search.hh
+@@ -267,7 +267,9 @@ public:
+                        TagGroupBldr *tag_bldr);
+   void setVertexArrivals(Vertex *vertex,
+                          TagGroupBldr *tag_bldr,
+-                         TagGroupSet *tag_group_cache = nullptr);
++                         TagGroupSet *tag_group_cache = nullptr,
++                         VertexSeq *filtered_arrivals = nullptr);
++  void insertFilteredArrivals(const VertexSeq &vertices);
+   void tnsInvalid(Vertex *vertex);
+   [[nodiscard]] bool arrivalsChanged(Vertex *vertex,
+                                      TagGroupBldr *tag_bldr);
+@@ -811,6 +813,9 @@ protected:
+   // only for a group it has not seen. Copies made for a parallel visit
+   // have one; tag groups are not deleted while they live.
+   TagGroupSet *tag_group_cache_;
++  // Vertices with a filter tag this thread set arrivals on, added to
++  // Search's filtered arrivals when the copy is deleted, after the visit.
++  VertexSeq *filtered_arrivals_;
+   SearchPred *search_adj_;
+   bool crpr_active_;
+   bool has_fanin_one_;
+diff --git a/openroad/sta/search/Search.cc b/openroad/sta/search/Search.cc
+index b9da573..f470b12 100644
+--- a/openroad/sta/search/Search.cc
++++ b/openroad/sta/search/Search.cc
+@@ -1080,7 +1080,8 @@ Search::findArrivalsSeed()
+ 
+ ArrivalVisitor::ArrivalVisitor(const StaState *sta) :
+   PathVisitor(nullptr, false, sta),
+-  tag_group_cache_(nullptr)
++  tag_group_cache_(nullptr),
++  filtered_arrivals_(nullptr)
+ {
+   init0();
+   init(true, false, nullptr);
+@@ -1088,7 +1089,8 @@ ArrivalVisitor::ArrivalVisitor(const StaState *sta) :
+ 
+ ArrivalVisitor::ArrivalVisitor(const ArrivalVisitor &arrival_visitor) :
+   PathVisitor(arrival_visitor.pred_, true, &arrival_visitor),
+-  tag_group_cache_(new TagGroupSet(128))
++  tag_group_cache_(new TagGroupSet(128)),
++  filtered_arrivals_(new VertexSeq)
+ {
+   init0();
+   init(arrival_visitor.always_to_endpoints_,
+@@ -1133,6 +1135,10 @@ ArrivalVisitor::~ArrivalVisitor()
+   delete tag_bldr_;
+   delete tag_bldr_no_crpr_;
+   delete tag_group_cache_;
++  if (filtered_arrivals_) {
++    search_->insertFilteredArrivals(*filtered_arrivals_);
++    delete filtered_arrivals_;
++  }
+   delete search_adj_;
+ }
+ 
+@@ -1198,7 +1204,8 @@ ArrivalVisitor::visit(Vertex *vertex,
+   }
+   if (arrivals_changed) {
+     debugPrint(debug_, "search", 4, "arrivals changed");
+-    search_->setVertexArrivals(vertex, tag_bldr_, tag_group_cache_);
++    search_->setVertexArrivals(vertex, tag_bldr_, tag_group_cache_,
++                               filtered_arrivals_);
+     search_->tnsInvalid(vertex);
+     constrainedRequiredsInvalid(vertex, is_clk);
+   }
+@@ -2817,7 +2824,8 @@ Search::findTagGroup(TagGroupBldr *tag_bldr,
+ void
+ Search::setVertexArrivals(Vertex *vertex,
+                           TagGroupBldr *tag_bldr,
+-                          TagGroupSet *tag_group_cache)
++                          TagGroupSet *tag_group_cache,
++                          VertexSeq *filtered_arrivals)
+ {
+   if (tag_bldr->empty())
+     deletePathsIncr(vertex);
+@@ -2842,12 +2850,23 @@ Search::setVertexArrivals(Vertex *vertex,
+       tag_group->incrRefCount();
+     }
+     if (tag_group->hasFilterTag()) {
+-      LockGuard lock(filtered_arrivals_lock_);
+-      filtered_arrivals_.insert(vertex);
++      if (filtered_arrivals)
++        filtered_arrivals->push_back(vertex);
++      else {
++        LockGuard lock(filtered_arrivals_lock_);
++        filtered_arrivals_.insert(vertex);
++      }
+     }
+   }
+ }
+ 
++void
++Search::insertFilteredArrivals(const VertexSeq &vertices)
++{
++  LockGuard lock(filtered_arrivals_lock_);
++  filtered_arrivals_.insert(vertices.begin(), vertices.end());
++}
++
+ void
+ Search::checkPrevPaths() const
+ {
+-- 
+2.53.0
+

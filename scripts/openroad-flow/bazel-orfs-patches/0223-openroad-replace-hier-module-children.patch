@@ -1,0 +1,1118 @@
+From 763dca17bd48e828b897e3989a298d87cee46e53 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Sat, 14 Nov 2026 00:40:33 +0100
+Subject: [PATCH] odb: replace_hier_module copies child module instances
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+dbModInst::swapMaster copied only the leaf instances of the module it
+swapped in (_dbModule::copy: "TODO: handle hierarchical child
+instances") and named every new net after the base name of the old
+one. A module with a child instance aborted: the child's net
+inner/_013_ and the module's own _013_ both became <inst>/_013_, which
+trips the assert in copyModuleInsts in a debug build and, in an
+optimized one, makes dbNet::create return null and the swap stop with
+"Attempt to connect iterm ... to a null net" (ODB-0440). The copy of
+the swapped-out module that swapMaster saves to a child block had the
+same naming, and there two nets of one name were silently merged into
+one: the module's internal net _003_ and the net _003_ of its parent
+that reaches it through a port (seen in replace_hier_mod2 and
+replace_hier_mod6, whose LCU/ALU modules have such nets).
+
+Now:
+
+- _dbModule::copy recreates each child dbModInst of the module, with a
+  uniquified copy of its dbModule, ports and mod iterms, recursively
+  (copyModuleChildren), copies the leaf instances of every module into
+  the copy of their module, and connects the children's mod iterms to
+  the copied mod nets.
+- Nets keep their names relative to the root of the copied hierarchy,
+  as link_design -hier names them: inner/_013_ under instance u becomes
+  u/inner/_013_. A net named outside the old hierarchy, one that
+  crosses its boundary, is named after the port's mod net. New nets are
+  mapped from the old dbNet, not by name, and a name already taken
+  stops with ODB-0481 instead of the assert.
+- A net is internal when all its iterms are in the copied hierarchy,
+  not only in its root module, and the boundary check walks up to the
+  root module's mod net.
+- swapMaster connects a net that crosses the boundary to every iterm
+  the port reaches through the mod nets of the child modules, not only
+  to the root module's iterms; it saves the old module to its child
+  block before deleting its mod inst, so the saved nets keep their
+  relative names, and it deletes the old module's child modules with
+  it instead of leaving them behind uninstantiated.
+
+replace_hier_mod7 swaps Outer (one child) for Outer_new (two levels of
+children, copied from an instance in the top block), back to Outer
+(copied from the child block the first swap saved it to), undoes a
+swap in an ECO and swaps again; children and parents share the names
+_1_ and _013_. It stops with ODB-0440 before this change. After the
+swap the worst path through r2/D, its slack (0.8075 ns) and the net
+names are those of the design linked from Verilog with Outer_new in
+place. replace_hier_mod1-6, replace_hier_mod_report_checks,
+TestSwapMaster*, rsz's replace_arith_modules1-3 pass unchanged.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/odb/src/db/dbModInst.cpp       |  73 +++--
+ openroad/odb/src/db/dbModule.cpp        | 386 ++++++++++++++++--------
+ openroad/odb/src/db/dbModule.h          |  17 +-
+ openroad/odb/test/BUILD                 |   1 +
+ openroad/odb/test/replace_hier_mod7.ok  | 207 +++++++++++++
+ openroad/odb/test/replace_hier_mod7.tcl |  46 +++
+ openroad/odb/test/replace_hier_mod7.v   |  77 +++++
+ 7 files changed, 655 insertions(+), 152 deletions(-)
+ create mode 100644 openroad/odb/test/replace_hier_mod7.ok
+ create mode 100644 openroad/odb/test/replace_hier_mod7.tcl
+ create mode 100644 openroad/odb/test/replace_hier_mod7.v
+
+diff --git a/openroad/odb/src/db/dbModInst.cpp b/openroad/odb/src/db/dbModInst.cpp
+index 5c72b0f..73148c4 100644
+--- a/openroad/odb/src/db/dbModInst.cpp
++++ b/openroad/odb/src/db/dbModInst.cpp
+@@ -8,6 +8,7 @@
+ #include <map>
+ #include <set>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ // Generator Code Begin Cpp
+@@ -521,11 +522,12 @@ void dbModInst::removeUnusedPortsAndPins()
+   debugPrint(logger, utl::ODB, "replace_design", 2, format_str, ##__VA_ARGS__)
+ 
+ // Swap one hierarchical module with another one.
+-// New module is not allowed to have multiple levels of hierarchy for now.
++// Either module may have child module instances; they are copied along.
+ // Newly instantiated modules are uniquified.
+ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+ {
+   dbModule* old_module = getMaster();
++  const std::string old_module_name = old_module->getName();
+   utl::Logger* logger = getImpl()->getLogger();
+ 
+   // Helper to remove dangling nets from a block
+@@ -656,10 +658,28 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+     }
+   }
+ 
+-  // 5. Delete current mod inst
++  // 5. Backup old dbModule to child block
++  // - Before its mod inst is deleted, so the nets copied keep their names
++  //   relative to it.
++  _dbModule::copyToChildBlock(old_module);
++  debugRDPrint1("Copied old module {} to a child block", old_module->getName());
++
++  // Collect the modules below old_module, parents first, to delete them
++  // with it.
++  std::vector<dbModule*> old_child_modules;
++  for (dbModInst* child : old_module->getModInsts()) {
++    old_child_modules.push_back(child->getMaster());
++  }
++  for (size_t i = 0; i < old_child_modules.size(); ++i) {
++    for (dbModInst* child : old_child_modules[i]->getModInsts()) {
++      old_child_modules.push_back(child->getMaster());
++    }
++  }
++
++  // 6. Delete current mod inst
+   dbModInst::destroy(this);
+ 
+-  // 6. Create a new mod inst of new_module_copy
++  // 7. Create a new mod inst of new_module_copy
+   dbModInst* new_mod_inst
+       = dbModInst::create(parent, new_module_copy, new_name.c_str());
+   if (!new_mod_inst) {
+@@ -667,7 +687,7 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+     return nullptr;
+   }
+ 
+-  // 7. Create mod iterms and connect to old mod nets
++  // 8. Create mod iterms and connect to old mod nets
+   for (const auto& [name, old_mod_net] : name_mod_net_map) {
+     // Find the corresponding ModBTerm in the new master module
+     dbModBTerm* new_mod_bterm = new_module_copy->findModBTerm(name.c_str());
+@@ -681,13 +701,16 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+   debugRDPrint1("New mod inst has {} mod iterms",
+                 new_mod_inst->getModITerms().size());
+ 
+-  // 8. Backup old dbModule to child block
+-  _dbModule::copyToChildBlock(old_module);
+-  debugRDPrint1("Copied to child block and deleted old module {} ",
+-                old_module->getName());
+-
+-  // 9. Delete the old dbModule
++  // 9. Delete the old dbModule and the modules below it
++  // - Deleting a module deletes its child mod insts, so each child module
++  //   is free to be deleted after its parent.
+   dbModule::destroy(old_module);
++  for (dbModule* module : old_child_modules) {
++    dbModule::destroy(module);
++  }
++  debugRDPrint1("Deleted old module {} and {} modules below it",
++                old_module_name,
++                old_child_modules.size());
+ 
+   // 10. Remove dangling internal nets of the old module
+   // - Note that internal nets of old module belongs to parent block.
+@@ -714,6 +737,8 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+   }
+ 
+   // 12. Connect nets crossing the hierarchical boundary
++  // - Through the mod nets of child modules, down to every iterm the port
++  //   reaches.
+   debugRDPrint1("Connecting nets that span module boundary");
+   for (const auto& [bterm_name, flat_net] : modbterm_name_flat_net_map) {
+     debugRDPrint1("  map_entry[modBTermName '{}'] = flat net '{}'",
+@@ -738,19 +763,31 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+       continue;
+     }
+ 
+-    // Connect flat net to new mod net iterms
++    // Connect flat net to the iterms of new mod net and of the mod nets
++    // of child modules it reaches.
+     // Copy to a vector because disconnect/connect can change the dbSet
+     // while iterating.
+-    dbSet<dbITerm> new_iterm_set = new_mod_net->getITerms();
+-    if (new_iterm_set.empty()) {
++    std::vector<std::pair<dbITerm*, dbModNet*>> new_iterms;
++    std::vector<dbModNet*> mod_nets{new_mod_net};
++    for (size_t i = 0; i < mod_nets.size(); ++i) {
++      dbModNet* mod_net = mod_nets[i];
++      for (dbITerm* new_iterm : mod_net->getITerms()) {
++        new_iterms.emplace_back(new_iterm, mod_net);
++      }
++      for (dbModITerm* mod_iterm : mod_net->getModITerms()) {
++        dbModBTerm* child_bterm = mod_iterm->getChildModBTerm();
++        if (child_bterm && child_bterm->getModNet()) {
++          mod_nets.push_back(child_bterm->getModNet());
++        }
++      }
++    }
++    if (new_iterms.empty()) {
+       debugRDPrint1("    new modnet '{}' has no iterms",
+                     new_mod_net->getName());
+       continue;
+     }
+ 
+-    std::vector<dbITerm*> new_iterms(new_iterm_set.begin(),
+-                                     new_iterm_set.end());
+-    for (dbITerm* new_iterm : new_iterms) {
++    for (const auto& [new_iterm, mod_net] : new_iterms) {
+       // Disconnect the old connection
+       // - e.g., the new_iterm on the new module might be connected to new
+       // modnet that is created when the new module is cloned.
+@@ -759,12 +796,12 @@ dbModInst* dbModInst::swapMaster(dbModule* new_module)
+                     new_iterm->getName());
+ 
+       // Connect the flat and hier nets
+-      new_iterm->connect(flat_net, new_mod_net);
++      new_iterm->connect(flat_net, mod_net);
+       debugRDPrint1(
+           "    connected iterm '{}' to flat net '{}' and hier net '{}'",
+           new_iterm->getName(),
+           flat_net->getName(),
+-          new_mod_net->getName());
++          mod_net->getName());
+     }
+   }
+ 
+diff --git a/openroad/odb/src/db/dbModule.cpp b/openroad/odb/src/db/dbModule.cpp
+index 790cf3c..6112255 100644
+--- a/openroad/odb/src/db/dbModule.cpp
++++ b/openroad/odb/src/db/dbModule.cpp
+@@ -23,7 +23,6 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+-#include <map>
+ #include <string>
+ #include <unordered_map>
+ #include <utility>
+@@ -34,6 +33,7 @@
+ #include "dbModuleModBTermItr.h"
+ #include "dbModuleModInstItr.h"
+ #include "dbModuleModNetItr.h"
++#include "odb/PtrSetMap.h"
+ #include "odb/dbBlockCallBackObj.h"
+ #include "odb/dbObject.h"
+ #include "odb/dbSet.h"
+@@ -694,26 +694,81 @@ bool dbModule::isTop() const
+ // Do a "deep" copy of old_module based on its instance context into new_module.
+ // - NOTE: _dbModule::copyModulePorts needs to be called before this function
+ //   to populate mod_bt_map.
+-// - All instances, mod nets and parent/child IO will be copied.
++// - All instances, child module instances (recursively), mod nets and
++//   parent/child IO will be copied.
+ // - Connections that span multiple modules needs to be done outside this API.
+ // - new_mod_inst is needed to create module instances for instance name
+-//   uniquification.
++//   uniquification.  It is null when new_module is not instantiated.
+ void _dbModule::copy(dbModule* old_module,
+                      dbModule* new_module,
+                      dbModInst* new_mod_inst,
+                      modBTMap& mod_bt_map)
+ {
+-  // Copy module instances and create iterm map
+-  ITMap it_map;  // map old iterm to new iterm
+-  copyModuleInsts(old_module, new_module, new_mod_inst, it_map);
++  // Copy child module instances and their modules, recursively
++  MITMap mit_map;  // map old mod iterm to new mod iterm
++  ModuleMap module_map{{old_module, new_module}};
++  copyModuleChildren(old_module, new_module, mod_bt_map, mit_map, module_map);
+ 
+-  // TODO: handle hierarchical child instances
++  // Copy instances of every module and create iterm map
++  ITMap it_map;  // map old iterm to new iterm
++  copyModuleInsts(module_map, new_mod_inst, it_map);
+ 
+-  // Copy mod nets and connect ports and iterms
+-  copyModuleModNets(old_module, new_module, mod_bt_map, it_map);
++  // Copy mod nets and connect ports, iterms and mod iterms
++  for (const auto& [old_mod, new_mod] : module_map) {
++    copyModuleModNets(old_mod, new_mod, mod_bt_map, it_map, mit_map);
++  }
+ 
+   // Establish boundary IO between parent and child
+-  copyModuleBoundaryIO(old_module, new_module, new_mod_inst);
++  if (new_mod_inst) {
++    copyModuleBoundaryIO(old_module, new_module, new_mod_inst);
++  }
++}
++
++// Copy the child module instances of old_module into new_module, each with a
++// uniquified copy of its module and that module's ports, and recurse into
++// them.  The copied modules are appended to module_map and the copied mod
++// iterms to mit_map.
++void _dbModule::copyModuleChildren(dbModule* old_module,
++                                   dbModule* new_module,
++                                   modBTMap& mod_bt_map,
++                                   MITMap& mit_map,
++                                   ModuleMap& module_map)
++{
++  dbBlock* block = new_module->getOwner();
++  utl::Logger* logger = old_module->getImpl()->getLogger();
++  for (dbModInst* old_child : old_module->getModInsts()) {
++    dbModule* old_master = old_child->getMaster();
++    dbModule* new_master = dbModule::makeUniqueDbModule(
++        old_master->getName(), old_child->getName(), block);
++    copyModulePorts(old_master, new_master, mod_bt_map);
++    dbModInst* new_child
++        = dbModInst::create(new_module, new_master, old_child->getName());
++    if (new_child == nullptr) {
++      logger->error(utl::ODB,
++                    477,
++                    "Mod instance {} cannot be created in module {}",
++                    old_child->getName(),
++                    new_module->getName());
++    }
++    debugPrint(logger,
++               utl::ODB,
++               "replace_design",
++               1,
++               "Created child mod inst {} of module {}",
++               new_child->getHierarchicalName(),
++               new_master->getName());
++    for (dbModITerm* old_mod_iterm : old_child->getModITerms()) {
++      dbModBTerm* old_mod_bterm = old_mod_iterm->getChildModBTerm();
++      dbModBTerm* new_mod_bterm = nullptr;
++      if (old_mod_bterm && mod_bt_map.contains(old_mod_bterm)) {
++        new_mod_bterm = mod_bt_map[old_mod_bterm];
++      }
++      mit_map[old_mod_iterm] = dbModITerm::create(
++          new_child, old_mod_iterm->getName(), new_mod_bterm);
++    }
++    module_map.emplace_back(old_master, new_master);
++    copyModuleChildren(old_master, new_master, mod_bt_map, mit_map, module_map);
++  }
+ }
+ 
+ // A bus with N members have N+1 modbterms.  The first one is the "bus port"
+@@ -834,140 +889,185 @@ void _dbModule::copyModulePorts(dbModule* old_module,
+              mod_bt_map.size());
+ }
+ 
+-void _dbModule::copyModuleInsts(dbModule* old_module,
+-                                dbModule* new_module,
++void _dbModule::copyModuleInsts(const ModuleMap& module_map,
+                                 dbModInst* new_mod_inst,
+                                 ITMap& it_map)
+ {
++  dbModule* old_module = module_map.front().first;
++  dbModule* new_module = module_map.front().second;
+   dbBlock* block = new_module->getOwner();
+   const char hier_delimiter = block->getHierarchyDelimiter();
+   utl::Logger* logger = old_module->getImpl()->getLogger();
+ 
+-  // Create a net name map (key: new net name, value: new dbNet*).
+-  std::map<std::string, dbNet*> new_net_name_map;
+-
+-  // Add insts to new module
+-  for (dbInst* old_inst : old_module->getInsts()) {
+-    // Decide an instance name.
+-    // - Note that new_mod_inst can be null when the corresponding dbModule is
+-    //   not instantiated.
+-    std::string new_inst_name;
+-    if (new_mod_inst) {
+-      new_inst_name = new_mod_inst->getHierarchicalName();
+-      new_inst_name += hier_delimiter;
+-    }
+-
+-    new_inst_name += block->getBaseName(old_inst->getConstName());
++  // Net names are kept relative to the root of the copied hierarchy, so
++  // nets of child modules keep their hierarchy prefix (e.g., "inner/_013_")
++  // and stay distinct from nets of the root module (e.g., "_013_").
++  std::string old_prefix;
++  if (dbModInst* old_mod_inst = old_module->getModInst()) {
++    old_prefix = old_mod_inst->getHierarchicalName() + hier_delimiter;
++  }
++  std::string new_prefix;
++  if (new_mod_inst) {
++    new_prefix = new_mod_inst->getHierarchicalName() + hier_delimiter;
++  }
+ 
+-    // Create an instance of the same master
+-    dbInst* new_inst = dbInst::makeUniqueDbInst(new_module->getOwner(),
+-                                                old_inst->getMaster(),
+-                                                new_inst_name.c_str(),
+-                                                /* phyical only */ false,
+-                                                new_module);
+-    if (new_inst) {
+-      debugPrint(logger,
+-                 utl::ODB,
+-                 "replace_design",
+-                 1,
+-                 "Created module instance '{}' with master '{}'",
+-                 new_inst->getName(),
+-                 old_inst->getMaster()->getName());
+-    } else {
+-      logger->error(utl::ODB,
+-                    13,
+-                    "Module instance '{}' with master '{}' cannot be created",
+-                    new_inst_name,
+-                    old_inst->getMaster()->getName());
++  // Leaf instances of the old hierarchy, to tell internal nets from nets
++  // that leave it.
++  odb::PtrSet<dbInst> old_insts;
++  for (const auto& [old_mod, new_mod] : module_map) {
++    for (dbInst* old_inst : old_mod->getInsts()) {
++      old_insts.insert(old_inst);
+     }
++  }
+ 
+-    // Map old iterms to new iterms and connect iterms that are local to this
+-    // module only.  Nets that connect to iterms of other modules will be
+-    // done outside this API in dbModInst::swapMaster().
+-    dbSet<dbITerm> old_iterms = old_inst->getITerms();
+-    dbSet<dbITerm> new_iterms = new_inst->getITerms();
+-    dbSet<dbITerm>::iterator iter1, iter2;
+-    iter1 = old_iterms.begin();
+-    iter2 = new_iterms.begin();
+-    for (; iter1 != old_iterms.end() && iter2 != new_iterms.end();
+-         ++iter1, ++iter2) {
+-      dbITerm* old_iterm = *iter1;
+-      dbITerm* new_iterm = *iter2;
+-      it_map[old_iterm] = new_iterm;
+-      debugPrint(logger,
+-                 utl::ODB,
+-                 "replace_design",
+-                 1,
+-                 "  old iterm {} maps to new iterm {}",
+-                 old_iterm->getName(),
+-                 new_iterm->getName());
+-      dbNet* old_net = old_iterm->getNet();
+-      if (old_net == nullptr) {
+-        continue;
+-      }
++  // Map an old flat net to its new local net.
++  odb::PtrMap<dbNet, dbNet*> new_net_map;
+ 
+-      //
+-      // Create a local net only if it connects to iterms inside this module
+-      //
+-      std::string new_net_name;
+-      if (new_mod_inst) {
+-        new_net_name = new_mod_inst->getHierarchicalName();
+-        new_net_name += hier_delimiter;
+-      }
++  for (const auto& [old_mod, new_mod] : module_map) {
++    // Decide the instance name prefix.
++    // - Note that new_mod has no mod inst when it is the root of a copy
++    //   into an uninstantiated dbModule.
++    std::string new_inst_prefix;
++    if (dbModInst* mod_inst = new_mod->getModInst()) {
++      new_inst_prefix = mod_inst->getHierarchicalName() + hier_delimiter;
++    }
+ 
+-      // Check if the flat net is an internal net within old_module
+-      // - If the old net is an internal net, a new net should be created.
+-      // - If the old net is an external net, a new net will be created later
+-      //   by boundary IO handling logic.
+-      // - Note that if old modnet is connected to a dbModBTerm and its
+-      //   corresponding dbModITerm is unconnected (has_parent_modnet == false),
+-      //   a new net should be created.
+-      // - If old_module is uninstantiated module, every net in the module is
+-      //   an internal net.
+-      //   e.g., No module instance.
+-      //         net_name = "_001_"     <-- Internal net.
+-      //
+-      // - Otherwise, an internal net should have the hierarchy prefix
+-      //   (= module instance hierarchical name).
+-      //   e.g., modinst_name = "u0/alu0"
+-      //         net_name = u0/alu0/_001_   <-- Internal net.
+-      //         net_name = u0/_001_        <-- External net crossing module
+-      //                                        boundary.
+-      std::string old_net_name = old_net->getName();
+-      dbModNet* old_mod_net = old_iterm->getModNet();
+-      bool has_parent_modnet
+-          = (old_mod_net && old_mod_net->getFirstParentModNet());
+-      if (!old_net->isInternalTo(old_module) && has_parent_modnet) {
+-        // Skip external net crossing module boundary.
+-        // It will be connected later.
++    // Add insts to new module
++    for (dbInst* old_inst : old_mod->getInsts()) {
++      std::string new_inst_name
++          = new_inst_prefix + block->getBaseName(old_inst->getConstName());
++
++      // Create an instance of the same master
++      dbInst* new_inst = dbInst::makeUniqueDbInst(block,
++                                                  old_inst->getMaster(),
++                                                  new_inst_name.c_str(),
++                                                  /* phyical only */ false,
++                                                  new_mod);
++      if (new_inst) {
+         debugPrint(logger,
+                    utl::ODB,
+                    "replace_design",
+-                   3,
+-                   "    Skip: non-internal dbNet '{}' of old_module '{}'.\n",
+-                   old_net_name,
+-                   old_module->getHierarchicalName());
+-        continue;
++                   1,
++                   "Created module instance '{}' with master '{}'",
++                   new_inst->getName(),
++                   old_inst->getMaster()->getName());
++      } else {
++        logger->error(utl::ODB,
++                      13,
++                      "Module instance '{}' with master '{}' cannot be created",
++                      new_inst_name,
++                      old_inst->getMaster()->getName());
+       }
+ 
+-      new_net_name += block->getBaseName(old_net_name.c_str());
+-      auto it = new_net_name_map.find(new_net_name);
+-      if (it != new_net_name_map.end()) {
+-        // Connect to an existing local net
+-        dbNet* new_net = (*it).second;
+-        new_iterm->connect(new_net);
++      // Map old iterms to new iterms and connect iterms that are local to
++      // the copied hierarchy only.  Nets that connect to iterms of other
++      // modules will be done outside this API in dbModInst::swapMaster().
++      dbSet<dbITerm> old_iterms = old_inst->getITerms();
++      dbSet<dbITerm> new_iterms = new_inst->getITerms();
++      dbSet<dbITerm>::iterator iter1, iter2;
++      iter1 = old_iterms.begin();
++      iter2 = new_iterms.begin();
++      for (; iter1 != old_iterms.end() && iter2 != new_iterms.end();
++           ++iter1, ++iter2) {
++        dbITerm* old_iterm = *iter1;
++        dbITerm* new_iterm = *iter2;
++        it_map[old_iterm] = new_iterm;
+         debugPrint(logger,
+                    utl::ODB,
+                    "replace_design",
+                    1,
+-                   "  connected iterm '{}' to existing local net '{}'",
+-                   new_iterm->getName(),
+-                   new_net->getName());
+-      } else {
++                   "  old iterm {} maps to new iterm {}",
++                   old_iterm->getName(),
++                   new_iterm->getName());
++        dbNet* old_net = old_iterm->getNet();
++        if (old_net == nullptr) {
++          continue;
++        }
++
++        // Check if the flat net is an internal net within the old hierarchy
++        // - If the old net is an internal net, a new net should be created.
++        // - If the old net is an external net, a new net will be created
++        //   later by boundary IO handling logic.
++        // - Note that if old modnet, seen from old_module, is connected to a
++        //   dbModBTerm and its corresponding dbModITerm is unconnected
++        //   (has_parent_modnet == false), a new net should be created.
++        // - If old_module is uninstantiated module or the new module is not
++        //   instantiated (new_mod_inst == nullptr), every net in the module
++        //   is an internal net.
++        //   e.g., No module instance.
++        //         net_name = "_001_"     <-- Internal net.
++        //
++        // - Otherwise, an internal net should have the hierarchy prefix
++        //   (= module instance hierarchical name).
++        //   e.g., modinst_name = "u0/alu0"
++        //         net_name = u0/alu0/_001_   <-- Internal net.
++        //         net_name = u0/_001_        <-- External net crossing module
++        //                                        boundary.
++        std::string old_net_name = old_net->getName();
++        bool is_internal = old_net->getBTerms().empty();
++        for (dbITerm* net_iterm : old_net->getITerms()) {
++          if (!is_internal) {
++            break;
++          }
++          is_internal = old_insts.contains(net_iterm->getInst());
++        }
++        // Walk up to the mod net of old_module the iterm connects through
++        dbModNet* old_mod_net = old_iterm->getModNet();
++        while (old_mod_net && old_mod_net->getParent() != old_module) {
++          old_mod_net = old_mod_net->getFirstParentModNet();
++        }
++        bool has_parent_modnet
++            = (old_mod_net && old_mod_net->getFirstParentModNet());
++        if (new_mod_inst && !is_internal && has_parent_modnet) {
++          // Skip external net crossing module boundary.
++          // It will be connected later.
++          debugPrint(logger,
++                     utl::ODB,
++                     "replace_design",
++                     3,
++                     "    Skip: non-internal dbNet '{}' of old_module '{}'.\n",
++                     old_net_name,
++                     old_module->getHierarchicalName());
++          continue;
++        }
++
++        auto it = new_net_map.find(old_net);
++        if (it != new_net_map.end()) {
++          // Connect to an existing local net
++          dbNet* new_net = (*it).second;
++          new_iterm->connect(new_net);
++          debugPrint(logger,
++                     utl::ODB,
++                     "replace_design",
++                     1,
++                     "  connected iterm '{}' to existing local net '{}'",
++                     new_iterm->getName(),
++                     new_net->getName());
++          continue;
++        }
++
++        // A net named outside the old hierarchy crosses its boundary; it is
++        // named after the mod net of old_module it connects through, the
++        // port's net, so it cannot take the name of an internal net.
++        std::string new_net_name = new_prefix;
++        if (old_net_name.starts_with(old_prefix)) {
++          new_net_name += old_net_name.substr(old_prefix.size());
++        } else if (old_mod_net) {
++          new_net_name += old_mod_net->getName();
++        } else {
++          new_net_name += block->getBaseName(old_net_name.c_str());
++        }
++
+         // Create and connect to a new local net
+-        assert(block->findNet(new_net_name.c_str()) == nullptr);
+-        dbNet* new_net
+-            = dbNet::create(new_module->getOwner(), new_net_name.c_str());
++        dbNet* new_net = dbNet::create(block, new_net_name.c_str());
++        if (new_net == nullptr) {
++          logger->error(utl::ODB,
++                        481,
++                        "Net {} cannot be created for net {} of module {}",
++                        new_net_name,
++                        old_net_name,
++                        old_module->getName());
++        }
+         new_iterm->connect(new_net);
+         debugPrint(logger,
+                    utl::ODB,
+@@ -978,21 +1078,22 @@ void _dbModule::copyModuleInsts(dbModule* old_module,
+                    new_net->getName());
+ 
+         // Insert it to the map
+-        new_net_name_map[new_net_name] = new_net;
++        new_net_map[old_net] = new_net;
+       }
+     }
+-  }
+ 
+-  if (new_module->getInsts().reversible()
+-      && new_module->getInsts().orderReversed()) {
+-    new_module->getInsts().reverse();
++    if (new_mod->getInsts().reversible()
++        && new_mod->getInsts().orderReversed()) {
++      new_mod->getInsts().reverse();
++    }
+   }
+ }
+ 
+ void _dbModule::copyModuleModNets(dbModule* old_module,
+                                   dbModule* new_module,
+                                   modBTMap& mod_bt_map,
+-                                  ITMap& it_map)
++                                  ITMap& it_map,
++                                  MITMap& mit_map)
+ {
+   utl::Logger* logger = old_module->getImpl()->getLogger();
+   debugPrint(logger,
+@@ -1077,6 +1178,31 @@ void _dbModule::copyModuleModNets(dbModule* old_module,
+                       new_net->getName());
+       }
+     }
++
++    // Connect mod iterms of child module instances to new mod net
++    for (dbModITerm* old_mod_iterm : old_net->getModITerms()) {
++      dbModITerm* new_mod_iterm = nullptr;
++      if (mit_map.contains(old_mod_iterm)) {
++        new_mod_iterm = mit_map[old_mod_iterm];
++      }
++      if (new_mod_iterm) {
++        new_mod_iterm->connect(new_net);
++        debugPrint(logger,
++                   utl::ODB,
++                   "replace_design",
++                   1,
++                   "  connected mod iterm {} to mod net {}",
++                   new_mod_iterm->getName(),
++                   new_net->getName());
++      } else {
++        logger->error(utl::ODB,
++                      535,
++                      "Module instance terminal {} cannot be connected to mod "
++                      "net {} because it does not exist",
++                      old_mod_iterm->getName(),
++                      new_net->getName());
++      }
++    }
+   }
+ }
+ 
+@@ -1157,9 +1283,7 @@ bool _dbModule::copyToChildBlock(dbModule* module)
+ 
+     modBTMap mod_bt_map;
+     _dbModule::copyModulePorts(module, new_module, mod_bt_map);
+-    ITMap it_map;
+-    copyModuleInsts(module, new_module, nullptr, it_map);
+-    copyModuleModNets(module, new_module, mod_bt_map, it_map);
++    copy(module, new_module, nullptr, mod_bt_map);
+   }
+   return true;
+ }
+diff --git a/openroad/odb/src/db/dbModule.h b/openroad/odb/src/db/dbModule.h
+index 34faf65..5b84f8e 100644
+--- a/openroad/odb/src/db/dbModule.h
++++ b/openroad/odb/src/db/dbModule.h
+@@ -14,6 +14,8 @@
+ #include <map>
+ #include <string>
+ #include <unordered_map>
++#include <utility>
++#include <vector>
+ 
+ #include "dbHashTable.h"
+ #include "dbModulePortItr.h"
+@@ -33,6 +35,7 @@ class dbITerm;
+ class dbInst;
+ class dbModBTerm;
+ class dbModInst;
++class dbModITerm;
+ class dbModule;
+ // User Code End Classes
+ 
+@@ -54,6 +57,9 @@ class _dbModule : public _dbObject
+   // Copy and uniquify a given module based on current instance
+   using modBTMap = odb::PtrMap<dbModBTerm, dbModBTerm*>;
+   using ITMap = odb::PtrMap<dbITerm, dbITerm*>;
++  using MITMap = odb::PtrMap<dbModITerm, dbModITerm*>;
++  // (old module, new module) pairs of a copied hierarchy, root first.
++  using ModuleMap = std::vector<std::pair<dbModule*, dbModule*>>;
+ 
+   static void copy(dbModule* old_module,
+                    dbModule* new_module,
+@@ -63,14 +69,19 @@ class _dbModule : public _dbObject
+   static void copyModulePorts(dbModule* old_module,
+                               dbModule* new_module,
+                               modBTMap& mod_bt_map);
+-  static void copyModuleInsts(dbModule* old_module,
+-                              dbModule* new_module,
++  static void copyModuleChildren(dbModule* old_module,
++                                 dbModule* new_module,
++                                 modBTMap& mod_bt_map,
++                                 MITMap& mit_map,
++                                 ModuleMap& module_map);
++  static void copyModuleInsts(const ModuleMap& module_map,
+                               dbModInst* new_mod_inst,
+                               ITMap& it_map);
+   static void copyModuleModNets(dbModule* old_module,
+                                 dbModule* new_module,
+                                 modBTMap& mod_bt_map,
+-                                ITMap& it_map);
++                                ITMap& it_map,
++                                MITMap& mit_map);
+   static void copyModuleBoundaryIO(dbModule* old_module,
+                                    dbModule* new_module,
+                                    dbModInst* new_mod_inst);
+diff --git a/openroad/odb/test/BUILD b/openroad/odb/test/BUILD
+index ec3c4bc..af910e6 100644
+--- a/openroad/odb/test/BUILD
++++ b/openroad/odb/test/BUILD
+@@ -206,6 +206,7 @@ COMPULSORY_TESTS = [
+     "replace_hier_mod4",
+     "replace_hier_mod5",
+     "replace_hier_mod6",
++    "replace_hier_mod7",
+     "replace_hier_mod_report_checks",
+     "rounding",
+     "row_no_step",
+diff --git a/openroad/odb/test/replace_hier_mod7.ok b/openroad/odb/test/replace_hier_mod7.ok
+new file mode 100644
+index 0000000..6bac9ec
+--- /dev/null
++++ b/openroad/odb/test/replace_hier_mod7.ok
+@@ -0,0 +1,207 @@
++[INFO ODB-0227] LEF file: Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
++[WARNING ORD-0011] Hierarchical flow (-hier) is currently in development and may cause multiple issues. Do not use in production environments.
++### Initial outer is Outer ###
++modules: Inner Inner_inner Inner_inner_1 Mid Outer Outer_new top
++nets: clk in1 out1 out2 outer/_013_ outer/_014_ outer/inner/_013_ outer2/_013_ outer2/_014_ outer2/_015_ outer2/inner/_013_ outer2/mid/_013_ outer2/mid/inner/_013_ oz oz2 r1q
++Cell type report for outer (Outer)
++Cell type report:                       Count       Area
++  Buffer                                    2       1.60
++  Inverter                                  2       1.06
++  Total                                     4       2.66
++Startpoint: r1 (rising edge-triggered flip-flop clocked by clk)
++Endpoint: r2 (rising edge-triggered flip-flop clocked by clk)
++Path Group: clk
++Path Type: max
++
++    Delay      Time   Description
++-------------------------------------------------------------
++   0.0000    0.0000   clock clk (rise edge)
++   0.0000    0.0000   clock network delay (ideal)
++   0.0000    0.0000 ^ r1/CK (DFF_X1)
++   0.0802    0.0802 v r1/Q (DFF_X1)
++   0.0256    0.1058 v outer/_1_/Z (BUF_X1)
++   0.0109    0.1167 ^ outer/inner/_1_/ZN (INV_X1)
++   0.0056    0.1223 v outer/inner/_2_/ZN (INV_X1)
++   0.0224    0.1447 v outer/_2_/Z (BUF_X1)
++   0.0000    0.1447 v r2/D (DFF_X1)
++             0.1447   data arrival time
++
++   1.0000    1.0000   clock clk (rise edge)
++   0.0000    1.0000   clock network delay (ideal)
++   0.0000    1.0000   clock reconvergence pessimism
++             1.0000 ^ r2/CK (DFF_X1)
++  -0.0388    0.9612   library setup time
++             0.9612   data required time
++-------------------------------------------------------------
++             0.9612   data required time
++            -0.1447   data arrival time
++-------------------------------------------------------------
++             0.8165   slack (MET)
++
++
++### swap outer to Outer_new ###
++[INFO ODB-0496] swapMaster sanity check passed (0 failures)
++modules: Inner_inner Inner_inner_1 Inner_inner_1_inner Inner_inner_inner Mid Mid_mid Outer_new Outer_new_outer top
++nets: clk in1 out1 out2 outer/_013_ outer/_014_ outer/_015_ outer/inner/_013_ outer/mid/_013_ outer/mid/inner/_013_ outer2/_013_ outer2/_014_ outer2/_015_ outer2/inner/_013_ outer2/mid/_013_ outer2/mid/inner/_013_ oz oz2 r1q
++Cell type report for outer (Outer_new_outer)
++Cell type report:                       Count       Area
++  Buffer                                    1       0.80
++  Inverter                                  6       3.19
++  Total                                     7       3.99
++Startpoint: r1 (rising edge-triggered flip-flop clocked by clk)
++Endpoint: r2 (rising edge-triggered flip-flop clocked by clk)
++Path Group: clk
++Path Type: max
++
++    Delay      Time   Description
++-------------------------------------------------------------
++   0.0000    0.0000   clock clk (rise edge)
++   0.0000    0.0000   clock network delay (ideal)
++   0.0000    0.0000 ^ r1/CK (DFF_X1)
++   0.0888    0.0888 ^ r1/Q (DFF_X1)
++   0.0076    0.0964 v outer/_1_/ZN (INV_X1)
++   0.0105    0.1069 ^ outer/mid/inner/_1_/ZN (INV_X1)
++   0.0055    0.1124 v outer/mid/inner/_2_/ZN (INV_X1)
++   0.0235    0.1359 v outer/mid/_1_/Z (BUF_X1)
++   0.0109    0.1469 ^ outer/inner/_1_/ZN (INV_X1)
++   0.0066    0.1535 v outer/inner/_2_/ZN (INV_X1)
++   0.0086    0.1620 ^ outer/_2_/ZN (INV_X1)
++   0.0000    0.1620 ^ r2/D (DFF_X1)
++             0.1620   data arrival time
++
++   1.0000    1.0000   clock clk (rise edge)
++   0.0000    1.0000   clock network delay (ideal)
++   0.0000    1.0000   clock reconvergence pessimism
++             1.0000 ^ r2/CK (DFF_X1)
++  -0.0305    0.9695   library setup time
++             0.9695   data required time
++-------------------------------------------------------------
++             0.9695   data required time
++            -0.1620   data arrival time
++-------------------------------------------------------------
++             0.8075   slack (MET)
++
++
++### swap outer back to Outer ###
++[INFO ODB-0496] swapMaster sanity check passed (0 failures)
++modules: Inner Inner_inner Inner_inner_1 Mid Outer Outer_new top
++nets: clk in1 out1 out2 outer/_013_ outer/_014_ outer/inner/_013_ outer2/_013_ outer2/_014_ outer2/_015_ outer2/inner/_013_ outer2/mid/_013_ outer2/mid/inner/_013_ oz oz2 r1q
++Cell type report for outer (Outer)
++Cell type report:                       Count       Area
++  Buffer                                    2       1.60
++  Inverter                                  2       1.06
++  Total                                     4       2.66
++Startpoint: r1 (rising edge-triggered flip-flop clocked by clk)
++Endpoint: r2 (rising edge-triggered flip-flop clocked by clk)
++Path Group: clk
++Path Type: max
++
++    Delay      Time   Description
++-------------------------------------------------------------
++   0.0000    0.0000   clock clk (rise edge)
++   0.0000    0.0000   clock network delay (ideal)
++   0.0000    0.0000 ^ r1/CK (DFF_X1)
++   0.0802    0.0802 v r1/Q (DFF_X1)
++   0.0256    0.1058 v outer/_1_/Z (BUF_X1)
++   0.0109    0.1167 ^ outer/inner/_1_/ZN (INV_X1)
++   0.0056    0.1223 v outer/inner/_2_/ZN (INV_X1)
++   0.0224    0.1447 v outer/_2_/Z (BUF_X1)
++   0.0000    0.1447 v r2/D (DFF_X1)
++             0.1447   data arrival time
++
++   1.0000    1.0000   clock clk (rise edge)
++   0.0000    1.0000   clock network delay (ideal)
++   0.0000    1.0000   clock reconvergence pessimism
++             1.0000 ^ r2/CK (DFF_X1)
++  -0.0388    0.9612   library setup time
++             0.9612   data required time
++-------------------------------------------------------------
++             0.9612   data required time
++            -0.1447   data arrival time
++-------------------------------------------------------------
++             0.8165   slack (MET)
++
++
++### swap outer to Outer_new and undo ###
++[INFO ODB-0496] swapMaster sanity check passed (0 failures)
++modules: Inner Inner_inner Inner_inner_1 Mid Outer Outer_new top
++nets: clk in1 out1 out2 outer/_013_ outer/_014_ outer/inner/_013_ outer2/_013_ outer2/_014_ outer2/_015_ outer2/inner/_013_ outer2/mid/_013_ outer2/mid/inner/_013_ oz oz2 r1q
++Cell type report for outer (Outer)
++Cell type report:                       Count       Area
++  Buffer                                    2       1.60
++  Inverter                                  2       1.06
++  Total                                     4       2.66
++Startpoint: r1 (rising edge-triggered flip-flop clocked by clk)
++Endpoint: r2 (rising edge-triggered flip-flop clocked by clk)
++Path Group: clk
++Path Type: max
++
++    Delay      Time   Description
++-------------------------------------------------------------
++   0.0000    0.0000   clock clk (rise edge)
++   0.0000    0.0000   clock network delay (ideal)
++   0.0000    0.0000 ^ r1/CK (DFF_X1)
++   0.0802    0.0802 v r1/Q (DFF_X1)
++   0.0256    0.1058 v outer/_1_/Z (BUF_X1)
++   0.0109    0.1167 ^ outer/inner/_1_/ZN (INV_X1)
++   0.0056    0.1223 v outer/inner/_2_/ZN (INV_X1)
++   0.0224    0.1447 v outer/_2_/Z (BUF_X1)
++   0.0000    0.1447 v r2/D (DFF_X1)
++             0.1447   data arrival time
++
++   1.0000    1.0000   clock clk (rise edge)
++   0.0000    1.0000   clock network delay (ideal)
++   0.0000    1.0000   clock reconvergence pessimism
++             1.0000 ^ r2/CK (DFF_X1)
++  -0.0388    0.9612   library setup time
++             0.9612   data required time
++-------------------------------------------------------------
++             0.9612   data required time
++            -0.1447   data arrival time
++-------------------------------------------------------------
++             0.8165   slack (MET)
++
++
++### swap outer to Outer_new again ###
++[INFO ODB-0496] swapMaster sanity check passed (0 failures)
++modules: Inner_inner Inner_inner_1 Inner_inner_1_inner_2 Inner_inner_inner_2 Mid Mid_mid_2 Outer_new Outer_new_outer_2 top
++nets: clk in1 out1 out2 outer/_013_ outer/_014_ outer/_015_ outer/inner/_013_ outer/mid/_013_ outer/mid/inner/_013_ outer2/_013_ outer2/_014_ outer2/_015_ outer2/inner/_013_ outer2/mid/_013_ outer2/mid/inner/_013_ oz oz2 r1q
++Cell type report for outer (Outer_new_outer_2)
++Cell type report:                       Count       Area
++  Buffer                                    1       0.80
++  Inverter                                  6       3.19
++  Total                                     7       3.99
++Startpoint: r1 (rising edge-triggered flip-flop clocked by clk)
++Endpoint: r2 (rising edge-triggered flip-flop clocked by clk)
++Path Group: clk
++Path Type: max
++
++    Delay      Time   Description
++-------------------------------------------------------------
++   0.0000    0.0000   clock clk (rise edge)
++   0.0000    0.0000   clock network delay (ideal)
++   0.0000    0.0000 ^ r1/CK (DFF_X1)
++   0.0888    0.0888 ^ r1/Q (DFF_X1)
++   0.0076    0.0964 v outer/_1_/ZN (INV_X1)
++   0.0105    0.1069 ^ outer/mid/inner/_1_/ZN (INV_X1)
++   0.0055    0.1124 v outer/mid/inner/_2_/ZN (INV_X1)
++   0.0235    0.1359 v outer/mid/_1_/Z (BUF_X1)
++   0.0109    0.1469 ^ outer/inner/_1_/ZN (INV_X1)
++   0.0066    0.1535 v outer/inner/_2_/ZN (INV_X1)
++   0.0086    0.1620 ^ outer/_2_/ZN (INV_X1)
++   0.0000    0.1620 ^ r2/D (DFF_X1)
++             0.1620   data arrival time
++
++   1.0000    1.0000   clock clk (rise edge)
++   0.0000    1.0000   clock network delay (ideal)
++   0.0000    1.0000   clock reconvergence pessimism
++             1.0000 ^ r2/CK (DFF_X1)
++  -0.0305    0.9695   library setup time
++             0.9695   data required time
++-------------------------------------------------------------
++             0.9695   data required time
++            -0.1620   data arrival time
++-------------------------------------------------------------
++             0.8075   slack (MET)
++
++
+diff --git a/openroad/odb/test/replace_hier_mod7.tcl b/openroad/odb/test/replace_hier_mod7.tcl
+new file mode 100644
+index 0000000..09817fa
+--- /dev/null
++++ b/openroad/odb/test/replace_hier_mod7.tcl
+@@ -0,0 +1,46 @@
++# Test hier module swap with modules that have child module instances:
++# Outer (one child) -> Outer_new (two levels of children) -> Outer, and an
++# undone swap.  Child modules have instance and net names (_1_, _013_) that
++# their parents also have.  Outer_new is copied from instance outer2 in the
++# top block, Outer from the child block the first swap saved it to.
++
++source "helpers.tcl"
++read_liberty Nangate45/Nangate45_typ.lib
++read_lef Nangate45/Nangate45.lef
++
++read_verilog replace_hier_mod7.v
++link_design top -hier
++create_clock -period 1 clk
++
++proc report_design { } {
++  set block [ord::get_db_block]
++  puts "modules: [lsort [lmap m [$block getModules] { $m getName }]]"
++  puts "nets: [lsort [lmap n [$block getNets] { $n getName }]]"
++  report_cell_usage outer
++  report_checks -through r2/D -digits 4
++}
++
++puts "### Initial outer is Outer ###"
++report_design
++
++set_debug_level ODB replace_design_check_sanity 1
++
++puts "### swap outer to Outer_new ###"
++replace_hier_module outer Outer_new
++report_design
++
++puts "### swap outer back to Outer ###"
++replace_hier_module outer Outer
++report_design
++
++puts "### swap outer to Outer_new and undo ###"
++set block [ord::get_db_block]
++odb::dbDatabase_beginEco $block
++replace_hier_module outer Outer_new
++odb::dbDatabase_endEco $block
++odb::dbDatabase_undoEco $block
++report_design
++
++puts "### swap outer to Outer_new again ###"
++replace_hier_module outer Outer_new
++report_design
+diff --git a/openroad/odb/test/replace_hier_mod7.v b/openroad/odb/test/replace_hier_mod7.v
+new file mode 100644
+index 0000000..1d3bf8b
+--- /dev/null
++++ b/openroad/odb/test/replace_hier_mod7.v
+@@ -0,0 +1,77 @@
++module top (clk, in1, out1, out2);
++ input clk;
++ input in1;
++ output out1;
++ output out2;
++
++ wire r1q;
++ wire oz;
++ wire oz2;
++
++ DFF_X1 r1 (.CK(clk),
++    .D(in1),
++    .Q(r1q));
++ Outer outer (.I(r1q), .O(oz));
++ DFF_X1 r2 (.CK(clk),
++    .D(oz),
++    .Q(out1));
++ Outer_new outer2 (.I(r1q), .O(oz2));
++ DFF_X1 r3 (.CK(clk),
++    .D(oz2),
++    .Q(out2));
++endmodule
++
++// Outer and its child Inner both have an instance _1_ and a net _013_.
++module Outer (I, O);
++ input I;
++ output O;
++
++ wire _013_;
++ wire _014_;
++
++ BUF_X1 _1_ (.A(I),
++    .Z(_013_));
++ Inner inner (.I(_013_), .O(_014_));
++ BUF_X1 _2_ (.A(_014_),
++    .Z(O));
++endmodule
++
++// Two levels of hierarchy below it.
++module Outer_new (I, O);
++ input I;
++ output O;
++
++ wire _013_;
++ wire _014_;
++ wire _015_;
++
++ INV_X1 _1_ (.A(I),
++    .ZN(_013_));
++ Mid mid (.I(_013_), .O(_014_));
++ Inner inner (.I(_014_), .O(_015_));
++ INV_X1 _2_ (.A(_015_),
++    .ZN(O));
++endmodule
++
++module Mid (I, O);
++ input I;
++ output O;
++
++ wire _013_;
++
++ Inner inner (.I(I), .O(_013_));
++ BUF_X1 _1_ (.A(_013_),
++    .Z(O));
++endmodule
++
++module Inner (I, O);
++ input I;
++ output O;
++
++ wire _013_;
++
++ INV_X1 _1_ (.A(I),
++    .ZN(_013_));
++ INV_X1 _2_ (.A(_013_),
++    .ZN(O));
++endmodule
+-- 
+2.53.0
+

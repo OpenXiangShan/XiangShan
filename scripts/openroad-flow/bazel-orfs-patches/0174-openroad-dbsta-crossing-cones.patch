@@ -1,0 +1,804 @@
+dbSta: crossing_cones, crossing_signatures and crossing_strip
+
+Tcl commands for timing only the register-to-register paths of a flat
+design that are not contained in one macro (a macro is an instance
+name's first level), in pieces that fit memory:
+
+crossing_signatures: the sets of macros the paths run through, found by
+propagating each net's macro masks forward from the registers in one
+pass, without enumerating a path.
+
+crossing_cones: the design cut to the logic those paths can touch for a
+set of macros: the nets between two macros, the logic forward and
+backward to the first register, the side inputs' fan-in, every load of
+a kept net and the clock network into every kept register. Optionally
+makes the registers only side inputs reach false path starts, and a
+path group through the crossing nets. With `flatten` nothing is
+destroyed: the cones' logic becomes movable (placed, not dont_touch,
+its nets' guides and wires dropped) and every other cell is fixed (not
+dont_touch: a buffer before a register's pin rewires it), the nets that
+touch no movable cell dont_touch, for a Top that places, repairs and routes the boundary
+logic of the macros it dissolves.
+
+crossing_strip: route guides, special wiring, blockages and
+obstructions removed, for a design timed from SPEF.
+
+Carried by bazel-orfs for //tools/carve; not upstreamed. Retires on a
+//:bump onto an OpenROAD that carries it.
+diff --git a/openroad/dbSta/src/dbSta.i b/openroad/dbSta/src/dbSta.i
+index 16a0cd1..da894cb 100644
+--- a/openroad/dbSta/src/dbSta.i
++++ b/openroad/dbSta/src/dbSta.i
+@@ -13,7 +13,14 @@
+ #include "db_sta/MakeDbSta.hh"
+ #include "ord/OpenRoad.hh"
+ #include "sta/Graph.hh"
++#include "sta/Liberty.hh"
+ #include "sta/Network.hh"
++#include <algorithm>
++#include <cstdint>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
+ #include "sta/Property.hh"
+ #include "sta/Report.hh"
+ #include "sta/VerilogWriter.hh"
+@@ -350,4 +357,757 @@ check_ip_cmd(const char* master_name,
+   }
+ }
+ 
++// Cut a flat design to what a register-to-register path between
++// "macros" can touch. A macro is an instance name's first level; cells
++// without one are the top level's own. Kept: every net with cells of two
++// macros on it, at least one of them in `macros` ("all": any), the
++// combinational logic back and forward from it to the first stop
++// (a register, latch, clock gate, memory, macro or cell without
++// liberty) on each side, passing only through the set's macros, `parent`
++// and the top level, a cell of any other macro kept as a load; every load
++// of a kept net; the drivers of the clock network into every kept stop.
++// Everything else is destroyed, unless `dry`. Returns "seeds kept
++// before needed...": needed are the blocks outside the set whose logic,
++// not a register, a cone ran into: a path through them is timed only in
++// a set that holds them too.
++// `false_starts`: the kept registers that no crossing path starts at, the
++// ones reached only through a side input's fan-in, made false path
++// starts, so the search propagates no arrivals from them: their paths
++// reach a crossing path's logic past its crossing net and stay in one
++// macro. Returns their count after the needed blocks, as "false N".
++// `false_starts` 2: every register, latch and memory no crossing path
++// starts at, kept or not, and every one no crossing path ends at, false
++// path starts and ends, so that only the crossing paths are timed:
++// the flattened Top's repair, which XSTile's 133,858 failing endpoints of
++// the macros' own paths held for 2.6 hours on 160 GB, none of them a path
++// it may change.
++// `group`: a path group of that name through the crossing nets, so a
++// report or the GUI's path group filter shows exactly the paths not
++// contained in one macro: each such path crosses a net between two.
++// `flatten`: nothing is destroyed; the cones' logic, every cell the data
++// walks passed through (not a stop, not a clock network cell, not a cell
++// of a macro outside the set), is made movable for a Top that places,
++// repairs and routes the boundary logic of its dissolved macros: placed,
++// not fixed, not dont_touch, its nets' guides and wires dropped. Every
++// other cell, the macros' register-to-register logic up to and including
++// their registers, is fixed: never moved, its footprint kept (the resizer
++// takes only a VT swap on a fixed cell). Not dont_touch: a buffer before
++// a register's D pin rewires the register's pin, which OpenDB refuses on
++// a dont_touch cell (ODB-1211, RSZ-3006 on XSTile's repair_design), and so
++// does CTS on its clock pin (CTS-0137); a cell on a movable cell's net
++// loses a dont_touch it had. The nets that touch no movable
++// cell are dont_touch, so nothing is buffered inside a macro, but the
++// clock network's, for the Top's clock tree. Returns the movable cells and
++// their nets as "flatten N M".
++const char*
++crossing_cones(const char* macros, const char* parent, bool dry,
++               int false_starts = 0, const char* group = "",
++               bool flatten = false)
++{
++  ord::OpenRoad* openroad = ord::getOpenRoad();
++  odb::dbBlock* block = openroad->getDb()->getChip()->getBlock();
++  sta::dbNetwork* network = openroad->getDbNetwork();
++
++  std::unordered_set<std::string> wanted;
++  bool all = false;
++  {
++    std::string s(macros);
++    size_t pos = 0;
++    while (pos < s.size()) {
++      size_t end = s.find(' ', pos);
++      if (end == std::string::npos) {
++        end = s.size();
++      }
++      if (end > pos) {
++        std::string m = s.substr(pos, end - pos);
++        if (m == "all") {
++          all = true;
++        }
++        wanted.insert(m);
++      }
++      pos = end + 1;
++    }
++  }
++  const std::string parent_name(parent);
++
++  // macro ids: 0 the top level, 1 the parent
++  std::unordered_map<std::string, int> macro_ids{{"", 0}, {parent_name, 1}};
++  std::vector<bool> crossable{true, true};
++  int max_inst = 0;
++  for (odb::dbInst* inst : block->getInsts()) {
++    max_inst = std::max(max_inst, static_cast<int>(inst->getId()));
++  }
++  std::vector<int> macro_of(max_inst + 1, 0);
++  std::unordered_map<odb::dbMaster*, bool> stop_of;
++  std::vector<char> stop(max_inst + 1, 0);
++  for (odb::dbInst* inst : block->getInsts()) {
++    const std::string name = inst->getName();
++    // the first divider not escaped: a top-level clock buffer's name
++    // carries its net's, clkbuf_0_u_CoupledL2\/...
++    size_t slash = name.find('/');
++    while (slash != std::string::npos && slash > 0 && name[slash - 1] == '\\') {
++      slash = name.find('/', slash + 1);
++    }
++    const std::string m = slash == std::string::npos ? "" : name.substr(0, slash);
++    auto [it, fresh] = macro_ids.try_emplace(m, macro_ids.size());
++    if (fresh) {
++      crossable.push_back(all || wanted.count(m));
++    }
++    macro_of[inst->getId()] = it->second;
++
++    odb::dbMaster* master = inst->getMaster();
++    auto st = stop_of.find(master);
++    if (st == stop_of.end()) {
++      bool is_stop = master->isBlock();
++      sta::LibertyCell* cell = network->libertyCell(inst);
++      if (cell == nullptr) {
++        is_stop = true;
++      } else if (cell->isSequential() || cell->isClockGate()
++                 || cell->isMemory() || cell->isMacro()) {
++        is_stop = true;
++      } else {
++        sta::LibertyCellPortIterator ports(cell);
++        while (ports.hasNext()) {
++          if (ports.next()->isClock()) {
++            is_stop = true;
++            break;
++          }
++        }
++      }
++      st = stop_of.emplace(master, is_stop).first;
++    }
++    stop[inst->getId()] = st->second;
++  }
++  // clock nets are the clock network's, kept below for latency, never a
++  // seed or a data cone: one tree over every register, a leaf net reaching
++  // two macros' registers pulled XSTile's whole clock tree, and every
++  // register on it, into one block's cones
++  sta::dbSta* sta = openroad->getSta();
++  sta->ensureClkNetwork(sta->cmdMode());
++  std::unordered_map<odb::dbNet*, bool> clock_of;
++  auto is_clock = [&](odb::dbNet* net) {
++    auto c = clock_of.find(net);
++    if (c == clock_of.end()) {
++      bool clock = false;
++      for (odb::dbITerm* iterm : net->getITerms()) {
++        if (iterm->isOutputSignal()
++            && sta->isClock(network->dbToSta(iterm), sta->cmdMode())) {
++          clock = true;
++          break;
++        }
++      }
++      c = clock_of.emplace(net, clock).first;
++    }
++    return c->second;
++  };
++  auto power = [&](odb::dbNet* net) {
++    return net->getSigType().isSupply() || is_clock(net);
++  };
++
++  std::vector<char> keep(max_inst + 1, 0);
++  std::unordered_set<odb::dbNet*> seen;
++  std::vector<odb::dbNet*> work;
++  int seeds = 0;
++  std::vector<odb::dbNet*> seed_nets;
++  for (odb::dbNet* net : block->getNets()) {
++    if (power(net)) {
++      continue;
++    }
++    int first = -1;
++    bool two = false;
++    bool hit = all;
++    for (odb::dbITerm* iterm : net->getITerms()) {
++      const int m = macro_of[iterm->getInst()->getId()];
++      if (m == 0) {
++        continue;
++      }
++      if (first < 0) {
++        first = m;
++      } else if (m != first) {
++        two = true;
++      }
++      if (m > 1 && crossable[m]) {
++        hit = true;
++      }
++    }
++    if (two && hit) {
++      seen.insert(net);
++      work.push_back(net);
++      seed_nets.push_back(net);
++      seeds++;
++    }
++  }
++
++  // forward from a crossing net through its loads' outputs, backward
++  // through its driver's inputs: a cell's side inputs are not on a path
++  // through the net, and following them spread XSTile's cones over 90 %
++  // of its 9.5 M instances. Every cell on a reached net is kept, so each
++  // driver keeps its load.
++  std::vector<odb::dbNet*> forward = work;
++  std::vector<odb::dbNet*> backward = work;
++  work.clear();
++  std::unordered_set<odb::dbNet*> seen_forward(seen);
++  std::unordered_set<odb::dbNet*> seen_backward(seen);
++  // side inputs' fan-in, walked apart so that a stop reached only from a
++  // side is told from one a crossing path starts at (`launch`)
++  std::vector<odb::dbNet*> side;
++  std::unordered_set<odb::dbNet*> seen_side;
++  std::vector<char> launch(max_inst + 1, 0);
++  // the cells a data walk passed through: `flatten`'s movable cells
++  std::vector<char> data(max_inst + 1, 0);
++  // the stops a crossing path ends at: false_starts 2's capture side
++  std::vector<char> capture(max_inst + 1, 0);
++  std::vector<char> needed(crossable.size(), 0);
++  auto expands = [&](odb::dbInst* inst) {
++    const int id = inst->getId();
++    if (stop[id]) {
++      return false;
++    }
++    if (!crossable[macro_of[id]]) {
++      needed[macro_of[id]] = 1;
++      return false;
++    }
++    return true;
++  };
++  while (!forward.empty()) {
++    odb::dbNet* net = forward.back();
++    forward.pop_back();
++    for (odb::dbITerm* iterm : net->getITerms()) {
++      odb::dbInst* inst = iterm->getInst();
++      keep[inst->getId()] = 1;
++      if (iterm->isInputSignal() && stop[inst->getId()]) {
++        capture[inst->getId()] = 1;
++      }
++      if (!iterm->isInputSignal() || !expands(inst)) {
++        continue;
++      }
++      data[inst->getId()] = 1;
++      for (odb::dbITerm* other : inst->getITerms()) {
++        odb::dbNet* n = other->getNet();
++        if (n == nullptr || power(n)) {
++          continue;
++        }
++        if (other->isOutputSignal()) {
++          if (seen_forward.insert(n).second) {
++            seen.insert(n);
++            forward.push_back(n);
++          }
++        } else if (other != iterm && seen_side.insert(n).second) {
++          // a side input's slew is the output's when its arc is the
++          // worst (the toy's XOR: 11.2 ps whole, 6.9 ps without), so
++          // its fan-in is kept, backward only
++          seen.insert(n);
++          side.push_back(n);
++        }
++      }
++    }
++  }
++  // back through drivers: from the crossing nets, marking the stops
++  // paths start at, then the side inputs' fan-in
++  auto walk_back = [&](std::vector<odb::dbNet*>& queue,
++                       std::unordered_set<odb::dbNet*>& seen_queue,
++                       bool starts) {
++    while (!queue.empty()) {
++      odb::dbNet* net = queue.back();
++      queue.pop_back();
++      for (odb::dbITerm* iterm : net->getITerms()) {
++        odb::dbInst* inst = iterm->getInst();
++        keep[inst->getId()] = 1;
++        if (!iterm->isOutputSignal()) {
++          continue;
++        }
++        if (starts) {
++          launch[inst->getId()] = 1;
++        }
++        if (!expands(inst)) {
++          continue;
++        }
++        data[inst->getId()] = 1;
++        for (odb::dbITerm* in : inst->getITerms()) {
++          odb::dbNet* n = in->getNet();
++          if (n == nullptr || !in->isInputSignal() || power(n)
++              || !seen_queue.insert(n).second) {
++            continue;
++          }
++          seen.insert(n);
++          queue.push_back(n);
++        }
++      }
++    }
++  };
++  walk_back(backward, seen_backward, true);
++  walk_back(side, seen_side, false);
++
++  // the clock network into the kept stops: back from each clock pin
++  // through its drivers; every cell on a reached clock net is kept as its
++  // load, so each clock net's delay, and every kept register's latency,
++  // is the whole design's (without them slacks moved by up to 0.9 ps on
++  // the toy), but only drivers are followed
++  std::unordered_set<odb::dbNet*> seen_clock;
++  for (odb::dbInst* inst : block->getInsts()) {
++    if (!keep[inst->getId()]) {
++      continue;
++    }
++    for (odb::dbITerm* iterm : inst->getITerms()) {
++      odb::dbNet* n = iterm->getNet();
++      if (iterm->getSigType() == odb::dbSigType::CLOCK && n != nullptr
++          && seen_clock.insert(n).second) {
++        work.push_back(n);
++      }
++    }
++  }
++  while (!work.empty()) {
++    odb::dbNet* net = work.back();
++    work.pop_back();
++    for (odb::dbITerm* iterm : net->getITerms()) {
++      odb::dbInst* inst = iterm->getInst();
++      keep[inst->getId()] = 1;
++      if (!iterm->isOutputSignal()) {
++        continue;
++      }
++      for (odb::dbITerm* other : inst->getITerms()) {
++        odb::dbNet* n = other->getNet();
++        // up the clock network only: a clock gate's enable is data, and
++        // following it walked XSTile's data logic, through its
++        // registers, into one block's cones
++        if (n == nullptr || !other->isInputSignal()
++            || n->getSigType().isSupply() || !is_clock(n)
++            || !seen_clock.insert(n).second) {
++          continue;
++        }
++        work.push_back(n);
++      }
++    }
++  }
++
++  std::vector<std::string> macro_names(macro_ids.size());
++  for (const auto& [name, id] : macro_ids) {
++    macro_names[id] = name;
++  }
++  std::string needs;
++  for (size_t m = 2; m < needed.size(); m++) {
++    if (needed[m]) {
++      needs += " " + macro_names[m];
++    }
++  }
++  int before = 0;
++  int kept = 0;
++  std::vector<odb::dbInst*> drop;
++  for (odb::dbInst* inst : block->getInsts()) {
++    before++;
++    if (keep[inst->getId()]) {
++      kept++;
++    } else {
++      drop.push_back(inst);
++    }
++  }
++  if (false_starts) {
++    // registers, latches and memories only: a clock gate's output is the
++    // clock network's
++    sta::dbSta* fsta = openroad->getSta();
++    sta::InstanceSet* insts = new sta::InstanceSet(network);
++    sta::InstanceSet* ends = new sta::InstanceSet(network);
++    for (odb::dbInst* inst : block->getInsts()) {
++      const int id = inst->getId();
++      if (!stop[id]) {
++        continue;
++      }
++      sta::LibertyCell* cell = network->libertyCell(inst);
++      if (cell == nullptr
++          || !(cell->isClockGate() || cell->isSequential() || cell->isMemory()
++               || cell->isMacro())) {
++        continue;
++      }
++      // a clock gate is an end, its enable's gating check, never a start
++      if (!cell->isClockGate() && !launch[id]
++          && (false_starts >= 2 || keep[id])) {
++        insts->insert(network->dbToSta(inst));
++      }
++      if (false_starts >= 2 && !capture[id]) {
++        ends->insert(network->dbToSta(inst));
++      }
++    }
++    needs += " false " + std::to_string(insts->size());
++    sta::Sdc* sdc = fsta->cmdSdc();
++    if (insts->empty()) {
++      delete insts;
++    } else {
++      sta::ExceptionFrom* from = fsta->makeExceptionFrom(
++          nullptr, nullptr, insts, sta::RiseFallBoth::riseFall(), sdc);
++      fsta->makeFalsePath(from, nullptr, nullptr, sta::MinMaxAll::all(),
++                          "crossing_cones: side-only starts", sdc);
++    }
++    if (false_starts >= 2) {
++      needs += " false_ends " + std::to_string(ends->size());
++    }
++    if (ends->empty()) {
++      delete ends;
++    } else {
++      sta::ExceptionTo* to = fsta->makeExceptionTo(
++          nullptr, nullptr, ends, sta::RiseFallBoth::riseFall(),
++          sta::RiseFallBoth::riseFall(), sdc);
++      fsta->makeFalsePath(nullptr, nullptr, to, sta::MinMaxAll::all(),
++                          "crossing_cones: ends no crossing reaches", sdc);
++    }
++  }
++  if (group[0] != '\0') {
++    sta::dbSta* gsta = openroad->getSta();
++    sta::Sdc* sdc = gsta->cmdSdc();
++    sta::NetSet* nets = new sta::NetSet(network);
++    for (odb::dbNet* net : seed_nets) {
++      nets->insert(network->dbToSta(net));
++    }
++    sta::ExceptionThruSeq* thrus = new sta::ExceptionThruSeq;
++    thrus->push_back(gsta->makeExceptionThru(
++        nullptr, nets, nullptr, sta::RiseFallBoth::riseFall(), sdc));
++    gsta->makeGroupPath(group, false, nullptr, thrus, nullptr,
++                        "crossing_cones: paths not contained in one macro",
++                        sdc);
++    needs += " group " + std::to_string(nets->size());
++  }
++  if (flatten) {
++    // the clock network's nets, left free for the Top's clock tree:
++    // is_clock's, and the root a clock port drives or any net on a
++    // clock pin (the toy's `clock`, driven by its port, is no cell's)
++    auto clock_tree = [&](odb::dbNet* net) {
++      if (net->getSigType() == odb::dbSigType::CLOCK || is_clock(net)) {
++        return true;
++      }
++      for (odb::dbBTerm* bterm : net->getBTerms()) {
++        if (sta->isClock(network->dbToSta(bterm), sta->cmdMode())) {
++          return true;
++        }
++      }
++      for (odb::dbITerm* iterm : net->getITerms()) {
++        if (iterm->getSigType() == odb::dbSigType::CLOCK) {
++          return true;
++        }
++      }
++      return false;
++    };
++    int movable = 0;
++    for (odb::dbInst* inst : block->getInsts()) {
++      if (data[inst->getId()]) {
++        inst->setDoNotTouch(false);
++        inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
++        movable++;
++      } else if (!inst->isFixed()) {
++        inst->setPlacementStatus(odb::dbPlacementStatus::FIRM);
++      }
++    }
++    int nets = 0;
++    for (odb::dbNet* net : block->getNets()) {
++      if (net->getSigType().isSupply()) {
++        continue;
++      }
++      bool moves = false;
++      for (odb::dbITerm* iterm : net->getITerms()) {
++        if (data[iterm->getInst()->getId()]) {
++          moves = true;
++          break;
++        }
++      }
++      if (moves) {
++        // its fixed cells too, a dont_touch the macro's flow set among
++        // them (a generated register file's storage): a buffer on the
++        // net rewires their pins
++        for (odb::dbITerm* iterm : net->getITerms()) {
++          iterm->getInst()->setDoNotTouch(false);
++        }
++        net->setDoNotTouch(false);
++        net->clearGuides();
++        if (odb::dbWire* wire = net->getWire()) {
++          odb::dbWire::destroy(wire);
++        }
++        nets++;
++      } else if (!clock_tree(net)) {
++        net->setDoNotTouch(true);
++      }
++    }
++    needs += " flatten " + std::to_string(movable) + " "
++             + std::to_string(nets);
++    drop.clear();
++  }
++  if (dry) {
++    drop.clear();
++  }
++  for (odb::dbInst* inst : drop) {
++    inst->setDoNotTouch(false);
++    // a flattened Top's macro nets are dont_touch (flatten), and OpenDB
++    // will not disconnect a cell from one (ODB-0372): the cut is a copy
++    // for timing
++    for (odb::dbITerm* iterm : inst->getITerms()) {
++      if (odb::dbNet* net = iterm->getNet()) {
++        net->setDoNotTouch(false);
++      }
++    }
++    odb::dbInst::destroy(inst);
++  }
++  std::vector<odb::dbNet*> empty;
++  for (odb::dbNet* net : block->getNets()) {
++    if (dry || flatten) {
++      break;
++    }
++    if (net->getITerms().empty() && net->getBTerms().empty()) {
++      empty.push_back(net);
++    }
++  }
++  for (odb::dbNet* net : empty) {
++    net->setDoNotTouch(false);
++    odb::dbNet::destroy(net);
++  }
++  static std::string result;
++  result = std::to_string(seeds) + " " + std::to_string(kept) + " "
++           + std::to_string(before) + needs;
++  return result.c_str();
++}
++
++// Strip what timing from parasitics read in (read_spef) does not read: every
++// net's route guides and special wiring, the blockages and obstructions.
++// XSTile's smallest crossing set, 0.32 M instances, loaded at 19 GB with
++// them, its power grid and guides over the whole die. Returns the guides
++// and special wires removed.
++const char*
++crossing_strip()
++{
++  odb::dbBlock* block = ord::getOpenRoad()->getDb()->getChip()->getBlock();
++  long guides = 0;
++  long swires = 0;
++  for (odb::dbNet* net : block->getNets()) {
++    guides += net->getGuides().size();
++    net->clearGuides();
++    std::vector<odb::dbSWire*> sw(net->getSWires().begin(), net->getSWires().end());
++    for (odb::dbSWire* s : sw) {
++      odb::dbSWire::destroy(s);
++      swires++;
++    }
++  }
++  std::vector<odb::dbBlockage*> blockages(block->getBlockages().begin(),
++                                          block->getBlockages().end());
++  for (odb::dbBlockage* b : blockages) {
++    odb::dbBlockage::destroy(b);
++  }
++  std::vector<odb::dbObstruction*> obstructions(block->getObstructions().begin(),
++                                                block->getObstructions().end());
++  for (odb::dbObstruction* o : obstructions) {
++    odb::dbObstruction::destroy(o);
++  }
++  static std::string result;
++  result = std::to_string(guides) + " " + std::to_string(swires);
++  return result.c_str();
++}
++
++// The macros the register-to-register paths of a flat design run through,
++// as signatures: a path's signature is the set of macros its cells belong
++// to (an instance name's first level; the top level's own cells are "",
++// the parent `parent`), from the stop it starts at through its logic to
++// the stop it ends at. Found by propagating each net's distinct masks
++// forward from the stops in one pass, no path enumerated. Returns one
++// "count macro+macro..." per signature of two or more macros, count the
++// endpoint pins it reaches, most first. A net carrying more than
++// `max_masks` distinct masks stops the search (an error, not a cut).
++const char*
++crossing_signatures(const char* parent, int max_masks)
++{
++  ord::OpenRoad* openroad = ord::getOpenRoad();
++  odb::dbBlock* block = openroad->getDb()->getChip()->getBlock();
++  sta::dbNetwork* network = openroad->getDbNetwork();
++  utl::Logger* logger = openroad->getLogger();
++
++  std::unordered_map<std::string, int> macro_ids{{"", 0}, {parent, 1}};
++  int max_inst = 0;
++  for (odb::dbInst* inst : block->getInsts()) {
++    max_inst = std::max(max_inst, static_cast<int>(inst->getId()));
++  }
++  std::vector<int> macro_of(max_inst + 1, 0);
++  std::vector<char> stop(max_inst + 1, 0);
++  std::unordered_map<odb::dbMaster*, bool> stop_of;
++  for (odb::dbInst* inst : block->getInsts()) {
++    const std::string name = inst->getName();
++    size_t slash = name.find('/');
++    while (slash != std::string::npos && slash > 0 && name[slash - 1] == '\\') {
++      slash = name.find('/', slash + 1);
++    }
++    const std::string m = slash == std::string::npos ? "" : name.substr(0, slash);
++    macro_of[inst->getId()] = macro_ids.try_emplace(m, macro_ids.size()).first->second;
++    odb::dbMaster* master = inst->getMaster();
++    auto st = stop_of.find(master);
++    if (st == stop_of.end()) {
++      bool is_stop = master->isBlock();
++      sta::LibertyCell* cell = network->libertyCell(inst);
++      if (cell == nullptr || cell->isSequential() || cell->isClockGate()
++          || cell->isMemory() || cell->isMacro()) {
++        is_stop = true;
++      } else {
++        sta::LibertyCellPortIterator ports(cell);
++        while (ports.hasNext()) {
++          if (ports.next()->isClock()) {
++            is_stop = true;
++            break;
++          }
++        }
++      }
++      st = stop_of.emplace(master, is_stop).first;
++    }
++    stop[inst->getId()] = st->second;
++  }
++  if (macro_ids.size() > 32) {
++    logger->error(utl::STA, 2300, "crossing_signatures: {} macros, more than 32",
++                  macro_ids.size());
++  }
++  auto bit = [&](odb::dbInst* inst) {
++    return uint32_t(1) << macro_of[inst->getId()];
++  };
++
++  sta::dbSta* sta = openroad->getSta();
++  sta->ensureClkNetwork(sta->cmdMode());
++  std::unordered_map<odb::dbNet*, bool> clock_of;
++  auto skip = [&](odb::dbNet* net) {
++    if (net->getSigType().isSupply()) {
++      return true;
++    }
++    auto c = clock_of.find(net);
++    if (c == clock_of.end()) {
++      bool clock = false;
++      for (odb::dbITerm* iterm : net->getITerms()) {
++        if (iterm->isOutputSignal()
++            && sta->isClock(network->dbToSta(iterm), sta->cmdMode())) {
++          clock = true;
++          break;
++        }
++      }
++      c = clock_of.emplace(net, clock).first;
++    }
++    return c->second;
++  };
++  auto driver = [](odb::dbNet* net) -> odb::dbInst* {
++    for (odb::dbITerm* iterm : net->getITerms()) {
++      if (iterm->isOutputSignal()) {
++        return iterm->getInst();
++      }
++    }
++    return nullptr;
++  };
++
++  // each net's masks, by a depth-first walk back to the stops: a net is
++  // done once every input net of its driver is
++  std::unordered_map<odb::dbNet*, std::vector<uint32_t>> masks;
++  std::unordered_map<odb::dbNet*, char> state;  // 1 open, 2 done
++  int loops = 0;
++  auto solve = [&](odb::dbNet* root) {
++    std::vector<odb::dbNet*> stack{root};
++    while (!stack.empty()) {
++      odb::dbNet* net = stack.back();
++      char& s = state[net];
++      if (s == 2) {
++        stack.pop_back();
++        continue;
++      }
++      std::vector<uint32_t>& out = masks[net];
++      odb::dbInst* inst = skip(net) ? nullptr : driver(net);
++      if (inst == nullptr) {
++        s = 2;
++        stack.pop_back();
++        continue;
++      }
++      if (stop[inst->getId()]) {
++        out = {bit(inst)};
++        s = 2;
++        stack.pop_back();
++        continue;
++      }
++      if (s == 0) {
++        s = 1;
++        for (odb::dbITerm* in : inst->getITerms()) {
++          odb::dbNet* n = in->getNet();
++          if (n != nullptr && in->isInputSignal() && !skip(n)) {
++            auto it = state.find(n);
++            if (it == state.end() || it->second == 0) {
++              stack.push_back(n);
++            } else if (it->second == 1) {
++              loops++;
++            }
++          }
++        }
++        continue;
++      }
++      // every input done (or on a loop): the union, this cell's bit added
++      std::unordered_set<uint32_t> set;
++      for (odb::dbITerm* in : inst->getITerms()) {
++        odb::dbNet* n = in->getNet();
++        if (n == nullptr || !in->isInputSignal() || skip(n)) {
++          continue;
++        }
++        auto m = masks.find(n);
++        if (m == masks.end()) {
++          continue;
++        }
++        for (uint32_t x : m->second) {
++          set.insert(x | bit(inst));
++        }
++      }
++      if (static_cast<int>(set.size()) > max_masks) {
++        logger->error(utl::STA, 2301,
++                      "crossing_signatures: net {} carries {} signatures, more "
++                      "than {}",
++                      net->getName(), set.size(), max_masks);
++      }
++      out.assign(set.begin(), set.end());
++      s = 2;
++      stack.pop_back();
++    }
++  };
++
++  std::unordered_map<uint32_t, long> endpoints;
++  for (odb::dbInst* inst : block->getInsts()) {
++    if (!stop[inst->getId()]) {
++      continue;
++    }
++    for (odb::dbITerm* in : inst->getITerms()) {
++      odb::dbNet* n = in->getNet();
++      if (n == nullptr || !in->isInputSignal()
++          || in->getSigType() == odb::dbSigType::CLOCK || skip(n)) {
++        continue;
++      }
++      solve(n);
++      std::unordered_set<uint32_t> seen;
++      for (uint32_t x : masks[n]) {
++        const uint32_t sig = x | bit(inst);
++        if (__builtin_popcount(sig) >= 2 && seen.insert(sig).second) {
++          endpoints[sig]++;
++        }
++      }
++    }
++  }
++  if (loops) {
++    logger->warn(utl::STA, 2302,
++                 "crossing_signatures: {} combinational loop edges ignored",
++                 loops);
++  }
++
++  std::vector<std::string> names(macro_ids.size());
++  for (const auto& [name, id] : macro_ids) {
++    names[id] = name.empty() ? "top" : name;
++  }
++  std::vector<std::pair<long, uint32_t>> sorted;
++  for (const auto& [sig, count] : endpoints) {
++    sorted.emplace_back(count, sig);
++  }
++  std::sort(sorted.rbegin(), sorted.rend());
++  static std::string result;
++  result.clear();
++  for (const auto& [count, sig] : sorted) {
++    result += std::to_string(count) + " ";
++    bool first = true;
++    for (size_t m = 0; m < names.size(); m++) {
++      if (sig & (uint32_t(1) << m)) {
++        result += (first ? "" : "+") + names[m];
++        first = false;
++      }
++    }
++    result += "\n";
++  }
++  return result.c_str();
++}
++
+ %} // inline

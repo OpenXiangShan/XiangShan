@@ -1,0 +1,10 @@
+--- pycross/private/bzlmod/pycross.bzl
++++ pycross/private/bzlmod/pycross.bzl
+@@ -17,7 +17,6 @@
+ 
+     for module in module_ctx.modules:
+         if module.name != "rules_pycross" and not module.is_root:
+-            _print_warn("Ignoring `pycross` extension usage from non-root, non-rules_pycross module {}".format(module.name))
+             continue
+ 
+         if not environments_tag:

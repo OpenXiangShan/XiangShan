@@ -1,0 +1,74 @@
+yosys: test that techmap maps cells alike whatever was interned first
+
+The test for yosys-0007: a module's cells come out of techmap in the
+same order whichever of their names another module interned first, and
+whichever order the module declares them in.
+
+--- /dev/null
++++ b/tests/techmap/techmap_order_by_name.ys
+@@ -0,0 +1,65 @@
++# techmap maps a module's cells in the order of their names' characters,
++# which is the order the module then holds them in and later passes visit
++# them: a module comes out of techmap alike whichever of its names were
++# interned first. rename -enumerate numbers the cells in the order the
++# module holds them.
++
++read_verilog <<EOT
++(* techmap_celltype = "tm_cell" *)
++module tm_map(input A, output Y);
++	tm_impl _TECHMAP_REPLACE_ (.A(A), .Y(Y));
++endmodule
++EOT
++design -stash tm_map
++
++read_rtlil <<EOT
++module \early
++  wire input 1 $tm_b
++end
++module \top
++  wire input 1 \a
++  wire input 2 \b
++  wire output 3 \ya
++  wire output 4 \yb
++  cell \tm_cell $tm_a
++    connect \A \a
++    connect \Y \ya
++  end
++  cell \tm_cell $tm_b
++    connect \A \b
++    connect \Y \yb
++  end
++end
++EOT
++techmap -map %tm_map top
++select -assert-count 2 top/t:tm_impl
++rename -enumerate -pattern mapped_% top/c:*
++select -assert-count 1 top/w:yb %x1 top/c:mapped_0 %i
++select -assert-count 1 top/w:ya %x1 top/c:mapped_1 %i
++
++design -reset
++
++read_rtlil <<EOT
++module \early
++  wire input 1 $tm_a
++end
++module \top
++  wire input 1 \a
++  wire input 2 \b
++  wire output 3 \ya
++  wire output 4 \yb
++  cell \tm_cell $tm_b
++    connect \A \b
++    connect \Y \yb
++  end
++  cell \tm_cell $tm_a
++    connect \A \a
++    connect \Y \ya
++  end
++end
++EOT
++techmap -map %tm_map top
++select -assert-count 2 top/t:tm_impl
++rename -enumerate -pattern mapped_% top/c:*
++select -assert-count 1 top/w:yb %x1 top/c:mapped_0 %i
++select -assert-count 1 top/w:ya %x1 top/c:mapped_1 %i

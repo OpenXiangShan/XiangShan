@@ -1,0 +1,46 @@
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] Share the wire of a redefined net
+
+A redefinition (output q; wire q, q;), which slang accepts with
+-Wredefinition, got a wire of its own that took the port wire's name,
+and with --keep-hierarchy the module lost the port:
+
+  ERROR: Module `controller$top.controller_i' referenced in module
+  `top' in cell `controller_i' does not have a port named 'q'.
+
+The redefinition now shares the wire of the symbol name lookup finds.
+
+Rebased onto sv-elab 3e15213 (OpenROAD's third-party/sv-elab pin), where
+the frontend builds an ir::Value rather than an RTLIL::SigSpec.
+---
+ src/slang_frontend.cc | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/slang_frontend.cc b/src/slang_frontend.cc
+index 5aa3221..65c91e4 100644
+--- a/src/slang_frontend.cc
++++ b/src/slang_frontend.cc
+@@ -3267,6 +3267,21 @@ bool is_special_net(const ast::Symbol &symbol)
+ 
+ const ir::Value &NetlistContext::add_wire(const ast::ValueSymbol &symbol)
+ {
++	// A redefinition (`output q; wire q, q;`, accepted with
++	// -Wredefinition) is not a second net: it shares the wire of the
++	// symbol name lookup finds. A wire of its own took the name of the
++	// port's wire, and with --keep-hierarchy the module lost the port.
++	if (const ast::Scope *scope = symbol.getParentScope()) {
++		const ast::Symbol *found = scope->find(symbol.name);
++		if (found && found != &symbol && ast::ValueSymbol::isKind(found->kind)) {
++			auto it = wire_cache.find(found);
++			ir::Value sig = it != wire_cache.end()
++					? it->second : add_wire(found->as<ast::ValueSymbol>());
++			wire_cache[&symbol] = sig;
++			return wire_cache.at(&symbol);
++		}
++	}
++
+ 	auto &type = symbol.getType();
+ 
+ 	AttributeGuard guard(*this);
+-- 
+2.53.0

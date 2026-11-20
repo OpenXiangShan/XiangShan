@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 1/4] grt: global_route -no_incremental frees the router once
+ the routes are saved
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FastRoute keeps its nets, Steiner trees, per-edge route grids and grid
+after global_route returns, for incremental routing: ORFS's global route
+stage repairs and then reroutes the nets it changed. A flow that reroutes
+nothing afterwards keeps them, on a large design many GB, through
+everything that follows, write_db and timing among them.
+
+global_route -no_incremental frees them once the routes are saved; the
+routes, which parasitics estimation reads, stay, and the result is the
+same. A later -start_incremental rebuilds the router from the routes, as
+it does on a design read from odb. Graph2D::clear now also frees the
+capacity per layer and the NDR nets per edge, which initCap3D allocates
+again.
+
+gcd_no_incremental routes gcd with -no_incremental, then incrementally,
+and expects gcd's guides.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/README.md                     |  2 +
+ openroad/grt/include/grt/GlobalRouter.h    |  6 ++
+ openroad/grt/src/GlobalRouter.cpp          |  7 +++
+ openroad/grt/src/GlobalRouter.i            |  6 ++
+ openroad/grt/src/GlobalRouter.tcl          |  5 +-
+ openroad/grt/src/fastroute/src/graph2d.cpp |  4 ++
+ openroad/grt/test/BUILD                    |  1 +
+ openroad/grt/test/gcd_no_incremental.ok    | 68 ++++++++++++++++++++++
+ openroad/grt/test/gcd_no_incremental.tcl   | 15 +++++
+ 9 files changed, 113 insertions(+), 1 deletion(-)
+ create mode 100644 openroad/grt/test/gcd_no_incremental.ok
+ create mode 100644 openroad/grt/test/gcd_no_incremental.tcl
+
+diff --git a/openroad/grt/README.md b/openroad/grt/README.md
+index 810c6ae..b90aa64 100644
+--- a/openroad/grt/README.md
++++ b/openroad/grt/README.md
+@@ -28,6 +28,7 @@ global_route
+     [-allow_congestion]
+     [-snapshot_batched_width width]
+     [-backing_file file]
++    [-no_incremental]
+     [-verbose]
+     [-start_incremental]
+     [-end_incremental]
+@@ -58,6 +59,7 @@ global_route
+ | `-infinite_cap` | Enables "infinite" gcell capacity for testing purpose. NOTE: this is not recommended for production flows. |
+ | `-snapshot_batched_width` | Set the semantic width of snapshot-batched routing (max batches per wave). The default is `0`, preserving the non-batched behavior. Set a positive integer to enable batched routing; allowed values are integers `[1, MAX_INT]`. Execution width still follows `set_thread_count`. NOTE: this is not recommended for production flows; it is intended for exploration and research projects. |
+ | `-backing_file` | Back the routing grid (the 2D and 3D edges and the capacity per layer) with a file at this path instead of memory alone, so the kernel pages it to the file rather than to swap. The file is reserved for the whole grid when the grid is set up, which fails at once if the disk cannot hold it, and is removed as soon as it is created. The routes are the same as without it. |
++| `-no_incremental` | Free the router's own nets, Steiner trees and grid once the routes are saved, for a flow that does not reroute incrementally afterwards. The routes are the same; a later `-start_incremental` rebuilds the router from them. |
+ 
+ ### Set Routing Layers
+ 
+diff --git a/openroad/grt/include/grt/GlobalRouter.h b/openroad/grt/include/grt/GlobalRouter.h
+index 7038dcd..1365545 100644
+--- a/openroad/grt/include/grt/GlobalRouter.h
++++ b/openroad/grt/include/grt/GlobalRouter.h
+@@ -161,6 +161,11 @@ class GlobalRouter
+   void setResAwareNetsPercentage(float percentage);
+   void setSnapshotBatchedWidth(int snapshot_batched_width);
+   void setBackingFile(const std::string& path);
++  // After a global_route, free what only incremental routing reads.
++  void setNoIncremental(bool no_incremental)
++  {
++    no_incremental_ = no_incremental;
++  }
+   int getSnapshotBatchedWidth() const;
+   int getSnapshotBatchCount() const;
+   bool isResistanceAware() { return resistance_aware_; };
+@@ -658,6 +663,7 @@ class GlobalRouter
+   bool resistance_aware_{false};
+   int snapshot_batched_width_{0};
+   std::string backing_file_;
++  bool no_incremental_ = false;
+   int num_threads_;
+   std::vector<int> vertical_capacities_;
+   std::vector<int> horizontal_capacities_;
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index 3a10f74..0550502 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -560,6 +560,13 @@ void GlobalRouter::globalRoute(bool save_guides)
+   }
+ 
+   finishGlobalRouting(save_guides);
++  if (no_incremental_) {
++    // Nothing reroutes incrementally: FastRoute's nets, trees and grid are
++    // freed; the routes stay. A later -start_incremental rebuilds them from
++    // the routes, as on a design read from odb.
++    fastroute_->clear();
++    initialized_ = false;
++  }
+   if (verbose_) {
+     const int elapsed = static_cast<int>(timer.elapsed());
+     const int hour = elapsed / 3600;
+diff --git a/openroad/grt/src/GlobalRouter.i b/openroad/grt/src/GlobalRouter.i
+index e75ccab..27fbe6f 100644
+--- a/openroad/grt/src/GlobalRouter.i
++++ b/openroad/grt/src/GlobalRouter.i
+@@ -161,6 +161,12 @@ set_backing_file(const char* path)
+   getGlobalRouter()->setBackingFile(path);
+ }
+ 
++void
++set_no_incremental(bool no_incremental)
++{
++  getGlobalRouter()->setNoIncremental(no_incremental);
++}
++
+ int
+ get_snapshot_batched_width()
+ {
+diff --git a/openroad/grt/src/GlobalRouter.tcl b/openroad/grt/src/GlobalRouter.tcl
+index 8581b7e..88978d3 100644
+--- a/openroad/grt/src/GlobalRouter.tcl
++++ b/openroad/grt/src/GlobalRouter.tcl
+@@ -151,6 +151,7 @@ sta::define_cmd_args "global_route" {[-guide_file out_file] \
+                                   [-allow_congestion] \
+                                   [-snapshot_batched_width width] \
+                                   [-backing_file file] \
++                                  [-no_incremental] \
+                                   [-verbose] \
+                                   [-start_incremental] \
+                                   [-end_incremental] \
+@@ -167,7 +168,7 @@ proc global_route { args } {
+           -skip_large_fanout_nets -snapshot_batched_width -backing_file
+          } \
+     flags {-allow_congestion -resistance_aware -infinite_cap -verbose -start_incremental \
+-          -end_incremental -use_cugr}
++          -end_incremental -use_cugr -no_incremental}
+ 
+   sta::check_argc_eq0 "global_route" $args
+ 
+@@ -261,6 +262,8 @@ proc global_route { args } {
+   }
+   grt::set_snapshot_batched_width $snapshot_batched_width
+ 
++  grt::set_no_incremental [info exists flags(-no_incremental)]
++
+   if { [info exists keys(-backing_file)] } {
+     grt::set_backing_file $keys(-backing_file)
+   } else {
+diff --git a/openroad/grt/src/fastroute/src/graph2d.cpp b/openroad/grt/src/fastroute/src/graph2d.cpp
+index 87c9c52..7ee7a19 100644
+--- a/openroad/grt/src/fastroute/src/graph2d.cpp
++++ b/openroad/grt/src/fastroute/src/graph2d.cpp
+@@ -247,6 +247,10 @@ void Graph2D::clear()
+   v_dirty_used_grids_.clear();
+   h_edges_.resize(boost::extents[0][0]);
+   v_edges_.resize(boost::extents[0][0]);
++  h_cap_3D_.resize(boost::extents[0][0][0]);
++  v_cap_3D_.resize(boost::extents[0][0][0]);
++  ndr_nets_ = {};
++  ndr_debit_ = {};
+   h_dirty_est_edges_.clear();
+   v_dirty_est_edges_.clear();
+   h_dirty_history_edges_.clear();
+diff --git a/openroad/grt/test/BUILD b/openroad/grt/test/BUILD
+index 1084522..f6ad511 100644
+--- a/openroad/grt/test/BUILD
++++ b/openroad/grt/test/BUILD
+@@ -44,6 +44,7 @@ TESTS = [
+     "estimate_path_resistance",
+     "gcd",
+     "gcd_backing_file",
++    "gcd_no_incremental",
+     "gcd_cugr",
+     "gcd_flute",
+     "global_route_above_max_layer_cugr",
+diff --git a/openroad/grt/test/gcd_no_incremental.ok b/openroad/grt/test/gcd_no_incremental.ok
+new file mode 100644
+index 0000000..fb367c5
+--- /dev/null
++++ b/openroad/grt/test/gcd_no_incremental.ok
+@@ -0,0 +1,68 @@
++[INFO ODB-0227] LEF file: Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
++[INFO ODB-0128] Design: gcd
++[INFO ODB-0130]     Created 54 pins.
++[INFO ODB-0131]     Created 676 components and 2850 component-terminals.
++[INFO ODB-0133]     Created 579 nets and 1498 connections.
++[WARNING GRT-0300] Timing is not available, setting critical nets percentage to 0.
++[INFO GRT-0020] Min routing layer: metal2
++[INFO GRT-0021] Max routing layer: metal10
++[INFO GRT-0022] Global adjustment: 0%
++[INFO GRT-0023] Grid origin: (0, 0)
++[INFO GRT-0088] Layer metal1  Track-Pitch = 0.1400  line-2-Via Pitch: 0.1350
++[INFO GRT-0088] Layer metal2  Track-Pitch = 0.1900  line-2-Via Pitch: 0.1400
++[INFO GRT-0088] Layer metal3  Track-Pitch = 0.1400  line-2-Via Pitch: 0.1400
++[INFO GRT-0088] Layer metal4  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal5  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal6  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal7  Track-Pitch = 0.8000  line-2-Via Pitch: 0.8000
++[INFO GRT-0088] Layer metal8  Track-Pitch = 0.8000  line-2-Via Pitch: 0.8000
++[INFO GRT-0088] Layer metal9  Track-Pitch = 1.6000  line-2-Via Pitch: 1.6000
++[INFO GRT-0088] Layer metal10 Track-Pitch = 1.6000  line-2-Via Pitch: 1.6000
++[INFO GRT-0003] Macros: 0
++[INFO GRT-0004] Blockages: 0
++[INFO GRT-0019] Found 0 clock nets.
++[INFO GRT-0001] Minimum degree: 2
++[INFO GRT-0002] Maximum degree: 36
++
++[INFO GRT-0053] Routing resources analysis:
++          Routing      Original      Derated      Resource
++Layer     Direction    Resources     Resources    Reduction (%)
++---------------------------------------------------------------
++metal1     Horizontal          0             0          0.00%
++metal2     Vertical        17918         17918          0.00%
++metal3     Horizontal      24480         24480          0.00%
++metal4     Vertical        12172         12172          0.00%
++metal5     Horizontal      12240         12240          0.00%
++metal6     Vertical        12172         12172          0.00%
++metal7     Horizontal       4284          4284          0.00%
++metal8     Vertical         4284          4284          0.00%
++metal9     Horizontal       2142          2142          0.00%
++metal10    Vertical         2142          2142          0.00%
++---------------------------------------------------------------
++
++[INFO GRT-0197] Via related to pin nodes: 2686
++[INFO GRT-0198] Via related Steiner nodes: 44
++[INFO GRT-0199] Via filling finished.
++[INFO GRT-0111] Final number of vias: 3503
++[INFO GRT-0112] Final usage 3D: 13033
++
++[INFO GRT-0096] Final congestion report:
++Layer         Resource        Demand        Usage (%)    Max H / Max V / Total Congestion
++---------------------------------------------------------------------------------------
++metal1               0             0            0.00%             0 /  0 /  0
++metal2           17918          1172            6.54%             0 /  0 /  0
++metal3           24480          1212            4.95%             0 /  0 /  0
++metal4           12172            41            0.34%             0 /  0 /  0
++metal5           12240            51            0.42%             0 /  0 /  0
++metal6           12172            48            0.39%             0 /  0 /  0
++metal7            4284             0            0.00%             0 /  0 /  0
++metal8            4284             0            0.00%             0 /  0 /  0
++metal9            2142             0            0.00%             0 /  0 /  0
++metal10           2142             0            0.00%             0 /  0 /  0
++---------------------------------------------------------------------------------------
++Total            91834          2524            2.75%             0 /  0 /  0
++
++[INFO GRT-0018] Total wirelength: 10767 um
++[INFO GRT-0014] Routed nets: 563
++[WARNING GRT-0300] Timing is not available, setting critical nets percentage to 0.
++No differences found.
+diff --git a/openroad/grt/test/gcd_no_incremental.tcl b/openroad/grt/test/gcd_no_incremental.tcl
+new file mode 100644
+index 0000000..fd5844a
+--- /dev/null
++++ b/openroad/grt/test/gcd_no_incremental.tcl
+@@ -0,0 +1,15 @@
++# gcd_nangate45 routed with -no_incremental: gcd's guides, and an
++# incremental route afterwards rebuilds the router from the routes
++source "helpers.tcl"
++read_lef "Nangate45/Nangate45.lef"
++read_def "gcd.def"
++
++set guide_file [make_result_file gcd_no_incremental.guide]
++
++global_route -verbose -no_incremental
++global_route -start_incremental
++global_route -end_incremental
++
++write_guides $guide_file
++
++diff_files gcd.guideok $guide_file
+-- 
+2.53.0
+

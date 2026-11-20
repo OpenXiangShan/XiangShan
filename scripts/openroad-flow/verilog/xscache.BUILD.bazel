@@ -1,0 +1,31 @@
+"""XSCache: coupledL2, openLLC and the shared cache utilities.
+
+The L2 is CoupledL2, inside XSTile, the unit the flow hardens: the
+core with its L1I and L1D and the L2 next to it.
+"""
+
+load("@rules_chisel//chisel:defs.bzl", "chisel_library")
+
+package(default_visibility = ["//visibility:public"])
+
+chisel_library(
+    name = "xscache",
+    # build.mill adds the CHI-to-ZhuJiang bridge from the test tree.
+    srcs = glob(["src/main/scala/**/*.scala"]) + [
+        "src/test/scala/ZhuJiangBridge.scala",
+    ],
+    scalacopts = [
+        "-Ymacro-annotations",
+        "-Xcheckinit:false",
+    ],
+    exports = ["@xs_rocket_chip//:rocket_chip"],
+    deps = [
+        "@xs_maven//:com_github_scopt_scopt_2_13",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_openncb//:openncb",
+        "@xs_rocket_chip//:macros",
+        "@xs_rocket_chip//:rocket_chip",
+        "@xs_utility//:utility",
+        "@xs_zhujiang//:zhujiang",
+    ],
+)

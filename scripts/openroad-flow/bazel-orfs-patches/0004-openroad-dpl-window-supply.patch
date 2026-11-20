@@ -1,0 +1,254 @@
+From ed377b9343f01797c0716a219547b022d024a4f0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Sat, 19 Sep 2026 22:04:21 +0200
+Subject: [PATCH] dpl: before the search, say when no search can legalize the
+ placement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The diamond search moves a cell only within its displacement window, and
+rip-up-and-replace moves the cells it displaces within theirs, so
+legalization is a matching of cells to free sites and Hall's condition
+applies: it exists only if every set of cells has, in the union of their
+windows, at least as many free sites as they need. Checking every set is
+exponential; any one set that fails is proof. Tile the core into boxes
+the size of the window, take the cells global placement left in each,
+and compare the sites they need with the free sites in the box grown by
+the window on every side. Demand over supply is a placement no search
+order can legalize, reported in seconds with the worst windows in
+microns, instead of the hours the search takes to prove it cell by cell.
+
+The check runs before either engine, the legacy diamond search and the
+default negotiation legalizer, whose windows extend up to the same
+displacement cap; on take 19 of the same design the negotiation ran
+past two hours where the check answers in a second.
+
+Measured on a hierarchical asap7 design whose clock buffers landed in
+channels narrower than they needed: 82 minutes of diamond search in the
+CTS stage, 37 % of samples in one function, on a placement this check
+rejects before the first move. For that flow the stop is the performance
+improvement: no legalizer speed-up returns 82 minutes.
+
+Passing proves nothing; some other set of cells may still fail. The
+override is the option the search already has: a wider
+-max_displacement, which the check re-runs against.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/dpl/include/dpl/Opendp.h |   1 +
+ openroad/dpl/src/Opendp.cpp       |   4 +
+ openroad/dpl/src/Place.cpp        | 163 ++++++++++++++++++++++++++++++
+ 3 files changed, 168 insertions(+)
+
+diff --git a/openroad/dpl/include/dpl/Opendp.h b/openroad/dpl/include/dpl/Opendp.h
+index 06e277b..8e35b04 100644
+--- a/openroad/dpl/include/dpl/Opendp.h
++++ b/openroad/dpl/include/dpl/Opendp.h
+@@ -246,6 +246,7 @@ class Opendp
+ 
+   std::string printBgBox(const boost::geometry::model::box<bgPoint>& queryBox);
+   void diamondDPL();
++  void checkWindowSupply();
+   DbuPt nearestPt(const Node* cell, const DbuRect& rect) const;
+   int distToRect(const Node* cell, const odb::Rect& rect) const;
+   static bool checkOverlap(const odb::Rect& cell, const odb::Rect& box);
+diff --git a/openroad/dpl/src/Opendp.cpp b/openroad/dpl/src/Opendp.cpp
+index 0223107..58a789f 100644
+--- a/openroad/dpl/src/Opendp.cpp
++++ b/openroad/dpl/src/Opendp.cpp
+@@ -267,6 +267,10 @@ void Opendp::detailedPlacement(const int max_displacement_x,
+       groupInitPixels2();
+       groupInitPixels();
+     }
++    // The negotiation's windows extend up to the same displacement cap
++    // the diamond search has; a placement no window can legalize is
++    // refused here too, before the iterations are spent.
++    checkWindowSupply();
+     if (!quiet_) {
+       logger_->info(DPL, 1102, "Legalizing using negotiation legalizer.");
+     }
+diff --git a/openroad/dpl/src/Place.cpp b/openroad/dpl/src/Place.cpp
+index d4b052e..3079bfa 100644
+--- a/openroad/dpl/src/Place.cpp
++++ b/openroad/dpl/src/Place.cpp
+@@ -83,6 +83,8 @@ void Opendp::diamondDPL()
+     placeGroups();
+   }
+ 
++  checkWindowSupply();
++
+   if (debug_observer_) {
+     logger_->report("Pause before detail placement.");
+     debug_observer_->redrawAndPause();
+@@ -96,6 +98,167 @@ void Opendp::diamondDPL()
+   }
+ }
+ 
++
++////////////////////////////////////////////////////////////////
++
++// Before any search: can the cells be legalized at all within the
++// displacement window?
++//
++// The diamond search moves a cell only within +/- max_displacement of
++// where global placement left it, and rip-up-and-replace moves the cells
++// it displaces within their own windows, so a cell can never end up
++// outside its window. Legalization is then a matching of cells to free
++// sites, and Hall's condition says it exists only if every set of cells
++// has, in the union of their windows, at least as many free sites as
++// they need. Checking every set is exponential, but any one set that
++// fails is proof: tile the core into boxes the size of the window, take
++// the cells global placement left in each box, and compare the sites
++// they need with the free sites in the box grown by the window on every
++// side, which contains the union of their windows. Demand over supply is
++// a placement no search order can legalize, and this says so in seconds
++// instead of the hours the search takes to prove it cell by cell (a
++// hierarchical design whose clock buffers landed in channels narrower
++// than the buffers needed: 82 minutes of diamond search, then failure).
++// Passing proves nothing; some other set may still fail. The override is
++// the option the search already has: a wider -max_displacement, which
++// this check re-runs against.
++void Opendp::checkWindowSupply()
++{
++  const GridX site_count = grid_->getRowSiteCount();
++  const GridY row_count = grid_->getRowCount();
++  const int box_w = max_displacement_x_;
++  const int box_h = max_displacement_y_;
++  if (box_w <= 0 || box_h <= 0 || site_count.v <= 0 || row_count.v <= 0) {
++    return;
++  }
++  const int boxes_x = (site_count.v + box_w - 1) / box_w;
++  const int boxes_y = (row_count.v + box_h - 1) / box_h;
++  std::vector<int64_t> supply(boxes_x * boxes_y, 0);
++  std::vector<int64_t> demand(boxes_x * boxes_y, 0);
++  auto box_index = [&](const int bx, const int by) { return by * boxes_x + bx; };
++
++  // Free sites, as checkPixels sees them for a cell outside any group.
++  for (GridY y{0}; y < row_count; y++) {
++    for (GridX x{0}; x < site_count; x++) {
++      const Pixel* pixel = grid_->gridPixel(x, y);
++      if (pixel && pixel->is_valid && !pixel->cell && !pixel->group) {
++        supply[box_index(x.v / box_w, y.v / box_h)]++;
++      }
++    }
++  }
++
++  // Sites the cells need, counted at the box the search will start each
++  // cell from, padding included, as the search will paint them.
++  int64_t cells = 0;
++  for (const auto& node : network_->getNodes()) {
++    const Node* cell = node.get();
++    if (cell->getType() != Node::CELL || cell->isFixed() || cell->inGroup()
++        || cell->isPlaced() || cell->getRegion()
++        || !cell->getDbInst()->getMaster()->isCore()) {
++      continue;
++    }
++    // Where the search will start: a cell left on a macro or a blockage
++    // is first moved to the nearest pixel off it (legalPt), however far,
++    // and the window is centred there.
++    const GridPt start = legalGridPt(cell, false);
++    const int bx = std::clamp(start.x.v, 0, site_count.v - 1) / box_w;
++    const int by = std::clamp(start.y.v, 0, row_count.v - 1) / box_h;
++    demand[box_index(bx, by)] += static_cast<int64_t>(grid_->gridPaddedWidth(cell).v)
++                                 * static_cast<int64_t>(grid_->gridHeight(cell).v);
++    cells++;
++  }
++  if (cells == 0) {
++    return;
++  }
++
++  // Each box against the free sites of the box grown by one window on
++  // every side: the region every cell in the box can reach.
++  struct Shortfall
++  {
++    int bx;
++    int by;
++    int64_t demand;
++    int64_t supply;
++  };
++  std::vector<Shortfall> shortfalls;
++  for (int by = 0; by < boxes_y; by++) {
++    for (int bx = 0; bx < boxes_x; bx++) {
++      const int64_t need = demand[box_index(bx, by)];
++      if (need == 0) {
++        continue;
++      }
++      int64_t have = 0;
++      for (int ny = std::max(0, by - 1); ny <= std::min(boxes_y - 1, by + 1); ny++) {
++        for (int nx = std::max(0, bx - 1); nx <= std::min(boxes_x - 1, bx + 1);
++             nx++) {
++          have += supply[box_index(nx, ny)];
++        }
++      }
++      if (need > have) {
++        shortfalls.push_back({bx, by, need, have});
++      }
++    }
++  }
++  if (shortfalls.empty()) {
++    return;
++  }
++  std::ranges::sort(shortfalls, [](const Shortfall& a, const Shortfall& b) {
++    return a.demand - a.supply > b.demand - b.supply;
++  });
++  const DbuX site_width = grid_->getSiteWidth();
++  const double box_w_um = block_->dbuToMicrons(box_w * site_width.v);
++  const double box_h_um = block_->dbuToMicrons(
++      grid_->gridYToDbu(GridY{std::min(box_h, row_count.v)}).v);
++  logger_->info(DPL,
++                1106,
++                "{} of {} windows of {:.1f} x {:.1f} um hold more cells than "
++                "the free sites within +/- {} sites and +/- {} rows of them "
++                "can take (sites of cells needed / free sites reachable):",
++                shortfalls.size(),
++                boxes_x * boxes_y,
++                box_w_um,
++                box_h_um,
++                max_displacement_x_,
++                max_displacement_y_);
++  const size_t shown = std::min<size_t>(shortfalls.size(), 10);
++  for (size_t i = 0; i < shown; i++) {
++    const Shortfall& s = shortfalls[i];
++    const double x_um = block_->dbuToMicrons(
++        core_.xMin() + gridToDbu(GridX{s.bx * box_w}, site_width).v);
++    const double y_um = block_->dbuToMicrons(
++        core_.yMin() + grid_->gridYToDbu(GridY{s.by * box_h}).v);
++    logger_->info(DPL,
++                  1106,
++                  "  window at ({:.1f}, {:.1f}) um: {} / {}",
++                  x_um,
++                  y_um,
++                  s.demand,
++                  s.supply);
++  }
++  // No site at all within reach is a different message from too few.
++  const bool nowhere = std::ranges::all_of(
++      shortfalls, [](const Shortfall& s) { return s.supply == 0; });
++  logger_->error(DPL,
++                 1107,
++                 "The placement cannot be legalized within the displacement "
++                 "window: {} window(s) need more sites than any search order "
++                 "can reach (worst at ({:.1f}, {:.1f}) um). {} "
++                 "-max_displacement widens the window; the fix belongs to "
++                 "the placement before this stage.",
++                 shortfalls.size(),
++                 block_->dbuToMicrons(
++                     core_.xMin()
++                     + gridToDbu(GridX{shortfalls[0].bx * box_w}, site_width).v),
++                 block_->dbuToMicrons(
++                     core_.yMin()
++                     + grid_->gridYToDbu(GridY{shortfalls[0].by * box_h}).v),
++                 nowhere ? "No free site is within reach of them at all: the "
++                           "rows around them are full or absent."
++                         : "The cells there outnumber the sites they can "
++                           "reach: density, or a channel too narrow for what "
++                           "was put in it.");
++}
++
+ ////////////////////////////////////////////////////////////////
+ 
+ void Opendp::placeGroups()
+-- 
+2.53.0
+

@@ -1,0 +1,1333 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Thu, 19 Nov 2026 12:20:01 +0100
+Subject: [PATCH] search: a filtered search keeps the design's arrivals and
+ propagates the filter's paths alone
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+write_timing_model runs one filtered arrival search per input port and
+transition (findFilteredArrivals -from the pin), then deleted the paths
+of every vertex the filter reached and marked them invalid. Each search
+rebuilt every path at every vertex of the input's fanout cone: the
+register-launched paths too, which with a propagated clock and CRPR are
+tens of tags per vertex on a placed block, and the next search began by
+rebuilding the previous cone once more to restore what the deletion
+took. An input cost O(cone x fanin x tags per vertex), twice, for arcs
+that need the input's own two to four tags.
+
+The filter's paths now live beside the design's on each vertex
+(Vertex::filter_paths_ with a tag group of its own), the design's paths
+stay as they are, and a filtered search over existing arrivals
+propagates the filter's paths alone (ArrivalVisitor::visitFilterOverlay):
+at each vertex only the fanins' filter paths are followed. A filter start
+is searched from all of its fanins' paths and its seeds and only what
+the filter marks is kept (visitFilterStart), since the filter's state is
+minted at the start's seeds and on the edges out of it. A vertex whose
+own arrivals are invalid, and the fanouts of a vertex whose design paths
+change, are searched in full as before, so incremental timing keeps its
+semantics; such a vertex whose filter paths took a design path's place
+is invalidated when the filter goes, as every filtered vertex was before,
+and so is every filtered vertex of a search over no earlier arrivals.
+Deleting the filter is then a pointer drop per vertex. VertexPathIterator,
+Path::vertexPath, Path::pathIndex and the required-time visitor see both
+arrays, so path ends, path enumeration and requireds are as before.
+
+write_timing_model seeds the inputs through sta_input_port_default_clock
+for the whole search instead of set_input_delay per input: setting and
+removing the delay invalidated the input vertex and cascaded a full
+search of its cone, and a delay on every input at once gave every input
+a tag of its own at every vertex it reached.
+
+The deletion also dropped an arc: after the last input's search every
+vertex of its cone had no paths, and findClkedOutputPaths read the
+output vertices as they were, so an output reached from the last input
+port lost its clock-to-output arcs. write_timing_model10 (a register and
+an AND gate, the output in the last input's cone) fails without this
+change: pin y has the combinational arc from b and no rising_edge arc
+from clk.
+
+Every regression log is identical to the unchanged binary's except
+write_timing_model10. Synthetic Nangate45 fabrics of N inputs and
+outputs, 12 levels of 2-input gates with a register column every second
+level and a clock tree of varying depth per register (distinct CRPR
+clock pins), 8 threads, the .lib byte-identical:
+
+      N   cells   before   after
+    256     10k   0.33 s   0.29 s
+   1024     41k   1.37 s   1.10 s
+   4096    164k   5.64 s   4.39 s
+
+On placed blocks with a propagated clock the ratio is larger, 2.5x,
+since the register-launched tags outnumber the filter's by more.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ graph/Graph.cc                |  27 +++
+ include/sta/Graph.hh          |  10 +
+ include/sta/ObjectTable.hh    |   2 +
+ include/sta/Path.hh           |   2 +
+ include/sta/Search.hh         |  48 ++++
+ search/MakeTimingModel.cc     |  28 +--
+ search/MakeTimingModelPvt.hh  |   2 +-
+ search/Path.cc                |  63 ++++-
+ search/PathEnum.cc            |   3 +-
+ search/Search.cc              | 441 ++++++++++++++++++++++++++++++----
+ search/Sta.cc                 |   9 +-
+ search/TagGroup.cc            |   6 +
+ search/TagGroup.hh            |   1 +
+ test/write_timing_model10.ok  | 141 +++++++++++
+ test/write_timing_model10.tcl |   9 +
+ test/write_timing_model10.v   |   6 +
+ 16 files changed, 719 insertions(+), 79 deletions(-)
+ create mode 100644 test/write_timing_model10.ok
+ create mode 100644 test/write_timing_model10.tcl
+ create mode 100644 test/write_timing_model10.v
+
+diff --git a/openroad/sta/graph/Graph.cc b/openroad/sta/graph/Graph.cc
+index fc001ff..e6ce29c 100644
+--- a/openroad/sta/graph/Graph.cc
++++ b/openroad/sta/graph/Graph.cc
+@@ -1080,6 +1080,8 @@ Vertex::init(Pin *pin,
+   slews_ = nullptr;
+   paths_ = nullptr;
+   tag_group_index_ = tag_group_index_max;
++  filter_paths_ = nullptr;
++  filter_tag_group_index_ = tag_group_index_max;
+   is_bidirect_drvr_ = is_bidirect_drvr;
+   is_reg_clk_ = is_reg_clk;
+   slew_annotated_ = false;
+@@ -1108,6 +1110,8 @@ Vertex::clear()
+   slews_ = nullptr;
+   delete [] paths_;
+   paths_ = nullptr;
++  delete [] filter_paths_;
++  filter_paths_ = nullptr;
+ }
+ 
+ void
+@@ -1279,6 +1283,29 @@ Vertex::deletePaths()
+   tag_group_index_ = tag_group_index_max;
+ }
+ 
++Path *
++Vertex::makeFilterPaths(uint32_t count)
++{
++  delete [] filter_paths_;
++  Path *paths = new Path[count];
++  filter_paths_ = paths;
++  return paths;
++}
++
++void
++Vertex::deleteFilterPaths()
++{
++  delete [] filter_paths_;
++  filter_paths_ = nullptr;
++  filter_tag_group_index_ = tag_group_index_max;
++}
++
++void
++Vertex::setFilterTagGroupIndex(TagGroupIndex tag_index)
++{
++  filter_tag_group_index_ = tag_index;
++}
++
+ bool
+ Vertex::hasFanin() const
+ {
+diff --git a/openroad/sta/include/sta/Graph.hh b/openroad/sta/include/sta/Graph.hh
+index e049b29..71d00fc 100644
+--- a/openroad/sta/include/sta/Graph.hh
++++ b/openroad/sta/include/sta/Graph.hh
+@@ -89,6 +89,7 @@ public:
+   void deleteVertex(Vertex *vertex);
+   bool hasFaninOne(Vertex *vertex) const;
+   VertexId vertexCount() { return vertices_->size(); }
++  VertexId vertexIdMax() { return vertices_->idMax(); }
+ 
+   void visitFanouts(Vertex *vertex,
+                     SearchPred *pred,
+@@ -273,6 +274,13 @@ public:
+   void deletePaths();
+   TagGroupIndex tagGroupIndex() const;
+   void setTagGroupIndex(TagGroupIndex tag_index);
++  // Paths tagged by the search filter (-from/-thru), kept beside the
++  // design's own paths so that a filtered search leaves them in place.
++  Path *filterPaths() const { return filter_paths_; }
++  Path *makeFilterPaths(uint32_t count);
++  void deleteFilterPaths();
++  TagGroupIndex filterTagGroupIndex() const { return filter_tag_group_index_; }
++  void setFilterTagGroupIndex(TagGroupIndex tag_index);
+   // Slew is annotated by sdc set_annotated_transition cmd.
+   bool slewAnnotated(const RiseFall *rf,
+                      const MinMax *min_max) const;
+@@ -327,10 +335,12 @@ protected:
+   float *slews_;
+   // Search
+   Path *paths_;
++  Path *filter_paths_;
+ 
+   // These fields are written by multiple threads, so they
+   // cannot share the same word as the following bit fields.
+   uint32_t tag_group_index_;
++  uint32_t filter_tag_group_index_;
+   uint32_t object_idx_;
+   // Each bit corresponds to a different BFS queue.
+   std::atomic<uint8_t> bfs_in_queue_; // 8
+diff --git a/openroad/sta/include/sta/ObjectTable.hh b/openroad/sta/include/sta/ObjectTable.hh
+index b1568b9..f215f17 100644
+--- a/openroad/sta/include/sta/ObjectTable.hh
++++ b/openroad/sta/include/sta/ObjectTable.hh
+@@ -57,6 +57,8 @@ public:
+   TYPE &ref(ObjectId id) const;
+   ObjectId objectId(const TYPE *object);
+   size_t size() const { return size_; }
++  // One past the largest id any object can have.
++  ObjectId idMax() const { return blocks_.size() * block_object_count; }
+   void clear();
+ 
+   // Objects are allocated in blocks of 128.
+diff --git a/openroad/sta/include/sta/Path.hh b/openroad/sta/include/sta/Path.hh
+index d04f982..c7cdb43 100644
+--- a/openroad/sta/include/sta/Path.hh
++++ b/openroad/sta/include/sta/Path.hh
+@@ -215,6 +215,8 @@ private:
+   Path *paths_;
+   size_t path_count_;
+   size_t path_index_;
++  Path *filter_paths_;
++  size_t filter_path_count_;
+   Path *next_;
+ };
+ 
+diff --git a/openroad/sta/include/sta/Search.hh b/openroad/sta/include/sta/Search.hh
+index c3305d5..5119946 100644
+--- a/openroad/sta/include/sta/Search.hh
++++ b/openroad/sta/include/sta/Search.hh
+@@ -270,6 +270,31 @@ public:
+                          TagGroupBldr *tag_bldr,
+                          TagGroupSet *tag_group_cache = nullptr,
+                          VertexSeq *filtered_arrivals = nullptr);
++  // Store the filter's paths at vertex beside the design's.
++  void setVertexFilterArrivals(Vertex *vertex,
++                               TagGroupBldr *tag_bldr,
++                               TagGroupSet *tag_group_cache,
++                               VertexSeq *filtered_arrivals);
++  TagGroup *filterTagGroup(const Vertex *vertex) const;
++  void deleteFilterPaths(Vertex *vertex);
++  // A filtered search over existing arrivals propagates the filter's
++  // paths alone; a vertex whose own arrivals are invalid, a filter
++  // start, and the fanouts of a vertex whose own arrivals changed are
++  // searched in full.
++  bool filterOverlay() const { return filter_overlay_; }
++  bool haveFilter() const { return have_filter_; }
++  void seedFilterStart(Vertex *vertex);
++  bool fullVisitRequired(const Vertex *vertex) const;
++  void requireFullVisit(Vertex *vertex);
++  bool isFilterStart(const Vertex *vertex) const;
++  // A vertex searched in full while the filter is on loses the design
++  // paths the filter marks; it is invalidated when the filter goes.
++  void noteFullVisit(Vertex *vertex);
++  [[nodiscard]] bool filterArrivalsChanged(Vertex *vertex,
++                                           TagGroupBldr *tag_bldr);
++  [[nodiscard]] bool pathsChanged(TagGroup *tag_group,
++                                  Path *paths,
++                                  TagGroupBldr *tag_bldr);
+   void insertFilteredArrivals(const VertexSeq &vertices);
+   void tnsInvalid(Vertex *vertex);
+   [[nodiscard]] bool arrivalsChanged(Vertex *vertex,
+@@ -604,6 +629,17 @@ protected:
+   // Vertices with invalid arrival times to update and search from.
+   VertexSet invalid_arrivals_;
+   std::mutex invalid_arrivals_lock_;
++  bool filter_overlay_{false};
++  bool filter_search_overlay_{false};
++  std::unordered_set<Vertex *> filter_full_visited_;
++  std::mutex filter_full_visited_lock_;
++  // Indexed by vertex id and stamped with the filtered search's
++  // generation, so that a search clears nothing; set by any thread,
++  // read on every visit.
++  std::unique_ptr<std::atomic<uint32_t>[]> full_visit_gen_;
++  std::unique_ptr<std::atomic<uint32_t>[]> filter_start_gen_;
++  size_t visit_gen_size_{0};
++  uint32_t filter_gen_{0};
+   BfsFwdIterator *arrival_iter_;
+   ArrivalVisitor *arrival_visitor_;
+ 
+@@ -755,6 +791,8 @@ protected:
+                          Edge *edge,
+                          const Pin *to_pin,
+                          Vertex *to_vertex);
++  // Visit only the from vertex's filter paths.
++  bool from_filter_only_{false};
+   // Return false to stop visiting.
+   [[nodiscard]] bool visitArc(const Pin *from_pin,
+                               Vertex *from_vertex,
+@@ -820,6 +858,13 @@ public:
+ 
+ protected:
+   void init0();
++  void visitFilterOverlay(Vertex *vertex,
++                          bool with_latch_edges);
++  void visitFilterStart(Vertex *vertex,
++                        bool with_latch_edges);
++  bool designTwinExists(const Tag *filter_tag) const;
++  void enqueueFanouts(Vertex *vertex,
++                      bool full_visit);
+   void seedArrivals(Vertex *vertex);
+   void pruneCrprArrivals();
+   void constrainedRequiredsInvalid(Vertex *vertex,
+@@ -831,6 +876,9 @@ protected:
+   bool clks_only_;
+   TagGroupBldr *tag_bldr_;
+   TagGroupBldr *tag_bldr_no_crpr_;
++  // The design's and the filter's paths of a visit, split from tag_bldr_.
++  TagGroupBldr *design_bldr_;
++  TagGroupBldr *filter_bldr_;
+   // Tag groups this thread has found, so that it takes tag_group_lock_
+   // only for a group it has not seen. Copies made for a parallel visit
+   // have one; tag groups are not deleted while they live.
+diff --git a/openroad/sta/search/MakeTimingModel.cc b/openroad/sta/search/MakeTimingModel.cc
+index 02b1ccb..b4524b5 100644
+--- a/openroad/sta/search/MakeTimingModel.cc
++++ b/openroad/sta/search/MakeTimingModel.cc
+@@ -437,29 +437,33 @@ MakeTimingModel::findTimingFromInputs()
+ 
+   Instance *top_inst = network_->topInstance();
+   Cell *top_cell = network_->cell(top_inst);
++  // Every input arrives at 0 on the default arrival clock, as one input
++  // with set_input_delay 0 on it did, for the whole search: the arrivals
++  // one input's filtered search makes stay in place for the next, and
++  // the inputs share their tags.
++  bool use_default_arrival_clock = variables_->useDefaultArrivalClock();
++  variables_->setUseDefaultArrivalClock(true);
+   CellPortBitIterator *port_iter = network_->portBitIterator(top_cell);
+   while (port_iter->hasNext()) {
+     Port *input_port = port_iter->next();
+-    if (network_->direction(input_port)->isInput())
+-      findTimingFromInput(input_port);
++    if (network_->direction(input_port)->isInput()) {
++      Pin *input_pin = network_->findPin(top_inst, input_port);
++      if (!sdc_->isClock(input_pin))
++        findTimingFromInput(input_pin);
++    }
+   }
+   delete port_iter;
++  variables_->setUseDefaultArrivalClock(use_default_arrival_clock);
+ }
+ 
+ void
+-MakeTimingModel::findTimingFromInput(Port *input_port)
++MakeTimingModel::findTimingFromInput(Pin *input_pin)
+ {
+-  Instance *top_inst = network_->topInstance();
+-  Pin *input_pin = network_->findPin(top_inst, input_port);
+-  if (!sdc_->isClock(input_pin)) {
++  {
+     MakeEndTimingArcs end_visitor(sta_);
+     OutputPinDelays output_delays;
+     for (const RiseFall *input_rf : RiseFall::range()) {
+       const RiseFallBoth *input_rf1 = input_rf->asRiseFallBoth();
+-      sta_->setInputDelay(input_pin, input_rf1, sdc_->defaultArrivalClock(),
+-                          sdc_->defaultArrivalClockEdge()->transition(), nullptr,
+-                          false, false, MinMaxAll::all(), true, 0.0, sdc_);
+-
+       PinSet *from_pins = new PinSet(network_);
+       from_pins->insert(input_pin);
+       ExceptionFrom *from = sta_->makeExceptionFrom(from_pins, nullptr,
+@@ -495,10 +499,6 @@ MakeTimingModel::findTimingFromInput(Port *input_port)
+       }
+       findOutputDelays(input_rf, endpoints, output_delays);
+       search_->deleteFilteredArrivals();
+-
+-      sta_->removeInputDelay(input_pin, input_rf1, sdc_->defaultArrivalClock(),
+-                             sdc_->defaultArrivalClockEdge()->transition(),
+-                             MinMaxAll::all(), sdc_);
+     }
+     makeSetupHoldTimingArcs(input_pin, end_visitor.margins());
+     makeInputOutputTimingArcs(input_pin, output_delays);
+diff --git a/openroad/sta/search/MakeTimingModelPvt.hh b/openroad/sta/search/MakeTimingModelPvt.hh
+index 87cc0a7..87e67ba 100644
+--- a/openroad/sta/search/MakeTimingModelPvt.hh
++++ b/openroad/sta/search/MakeTimingModelPvt.hh
+@@ -77,7 +77,7 @@ private:
+                      LibertyPort *lib_port);
+   void checkClock(Clock *clk);
+   void findTimingFromInputs();
+-  void findTimingFromInput(Port *input_port);
++  void findTimingFromInput(Pin *input_pin);
+   void findClkedOutputPaths();
+   void findClkTreeDelays();
+   void makeClkTreePaths(LibertyPort *lib_port,
+diff --git a/openroad/sta/search/Path.cc b/openroad/sta/search/Path.cc
+index 45d9355..ded339a 100644
+--- a/openroad/sta/search/Path.cc
++++ b/openroad/sta/search/Path.cc
+@@ -292,7 +292,12 @@ Path::pathIndex(const StaState *sta) const
+ {
+   Vertex *vertex = this->vertex(sta);
+   Path *paths = vertex->paths();
+-  return this - paths;
++  TagGroup *tag_group = sta->search()->tagGroup(vertex);
++  size_t path_count = tag_group ? tag_group->pathCount() : 0;
++  if (paths && this >= paths && this < paths + path_count)
++    return this - paths;
++  // A filter path is indexed after the design's paths.
++  return path_count + (this - vertex->filterPaths());
+ }
+ 
+ const ClkInfo *
+@@ -532,6 +537,17 @@ Path::vertexPath(const Vertex *vertex,
+         return &src_vpath;
+     }
+   }
++  TagGroup *filter_tag_group = search->filterTagGroup(vertex);
++  if (filter_tag_group) {
++    size_t path_index;
++    bool exists;
++    filter_tag_group->pathIndex(tag, path_index, exists);
++    if (exists) {
++      Path &src_vpath = vertex->filterPaths()[path_index];
++      if (!src_vpath.isNull())
++        return &src_vpath;
++    }
++  }
+   return nullptr;
+ }
+ 
+@@ -723,13 +739,20 @@ VertexPathIterator::VertexPathIterator(Vertex *vertex,
+   paths_(vertex->paths()),
+   path_count_(0),
+   path_index_(0),
++  filter_paths_(nullptr),
++  filter_path_count_(0),
+   next_(nullptr)
+ {
+   TagGroup *tag_group = search_->tagGroup(vertex);
+-  if (tag_group) {
++  if (tag_group)
+     path_count_ = tag_group->pathCount();
+-    findNext();
++  TagGroup *filter_tag_group = search_->filterTagGroup(vertex);
++  if (filter_tag_group) {
++    filter_paths_ = vertex->filterPaths();
++    filter_path_count_ = filter_tag_group->pathCount();
+   }
++  if (tag_group || filter_tag_group)
++    findNext();
+ }
+ 
+ VertexPathIterator::VertexPathIterator(Vertex *vertex,
+@@ -745,13 +768,20 @@ VertexPathIterator::VertexPathIterator(Vertex *vertex,
+   paths_(vertex->paths()),
+   path_count_(0),
+   path_index_(0),
++  filter_paths_(nullptr),
++  filter_path_count_(0),
+   next_(nullptr)
+ {
+   TagGroup *tag_group = search_->tagGroup(vertex);
+-  if (tag_group) {
++  if (tag_group)
+     path_count_ = tag_group->pathCount();
+-    findNext();
++  TagGroup *filter_tag_group = search_->filterTagGroup(vertex);
++  if (filter_tag_group) {
++    filter_paths_ = vertex->filterPaths();
++    filter_path_count_ = filter_tag_group->pathCount();
+   }
++  if (tag_group || filter_tag_group)
++    findNext();
+ }
+ 
+ VertexPathIterator::VertexPathIterator(Vertex *vertex,
+@@ -766,19 +796,36 @@ VertexPathIterator::VertexPathIterator(Vertex *vertex,
+   paths_(vertex->paths()),
+   path_count_(0),
+   path_index_(0),
++  filter_paths_(nullptr),
++  filter_path_count_(0),
+   next_(nullptr)
+ {
+   TagGroup *tag_group = search_->tagGroup(vertex);
+-  if (tag_group) {
++  if (tag_group)
+     path_count_ = tag_group->pathCount();
+-    findNext();
++  TagGroup *filter_tag_group = search_->filterTagGroup(vertex);
++  if (filter_tag_group) {
++    filter_paths_ = vertex->filterPaths();
++    filter_path_count_ = filter_tag_group->pathCount();
+   }
++  if (tag_group || filter_tag_group)
++    findNext();
+ }
+ 
+ void
+ VertexPathIterator::findNext()
+ {
+-  while (path_index_ < path_count_) {
++  while (true) {
++    if (path_index_ >= path_count_) {
++      if (filter_paths_ == nullptr)
++        break;
++      // The design's paths are done; continue with the filter's.
++      paths_ = filter_paths_;
++      path_count_ = filter_path_count_;
++      path_index_ = 0;
++      filter_paths_ = nullptr;
++      continue;
++    }
+     Path *path = &paths_[path_index_++];
+     if (filtered_) {
+       const Tag *tag = path->tag(search_);
+diff --git a/openroad/sta/search/PathEnum.cc b/openroad/sta/search/PathEnum.cc
+index e228f4d..e05da9b 100644
+--- a/openroad/sta/search/PathEnum.cc
++++ b/openroad/sta/search/PathEnum.cc
+@@ -401,8 +401,7 @@ PathEnumFaninVisitor::visitEdge(const Pin *from_pin,
+                                 const Pin *to_pin,
+                                 Vertex *to_vertex)
+ {
+-  TagGroup *from_tag_group = search_->tagGroup(from_vertex);
+-  if (from_tag_group) {
++  if (search_->tagGroup(from_vertex) || search_->filterTagGroup(from_vertex)) {
+     TimingArcSet *arc_set = edge->timingArcSet();
+     VertexPathIterator from_iter(from_vertex, scene_, min_max_, nullptr, search_);
+     while (from_iter.hasNext()) {
+diff --git a/openroad/sta/search/Search.cc b/openroad/sta/search/Search.cc
+index 0ff238b..f6eb12e 100644
+--- a/openroad/sta/search/Search.cc
++++ b/openroad/sta/search/Search.cc
+@@ -81,6 +81,7 @@
+ 
+ namespace sta {
+ 
++
+ ////////////////////////////////////////////////////////////////
+ 
+ EvalPred::EvalPred(const StaState *sta) :
+@@ -450,6 +451,67 @@ Search::deletePaths(Vertex *vertex)
+     vertex->deletePaths();
+     tag_group->decrRefCount();
+   }
++  deleteFilterPaths(vertex);
++}
++
++void
++Search::deleteFilterPaths(Vertex *vertex)
++{
++  TagGroup *tag_group = filterTagGroup(vertex);
++  if (tag_group) {
++    vertex->deleteFilterPaths();
++    tag_group->decrRefCount();
++  }
++}
++
++TagGroup *
++Search::filterTagGroup(const Vertex *vertex) const
++{
++  TagGroupIndex index = vertex->filterTagGroupIndex();
++  if (index == tag_group_index_max)
++    return nullptr;
++  else
++    return tag_groups_[index];
++}
++
++bool
++Search::fullVisitRequired(const Vertex *vertex) const
++{
++  VertexId id = graph_->id(vertex);
++  return id < visit_gen_size_
++    && full_visit_gen_[id].load(std::memory_order_relaxed) == filter_gen_;
++}
++
++void
++Search::requireFullVisit(Vertex *vertex)
++{
++  VertexId id = graph_->id(vertex);
++  if (id < visit_gen_size_)
++    full_visit_gen_[id].store(filter_gen_, std::memory_order_relaxed);
++}
++
++bool
++Search::isFilterStart(const Vertex *vertex) const
++{
++  VertexId id = graph_->id(vertex);
++  return id < visit_gen_size_
++    && filter_start_gen_[id].load(std::memory_order_relaxed) == filter_gen_;
++}
++
++void
++Search::seedFilterStart(Vertex *vertex)
++{
++  VertexId id = graph_->id(vertex);
++  if (filter_overlay_ && id < visit_gen_size_)
++    filter_start_gen_[id].store(filter_gen_, std::memory_order_relaxed);
++  arrival_iter_->enqueue(vertex);
++}
++
++void
++Search::noteFullVisit(Vertex *vertex)
++{
++  LockGuard lock(filter_full_visited_lock_);
++  filter_full_visited_.insert(vertex);
+ }
+ 
+ ////////////////////////////////////////////////////////////////
+@@ -544,26 +606,28 @@ Search::deleteFilteredArrivals()
+     ExceptionThruSeq *thrus = filter_thrus_;
+     if ((filter_from_ && (filter_from_->pins() || filter_from_->instances()))
+         || thrus) {
+-      for (Vertex *vertex : filtered_arrivals_) {
+-        deletePathsIncr(vertex);
+-        arrivalInvalid(vertex);
+-        requiredInvalid(vertex);
+-      }
+-      bool check_filter_arrivals = false;
+-      if (check_filter_arrivals) {
+-        VertexIterator vertex_iter(graph_);
+-        while (vertex_iter.hasNext()) {
+-          Vertex *vertex = vertex_iter.next();
+-          TagGroup *tag_group = tagGroup(vertex);
+-          if (tag_group && tag_group->hasFilterTag())
+-            filtered_arrivals_.erase(vertex);
++      // The filter's paths sit beside the design's, which stay as
++      // they are. A vertex searched in full while the filter was on
++      // (its arrivals were invalid, or an upstream change reached it)
++      // seeded the filter's paths in place of the design's, as does
++      // every vertex of a search over no earlier arrivals; those are
++      // found again at the next search.
++      for (Vertex *vertex : filtered_arrivals_)
++        deleteFilterPaths(vertex);
++      if (filter_search_overlay_) {
++        for (Vertex *vertex : filter_full_visited_) {
++          arrivalInvalid(vertex);
++          requiredInvalid(vertex);
+         }
+-        if (!filtered_arrivals_.empty()) {
+-          report_->report("Filtered verticies mismatch");
+-          for (Vertex *vertex : filtered_arrivals_)
+-            report_->report(" {}", vertex->to_string(this));
++      }
++      else {
++        for (Vertex *vertex : filtered_arrivals_) {
++          arrivalInvalid(vertex);
++          requiredInvalid(vertex);
+         }
+       }
++      filter_full_visited_.clear();
++      filter_search_overlay_ = false;
+       filtered_arrivals_.clear();
+       deleteFilterTagGroups();
+       deleteFilterTags();
+@@ -642,6 +706,28 @@ Search::findFilteredArrivals(bool thru_latches)
+   arrival_iter_->ensureSize();
+ 
+   filtered_arrivals_.clear();
++  // Over existing arrivals only the filter's paths are propagated;
++  // vertices with invalid arrivals, filter starts and the fanouts of
++  // a vertex whose own arrivals change are searched in full.
++  filter_overlay_ = arrivals_exist_ && arrivals_seeded_;
++  filter_search_overlay_ = filter_overlay_;
++  filter_full_visited_.clear();
++  if (filter_overlay_) {
++    size_t id_max = graph_->vertexIdMax();
++    if (id_max > visit_gen_size_ || filter_gen_ == UINT32_MAX) {
++      full_visit_gen_ = std::make_unique<std::atomic<uint32_t>[]>(id_max);
++      filter_start_gen_ = std::make_unique<std::atomic<uint32_t>[]>(id_max);
++      for (size_t i = 0; i < id_max; i++) {
++        full_visit_gen_[i].store(0, std::memory_order_relaxed);
++        filter_start_gen_[i].store(0, std::memory_order_relaxed);
++      }
++      visit_gen_size_ = id_max;
++      filter_gen_ = 0;
++    }
++    filter_gen_++;
++    for (Vertex *vertex : invalid_arrivals_)
++      requireFullVisit(vertex);
++  }
+   findArrivalsSeed();
+   seedFilterStarts();
+ 
+@@ -666,6 +752,7 @@ Search::findFilteredArrivals(bool thru_latches)
+ 
+     deleteTagsPrev();
+   }
++  filter_overlay_ = false;
+ }
+ 
+ // Delete stale tag arrarys.
+@@ -748,7 +835,7 @@ SeedFaninsThruHierPin::visit(const Pin *drvr,
+                              const Pin *)
+ {
+   graph_->verticesApply(drvr, [this] (Vertex *vertex) {
+-    search_->arrivalIterator()->enqueue(vertex);
++    search_->seedFilterStart(vertex);
+   });
+ }
+ 
+@@ -769,7 +856,7 @@ Search::seedFilterStarts()
+       }
+       else {
+         graph_->verticesApply(pin, [this] (Vertex *vertex) {
+-          arrival_iter_->enqueue(vertex);
++          seedFilterStart(vertex);
+         });
+       }
+     }
+@@ -1144,6 +1231,8 @@ ArrivalVisitor::init0()
+ {
+   tag_bldr_ = new TagGroupBldr(true, this);
+   tag_bldr_no_crpr_ = new TagGroupBldr(false, this);
++  design_bldr_ = new TagGroupBldr(true, this);
++  filter_bldr_ = new TagGroupBldr(true, this);
+   search_adj_ = new SearchAdjLoop(this);
+ }
+ 
+@@ -1175,6 +1264,8 @@ ArrivalVisitor::~ArrivalVisitor()
+ {
+   delete tag_bldr_;
+   delete tag_bldr_no_crpr_;
++  delete design_bldr_;
++  delete filter_bldr_;
+   delete tag_group_cache_;
+   if (filtered_arrivals_) {
+     search_->insertFilteredArrivals(*filtered_arrivals_);
+@@ -1198,10 +1289,25 @@ ArrivalVisitor::visit(Vertex *vertex)
+     visit(vertex, false);
+ }
+ 
++static bool
++isFilterTag(const Tag *tag)
++{
++  return tag->isFilter() || tag->clkInfo()->crprPathRefsFilter();
++}
++
+ void
+ ArrivalVisitor::visit(Vertex *vertex,
+                       bool with_latch_edges)
+ {
++  if (search_->filterOverlay()
++      && search_->tagGroup(vertex)
++      && !search_->fullVisitRequired(vertex)) {
++    if (search_->isFilterStart(vertex))
++      visitFilterStart(vertex, with_latch_edges);
++    else
++      visitFilterOverlay(vertex, with_latch_edges);
++    return;
++  }
+   debugPrint(debug_, "search", 2, "find arrivals {}",
+              vertex->to_string(this));
+ 
+@@ -1222,34 +1328,189 @@ ArrivalVisitor::visit(Vertex *vertex,
+   seedArrivals(vertex);
+ 
+   bool is_clk = tag_bldr_->hasClkTag();
+-  bool arrivals_changed = search_->arrivalsChanged(vertex, tag_bldr_);
++  // The filter's paths are stored beside the design's own.
++  TagGroupBldr *design_bldr = tag_bldr_;
++  bool have_filter_paths = false;
++  filter_bldr_->init(vertex);
++  if (search_->haveFilter() && tag_bldr_->hasFilterTag()) {
++    design_bldr_->init(vertex);
++    for (auto const [tag, path_index] : tag_bldr_->pathIndexMap()) {
++      const Path *path = tag_bldr_->path(path_index);
++      if (isFilterTag(tag))
++        filter_bldr_->insertPath(*path);
++      else
++        design_bldr_->insertPath(*path);
++    }
++    design_bldr = design_bldr_;
++    have_filter_paths = !filter_bldr_->empty();
++    // Where the filter's state is minted the design's path is marked
++    // in place of being kept; such a vertex is found again once the
++    // filter is gone.
++    if (search_->filterOverlay()) {
++      for (auto const [tag, path_index] : filter_bldr_->pathIndexMap()) {
++        if (!designTwinExists(tag)) {
++          search_->noteFullVisit(vertex);
++          break;
++        }
++      }
++    }
++  }
++  bool arrivals_changed = search_->arrivalsChanged(vertex, design_bldr);
+   // If vertex is a latch data input arrival that changed from the
+   // previous eval pass enqueue the latch outputs to be re-evaled on the
+   // next pass.
+   if (arrivals_changed && network_->isLatchData(pin))
+     search_->postponeLatchDataOutputs(vertex);
+ 
+-  if ((always_to_endpoints_ || arrivals_changed)) {
+-    graph_->visitFanoutEdges(vertex, search_adj_,
+-                             [this, vertex] (Edge *edge,
+-                                             Vertex *fanout) {
+-                               if (edge->isDisabledLoop()) {
+-                                 if (hasPendingLoopPaths(edge))
+-                                   search_->postponeArrivals(fanout);
+-                               }
+-                               else if (clks_only_ && vertex->isRegClk())
+-                                 search_->arrivalInvalid(fanout);
+-                               else
+-                                 search_->arrivalIterator()->enqueue(fanout);
+-                             });
++  if (search_->filterOverlay()) {
++    if (arrivals_changed)
++      enqueueFanouts(vertex, true);
++    else if (have_filter_paths)
++      enqueueFanouts(vertex, false);
+   }
++  else if (always_to_endpoints_ || arrivals_changed)
++    enqueueFanouts(vertex, false);
+   if (arrivals_changed) {
+     debugPrint(debug_, "search", 4, "arrivals changed");
+-    search_->setVertexArrivals(vertex, tag_bldr_, tag_group_cache_,
++    search_->setVertexArrivals(vertex, design_bldr, tag_group_cache_,
+                                filtered_arrivals_);
+     search_->tnsInvalid(vertex);
+     constrainedRequiredsInvalid(vertex, is_clk);
+   }
++  if (have_filter_paths || search_->filterTagGroup(vertex))
++    search_->setVertexFilterArrivals(vertex, filter_bldr_, tag_group_cache_,
++                                     filtered_arrivals_);
++}
++
++// The design's path the filter marks: the same tag less the filter's
++// states.
++bool
++ArrivalVisitor::designTwinExists(const Tag *filter_tag) const
++{
++  const ExceptionStateSet *states = filter_tag->states();
++  for (auto const [tag, path_index] : design_bldr_->pathIndexMap()) {
++    if (tag->scene() == filter_tag->scene()
++        && tag->rfIndex() == filter_tag->rfIndex()
++        && tag->minMaxIndex() == filter_tag->minMaxIndex()
++        && tag->clkInfo() == filter_tag->clkInfo()
++        && tag->isClock() == filter_tag->isClock()
++        && tag->isSegmentStart() == filter_tag->isSegmentStart()
++        && tag->inputDelay() == filter_tag->inputDelay()) {
++      const ExceptionStateSet *tag_states = tag->states();
++      size_t design_count = 0;
++      bool match = true;
++      if (states) {
++        for (ExceptionState *state : *states) {
++          if (!state->exception()->isFilter()) {
++            design_count++;
++            if (tag_states == nullptr || !tag_states->contains(state)) {
++              match = false;
++              break;
++            }
++          }
++        }
++      }
++      if (match && design_count == (tag_states ? tag_states->size() : 0))
++        return true;
++    }
++  }
++  return false;
++}
++
++// Propagate the filter's paths from the fanins over the vertex's own
++// arrivals, which stay as they are.
++void
++ArrivalVisitor::visitFilterOverlay(Vertex *vertex,
++                                   bool with_latch_edges)
++{
++  debugPrint(debug_, "search", 2, "find filter arrivals {}",
++             vertex->to_string(this));
++  tag_bldr_->init(vertex);
++  has_fanin_one_ = graph_->hasFaninOne(vertex);
++  if (crpr_active_ && !has_fanin_one_)
++    tag_bldr_no_crpr_->init(vertex);
++
++  from_filter_only_ = true;
++  visitFaninPaths(vertex, with_latch_edges);
++  from_filter_only_ = false;
++  if (crpr_active_
++      && search_->crprPathPruningEnabled()
++      && tag_bldr_->hasPropagatedClk() && !has_fanin_one_)
++    pruneCrprArrivals();
++
++  // A fanin that is a filter start offers the design's paths too;
++  // only what the filter marks is kept.
++  filter_bldr_->init(vertex);
++  for (auto const [tag, path_index] : tag_bldr_->pathIndexMap()) {
++    if (isFilterTag(tag))
++      filter_bldr_->insertPath(*tag_bldr_->path(path_index));
++  }
++  bool changed = search_->filterArrivalsChanged(vertex, filter_bldr_);
++  if (changed && network_->isLatchData(vertex->pin()))
++    search_->postponeLatchDataOutputs(vertex);
++  if (changed) {
++    search_->setVertexFilterArrivals(vertex, filter_bldr_, tag_group_cache_,
++                                     filtered_arrivals_);
++    enqueueFanouts(vertex, false);
++  }
++}
++
++// A filter start's paths are the design's own, marked by the filter:
++// the arrivals are found as in a full visit and the marked ones kept
++// beside the design's paths, which stay as they are.
++void
++ArrivalVisitor::visitFilterStart(Vertex *vertex,
++                                 bool with_latch_edges)
++{
++  debugPrint(debug_, "search", 2, "find filter start arrivals {}",
++             vertex->to_string(this));
++  tag_bldr_->init(vertex);
++  has_fanin_one_ = graph_->hasFaninOne(vertex);
++  if (crpr_active_ && !has_fanin_one_)
++    tag_bldr_no_crpr_->init(vertex);
++
++  visitFaninPaths(vertex, with_latch_edges);
++  if (crpr_active_
++      && search_->crprPathPruningEnabled()
++      && tag_bldr_->hasPropagatedClk() && !has_fanin_one_)
++    pruneCrprArrivals();
++  seedArrivals(vertex);
++
++  filter_bldr_->init(vertex);
++  for (auto const [tag, path_index] : tag_bldr_->pathIndexMap()) {
++    if (isFilterTag(tag))
++      filter_bldr_->insertPath(*tag_bldr_->path(path_index));
++  }
++  bool changed = search_->filterArrivalsChanged(vertex, filter_bldr_);
++  if (changed && network_->isLatchData(vertex->pin()))
++    search_->postponeLatchDataOutputs(vertex);
++  if (changed)
++    search_->setVertexFilterArrivals(vertex, filter_bldr_, tag_group_cache_,
++                                     filtered_arrivals_);
++  // The filter's state is also minted on the edges out of the start,
++  // from the design's paths, so the fanouts look at all of them.
++  enqueueFanouts(vertex, false);
++}
++
++void
++ArrivalVisitor::enqueueFanouts(Vertex *vertex,
++                               bool full_visit)
++{
++  graph_->visitFanoutEdges(vertex, search_adj_,
++                           [this, vertex, full_visit] (Edge *edge,
++                                                       Vertex *fanout) {
++                             if (edge->isDisabledLoop()) {
++                               if (hasPendingLoopPaths(edge))
++                                 search_->postponeArrivals(fanout);
++                             }
++                             else if (clks_only_ && vertex->isRegClk())
++                               search_->arrivalInvalid(fanout);
++                             else {
++                               if (full_visit)
++                                 search_->requireFullVisit(fanout);
++                               search_->arrivalIterator()->enqueue(fanout);
++                             }
++                           });
+ }
+ 
+ bool
+@@ -1258,13 +1519,15 @@ ArrivalVisitor::hasPendingLoopPaths(Edge *edge) const
+   if (tag_bldr_ && tag_bldr_->hasLoopTag()) {
+     Vertex *from_vertex = edge->from(graph_);
+     TagGroup *prev_tag_group = search_->tagGroup(from_vertex);
++    TagGroup *prev_filter_group = search_->filterTagGroup(from_vertex);
+     for (auto const [from_tag, path_index] : tag_bldr_->pathIndexMap()) {
+       if (from_tag->isLoop()) {
+         // Loop false path exceptions apply to rise/fall edges so to_rf
+         // does not matter.
+         Tag *to_tag = search_->thruTag(from_tag, edge, RiseFall::rise(), nullptr);
+         if (to_tag
+-            && (prev_tag_group == nullptr || !prev_tag_group->hasTag(from_tag)))
++            && !(prev_tag_group && prev_tag_group->hasTag(from_tag))
++            && !(prev_filter_group && prev_filter_group->hasTag(from_tag)))
+           return true;
+       }
+     }
+@@ -1356,13 +1619,26 @@ ArrivalVisitor::constrainedRequiredsInvalid(Vertex *vertex,
+   }
+ }
+ 
++bool
++Search::filterArrivalsChanged(Vertex *vertex,
++                              TagGroupBldr *tag_bldr)
++{
++  return pathsChanged(filterTagGroup(vertex), vertex->filterPaths(), tag_bldr);
++}
++
+ bool
+ Search::arrivalsChanged(Vertex *vertex,
+                         TagGroupBldr *tag_bldr)
+ {
+-  Path *paths1 = vertex->paths();
++  return pathsChanged(tagGroup(vertex), vertex->paths(), tag_bldr);
++}
++
++bool
++Search::pathsChanged(TagGroup *tag_group,
++                     Path *paths1,
++                     TagGroupBldr *tag_bldr)
++{
+   if (paths1) {
+-    TagGroup *tag_group = tagGroup(vertex);
+     if (tag_group == nullptr || tag_group->pathCount() != tag_bldr->pathCount())
+       return true;
+     for (auto const [tag1, path_index1] : *tag_group->pathIndexMap()) {
+@@ -2167,12 +2443,13 @@ PathVisitor::visitEdge(const Pin *from_pin,
+                        Vertex *to_vertex)
+ {
+   TagGroup *from_tag_group = search_->tagGroup(from_vertex);
+-  if (from_tag_group) {
++  TagGroup *from_filter_group = search_->filterTagGroup(from_vertex);
++  if (from_filter_only_ && !search_->isFilterStart(from_vertex)
++      ? from_filter_group != nullptr
++      : (from_tag_group || from_filter_group)) {
+     TimingArcSet *arc_set = edge->timingArcSet();
+-    VertexPathIterator from_iter(from_vertex, search_);
+     const Mode *prev_mode = nullptr;
+-    while (from_iter.hasNext()) {
+-      Path *from_path = from_iter.next();
++    auto visit_from_path = [&] (Path *from_path) -> bool {
+       const Mode *mode = from_path->mode(this);
+       if (mode == prev_mode
+           || (pred_->searchFrom(from_vertex, mode)
+@@ -2190,6 +2467,22 @@ PathVisitor::visitEdge(const Pin *from_pin,
+                       to_vertex, min_max, mode))
+           return false;
+       }
++      return true;
++    };
++    if (from_filter_only_ && !search_->isFilterStart(from_vertex)) {
++      Path *from_paths = from_vertex->filterPaths();
++      size_t from_count = from_filter_group->pathCount();
++      for (size_t i = 0; i < from_count; i++) {
++        if (!visit_from_path(&from_paths[i]))
++          return false;
++      }
++    }
++    else {
++      VertexPathIterator from_iter(from_vertex, search_);
++      while (from_iter.hasNext()) {
++        if (!visit_from_path(from_iter.next()))
++          return false;
++      }
+     }
+   }
+   return true;
+@@ -2935,6 +3228,41 @@ Search::setVertexArrivals(Vertex *vertex,
+   }
+ }
+ 
++void
++Search::setVertexFilterArrivals(Vertex *vertex,
++                                TagGroupBldr *tag_bldr,
++                                TagGroupSet *tag_group_cache,
++                                VertexSeq *filtered_arrivals)
++{
++  TagGroup *prev_tag_group = filterTagGroup(vertex);
++  if (tag_bldr->empty()) {
++    if (prev_tag_group) {
++      vertex->deleteFilterPaths();
++      prev_tag_group->decrRefCount();
++    }
++    return;
++  }
++  TagGroup *tag_group = findTagGroup(tag_bldr, tag_group_cache);
++  if (tag_group == prev_tag_group)
++    tag_bldr->copyPaths(tag_group, vertex->filterPaths());
++  else {
++    if (prev_tag_group) {
++      vertex->deleteFilterPaths();
++      prev_tag_group->decrRefCount();
++    }
++    Path *paths = vertex->makeFilterPaths(tag_group->pathCount());
++    tag_bldr->copyPaths(tag_group, paths);
++    vertex->setFilterTagGroupIndex(tag_group->index());
++    tag_group->incrRefCount();
++  }
++  if (filtered_arrivals)
++    filtered_arrivals->push_back(vertex);
++  else {
++    LockGuard lock(filtered_arrivals_lock_);
++    filtered_arrivals_.insert(vertex);
++  }
++}
++
+ void
+ Search::insertFilteredArrivals(const VertexSeq &vertices)
+ {
+@@ -3622,12 +3950,24 @@ RequiredCmp::requiredsInit(Vertex *vertex,
+ {
+   Search *search = sta->search();
+   TagGroup *tag_group = search->tagGroup(vertex);
+-  if (tag_group) {
+-    size_t path_count = tag_group->pathCount();
+-    requireds_.resize(path_count);
+-    for (auto const [tag, path_index] : *tag_group->pathIndexMap()) {
+-      const MinMax *min_max = tag->minMax();
+-      requireds_[path_index] = delayInitValue(min_max->opposite());
++  TagGroup *filter_tag_group = search->filterTagGroup(vertex);
++  size_t path_count = tag_group ? tag_group->pathCount() : 0;
++  size_t filter_count = filter_tag_group ? filter_tag_group->pathCount() : 0;
++  if (path_count + filter_count > 0) {
++    requireds_.resize(path_count + filter_count);
++    if (tag_group) {
++      for (auto const [tag, path_index] : *tag_group->pathIndexMap()) {
++        const MinMax *min_max = tag->minMax();
++        requireds_[path_index] = delayInitValue(min_max->opposite());
++      }
++    }
++    if (filter_tag_group) {
++      // Filter paths are indexed after the design's (Path::pathIndex).
++      for (auto const [tag, path_index] : *filter_tag_group->pathIndexMap()) {
++        const MinMax *min_max = tag->minMax();
++        requireds_[path_count + path_index] =
++          delayInitValue(min_max->opposite());
++      }
+     }
+   }
+   else
+@@ -3746,11 +4086,10 @@ RequiredVisitor::visitFromToPath(const Pin *,
+                from_tag->to_string(this));
+     size_t path_index = from_path->pathIndex(this);
+     const MinMax *req_min = min_max->opposite();
+-    TagGroup *to_tag_group = search_->tagGroup(to_vertex);
+     // Check to see if to_tag was pruned.
+-    if (to_tag_group && to_tag_group->hasTag(to_tag)) {
+-      size_t to_path_index = to_tag_group->pathIndex(to_tag);
+-      Path &to_path = to_vertex->paths()[to_path_index];
++    Path *to_path_ptr = Path::vertexPath(to_vertex, to_tag, this);
++    if (to_path_ptr) {
++      Path &to_path = *to_path_ptr;
+       const Required &to_required = to_path.required();
+       Required from_required = delayDiff(to_required, arc_delay, this);
+       debugPrint(debug_, "search", 3, "  to tag   {:2}: {}",
+diff --git a/openroad/sta/search/Sta.cc b/openroad/sta/search/Sta.cc
+index 52dd346..a7687f7 100644
+--- a/openroad/sta/search/Sta.cc
++++ b/openroad/sta/search/Sta.cc
+@@ -4034,11 +4034,14 @@ Sta::maxPathCountVertex() const
+ int
+ Sta::vertexPathCount(Vertex *vertex) const
+ {
++  int count = 0;
+   TagGroup *tag_group = search_->tagGroup(vertex);
+   if (tag_group)
+-    return tag_group->pathCount();
+-  else
+-    return 0;
++    count += tag_group->pathCount();
++  TagGroup *filter_tag_group = search_->filterTagGroup(vertex);
++  if (filter_tag_group)
++    count += filter_tag_group->pathCount();
++  return count;
+ }
+ 
+ int
+diff --git a/openroad/sta/search/TagGroup.cc b/openroad/sta/search/TagGroup.cc
+index 6fbe4d9..bd714b6 100644
+--- a/openroad/sta/search/TagGroup.cc
++++ b/openroad/sta/search/TagGroup.cc
+@@ -208,6 +208,12 @@ TagGroupBldr::tagMatchPath(Tag *tag,
+   }
+ }
+ 
++Path *
++TagGroupBldr::path(size_t path_index)
++{
++  return &paths_[path_index];
++}
++
+ Arrival
+ TagGroupBldr::arrival(size_t path_index) const
+ {
+diff --git a/openroad/sta/search/TagGroup.hh b/openroad/sta/search/TagGroup.hh
+index cef8858..2156d47 100644
+--- a/openroad/sta/search/TagGroup.hh
++++ b/openroad/sta/search/TagGroup.hh
+@@ -127,6 +127,7 @@ public:
+                     Path *&match,
+                     size_t &path_index);
+   Arrival arrival(size_t path_index) const;
++  Path *path(size_t path_index);
+   // prev_path == hull
+   void setArrival(Tag *tag,
+                   const Arrival &arrival);
+diff --git a/openroad/sta/test/write_timing_model10.ok b/openroad/sta/test/write_timing_model10.ok
+new file mode 100644
+index 0000000..681eb14
+--- /dev/null
++++ b/openroad/sta/test/write_timing_model10.ok
+@@ -0,0 +1,141 @@
++library (top) {
++  comment                        : "";
++  delay_model                    : table_lookup;
++  simulation                     : false;
++  capacitive_load_unit (1,fF);
++  leakage_power_unit             : 1pW;
++  current_unit                   : "1mA";
++  pulling_resistance_unit        : "1kohm";
++  time_unit                      : "1ns";
++  voltage_unit                   : "1v";
++  library_features(report_delay_calculation);
++
++  input_threshold_pct_rise : 50;
++  input_threshold_pct_fall : 50;
++  output_threshold_pct_rise : 50;
++  output_threshold_pct_fall : 50;
++  slew_lower_threshold_pct_rise : 30;
++  slew_lower_threshold_pct_fall : 30;
++  slew_upper_threshold_pct_rise : 70;
++  slew_upper_threshold_pct_fall : 70;
++  slew_derate_from_library : 1.0;
++
++
++  nom_process                    : 1.0;
++  nom_temperature                : 25.0;
++  nom_voltage                    : 1.10;
++
++  lu_table_template(template_1) {
++    variable_1 : total_output_net_capacitance;
++    index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++  }
++
++  cell ("top") {
++    area : 5.586 
++    is_macro_cell : true;
++    pin("clk") {
++      direction : input;
++      clock : true;
++      capacitance : 0.9497;
++      max_transition : 0.199;
++      timing() {
++        timing_sense : positive_unate;
++        timing_type : min_clock_tree_path;
++        cell_rise(scalar) {
++          values("0.00000");
++        }
++        cell_fall(scalar) {
++          values("0.00000");
++        }
++      }
++      timing() {
++        timing_sense : positive_unate;
++        timing_type : max_clock_tree_path;
++        cell_rise(scalar) {
++          values("0.00000");
++        }
++        cell_fall(scalar) {
++          values("0.00000");
++        }
++      }
++    }
++    pin("a") {
++      direction : input;
++      capacitance : 1.1403;
++      max_transition : 0.199;
++      timing() {
++        related_pin : "clk";
++        timing_type : hold_rising;
++        rise_constraint(scalar) {
++          values("0.00313");
++        }
++        fall_constraint(scalar) {
++          values("0.00133");
++        }
++      }
++      timing() {
++        related_pin : "clk";
++        timing_type : setup_rising;
++        rise_constraint(scalar) {
++          values("0.02911");
++        }
++        fall_constraint(scalar) {
++          values("0.03675");
++        }
++      }
++    }
++    pin("b") {
++      direction : input;
++      capacitance : 0.9746;
++      max_transition : 0.199;
++    }
++    pin("y") {
++      direction : output;
++      capacitance : 0.0000;
++      max_transition : 0.199;
++      max_capacitance : 60.577;
++      timing() {
++        related_pin : "b";
++        timing_sense : positive_unate;
++        timing_type : combinational;
++        cell_rise(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.02380,0.02875,0.03401,0.04365,0.06210,0.09858,0.17134");
++        }
++        rise_transition(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.00573,0.00893,0.01282,0.02089,0.03777,0.07223,0.14135");
++        }
++        cell_fall(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.02346,0.02699,0.03049,0.03635,0.04650,0.06528,0.10204");
++        }
++        fall_transition(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.00450,0.00614,0.00801,0.01162,0.01888,0.03410,0.06570");
++        }
++      }
++      timing() {
++        related_pin : "clk";
++        timing_type : rising_edge;
++        cell_rise(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.10877,0.11371,0.11898,0.12862,0.14707,0.18354,0.25630");
++        }
++        rise_transition(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.00573,0.00893,0.01282,0.02089,0.03777,0.07223,0.14135");
++        }
++        cell_fall(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.10099,0.10452,0.10802,0.11388,0.12403,0.14281,0.17957");
++        }
++        fall_transition(template_1) {
++          index_1("0.36562,  1.89304,  3.78609,  7.57217,  15.14430,  30.28870,  60.57740");
++          values("0.00450,0.00614,0.00801,0.01162,0.01888,0.03410,0.06570");
++        }
++      }
++    }
++  }
++
++}
+diff --git a/openroad/sta/test/write_timing_model10.tcl b/openroad/sta/test/write_timing_model10.tcl
+new file mode 100644
+index 0000000..56eb964
+--- /dev/null
++++ b/openroad/sta/test/write_timing_model10.tcl
+@@ -0,0 +1,9 @@
++# write_timing_model clock to output arc of an output in the last input's cone
++source "helpers.tcl"
++read_liberty ../examples/nangate45_typ.lib.gz
++read_verilog write_timing_model10.v
++link_design top
++create_clock -name clk -period 10 [get_ports clk]
++set model [make_result_file write_timing_model10.lib]
++write_timing_model $model
++report_file $model
+diff --git a/openroad/sta/test/write_timing_model10.v b/openroad/sta/test/write_timing_model10.v
+new file mode 100644
+index 0000000..869e2ea
+--- /dev/null
++++ b/openroad/sta/test/write_timing_model10.v
+@@ -0,0 +1,6 @@
++module top (clk, a, b, y);
++  input clk, a, b;
++  output y;
++  DFF_X1 r1 (.D(a), .CK(clk), .Q(q));
++  AND2_X1 u1 (.A1(q), .A2(b), .ZN(y));
++endmodule

@@ -1,0 +1,227 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 2/4] grt: map the backing file lazily, and page the grid out
+ while nets are built
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The backed grid was mapped to its file as it was allocated, so the kernel
+wrote it back every time routing dirtied it: on a large die, the grid
+rewritten to disk again and again over a long route. It is now ordinary
+memory until its first page-out, when it is copied to its file, already
+reserved, and mapped there; a run that never pages out writes nothing.
+
+Building the nets reads the database, not the grid: with a backing file
+the grid is now paged out before initNets and read back (MADV_WILLNEED)
+after initNetlist, so the grid and the nets being built are not in memory
+at once.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/GlobalRouter.cpp             |  4 ++
+ .../grt/src/fastroute/include/FastRoute.h     |  3 +
+ .../grt/src/fastroute/include/FileBacking.h   | 19 ++++--
+ .../grt/src/fastroute/src/FileBacking.cpp     | 64 +++++++++++++------
+ 4 files changed, 64 insertions(+), 26 deletions(-)
+
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index 0550502..5a11bbf 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -257,8 +257,12 @@ std::vector<Net*> GlobalRouter::initFastRoute(int min_routing_layer,
+   // Init the data structures to monitor 3D capacity during 2D phases
+   fastroute_->initEdgesCapacityPerLayer();
+ 
++  // The nets are built from the database, not the grid: with a backing file
++  // the grid waits in it meanwhile, and is read back for routing.
++  fastroute_->pageOutGrid();
+   std::vector<Net*> nets = initNets(check_pin_placement);
+   initNetlist(nets);
++  fastroute_->prefetchGrid();
+ 
+   initialized_ = true;
+   return nets;
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index 5f4622e..1572cf9 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -298,6 +298,9 @@ class FastRouteCore
+   {
+     route_finisher_ = std::move(finisher);
+   }
++  // With a backing file: the grid written out and freed, or read back.
++  void pageOutGrid() { backing_.pageOut(); }
++  void prefetchGrid() { backing_.willNeed(); }
+   int totalOverflow() const { return total_overflow_; }
+   bool has2Doverflow() const { return has_2D_overflow_; }
+   int getSnapshotBatchCount() const { return snapshot_batch_count_; }
+diff --git a/openroad/grt/src/fastroute/include/FileBacking.h b/openroad/grt/src/fastroute/include/FileBacking.h
+index 158270e..9624337 100644
+--- a/openroad/grt/src/fastroute/include/FileBacking.h
++++ b/openroad/grt/src/fastroute/include/FileBacking.h
+@@ -11,12 +11,13 @@
+ 
+ namespace grt {
+ 
+-// Backs arrays already allocated with a file: the page-aligned interior of
+-// each is copied to the file and mapped there, shared, at the same address,
+-// so an array keeps its type, address and contents while the kernel pages
+-// it to the file rather than to swap. The whole file is reserved up front,
+-// so a disk that cannot hold it fails when the grid is set up, not when a
+-// page is first written back. The file is unlinked once reserved and leaves
++// Backs arrays already allocated with a file: at its first page-out the
++// page-aligned interior of each is copied to the file and mapped there,
++// shared, at the same address, so an array keeps its type, address and
++// contents while its pages go to the file rather than to swap; until then it
++// is ordinary memory and costs no disk writes. The whole file is reserved up
++// front, so a disk that cannot hold it fails when the grid is set up, not when
++// a page is first written back. The file is unlinked once reserved and leaves
+ // nothing behind.
+ class FileBacking
+ {
+@@ -38,6 +39,8 @@ class FileBacking
+   // are read back as they are touched. A dirty page only unmapped would stay
+   // in memory until written back, so the ranges are synced first.
+   void pageOut();
++  // Starts reading paged-out ranges back in, ahead of their use.
++  void willNeed();
+ 
+   static size_t pageSlack();
+ 
+@@ -47,12 +50,16 @@ class FileBacking
+     char* data;
+     size_t len;
+     size_t offset;
++    bool in_file;  // moved to the file at its first page-out
+   };
+ 
++  void moveToFile(Range& range);
++
+   int fd_ = -1;
+   size_t size_ = 0;
+   size_t offset_ = 0;
+   std::vector<Range> ranges_;
++  utl::Logger* logger_ = nullptr;
+ };
+ 
+ }  // namespace grt
+diff --git a/openroad/grt/src/fastroute/src/FileBacking.cpp b/openroad/grt/src/fastroute/src/FileBacking.cpp
+index 9a8263b..207106a 100644
+--- a/openroad/grt/src/fastroute/src/FileBacking.cpp
++++ b/openroad/grt/src/fastroute/src/FileBacking.cpp
+@@ -26,6 +26,7 @@ void FileBacking::reserve(utl::Logger* logger,
+                           const std::string& path,
+                           size_t bytes)
+ {
++  logger_ = logger;
+   release();
+   fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+   if (fd_ < 0) {
+@@ -76,30 +77,39 @@ void FileBacking::map(utl::Logger* logger, void* data, size_t bytes)
+                   size_,
+                   len);
+   }
+-  char* p = reinterpret_cast<char*>(begin);
++  // The range stays ordinary memory until it is paged out: routing rewrites
++  // the grid all the time, and a file mapping would have the kernel write it
++  // back over and over. Its room in the file is already reserved.
++  ranges_.push_back({reinterpret_cast<char*>(begin), len, offset_, false});
++  offset_ += len;
++  logger_ = logger;
++}
++
++void FileBacking::moveToFile(Range& range)
++{
+   size_t done = 0;
+-  while (done < len) {
+-    const ssize_t n = pwrite(fd_, p + done, len - done, offset_ + done);
++  while (done < range.len) {
++    const ssize_t n
++        = pwrite(fd_, range.data + done, range.len - done, range.offset + done);
+     if (n <= 0) {
+-      logger->error(utl::GRT,
+-                    1259,
+-                    "Cannot write the backing file: {}.",
+-                    strerror(errno));
++      logger_->error(utl::GRT,
++                     1259,
++                     "Cannot write the backing file: {}.",
++                     strerror(errno));
+     }
+     done += n;
+   }
+-  if (mmap(p,
+-           len,
++  if (mmap(range.data,
++           range.len,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_FIXED,
+            fd_,
+-           static_cast<off_t>(offset_))
++           static_cast<off_t>(range.offset))
+       == MAP_FAILED) {
+-    logger->error(
++    logger_->error(
+         utl::GRT, 1260, "Cannot map the backing file: {}.", strerror(errno));
+   }
+-  ranges_.push_back({p, len, offset_});
+-  offset_ += len;
++  range.in_file = true;
+ }
+ 
+ void FileBacking::release()
+@@ -108,12 +118,14 @@ void FileBacking::release()
+     return;
+   }
+   for (const Range& range : ranges_) {
+-    mmap(range.data,
+-         range.len,
+-         PROT_READ | PROT_WRITE,
+-         MAP_PRIVATE | MAP_FIXED,
+-         fd_,
+-         static_cast<off_t>(range.offset));
++    if (range.in_file) {
++      mmap(range.data,
++           range.len,
++           PROT_READ | PROT_WRITE,
++           MAP_PRIVATE | MAP_FIXED,
++           fd_,
++           static_cast<off_t>(range.offset));
++    }
+   }
+   ranges_.clear();
+   close(fd_);
+@@ -122,12 +134,24 @@ void FileBacking::release()
+ 
+ void FileBacking::pageOut()
+ {
+-  for (const Range& range : ranges_) {
++  for (Range& range : ranges_) {
++    if (!range.in_file) {
++      moveToFile(range);
++    }
+     msync(range.data, range.len, MS_SYNC);
+     madvise(range.data, range.len, MADV_PAGEOUT);
+   }
+ }
+ 
++void FileBacking::willNeed()
++{
++  for (const Range& range : ranges_) {
++    if (range.in_file) {
++      madvise(range.data, range.len, MADV_WILLNEED);
++    }
++  }
++}
++
+ size_t FileBacking::pageSlack()
+ {
+   return 2 * sysconf(_SC_PAGESIZE);
+-- 
+2.53.0
+

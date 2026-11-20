@@ -1,0 +1,582 @@
+boost::icl's exclusive_less_than comparator violates strict weak
+ordering (boostorg/icl#51), which libc++'s std::map exposes:
+interval_set::operator-= subtracts only the first overlapping interval
+and leaves phantom coverage (boostorg/icl#55). This is upstream commit
+boostorg/icl@7de3f55655 ("Refactored interval lookup operations", #54),
+merged after boost 1.90, trimmed to include/. Drop this patch when a
+boost.icl release containing it lands in BCR.
+
+diff --git a/include/boost/icl/concept/element_associator.hpp b/include/boost/icl/concept/element_associator.hpp
+index 98280ece..7c4cbfd3 100644
+--- a/include/boost/icl/concept/element_associator.hpp
++++ b/include/boost/icl/concept/element_associator.hpp
+@@ -143,7 +143,7 @@ is_element_equal(const Type& left, const Type& right)
+ { return left == right; }
+ 
+ 
+-/* Strict weak less ordering which is given by the Compare order */
++/* Strict partial less ordering which is given by the Compare order */
+ template<class Type>
+ inline typename enable_if<is_associative_element_container<Type>, bool>::type
+ operator < (const Type& left, const Type& right)
+diff --git a/include/boost/icl/concept/interval.hpp b/include/boost/icl/concept/interval.hpp
+index fab7dd99..3a1e69f9 100644
+--- a/include/boost/icl/concept/interval.hpp
++++ b/include/boost/icl/concept/interval.hpp
+@@ -565,8 +565,10 @@ template<class Type>
+ typename boost::enable_if<is_static_open<Type>, bool>::type
+ is_empty(const Type& object)
+ {
+-    return domain_less_equal<Type>(upper(object),                   lower(object) )
+-        || domain_less_equal<Type>(upper(object), domain_next<Type>(lower(object)));
++    // we use ternary operator instead of || to prevent a codegen bug with GCC 10-11
++    return domain_less_equal<Type>(upper(object), lower(object))?
++        true:
++        domain_less_equal<Type>(upper(object), domain_next<Type>(lower(object)));
+ }
+ 
+ template<class Type>
+@@ -576,8 +578,10 @@ is_empty(const Type& object)
+     if(object.bounds() == interval_bounds::closed())
+         return domain_less<Type>(upper(object), lower(object));
+     else if(object.bounds() == interval_bounds::open())
+-        return domain_less_equal<Type>(upper(object),                   lower(object) )
+-            || domain_less_equal<Type>(upper(object), domain_next<Type>(lower(object)));
++        // we use ternary operator instead of || to prevent a codegen bug with GCC 10-11
++        return domain_less_equal<Type>(upper(object), lower(object))?
++            true:
++            domain_less_equal<Type>(upper(object), domain_next<Type>(lower(object)));
+     else
+         return domain_less_equal<Type>(upper(object), lower(object));
+ }
+diff --git a/include/boost/icl/detail/assoc_container_adaptor.hpp b/include/boost/icl/detail/assoc_container_adaptor.hpp
+new file mode 100644
+index 00000000..63e4975f
+--- /dev/null
++++ b/include/boost/icl/detail/assoc_container_adaptor.hpp
+@@ -0,0 +1,187 @@
++/*-----------------------------------------------------------------------------+
++Copyright (c) 2026: Joaquin M Lopez Munoz
+++------------------------------------------------------------------------------+
++   Distributed under the Boost Software License, Version 1.0.
++      (See accompanying file LICENCE.txt or copy at
++           http://www.boost.org/LICENSE_1_0.txt)
+++-----------------------------------------------------------------------------*/
++#ifndef BOOST_ICL_DETAIL_ASSOC_CONTAINER_ADAPTOR_HPP_JMLM_260320
++#define BOOST_ICL_DETAIL_ASSOC_CONTAINER_ADAPTOR_HPP_JMLM_260320
++
++#include <boost/icl/impl_config.hpp>
++#include <iterator>
++#include <type_traits>
++#include <utility>
++
++namespace boost{namespace icl{namespace detail
++{
++
++/*-----------------------------------------------------------------------------+
++| Interval comparison is generally a partial order rather than a strict weak   |
++| order (SWO). This does not pose any problem with associative containers as   |
++| long as the intervals in the container are disjoint, since the induced order |
++| restricted to those is a SWO (indeed, a total order). A difficulty may arise |
++| when doing a lookup operation for an interval k that overlaps with           |
++| E = elements(container), as the induced order over {k} U E may not be a SWO. |
++| All stdlib implementations support this case except libc++ v22 or higher:    |
++|   https://github.com/llvm/llvm-project/issues/183189                         |
++|   https://github.com/boostorg/icl/issues/51 .                                |
++| Whether libc++'s behavior is conformant or not is contested, see             |
++|   https://github.com/llvm/llvm-project/issues/187667 ,                       |
++| but, regardless, we can solve the problem by resorting to heterogeneous      |
++| lookup. When k is of a type other than key_type and the compare predicate is |
++| transparent, lookup operations on k are defined by the standard in terms of  |
++| elements being _partitioned_ by k, without any reference to SWO compliance.  |
++|                                                                              |
++| assoc_container_adaptor, in combination with transparent_compare, forces     |
++| lookup operations on the adapted container to be routed through its          |
++| heterogeneous lookup overloads, and does nothing for C++11 containers        |
++| without het lookup. This circumvents libc++'s singular behavior except when  |
++| in C++11 mode: in this case, we use Boost.Container, which supports het      |
++| lookup even in C++11 (see impl_config.hpp). Insert functions are also        |
++| provided that prevent UB when the element would violate SWO (this is UB      |
++| regardless of the resolution of libc++'s issue).                             |
++|                                                                              |
++| Additionally, Boost.ICL interval find functions are documented to return the |
++| _first_ eligible element, which is not guaranteed by std::(set|map)::find;   |
++| assoc_container_adaptor fixes that.
+++-----------------------------------------------------------------------------*/
++
++template<class Compare>
++struct transparent_compare: Compare
++{
++    using is_transparent = void;
++    using super = Compare;
++
++    using super::super;
++};
++
++template<class AssocContainer>
++using assoc_container_is_set = std::is_same<
++    typename AssocContainer::key_type, typename AssocContainer::value_type>;
++
++template<typename InputIterator>
++using assoc_container_enable_if_is_input_iterator_t =
++    typename std::enable_if<
++        std::is_convertible<
++            typename std::iterator_traits<InputIterator>::iterator_category,
++            std::input_iterator_tag
++        >::value
++    >::type;
++
++template<class AssocContainer>
++struct assoc_container_adaptor: AssocContainer
++{
++    using key_type = typename AssocContainer::key_type;
++    using value_type = typename AssocContainer::value_type;
++    using size_type = typename AssocContainer::size_type;
++    using key_compare = typename AssocContainer::key_compare::super;
++    using iterator = typename AssocContainer::iterator;
++    using const_iterator = typename AssocContainer::const_iterator;
++
++    using AssocContainer::AssocContainer;
++
++    template<
++        typename InputIterator,
++        typename = assoc_container_enable_if_is_input_iterator_t<InputIterator>
++    >
++    void insert(InputIterator first, InputIterator last)
++    {
++        while(first != last) insert(*first++);
++    }
++
++    std::pair<iterator, bool> insert(const value_type& x)
++    {
++        auto it = lower_bound(key_from_value(x));
++        if(it == AssocContainer::end() || AssocContainer::value_comp()(x, *it)) {
++            return {AssocContainer::insert(it, x), true};
++        }
++        else {
++            return {it, false};
++        }
++    }
++
++    iterator insert(const_iterator pos, const value_type& x)
++    {
++        if((pos == AssocContainer::end() || AssocContainer::value_comp()(x, *pos)) &&
++           (pos == AssocContainer::begin() || AssocContainer::value_comp()(*std::prev(pos), x))){
++            return AssocContainer::insert(pos, x);
++        }
++        return insert(x).first;
++    }
++
++    size_type count(const key_type& key)
++    {
++        return AssocContainer::count(std::cref(key));
++    }
++
++    size_type count(const key_type& key) const
++    {
++        return AssocContainer::count(std::cref(key));
++    }
++
++    iterator find(const key_type& key)
++    {
++        auto it = AssocContainer::lower_bound(std::cref(key));
++        return 
++            it == AssocContainer::end() ||
++            AssocContainer::key_comp()(key, key_from_value(*it))?
++            AssocContainer::end(): it;
++    }
++
++    const_iterator find(const key_type& key) const
++    {
++        return const_cast<assoc_container_adaptor*>(this)->find(key);
++    }
++
++    std::pair<iterator, iterator> equal_range(const key_type& key)
++    {
++        return AssocContainer::equal_range(std::cref(key));
++    }
++
++    std::pair<const_iterator, const_iterator> equal_range(const key_type& key) const
++    {
++        return AssocContainer::equal_range(std::cref(key));
++    }
++
++    iterator lower_bound(const key_type& key)
++    {
++        return AssocContainer::lower_bound(std::cref(key));
++    }
++
++    const_iterator lower_bound(const key_type& key) const
++    {
++        return AssocContainer::lower_bound(std::cref(key));
++    }
++
++    iterator upper_bound(const key_type& key)
++    {
++        return AssocContainer::upper_bound(std::cref(key));
++    }
++
++    const_iterator upper_bound(const key_type& key) const
++    {
++        return AssocContainer::upper_bound(std::cref(key));
++    }
++
++private:
++    template<
++        class IsSet = assoc_container_is_set<AssocContainer>,
++        typename std::enable_if<IsSet::value>::type* = nullptr>
++    static const key_type& key_from_value(const value_type& x)
++    {
++        return x;
++    }
++
++    template<
++        class IsSet = assoc_container_is_set<AssocContainer>,
++        typename std::enable_if<!IsSet::value>::type* = nullptr>
++    static const key_type& key_from_value(const value_type& x)
++    {
++        return x.first;
++    }
++};
++
++}}} // namespace detail icl boost
++
++#endif
+diff --git a/include/boost/icl/detail/element_iterator.hpp b/include/boost/icl/detail/element_iterator.hpp
+index 6c06f494..d1f3c9e9 100644
+--- a/include/boost/icl/detail/element_iterator.hpp
++++ b/include/boost/icl/detail/element_iterator.hpp
+@@ -8,11 +8,22 @@ Copyright (c) 2009-2009: Joachim Faulhaber
+ #ifndef BOOST_ICL_DETAIL_ELEMENT_ITERATOR_HPP_JOFA_091104
+ #define BOOST_ICL_DETAIL_ELEMENT_ITERATOR_HPP_JOFA_091104
+ 
++#include <boost/config.hpp>
+ #include <boost/mpl/if.hpp>
+ #include <boost/iterator/iterator_facade.hpp>
+ #include <boost/icl/type_traits/succ_pred.hpp>
+ #include <boost/icl/detail/mapped_reference.hpp>
+ 
++#if BOOST_CXX_VERSION >= 202002L
++#include <iterator>
++#endif
++
++namespace boost{namespace movelib{
++
++template<class It> class reverse_iterator;
++
++}} // namespace movelib boost
++
+ namespace boost{namespace icl
+ {
+ 
+@@ -62,6 +73,13 @@ struct is_reverse<std::reverse_iterator<BaseIteratorT> >
+     BOOST_STATIC_CONSTANT(bool, value = true);
+ };
+ 
++template<class BaseIteratorT>
++struct is_reverse<boost::movelib::reverse_iterator<BaseIteratorT> >
++{ 
++    typedef is_reverse<boost::movelib::reverse_iterator<BaseIteratorT> > type; 
++    BOOST_STATIC_CONSTANT(bool, value = true);
++};
++
+ template<class BaseIteratorT>
+ struct is_reverse<icl::element_iterator<BaseIteratorT> >
+ { 
+@@ -333,6 +351,32 @@ class element_iterator
+ 
+ }} // namespace icl boost
+ 
++#if BOOST_CXX_VERSION >= 202002L
++// std::iter_value_t<It> falls back to std::indirectly_readable_traits<It>::value_type when
++// std::iterator_traits<It> is not specialized, but std::indirectly_readable_traits<It> is
++// ill-defined if It::value_type and It::element_type _both_ exist and are _not_ the same, which
++// is precisely the case for element_iterator<SegmentIteratorT>.
++// Workaround is to specialize std::iterator_traits<element_iterator<SegmentIteratorT>>. We do this
++// by deriving from std::iterator_traits<derived_wrapper<element_iterator<SegmentIteratorT>>> so
++// that we don't have to revisit this ever even if more typedefs are added to std::iterator_traits
++// in future versions of the C++ standard.
++
++namespace boost{namespace icl{namespace detail{
++
++template <class Class> struct derived_wrapper: Class {};
++
++}}} // namespace detail icl boost
++
++namespace std{
++
++template <class SegmentIteratorT> 
++struct iterator_traits< ::boost::icl::element_iterator<SegmentIteratorT>> :
++    iterator_traits< ::boost::icl::detail::derived_wrapper< ::boost::icl::element_iterator<SegmentIteratorT>>>
++{};
++
++} // namespace std
++#endif
++
+ #endif // BOOST_ICL_DETAIL_ELEMENT_ITERATOR_HPP_JOFA_091104
+ 
+ 
+diff --git a/include/boost/icl/detail/exclusive_less_than.hpp b/include/boost/icl/detail/exclusive_less_than.hpp
+index 3a4aa650..fbdaa5f9 100644
+--- a/include/boost/icl/detail/exclusive_less_than.hpp
++++ b/include/boost/icl/detail/exclusive_less_than.hpp
+@@ -17,7 +17,7 @@ namespace boost{ namespace icl
+ template <class IntervalT>
+ struct exclusive_less_than 
+ {
+-    /** Operator <tt>operator()</tt> implements a strict weak ordering on intervals. */
++    /** Operator <tt>operator()</tt> implements a strict partial ordering on intervals. */
+     bool operator()(const IntervalT& left, const IntervalT& right)const
+     { 
+         return icl::non_empty::exclusive_less(left, right); 
+diff --git a/include/boost/icl/detail/map_adaptor.hpp b/include/boost/icl/detail/map_adaptor.hpp
+new file mode 100644
+index 00000000..790490ed
+--- /dev/null
++++ b/include/boost/icl/detail/map_adaptor.hpp
+@@ -0,0 +1,29 @@
++/*-----------------------------------------------------------------------------+
++Copyright (c) 2026: Joaquin M Lopez Munoz
+++------------------------------------------------------------------------------+
++   Distributed under the Boost Software License, Version 1.0.
++      (See accompanying file LICENCE.txt or copy at
++           http://www.boost.org/LICENSE_1_0.txt)
+++-----------------------------------------------------------------------------*/
++#ifndef BOOST_ICL_DETAIL_MAP_ADAPTOR_HPP_JMLM_260321
++#define BOOST_ICL_DETAIL_MAP_ADAPTOR_HPP_JMLM_260321
++
++#include <boost/icl/detail/assoc_container_adaptor.hpp>
++
++#include ICL_IMPL_PATH(map)
++
++// let boostdep know about this potential dependency hidden by ICL_IMPL_PATH
++#if 0
++#include <boost/container/map.hpp>
++#endif
++
++namespace boost{namespace icl{namespace detail
++{
++
++template<class K, class T, class Compare, class Allocator>
++using map_adaptor = assoc_container_adaptor<
++    ICL_IMPL_SPACE::map<K, T, transparent_compare<Compare>, Allocator>>;
++
++}}} // namespace detail icl boost
++
++#endif
+diff --git a/include/boost/icl/detail/mapped_reference.hpp b/include/boost/icl/detail/mapped_reference.hpp
+index 67f7d041..212059cb 100644
+--- a/include/boost/icl/detail/mapped_reference.hpp
++++ b/include/boost/icl/detail/mapped_reference.hpp
+@@ -134,7 +134,7 @@ inline typename enable_if<is_mapped_reference_combinable<StdPairT>, bool>::type
+ operator == (                         const StdPairT& left, 
+              const mapped_reference<FirstT, SecondT>& right)
+ { 
+-    return right == left; 
++    return right.operator ==(left); 
+ }
+ 
+ template<class FirstT, class SecondT, class StdPairT>
+@@ -142,7 +142,7 @@ inline typename enable_if<is_mapped_reference_combinable<StdPairT>, bool>::type
+ operator != (                         const StdPairT& left, 
+              const mapped_reference<FirstT, SecondT>& right)
+ { 
+-    return !(right == left); 
++    return !(right.operator ==(left)); 
+ }
+ 
+ //------------------------------------------------------------------------------
+diff --git a/include/boost/icl/detail/set_adaptor.hpp b/include/boost/icl/detail/set_adaptor.hpp
+new file mode 100644
+index 00000000..2a44b8a5
+--- /dev/null
++++ b/include/boost/icl/detail/set_adaptor.hpp
+@@ -0,0 +1,44 @@
++/*-----------------------------------------------------------------------------+
++Copyright (c) 2026: Joaquin M Lopez Munoz
+++------------------------------------------------------------------------------+
++   Distributed under the Boost Software License, Version 1.0.
++      (See accompanying file LICENCE.txt or copy at
++           http://www.boost.org/LICENSE_1_0.txt)
+++-----------------------------------------------------------------------------*/
++#ifndef BOOST_ICL_DETAIL_SET_ADAPTOR_HPP_JMLM_260321
++#define BOOST_ICL_DETAIL_SET_ADAPTOR_HPP_JMLM_260321
++
++#include <boost/icl/detail/assoc_container_adaptor.hpp>
++
++#include ICL_IMPL_PATH(set)
++
++// let boostdep know about this potential dependency hidden by ICL_IMPL_PATH
++#if 0
++#include <boost/container/set.hpp>
++#endif
++
++namespace boost{namespace icl{namespace detail
++{
++
++template<class K, class Compare, class Allocator>
++struct set_adaptor: assoc_container_adaptor<
++    ICL_IMPL_SPACE::set<K, transparent_compare<Compare>, Allocator>>
++{
++    using super = assoc_container_adaptor<
++        ICL_IMPL_SPACE::set<K, transparent_compare<Compare>, Allocator>>;
++
++    using super::super;
++
++    // Boost.ICL assumes set::iterator is the same type as set::const_iterator,
++    // which is not guaranteed generally and is certainly not the case for
++    // boost::container::set. We extend to reverse_iterator out of sympathy.
++
++    using const_iterator = typename super::const_iterator;
++    using iterator = const_iterator;
++    using const_reverse_iterator = typename super::const_reverse_iterator;
++    using reverse_iterator = const_reverse_iterator;
++};
++
++}}} // namespace detail icl boost
++
++#endif
+diff --git a/include/boost/icl/impl_config.hpp b/include/boost/icl/impl_config.hpp
+index 55297396..601d4bcc 100644
+--- a/include/boost/icl/impl_config.hpp
++++ b/include/boost/icl/impl_config.hpp
+@@ -32,14 +32,19 @@ Copyright (c) 2009-2011: Joachim Faulhaber
+ |                                                                              |
+ | NOTE: ICL_USE_BOOST_INTERPROCESS_IMPLEMENTATION: This define has been        |
+ |     available until boost version 1.48.0 and is no longer supported.         |
++|                                                                              |
++| NOTE: With libc++ v22 or higher in C++11, boost::container is used           |
++|     regardless of user indications. See assoc_container_adaptor.hpp for      |
++|     the rationale.                                                           |
+ +-----------------------------------------------------------------------------*/
+ 
+-#if defined(ICL_USE_BOOST_MOVE_IMPLEMENTATION)
++#if defined(ICL_USE_BOOST_MOVE_IMPLEMENTATION) ||\
++    (BOOST_CXX_VERSION < 201402L && defined(_LIBCPP_VERSION) && _LIBCPP_VERSION > 220000)
+ #   define ICL_IMPL_SPACE boost::container
+-#elif defined(ICL_USE_STD_IMPLEMENTATION)
+-#   define ICL_IMPL_SPACE std
++#   define ICL_IMPL_PATH(header) <boost/container/header.hpp>
+ #else
+ #   define ICL_IMPL_SPACE std
++#   define ICL_IMPL_PATH(header) <header>
+ #endif
+ 
+ /*-----------------------------------------------------------------------------+
+diff --git a/include/boost/icl/interval_base_map.hpp b/include/boost/icl/interval_base_map.hpp
+index f464a6a4..89555c7c 100644
+--- a/include/boost/icl/interval_base_map.hpp
++++ b/include/boost/icl/interval_base_map.hpp
+@@ -19,6 +19,7 @@ Copyright (c) 1999-2006: Cortex Software GmbH, Kantstrasse 57, Berlin
+ #include <boost/icl/detail/on_absorbtion.hpp>
+ #include <boost/icl/detail/interval_map_algo.hpp>
+ #include <boost/icl/detail/exclusive_less_than.hpp>
++#include <boost/icl/detail/map_adaptor.hpp>
+ 
+ #include <boost/icl/associative_interval_container.hpp>
+ 
+@@ -145,8 +146,7 @@ class interval_base_map
+         allocator_type;
+ 
+     /// Container type for the implementation 
+-    typedef ICL_IMPL_SPACE::map<interval_type,codomain_type,
+-                                key_compare,allocator_type> ImplMapT;
++    typedef detail::map_adaptor<interval_type,codomain_type,key_compare,allocator_type> ImplMapT;
+ 
+     /// key type of the implementing container
+     typedef typename ImplMapT::key_type   key_type;
+diff --git a/include/boost/icl/interval_base_set.hpp b/include/boost/icl/interval_base_set.hpp
+index d693bd43..a0b3968d 100644
+--- a/include/boost/icl/interval_base_set.hpp
++++ b/include/boost/icl/interval_base_set.hpp
+@@ -11,14 +11,6 @@ Copyright (c) 1999-2006: Cortex Software GmbH, Kantstrasse 57, Berlin
+ 
+ #include <boost/icl/impl_config.hpp>
+ 
+-#if defined(ICL_USE_BOOST_MOVE_IMPLEMENTATION)
+-#   include <boost/container/set.hpp>
+-#elif defined(ICL_USE_STD_IMPLEMENTATION)
+-#   include <set>
+-#else // Default for implementing containers
+-#   include <set>
+-#endif
+-
+ #include <limits>
+ #include <boost/next_prior.hpp>
+ #include <boost/icl/associative_interval_container.hpp>
+@@ -30,6 +22,7 @@ Copyright (c) 1999-2006: Cortex Software GmbH, Kantstrasse 57, Berlin
+ #include <boost/icl/type_traits/is_interval_splitter.hpp>
+ #include <boost/icl/detail/interval_set_algo.hpp>
+ #include <boost/icl/detail/exclusive_less_than.hpp>
++#include <boost/icl/detail/set_adaptor.hpp>
+ 
+ #include <boost/icl/right_open_interval.hpp>
+ #include <boost/icl/continuous_interval.hpp>
+@@ -116,7 +109,7 @@ class interval_base_set
+     typedef Alloc<DomainT> domain_allocator_type;
+ 
+     /// Container type for the implementation
+-    typedef typename ICL_IMPL_SPACE::set<interval_type,key_compare,allocator_type> ImplSetT;
++    typedef detail::set_adaptor<interval_type,key_compare,allocator_type> ImplSetT;
+ 
+     /// key type of the implementing container
+     typedef typename ImplSetT::key_type   key_type;
+diff --git a/include/boost/icl/map.hpp b/include/boost/icl/map.hpp
+index 3877745d..8d67de1e 100644
+--- a/include/boost/icl/map.hpp
++++ b/include/boost/icl/map.hpp
+@@ -10,16 +10,8 @@ Copyright (c) 2007-2011: Joachim Faulhaber
+ 
+ #include <boost/icl/impl_config.hpp>
+ 
+-#if defined(ICL_USE_BOOST_MOVE_IMPLEMENTATION)
+-#   include <boost/container/map.hpp>
+-#   include <boost/container/set.hpp>
+-#elif defined(ICL_USE_STD_IMPLEMENTATION)
+-#   include <map>
+-#   include <set>
+-#else // Default for implementing containers
+-#   include <map>
+-#   include <set>
+-#endif
++#include <boost/icl/detail/map_adaptor.hpp>
++#include ICL_IMPL_PATH(set)
+ 
+ #include <string>
+ #include <boost/call_traits.hpp>
+@@ -89,14 +81,14 @@ template
+     ICL_SECTION Section = ICL_SECTION_INSTANCE(icl::inter_section, CodomainT),
+     ICL_ALLOC   Alloc   = std::allocator
+ >
+-class map: private ICL_IMPL_SPACE::map<DomainT, CodomainT, ICL_COMPARE_DOMAIN(Compare,DomainT),
++class map: private detail::map_adaptor<DomainT, CodomainT, ICL_COMPARE_DOMAIN(Compare,DomainT),
+                                        Alloc<std::pair<const DomainT, CodomainT> > >
+ {
+ public:
+     typedef Alloc<typename std::pair<const DomainT, CodomainT> >  allocator_type;
+ 
+     typedef typename icl::map<DomainT,CodomainT,Traits, Compare,Combine,Section,Alloc> type;
+-    typedef typename ICL_IMPL_SPACE::map<DomainT, CodomainT, ICL_COMPARE_DOMAIN(Compare,DomainT),
++    typedef typename detail::map_adaptor<DomainT, CodomainT, ICL_COMPARE_DOMAIN(Compare,DomainT),
+                                          allocator_type>   base_type;
+ 
+     typedef Traits traits;
+diff --git a/include/boost/icl/set.hpp b/include/boost/icl/set.hpp
+index db44b5e8..aa1a68ed 100644
+--- a/include/boost/icl/set.hpp
++++ b/include/boost/icl/set.hpp
+@@ -10,13 +10,7 @@ Copyright (c) 2007-2011: Joachim Faulhaber
+ 
+ #include <boost/icl/impl_config.hpp>
+ 
+-#if defined(ICL_USE_BOOST_MOVE_IMPLEMENTATION)
+-#   include <boost/container/set.hpp>
+-#elif defined(ICL_USE_STD_IMPLEMENTATION)
+-#   include <set>
+-#else 
+-#   include <set>
+-#endif
++#include ICL_IMPL_PATH(set)
+ 
+ #include <boost/icl/associative_element_container.hpp>
+ #include <boost/icl/functors.hpp>

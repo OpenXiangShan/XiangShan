@@ -1,0 +1,10 @@
+"""CDE: rocket-chip's configuration system. Plain Scala, no Chisel."""
+
+load("@rules_scala//scala:scala.bzl", "scala_library")
+
+package(default_visibility = ["//visibility:public"])
+
+scala_library(
+    name = "cde",
+    srcs = glob(["cde/src/**/*.scala"]),
+)

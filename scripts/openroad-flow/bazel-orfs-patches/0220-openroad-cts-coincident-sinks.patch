@@ -1,0 +1,715 @@
+From c36a9b2621b4354ccffc2294a8facaa5920b0e3b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Thu, 12 Nov 2026 22:36:58 +0100
+Subject: [PATCH] cts: connect every sink when two share a location
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+HTreeBuilder found a clock sink by its location: mapLocationToSink_ held
+one sink per location, and a second sink at the same point overwrote the
+first. Two registers placed on top of each other (same master, location
+and orientation, so the same clock pin point) then resolved to one
+ClockInst. Sink clustering put that one into its cluster's subnet twice,
+and so did the leaf level of a tree too small to cluster; the other
+register was in no subnet. Writing the tree takes every sink off the
+clock net and connects only the subnets' sinks, so its clock pin was
+left on no net. Nothing said so: CTS-0035 counts locations and reported
+every sink covered.
+
+Sink clustering now takes each sink by its index in the vector that runs
+parallel to its points, instead of looking its location up. The map
+keeps every sink at a location, and the leaf level connects the next one
+each time the location appears among its branches' sinks. Once the
+subnets are made, a sink that is in none of them is an error (CTS-0138)
+instead of a clock pin left on no net. #9816 nudged cloned clock gaters
+apart by 1 dbu for the same map; sinks that already shared a location
+when CTS started were still lost.
+
+Where no two sinks share a location the trees are the same; every
+existing cts test passes unchanged.
+
+colocated_registers puts a register on top of another in a clustered
+tree (226 sinks) and in one too small to cluster (37 sinks), and checks
+that every register's clock pin reaches its clock port through the tree.
+It fails without the change (ffa_twin's clock pin on no net) and passes
+with it.
+
+Upstream as The-OpenROAD-Project/OpenROAD#12351; retires with the
+//:bump onto an OpenROAD that has it.
+
+Updated before that merge because the earlier carry was broken on the
+pinned OpenROAD: since 02eab85733 filters clock gate sinks out of the
+points before sink clustering, it indexed sinkInsts by the point's
+index, which put the wrong instances in a cluster or stopped CTS with
+CTS-0138 on any clock with gate sinks and sink clustering
+(TestClockGateSinks, gated_clock1). The sink is now taken from
+pointInsts, which runs parallel to the points.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/cts/src/HTreeBuilder.cpp         |  73 +++--
+ openroad/cts/src/HTreeBuilder.h           |  11 +-
+ openroad/cts/test/BUILD                   |   1 +
+ openroad/cts/test/colocated_registers.def | 318 ++++++++++++++++++++++
+ openroad/cts/test/colocated_registers.tcl |  87 ++++++
+ 5 files changed, 467 insertions(+), 23 deletions(-)
+ create mode 100644 openroad/cts/test/colocated_registers.def
+ create mode 100644 openroad/cts/test/colocated_registers.tcl
+
+diff --git a/openroad/cts/src/HTreeBuilder.cpp b/openroad/cts/src/HTreeBuilder.cpp
+index 758c2a6372..9367526f11 100644
+--- a/openroad/cts/src/HTreeBuilder.cpp
++++ b/openroad/cts/src/HTreeBuilder.cpp
+@@ -9,7 +9,9 @@
+ #include <fstream>
+ #include <iostream>
+ #include <limits>
++#include <map>
+ #include <string>
++#include <unordered_set>
+ #include <utility>
+ #include <vector>
+ 
+@@ -38,7 +40,7 @@ Point<double> HTreeBuilder::legalizeOneBuffer(Point<double> bufferLoc,
+ 
+ void HTreeBuilder::preSinkClustering(
+     const std::vector<std::pair<float, float>>& sinks,
+-    const std::vector<const ClockInst*>& sinkInsts,
++    const std::vector<ClockInst*>& sinkInsts,
+     const float maxDiameter,
+     const unsigned clusterSize,
+     const bool secondLevel)
+@@ -58,7 +60,7 @@ void HTreeBuilder::preSinkClustering(
+     clock_.forEachSink([&](ClockInst& inst) {
+       const Point<double> normLocation((float) inst.getX() / wireSegmentUnit_,
+                                        (float) inst.getY() / wireSegmentUnit_);
+-      mapLocationToSink_[normLocation] = &inst;
++      mapLocationToSink_[normLocation].push_back(&inst);
+       if (!fuzzyEqual(inst.getInsertionDelay(), 0.0, 1e-6)) {
+         setSinkInsertionDelay(normLocation,
+                               inst.getInsertionDelay() / wireSegmentUnit_);
+@@ -80,7 +82,7 @@ void HTreeBuilder::preSinkClustering(
+   // The H-tree drives a clock gate sink directly in place of a leaf buffer.
+   std::vector<std::pair<float, float>> gatePoints;
+   std::vector<std::pair<float, float>> points;
+-  std::vector<const ClockInst*> pointInsts;
++  std::vector<ClockInst*> pointInsts;
+   for (size_t i = 0; i < sinks.size(); i++) {
+     if (!secondLevel && sinkInsts[i]->isClockGateSink()) {
+       gatePoints.push_back(sinks[i]);
+@@ -163,14 +165,11 @@ void HTreeBuilder::preSinkClustering(
+       float ySum = 0;
+       for (auto point_idx : cluster) {
+         const std::pair<double, double>& point = points[point_idx];
+-        const Point<double> mapPoint(point.first, point.second);
+-        if (mapLocationToSink_.find(mapPoint) == mapLocationToSink_.end()) {
+-          logger_->error(CTS, 79, "Sink not found.");
+-        }
+         xSum += point.first;
+         ySum += point.second;
+-        clusterClockInsts.push_back(mapLocationToSink_[mapPoint]);
+-        // clock inst needs to be added to the new subnet
++        // clock inst needs to be added to the new subnet; taken by its index,
++        // not looked up by its location, which it may share with another sink
++        clusterClockInsts.push_back(pointInsts[point_idx]);
+       }
+       const unsigned pointCounter = cluster.size();
+       const float normCenterX
+@@ -222,7 +221,7 @@ void HTreeBuilder::preSinkClustering(
+       // Simulate the float conversion to ensure consistent map keys
+       Point<double> mapKey(point.first, point.second);
+ 
+-      mapLocationToSink_[mapKey] = &rootBuffer;
++      mapLocationToSink_[mapKey].push_back(&rootBuffer);
+     }
+     clusterCount++;
+   }
+@@ -319,7 +318,7 @@ void HTreeBuilder::initSinkRegion()
+   }
+ 
+   std::vector<std::pair<float, float>> topLevelSinks;
+-  std::vector<const ClockInst*> sinkInsts;
++  std::vector<ClockInst*> sinkInsts;
+   initTopLevelSinks(topLevelSinks, sinkInsts);
+ 
+   const float maxDiameter = (clusterDiameter * dbUnits) / wireSegmentUnit_;
+@@ -341,7 +340,7 @@ void HTreeBuilder::initSinkRegion()
+     if (topLevelSinksClustered_.size() > 400
+         && options_->getSinkClusteringLevels() > 0) {
+       std::vector<std::pair<float, float>> secondLevelLocs;
+-      std::vector<const ClockInst*> secondLevelInsts;
++      std::vector<ClockInst*> secondLevelInsts;
+       initSecondLevelSinks(secondLevelLocs, secondLevelInsts);
+       preSinkClustering(secondLevelLocs,
+                         secondLevelInsts,
+@@ -1413,7 +1412,7 @@ std::string HTreeBuilder::plotHTree()
+             = leafTopology.getBranchSinksLocations(idx);
+ 
+         for (const Point<double>& loc : sinkLocs) {
+-          auto name2 = mapLocationToSink_[loc]->getName();
++          auto name2 = mapLocationToSink_[loc].front()->getName();
+ 
+           file << numSinks << " " << loc.getX() << " " << loc.getY();
+           file << " " << px << " " << py << " leafbuffer " << name2;
+@@ -1852,10 +1851,10 @@ void HTreeBuilder::computeBranchingPoints(const unsigned level,
+ 
+ void HTreeBuilder::initTopLevelSinks(
+     std::vector<std::pair<float, float>>& sinkLocations,
+-    std::vector<const ClockInst*>& sinkInsts)
++    std::vector<ClockInst*>& sinkInsts)
+ {
+   sinkLocations.clear();
+-  clock_.forEachSink([&](const ClockInst& sink) {
++  clock_.forEachSink([&](ClockInst& sink) {
+     sinkLocations.emplace_back((float) sink.getX() / wireSegmentUnit_,
+                                (float) sink.getY() / wireSegmentUnit_);
+     sinkInsts.emplace_back(&sink);
+@@ -1864,13 +1863,15 @@ void HTreeBuilder::initTopLevelSinks(
+ 
+ void HTreeBuilder::initSecondLevelSinks(
+     std::vector<std::pair<float, float>>& sinkLocations,
+-    std::vector<const ClockInst*>& sinkInsts)
++    std::vector<ClockInst*>& sinkInsts)
+ {
+   sinkLocations.clear();
+   for (const auto& buf : topLevelSinksClustered_) {
+     sinkLocations.emplace_back(buf.first, buf.second);
+     const Point<double> bufPos(buf.first, buf.second);
+-    sinkInsts.emplace_back(mapLocationToSink_[bufPos]);
++    // A sink buffer's location is unique: legalizeOneBuffer resolves
++    // collisions with every location in the map.
++    sinkInsts.emplace_back(mapLocationToSink_[bufPos].front());
+   }
+ }
+ 
+@@ -2128,6 +2129,9 @@ void HTreeBuilder::createClockSubNets()
+ 
+   LevelTopology& leafTopology = topologyForEachLevel_.back();
+   unsigned numSinks = 0;
++  // Sinks that share a location appear once each among the branches' sink
++  // locations: each appearance connects the next sink at that location.
++  std::map<Point<double>, size_t> numConnectedAt;
+   leafTopology.forEachBranchingPoint(
+       [&](unsigned idx, Point<double> branchPoint) {
+         ClockSubNet* subNet = leafTopology.getBranchDrivingSubNet(idx);
+@@ -2142,16 +2146,47 @@ void HTreeBuilder::createClockSubNets()
+         const std::vector<Point<double>>& sinkLocs
+             = leafTopology.getBranchSinksLocations(idx);
+         for (const Point<double>& loc : sinkLocs) {
+-          if (mapLocationToSink_.find(loc) == mapLocationToSink_.end()) {
++          const auto sinks = mapLocationToSink_.find(loc);
++          size_t& numConnected = numConnectedAt[loc];
++          if (sinks == mapLocationToSink_.end()
++              || numConnected == sinks->second.size()) {
+             logger_->error(CTS, 80, "Sink not found.");
+           }
+ 
+-          subNet->addInst(*mapLocationToSink_[loc]);
++          subNet->addInst(*sinks->second[numConnected++]);
+           ++numSinks;
+         }
+       });
+ 
+   logger_->info(CTS, 35, " Number of sinks covered: {}.", numSinks);
++
++  // Writing the tree to the database takes every sink off the clock net and
++  // connects only the sinks of the subnets: a sink in no subnet would be
++  // left with its clock pin on no net.
++  std::unordered_set<const ClockInst*> connected;
++  clock_.forEachSubNet([&](const ClockSubNet& subNet) {
++    subNet.forEachSink([&](const ClockInst* inst) { connected.insert(inst); });
++  });
++  unsigned numLeftOut = 0;
++  const ClockInst* leftOut = nullptr;
++  clock_.forEachSink([&](const ClockInst& sink) {
++    if (!connected.contains(&sink)) {
++      if (leftOut == nullptr) {
++        leftOut = &sink;
++      }
++      ++numLeftOut;
++    }
++  });
++  if (numLeftOut > 0) {
++    logger_->error(CTS,
++                   138,
++                   "{} of the {} sinks of clock net {} are not in the clock "
++                   "tree, {} among them.",
++                   numLeftOut,
++                   clock_.getNumSinks(),
++                   clock_.getName(),
++                   leftOut->getName());
++  }
+ }
+ 
+ void HTreeBuilder::createSingleBufferClockNet()
+diff --git a/openroad/cts/src/HTreeBuilder.h b/openroad/cts/src/HTreeBuilder.h
+index 95983d4657..6f52dd6ecd 100644
+--- a/openroad/cts/src/HTreeBuilder.h
++++ b/openroad/cts/src/HTreeBuilder.h
+@@ -306,9 +306,9 @@ class HTreeBuilder : public TreeBuilder
+   void createClockSubNets();
+   void createSingleBufferClockNet();
+   void initTopLevelSinks(std::vector<std::pair<float, float>>& sinkLocations,
+-                         std::vector<const ClockInst*>& sinkInsts);
++                         std::vector<ClockInst*>& sinkInsts);
+   void initSecondLevelSinks(std::vector<std::pair<float, float>>& sinkLocations,
+-                            std::vector<const ClockInst*>& sinkInsts);
++                            std::vector<ClockInst*>& sinkInsts);
+   void computeBranchSinks(
+       const LevelTopology& topology,
+       unsigned branchIdx,
+@@ -341,7 +341,7 @@ class HTreeBuilder : public TreeBuilder
+                         std::vector<std::pair<float, float>>& points,
+                         std::vector<unsigned>& mapSinkToPoint);
+   void preSinkClustering(const std::vector<std::pair<float, float>>& sinks,
+-                         const std::vector<const ClockInst*>& sinkInsts,
++                         const std::vector<ClockInst*>& sinkInsts,
+                          float maxDiameter,
+                          unsigned clusterSize,
+                          bool secondLevel = false);
+@@ -379,7 +379,10 @@ class HTreeBuilder : public TreeBuilder
+  private:
+   Box<double> sinkRegion_;
+   std::vector<LevelTopology> topologyForEachLevel_;
+-  std::map<Point<double>, ClockInst*> mapLocationToSink_;
++  // Every sink and sink buffer at a location, in the order they were added.
++  // Two clock pins can share a location (two registers placed on top of
++  // each other), and each of them must still be connected.
++  std::map<Point<double>, std::vector<ClockInst*>> mapLocationToSink_;
+   std::vector<std::pair<float, float>> topLevelSinksClustered_;
+ 
+   int wireSegmentUnit_ = 0;
+diff --git a/openroad/cts/test/BUILD b/openroad/cts/test/BUILD
+index fbec1e25e0..6c0764cefc 100644
+--- a/openroad/cts/test/BUILD
++++ b/openroad/cts/test/BUILD
+@@ -62,6 +62,7 @@ COMPULSORY_TESTS = [
+ ]
+ 
+ PASSFAIL_TESTS = [
++    "colocated_registers",
+     "dangling_clock_inverter",
+     "dont_touch_sink",
+     "dont_touch_skipped_net",
+diff --git a/openroad/cts/test/colocated_registers.def b/openroad/cts/test/colocated_registers.def
+new file mode 100644
+index 0000000000..b5e0e3885f
+--- /dev/null
++++ b/openroad/cts/test/colocated_registers.def
+@@ -0,0 +1,318 @@
++VERSION 5.8 ;
++DIVIDERCHAR "/" ;
++BUSBITCHARS "[]" ;
++DESIGN colocated_registers ;
++UNITS DISTANCE MICRONS 2000 ;
++DIEAREA ( 0 0 ) ( 420000 210000 ) ;
++COMPONENTS 263 ;
++    - ffa_0 DFF_X1 + PLACED ( 3800 2800 ) N ;
++    - ffa_1 DFF_X1 + PLACED ( 17100 2800 ) N ;
++    - ffa_10 DFF_X1 + PLACED ( 136800 2800 ) N ;
++    - ffa_100 DFF_X1 + PLACED ( 136800 86800 ) N ;
++    - ffa_101 DFF_X1 + PLACED ( 150100 86800 ) N ;
++    - ffa_102 DFF_X1 + PLACED ( 163400 86800 ) N ;
++    - ffa_103 DFF_X1 + PLACED ( 176700 86800 ) N ;
++    - ffa_104 DFF_X1 + PLACED ( 190000 86800 ) N ;
++    - ffa_105 DFF_X1 + PLACED ( 3800 100800 ) N ;
++    - ffa_106 DFF_X1 + PLACED ( 17100 100800 ) N ;
++    - ffa_107 DFF_X1 + PLACED ( 30400 100800 ) N ;
++    - ffa_108 DFF_X1 + PLACED ( 43700 100800 ) N ;
++    - ffa_109 DFF_X1 + PLACED ( 57000 100800 ) N ;
++    - ffa_11 DFF_X1 + PLACED ( 150100 2800 ) N ;
++    - ffa_110 DFF_X1 + PLACED ( 70300 100800 ) N ;
++    - ffa_111 DFF_X1 + PLACED ( 83600 100800 ) N ;
++    - ffa_112 DFF_X1 + PLACED ( 96900 100800 ) N ;
++    - ffa_113 DFF_X1 + PLACED ( 110200 100800 ) N ;
++    - ffa_114 DFF_X1 + PLACED ( 123500 100800 ) N ;
++    - ffa_115 DFF_X1 + PLACED ( 136800 100800 ) N ;
++    - ffa_116 DFF_X1 + PLACED ( 150100 100800 ) N ;
++    - ffa_117 DFF_X1 + PLACED ( 163400 100800 ) N ;
++    - ffa_118 DFF_X1 + PLACED ( 176700 100800 ) N ;
++    - ffa_119 DFF_X1 + PLACED ( 190000 100800 ) N ;
++    - ffa_12 DFF_X1 + PLACED ( 163400 2800 ) N ;
++    - ffa_120 DFF_X1 + PLACED ( 3800 114800 ) N ;
++    - ffa_121 DFF_X1 + PLACED ( 17100 114800 ) N ;
++    - ffa_122 DFF_X1 + PLACED ( 30400 114800 ) N ;
++    - ffa_123 DFF_X1 + PLACED ( 43700 114800 ) N ;
++    - ffa_124 DFF_X1 + PLACED ( 57000 114800 ) N ;
++    - ffa_125 DFF_X1 + PLACED ( 70300 114800 ) N ;
++    - ffa_126 DFF_X1 + PLACED ( 83600 114800 ) N ;
++    - ffa_127 DFF_X1 + PLACED ( 96900 114800 ) N ;
++    - ffa_128 DFF_X1 + PLACED ( 110200 114800 ) N ;
++    - ffa_129 DFF_X1 + PLACED ( 123500 114800 ) N ;
++    - ffa_13 DFF_X1 + PLACED ( 176700 2800 ) N ;
++    - ffa_130 DFF_X1 + PLACED ( 136800 114800 ) N ;
++    - ffa_131 DFF_X1 + PLACED ( 150100 114800 ) N ;
++    - ffa_132 DFF_X1 + PLACED ( 163400 114800 ) N ;
++    - ffa_133 DFF_X1 + PLACED ( 176700 114800 ) N ;
++    - ffa_134 DFF_X1 + PLACED ( 190000 114800 ) N ;
++    - ffa_135 DFF_X1 + PLACED ( 3800 128800 ) N ;
++    - ffa_136 DFF_X1 + PLACED ( 17100 128800 ) N ;
++    - ffa_137 DFF_X1 + PLACED ( 30400 128800 ) N ;
++    - ffa_138 DFF_X1 + PLACED ( 43700 128800 ) N ;
++    - ffa_139 DFF_X1 + PLACED ( 57000 128800 ) N ;
++    - ffa_14 DFF_X1 + PLACED ( 190000 2800 ) N ;
++    - ffa_140 DFF_X1 + PLACED ( 70300 128800 ) N ;
++    - ffa_141 DFF_X1 + PLACED ( 83600 128800 ) N ;
++    - ffa_142 DFF_X1 + PLACED ( 96900 128800 ) N ;
++    - ffa_143 DFF_X1 + PLACED ( 110200 128800 ) N ;
++    - ffa_144 DFF_X1 + PLACED ( 123500 128800 ) N ;
++    - ffa_145 DFF_X1 + PLACED ( 136800 128800 ) N ;
++    - ffa_146 DFF_X1 + PLACED ( 150100 128800 ) N ;
++    - ffa_147 DFF_X1 + PLACED ( 163400 128800 ) N ;
++    - ffa_148 DFF_X1 + PLACED ( 176700 128800 ) N ;
++    - ffa_149 DFF_X1 + PLACED ( 190000 128800 ) N ;
++    - ffa_15 DFF_X1 + PLACED ( 3800 16800 ) N ;
++    - ffa_150 DFF_X1 + PLACED ( 3800 142800 ) N ;
++    - ffa_151 DFF_X1 + PLACED ( 17100 142800 ) N ;
++    - ffa_152 DFF_X1 + PLACED ( 30400 142800 ) N ;
++    - ffa_153 DFF_X1 + PLACED ( 43700 142800 ) N ;
++    - ffa_154 DFF_X1 + PLACED ( 57000 142800 ) N ;
++    - ffa_155 DFF_X1 + PLACED ( 70300 142800 ) N ;
++    - ffa_156 DFF_X1 + PLACED ( 83600 142800 ) N ;
++    - ffa_157 DFF_X1 + PLACED ( 96900 142800 ) N ;
++    - ffa_158 DFF_X1 + PLACED ( 110200 142800 ) N ;
++    - ffa_159 DFF_X1 + PLACED ( 123500 142800 ) N ;
++    - ffa_16 DFF_X1 + PLACED ( 17100 16800 ) N ;
++    - ffa_160 DFF_X1 + PLACED ( 136800 142800 ) N ;
++    - ffa_161 DFF_X1 + PLACED ( 150100 142800 ) N ;
++    - ffa_162 DFF_X1 + PLACED ( 163400 142800 ) N ;
++    - ffa_163 DFF_X1 + PLACED ( 176700 142800 ) N ;
++    - ffa_164 DFF_X1 + PLACED ( 190000 142800 ) N ;
++    - ffa_165 DFF_X1 + PLACED ( 3800 156800 ) N ;
++    - ffa_166 DFF_X1 + PLACED ( 17100 156800 ) N ;
++    - ffa_167 DFF_X1 + PLACED ( 30400 156800 ) N ;
++    - ffa_168 DFF_X1 + PLACED ( 43700 156800 ) N ;
++    - ffa_169 DFF_X1 + PLACED ( 57000 156800 ) N ;
++    - ffa_17 DFF_X1 + PLACED ( 30400 16800 ) N ;
++    - ffa_170 DFF_X1 + PLACED ( 70300 156800 ) N ;
++    - ffa_171 DFF_X1 + PLACED ( 83600 156800 ) N ;
++    - ffa_172 DFF_X1 + PLACED ( 96900 156800 ) N ;
++    - ffa_173 DFF_X1 + PLACED ( 110200 156800 ) N ;
++    - ffa_174 DFF_X1 + PLACED ( 123500 156800 ) N ;
++    - ffa_175 DFF_X1 + PLACED ( 136800 156800 ) N ;
++    - ffa_176 DFF_X1 + PLACED ( 150100 156800 ) N ;
++    - ffa_177 DFF_X1 + PLACED ( 163400 156800 ) N ;
++    - ffa_178 DFF_X1 + PLACED ( 176700 156800 ) N ;
++    - ffa_179 DFF_X1 + PLACED ( 190000 156800 ) N ;
++    - ffa_18 DFF_X1 + PLACED ( 43700 16800 ) N ;
++    - ffa_180 DFF_X1 + PLACED ( 3800 170800 ) N ;
++    - ffa_181 DFF_X1 + PLACED ( 17100 170800 ) N ;
++    - ffa_182 DFF_X1 + PLACED ( 30400 170800 ) N ;
++    - ffa_183 DFF_X1 + PLACED ( 43700 170800 ) N ;
++    - ffa_184 DFF_X1 + PLACED ( 57000 170800 ) N ;
++    - ffa_185 DFF_X1 + PLACED ( 70300 170800 ) N ;
++    - ffa_186 DFF_X1 + PLACED ( 83600 170800 ) N ;
++    - ffa_187 DFF_X1 + PLACED ( 96900 170800 ) N ;
++    - ffa_188 DFF_X1 + PLACED ( 110200 170800 ) N ;
++    - ffa_189 DFF_X1 + PLACED ( 123500 170800 ) N ;
++    - ffa_19 DFF_X1 + PLACED ( 57000 16800 ) N ;
++    - ffa_190 DFF_X1 + PLACED ( 136800 170800 ) N ;
++    - ffa_191 DFF_X1 + PLACED ( 150100 170800 ) N ;
++    - ffa_192 DFF_X1 + PLACED ( 163400 170800 ) N ;
++    - ffa_193 DFF_X1 + PLACED ( 176700 170800 ) N ;
++    - ffa_194 DFF_X1 + PLACED ( 190000 170800 ) N ;
++    - ffa_195 DFF_X1 + PLACED ( 3800 184800 ) N ;
++    - ffa_196 DFF_X1 + PLACED ( 17100 184800 ) N ;
++    - ffa_197 DFF_X1 + PLACED ( 30400 184800 ) N ;
++    - ffa_198 DFF_X1 + PLACED ( 43700 184800 ) N ;
++    - ffa_199 DFF_X1 + PLACED ( 57000 184800 ) N ;
++    - ffa_2 DFF_X1 + PLACED ( 30400 2800 ) N ;
++    - ffa_20 DFF_X1 + PLACED ( 70300 16800 ) N ;
++    - ffa_200 DFF_X1 + PLACED ( 70300 184800 ) N ;
++    - ffa_201 DFF_X1 + PLACED ( 83600 184800 ) N ;
++    - ffa_202 DFF_X1 + PLACED ( 96900 184800 ) N ;
++    - ffa_203 DFF_X1 + PLACED ( 110200 184800 ) N ;
++    - ffa_204 DFF_X1 + PLACED ( 123500 184800 ) N ;
++    - ffa_205 DFF_X1 + PLACED ( 136800 184800 ) N ;
++    - ffa_206 DFF_X1 + PLACED ( 150100 184800 ) N ;
++    - ffa_207 DFF_X1 + PLACED ( 163400 184800 ) N ;
++    - ffa_208 DFF_X1 + PLACED ( 176700 184800 ) N ;
++    - ffa_209 DFF_X1 + PLACED ( 190000 184800 ) N ;
++    - ffa_21 DFF_X1 + PLACED ( 83600 16800 ) N ;
++    - ffa_210 DFF_X1 + PLACED ( 3800 198800 ) N ;
++    - ffa_211 DFF_X1 + PLACED ( 17100 198800 ) N ;
++    - ffa_212 DFF_X1 + PLACED ( 30400 198800 ) N ;
++    - ffa_213 DFF_X1 + PLACED ( 43700 198800 ) N ;
++    - ffa_214 DFF_X1 + PLACED ( 57000 198800 ) N ;
++    - ffa_215 DFF_X1 + PLACED ( 70300 198800 ) N ;
++    - ffa_216 DFF_X1 + PLACED ( 83600 198800 ) N ;
++    - ffa_217 DFF_X1 + PLACED ( 96900 198800 ) N ;
++    - ffa_218 DFF_X1 + PLACED ( 110200 198800 ) N ;
++    - ffa_219 DFF_X1 + PLACED ( 123500 198800 ) N ;
++    - ffa_22 DFF_X1 + PLACED ( 96900 16800 ) N ;
++    - ffa_220 DFF_X1 + PLACED ( 136800 198800 ) N ;
++    - ffa_221 DFF_X1 + PLACED ( 150100 198800 ) N ;
++    - ffa_222 DFF_X1 + PLACED ( 163400 198800 ) N ;
++    - ffa_223 DFF_X1 + PLACED ( 176700 198800 ) N ;
++    - ffa_224 DFF_X1 + PLACED ( 190000 198800 ) N ;
++    - ffa_23 DFF_X1 + PLACED ( 110200 16800 ) N ;
++    - ffa_24 DFF_X1 + PLACED ( 123500 16800 ) N ;
++    - ffa_25 DFF_X1 + PLACED ( 136800 16800 ) N ;
++    - ffa_26 DFF_X1 + PLACED ( 150100 16800 ) N ;
++    - ffa_27 DFF_X1 + PLACED ( 163400 16800 ) N ;
++    - ffa_28 DFF_X1 + PLACED ( 176700 16800 ) N ;
++    - ffa_29 DFF_X1 + PLACED ( 190000 16800 ) N ;
++    - ffa_3 DFF_X1 + PLACED ( 43700 2800 ) N ;
++    - ffa_30 DFF_X1 + PLACED ( 3800 30800 ) N ;
++    - ffa_31 DFF_X1 + PLACED ( 17100 30800 ) N ;
++    - ffa_32 DFF_X1 + PLACED ( 30400 30800 ) N ;
++    - ffa_33 DFF_X1 + PLACED ( 43700 30800 ) N ;
++    - ffa_34 DFF_X1 + PLACED ( 57000 30800 ) N ;
++    - ffa_35 DFF_X1 + PLACED ( 70300 30800 ) N ;
++    - ffa_36 DFF_X1 + PLACED ( 83600 30800 ) N ;
++    - ffa_37 DFF_X1 + PLACED ( 96900 30800 ) N ;
++    - ffa_38 DFF_X1 + PLACED ( 110200 30800 ) N ;
++    - ffa_39 DFF_X1 + PLACED ( 123500 30800 ) N ;
++    - ffa_4 DFF_X1 + PLACED ( 57000 2800 ) N ;
++    - ffa_40 DFF_X1 + PLACED ( 136800 30800 ) N ;
++    - ffa_41 DFF_X1 + PLACED ( 150100 30800 ) N ;
++    - ffa_42 DFF_X1 + PLACED ( 163400 30800 ) N ;
++    - ffa_43 DFF_X1 + PLACED ( 176700 30800 ) N ;
++    - ffa_44 DFF_X1 + PLACED ( 190000 30800 ) N ;
++    - ffa_45 DFF_X1 + PLACED ( 3800 44800 ) N ;
++    - ffa_46 DFF_X1 + PLACED ( 17100 44800 ) N ;
++    - ffa_47 DFF_X1 + PLACED ( 30400 44800 ) N ;
++    - ffa_48 DFF_X1 + PLACED ( 43700 44800 ) N ;
++    - ffa_49 DFF_X1 + PLACED ( 57000 44800 ) N ;
++    - ffa_5 DFF_X1 + PLACED ( 70300 2800 ) N ;
++    - ffa_50 DFF_X1 + PLACED ( 70300 44800 ) N ;
++    - ffa_51 DFF_X1 + PLACED ( 83600 44800 ) N ;
++    - ffa_52 DFF_X1 + PLACED ( 96900 44800 ) N ;
++    - ffa_53 DFF_X1 + PLACED ( 110200 44800 ) N ;
++    - ffa_54 DFF_X1 + PLACED ( 123500 44800 ) N ;
++    - ffa_55 DFF_X1 + PLACED ( 136800 44800 ) N ;
++    - ffa_56 DFF_X1 + PLACED ( 150100 44800 ) N ;
++    - ffa_57 DFF_X1 + PLACED ( 163400 44800 ) N ;
++    - ffa_58 DFF_X1 + PLACED ( 176700 44800 ) N ;
++    - ffa_59 DFF_X1 + PLACED ( 190000 44800 ) N ;
++    - ffa_6 DFF_X1 + PLACED ( 83600 2800 ) N ;
++    - ffa_60 DFF_X1 + PLACED ( 3800 58800 ) N ;
++    - ffa_61 DFF_X1 + PLACED ( 17100 58800 ) N ;
++    - ffa_62 DFF_X1 + PLACED ( 30400 58800 ) N ;
++    - ffa_63 DFF_X1 + PLACED ( 43700 58800 ) N ;
++    - ffa_64 DFF_X1 + PLACED ( 57000 58800 ) N ;
++    - ffa_65 DFF_X1 + PLACED ( 70300 58800 ) N ;
++    - ffa_66 DFF_X1 + PLACED ( 83600 58800 ) N ;
++    - ffa_67 DFF_X1 + PLACED ( 96900 58800 ) N ;
++    - ffa_68 DFF_X1 + PLACED ( 110200 58800 ) N ;
++    - ffa_69 DFF_X1 + PLACED ( 123500 58800 ) N ;
++    - ffa_7 DFF_X1 + PLACED ( 96900 2800 ) N ;
++    - ffa_70 DFF_X1 + PLACED ( 136800 58800 ) N ;
++    - ffa_71 DFF_X1 + PLACED ( 150100 58800 ) N ;
++    - ffa_72 DFF_X1 + PLACED ( 163400 58800 ) N ;
++    - ffa_73 DFF_X1 + PLACED ( 176700 58800 ) N ;
++    - ffa_74 DFF_X1 + PLACED ( 190000 58800 ) N ;
++    - ffa_75 DFF_X1 + PLACED ( 3800 72800 ) N ;
++    - ffa_76 DFF_X1 + PLACED ( 17100 72800 ) N ;
++    - ffa_77 DFF_X1 + PLACED ( 30400 72800 ) N ;
++    - ffa_78 DFF_X1 + PLACED ( 43700 72800 ) N ;
++    - ffa_79 DFF_X1 + PLACED ( 57000 72800 ) N ;
++    - ffa_8 DFF_X1 + PLACED ( 110200 2800 ) N ;
++    - ffa_80 DFF_X1 + PLACED ( 70300 72800 ) N ;
++    - ffa_81 DFF_X1 + PLACED ( 83600 72800 ) N ;
++    - ffa_82 DFF_X1 + PLACED ( 96900 72800 ) N ;
++    - ffa_83 DFF_X1 + PLACED ( 110200 72800 ) N ;
++    - ffa_84 DFF_X1 + PLACED ( 123500 72800 ) N ;
++    - ffa_85 DFF_X1 + PLACED ( 136800 72800 ) N ;
++    - ffa_86 DFF_X1 + PLACED ( 150100 72800 ) N ;
++    - ffa_87 DFF_X1 + PLACED ( 163400 72800 ) N ;
++    - ffa_88 DFF_X1 + PLACED ( 176700 72800 ) N ;
++    - ffa_89 DFF_X1 + PLACED ( 190000 72800 ) N ;
++    - ffa_9 DFF_X1 + PLACED ( 123500 2800 ) N ;
++    - ffa_90 DFF_X1 + PLACED ( 3800 86800 ) N ;
++    - ffa_91 DFF_X1 + PLACED ( 17100 86800 ) N ;
++    - ffa_92 DFF_X1 + PLACED ( 30400 86800 ) N ;
++    - ffa_93 DFF_X1 + PLACED ( 43700 86800 ) N ;
++    - ffa_94 DFF_X1 + PLACED ( 57000 86800 ) N ;
++    - ffa_95 DFF_X1 + PLACED ( 70300 86800 ) N ;
++    - ffa_96 DFF_X1 + PLACED ( 83600 86800 ) N ;
++    - ffa_97 DFF_X1 + PLACED ( 96900 86800 ) N ;
++    - ffa_98 DFF_X1 + PLACED ( 110200 86800 ) N ;
++    - ffa_99 DFF_X1 + PLACED ( 123500 86800 ) N ;
++    - ffa_twin DFF_X1 + PLACED ( 96900 100800 ) N ;
++    - ffb_0 DFF_X1 + PLACED ( 212800 2800 ) N ;
++    - ffb_1 DFF_X1 + PLACED ( 226100 2800 ) N ;
++    - ffb_10 DFF_X1 + PLACED ( 266000 16800 ) N ;
++    - ffb_11 DFF_X1 + PLACED ( 279300 16800 ) N ;
++    - ffb_12 DFF_X1 + PLACED ( 212800 30800 ) N ;
++    - ffb_13 DFF_X1 + PLACED ( 226100 30800 ) N ;
++    - ffb_14 DFF_X1 + PLACED ( 239400 30800 ) N ;
++    - ffb_15 DFF_X1 + PLACED ( 252700 30800 ) N ;
++    - ffb_16 DFF_X1 + PLACED ( 266000 30800 ) N ;
++    - ffb_17 DFF_X1 + PLACED ( 279300 30800 ) N ;
++    - ffb_18 DFF_X1 + PLACED ( 212800 44800 ) N ;
++    - ffb_19 DFF_X1 + PLACED ( 226100 44800 ) N ;
++    - ffb_2 DFF_X1 + PLACED ( 239400 2800 ) N ;
++    - ffb_20 DFF_X1 + PLACED ( 239400 44800 ) N ;
++    - ffb_21 DFF_X1 + PLACED ( 252700 44800 ) N ;
++    - ffb_22 DFF_X1 + PLACED ( 266000 44800 ) N ;
++    - ffb_23 DFF_X1 + PLACED ( 279300 44800 ) N ;
++    - ffb_24 DFF_X1 + PLACED ( 212800 58800 ) N ;
++    - ffb_25 DFF_X1 + PLACED ( 226100 58800 ) N ;
++    - ffb_26 DFF_X1 + PLACED ( 239400 58800 ) N ;
++    - ffb_27 DFF_X1 + PLACED ( 252700 58800 ) N ;
++    - ffb_28 DFF_X1 + PLACED ( 266000 58800 ) N ;
++    - ffb_29 DFF_X1 + PLACED ( 279300 58800 ) N ;
++    - ffb_3 DFF_X1 + PLACED ( 252700 2800 ) N ;
++    - ffb_30 DFF_X1 + PLACED ( 212800 72800 ) N ;
++    - ffb_31 DFF_X1 + PLACED ( 226100 72800 ) N ;
++    - ffb_32 DFF_X1 + PLACED ( 239400 72800 ) N ;
++    - ffb_33 DFF_X1 + PLACED ( 252700 72800 ) N ;
++    - ffb_34 DFF_X1 + PLACED ( 266000 72800 ) N ;
++    - ffb_35 DFF_X1 + PLACED ( 279300 72800 ) N ;
++    - ffb_4 DFF_X1 + PLACED ( 266000 2800 ) N ;
++    - ffb_5 DFF_X1 + PLACED ( 279300 2800 ) N ;
++    - ffb_6 DFF_X1 + PLACED ( 212800 16800 ) N ;
++    - ffb_7 DFF_X1 + PLACED ( 226100 16800 ) N ;
++    - ffb_8 DFF_X1 + PLACED ( 239400 16800 ) N ;
++    - ffb_9 DFF_X1 + PLACED ( 252700 16800 ) N ;
++    - ffb_twin DFF_X1 + PLACED ( 239400 30800 ) N ;
++END COMPONENTS
++PINS 2 ;
++    - clk_a + NET clk_a + DIRECTION INPUT + USE CLOCK
++      + PORT
++        + LAYER metal6 ( -140 -140 ) ( 140 140 )
++        + FIXED ( 100000 209860 ) N ;
++    - clk_b + NET clk_b + DIRECTION INPUT + USE CLOCK
++      + PORT
++        + LAYER metal6 ( -140 -140 ) ( 140 140 )
++        + FIXED ( 300000 209860 ) N ;
++END PINS
++NETS 2 ;
++    - clk_a ( PIN clk_a ) ( ffa_224 CK ) ( ffa_223 CK ) ( ffa_222 CK ) ( ffa_221 CK ) ( ffa_220 CK ) ( ffa_219 CK )
++      ( ffa_218 CK ) ( ffa_217 CK ) ( ffa_216 CK ) ( ffa_215 CK ) ( ffa_214 CK ) ( ffa_213 CK ) ( ffa_212 CK ) ( ffa_211 CK )
++      ( ffa_210 CK ) ( ffa_209 CK ) ( ffa_208 CK ) ( ffa_207 CK ) ( ffa_206 CK ) ( ffa_205 CK ) ( ffa_204 CK ) ( ffa_203 CK )
++      ( ffa_202 CK ) ( ffa_201 CK ) ( ffa_200 CK ) ( ffa_199 CK ) ( ffa_198 CK ) ( ffa_197 CK ) ( ffa_196 CK ) ( ffa_195 CK )
++      ( ffa_194 CK ) ( ffa_193 CK ) ( ffa_192 CK ) ( ffa_191 CK ) ( ffa_190 CK ) ( ffa_189 CK ) ( ffa_188 CK ) ( ffa_187 CK )
++      ( ffa_186 CK ) ( ffa_185 CK ) ( ffa_184 CK ) ( ffa_183 CK ) ( ffa_182 CK ) ( ffa_181 CK ) ( ffa_180 CK ) ( ffa_179 CK )
++      ( ffa_178 CK ) ( ffa_177 CK ) ( ffa_176 CK ) ( ffa_175 CK ) ( ffa_174 CK ) ( ffa_173 CK ) ( ffa_172 CK ) ( ffa_171 CK )
++      ( ffa_170 CK ) ( ffa_169 CK ) ( ffa_168 CK ) ( ffa_167 CK ) ( ffa_166 CK ) ( ffa_165 CK ) ( ffa_164 CK ) ( ffa_163 CK )
++      ( ffa_162 CK ) ( ffa_161 CK ) ( ffa_160 CK ) ( ffa_159 CK ) ( ffa_158 CK ) ( ffa_157 CK ) ( ffa_156 CK ) ( ffa_155 CK )
++      ( ffa_154 CK ) ( ffa_153 CK ) ( ffa_152 CK ) ( ffa_151 CK ) ( ffa_150 CK ) ( ffa_149 CK ) ( ffa_148 CK ) ( ffa_147 CK )
++      ( ffa_146 CK ) ( ffa_145 CK ) ( ffa_144 CK ) ( ffa_143 CK ) ( ffa_142 CK ) ( ffa_141 CK ) ( ffa_140 CK ) ( ffa_139 CK )
++      ( ffa_138 CK ) ( ffa_137 CK ) ( ffa_136 CK ) ( ffa_135 CK ) ( ffa_134 CK ) ( ffa_133 CK ) ( ffa_132 CK ) ( ffa_131 CK )
++      ( ffa_130 CK ) ( ffa_129 CK ) ( ffa_128 CK ) ( ffa_127 CK ) ( ffa_126 CK ) ( ffa_125 CK ) ( ffa_124 CK ) ( ffa_123 CK )
++      ( ffa_122 CK ) ( ffa_121 CK ) ( ffa_120 CK ) ( ffa_119 CK ) ( ffa_118 CK ) ( ffa_117 CK ) ( ffa_116 CK ) ( ffa_115 CK )
++      ( ffa_114 CK ) ( ffa_113 CK ) ( ffa_twin CK ) ( ffa_112 CK ) ( ffa_111 CK ) ( ffa_110 CK ) ( ffa_109 CK ) ( ffa_108 CK )
++      ( ffa_107 CK ) ( ffa_106 CK ) ( ffa_105 CK ) ( ffa_104 CK ) ( ffa_103 CK ) ( ffa_102 CK ) ( ffa_101 CK ) ( ffa_100 CK )
++      ( ffa_99 CK ) ( ffa_98 CK ) ( ffa_97 CK ) ( ffa_96 CK ) ( ffa_95 CK ) ( ffa_94 CK ) ( ffa_93 CK ) ( ffa_92 CK )
++      ( ffa_91 CK ) ( ffa_90 CK ) ( ffa_89 CK ) ( ffa_88 CK ) ( ffa_87 CK ) ( ffa_86 CK ) ( ffa_85 CK ) ( ffa_84 CK )
++      ( ffa_83 CK ) ( ffa_82 CK ) ( ffa_81 CK ) ( ffa_80 CK ) ( ffa_79 CK ) ( ffa_78 CK ) ( ffa_77 CK ) ( ffa_76 CK )
++      ( ffa_75 CK ) ( ffa_74 CK ) ( ffa_73 CK ) ( ffa_72 CK ) ( ffa_71 CK ) ( ffa_70 CK ) ( ffa_69 CK ) ( ffa_68 CK )
++      ( ffa_67 CK ) ( ffa_66 CK ) ( ffa_65 CK ) ( ffa_64 CK ) ( ffa_63 CK ) ( ffa_62 CK ) ( ffa_61 CK ) ( ffa_60 CK )
++      ( ffa_59 CK ) ( ffa_58 CK ) ( ffa_57 CK ) ( ffa_56 CK ) ( ffa_55 CK ) ( ffa_54 CK ) ( ffa_53 CK ) ( ffa_52 CK )
++      ( ffa_51 CK ) ( ffa_50 CK ) ( ffa_49 CK ) ( ffa_48 CK ) ( ffa_47 CK ) ( ffa_46 CK ) ( ffa_45 CK ) ( ffa_44 CK )
++      ( ffa_43 CK ) ( ffa_42 CK ) ( ffa_41 CK ) ( ffa_40 CK ) ( ffa_39 CK ) ( ffa_38 CK ) ( ffa_37 CK ) ( ffa_36 CK )
++      ( ffa_35 CK ) ( ffa_34 CK ) ( ffa_33 CK ) ( ffa_32 CK ) ( ffa_31 CK ) ( ffa_30 CK ) ( ffa_29 CK ) ( ffa_28 CK )
++      ( ffa_27 CK ) ( ffa_26 CK ) ( ffa_25 CK ) ( ffa_24 CK ) ( ffa_23 CK ) ( ffa_22 CK ) ( ffa_21 CK ) ( ffa_20 CK )
++      ( ffa_19 CK ) ( ffa_18 CK ) ( ffa_17 CK ) ( ffa_16 CK ) ( ffa_15 CK ) ( ffa_14 CK ) ( ffa_13 CK ) ( ffa_12 CK )
++      ( ffa_11 CK ) ( ffa_10 CK ) ( ffa_9 CK ) ( ffa_8 CK ) ( ffa_7 CK ) ( ffa_6 CK ) ( ffa_5 CK ) ( ffa_4 CK )
++      ( ffa_3 CK ) ( ffa_2 CK ) ( ffa_1 CK ) ( ffa_0 CK ) + USE CLOCK ;
++    - clk_b ( PIN clk_b ) ( ffb_35 CK ) ( ffb_34 CK ) ( ffb_33 CK ) ( ffb_32 CK ) ( ffb_31 CK ) ( ffb_30 CK )
++      ( ffb_29 CK ) ( ffb_28 CK ) ( ffb_27 CK ) ( ffb_26 CK ) ( ffb_25 CK ) ( ffb_24 CK ) ( ffb_23 CK ) ( ffb_22 CK )
++      ( ffb_21 CK ) ( ffb_20 CK ) ( ffb_19 CK ) ( ffb_18 CK ) ( ffb_17 CK ) ( ffb_16 CK ) ( ffb_15 CK ) ( ffb_twin CK )
++      ( ffb_14 CK ) ( ffb_13 CK ) ( ffb_12 CK ) ( ffb_11 CK ) ( ffb_10 CK ) ( ffb_9 CK ) ( ffb_8 CK ) ( ffb_7 CK )
++      ( ffb_6 CK ) ( ffb_5 CK ) ( ffb_4 CK ) ( ffb_3 CK ) ( ffb_2 CK ) ( ffb_1 CK ) ( ffb_0 CK ) + USE CLOCK ;
++END NETS
++END DESIGN
+diff --git a/openroad/cts/test/colocated_registers.tcl b/openroad/cts/test/colocated_registers.tcl
+new file mode 100644
+index 0000000000..f878e9d1b5
+--- /dev/null
++++ b/openroad/cts/test/colocated_registers.tcl
+@@ -0,0 +1,87 @@
++# CTS connects both registers of a pair placed at the same location.
++#
++# ffa_twin sits exactly on ffa_112 (clock clk_a, 226 sinks, so its sinks
++# are clustered) and ffb_twin exactly on ffb_14 (clock clk_b, 37 sinks, too
++# few to cluster, so the H-tree's leaf level connects them). HTreeBuilder
++# found a sink by its location, one sink per location, so one register of
++# each pair was left out of the tree with its clock pin on no net, and
++# nothing said so.
++source "helpers.tcl"
++
++read_lef Nangate45/Nangate45.lef
++read_liberty Nangate45/Nangate45_typ.lib
++read_def colocated_registers.def
++
++create_clock -name clk_a -period 5 [get_ports clk_a]
++create_clock -name clk_b -period 5 [get_ports clk_b]
++source Nangate45/Nangate45.rc
++set_wire_rc -signal -layer metal3
++set_wire_rc -clock -layer metal5
++
++set block [ord::get_db_block]
++
++proc location { name } {
++  return [[$::block findInst $name] getLocation]
++}
++
++check "ffa_twin is on top of ffa_112" \
++  { expr { [location ffa_twin] == [location ffa_112] } } 1
++check "ffb_twin is on top of ffb_14" \
++  { expr { [location ffb_twin] == [location ffb_14] } } 1
++
++tee -quiet -variable log {
++  clock_tree_synthesis -root_buf CLKBUF_X3 \
++    -buf_list CLKBUF_X3 \
++    -sink_clustering_enable \
++    -sink_clustering_size 10
++}
++check "only clk_a's sinks are clustered" { regexp -all {CTS-0019} $log } 1
++
++# The port a register's clock comes from, through the clock tree's buffers.
++proc clock_source { name } {
++  set net [[[$::block findInst $name] findITerm CK] getNet]
++  for { set depth 0 } { $depth < 32 } { incr depth } {
++    if { $net eq "NULL" } {
++      return "no net"
++    }
++    foreach bterm [$net getBTerms] {
++      return [$bterm getName]
++    }
++    set input ""
++    foreach iterm [$net getITerms] {
++      if { [$iterm isOutputSignal] } {
++        foreach driver_iterm [[$iterm getInst] getITerms] {
++          if {
++            [$driver_iterm isInputSignal]
++            && [$driver_iterm getNet] ne "NULL"
++          } {
++            set input $driver_iterm
++          }
++        }
++      }
++    }
++    if { $input eq "" } {
++      return "no driver"
++    }
++    set net [$input getNet]
++  }
++  return "no port"
++}
++
++set pairs { ffa_112 clk_a ffa_twin clk_a ffb_14 clk_b ffb_twin clk_b }
++foreach { name port } $pairs {
++  check "$name is clocked from $port" { clock_source $name } $port
++}
++
++set unclocked 0
++foreach inst [$block getInsts] {
++  if {
++    [[$inst getMaster] getName] eq "DFF_X1"
++    && [clock_source [$inst getName]] ni { clk_a clk_b }
++  } {
++    incr unclocked
++  }
++}
++check "every register is clocked from a port" { set unclocked } 0
++
++exit_summary
+-- 
+2.53.0
+

@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 2/5] grt: page a backed grid out before the routes are
+ converted
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Global route peaks while it converts and saves the routes, when the grid
+(the 2D and 3D edges and the capacity per layer) is not read. With
+-backing_file the grid is now written to its file and its pages freed
+there, and read back as it is next touched: the congestion report and
+incremental routing read it again.
+
+Only unmapping a dirty page of a shared file mapping (MADV_PAGEOUT
+alone) leaves it in memory until the kernel writes it back: on a 512 MB
+test mapping the cgroup still held 499 MB after the call. msync first,
+then MADV_PAGEOUT, freed it at once: 3 MB held, 1.6 s for the write.
+Without -backing_file nothing changes.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/include/FileBacking.h |  4 ++++
+ openroad/grt/src/fastroute/src/FastRoute.cpp     |  4 ++++
+ openroad/grt/src/fastroute/src/FileBacking.cpp   | 13 +++++++++++++
+ 3 files changed, 21 insertions(+)
+
+diff --git a/openroad/grt/src/fastroute/include/FileBacking.h b/openroad/grt/src/fastroute/include/FileBacking.h
+index eb5d248..158270e 100644
+--- a/openroad/grt/src/fastroute/include/FileBacking.h
++++ b/openroad/grt/src/fastroute/include/FileBacking.h
+@@ -34,6 +34,10 @@ class FileBacking
+   // allocator can reuse the addresses as ordinary memory and nothing more
+   // is written to the file.
+   void release();
++  // Writes the mapped ranges to the file and frees their pages now; they
++  // are read back as they are touched. A dirty page only unmapped would stay
++  // in memory until written back, so the ranges are synced first.
++  void pageOut();
+ 
+   static size_t pageSlack();
+ 
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index 97234f0..9ae09a4 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -2901,6 +2901,10 @@ NetRouteMap FastRouteCore::run()
+     }
+   }
+ 
++  // The grid is not read while the routes are converted and saved, where
++  // global route peaks: with a backing file it is written out and freed,
++  // and read back as it is next touched.
++  backing_.pageOut();
+   NetRouteMap routes = getRoutes();
+   net_ids_.clear();
+   return routes;
+diff --git a/openroad/grt/src/fastroute/src/FileBacking.cpp b/openroad/grt/src/fastroute/src/FileBacking.cpp
+index ca999b3..9a8263b 100644
+--- a/openroad/grt/src/fastroute/src/FileBacking.cpp
++++ b/openroad/grt/src/fastroute/src/FileBacking.cpp
+@@ -15,6 +15,11 @@
+ 
+ #include "utl/Logger.h"
+ 
++// Linux 5.4; older system headers lack it, older kernels refuse it.
++#ifndef MADV_PAGEOUT
++#define MADV_PAGEOUT 21
++#endif
++
+ namespace grt {
+ 
+ void FileBacking::reserve(utl::Logger* logger,
+@@ -115,6 +120,14 @@ void FileBacking::release()
+   fd_ = -1;
+ }
+ 
++void FileBacking::pageOut()
++{
++  for (const Range& range : ranges_) {
++    msync(range.data, range.len, MS_SYNC);
++    madvise(range.data, range.len, MADV_PAGEOUT);
++  }
++}
++
+ size_t FileBacking::pageSlack()
+ {
+   return 2 * sysconf(_SC_PAGESIZE);
+-- 
+2.53.0
+

@@ -1,0 +1,852 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 3/4] odb: read_db -backing_file keeps the tables' pages in a
+ file
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A database is read into memory a table page at a time, and those pages
+can only go to swap: on a large design tens of GB that a later step may
+not read for an hour.
+
+read_db -backing_file <file> (dbDatabase::setBackingFile) gives every
+table its pages from chunks of its own. A chunk is ordinary memory until
+it is paged out, when it is copied to its room in the file, reserved
+(posix_fallocate) as the chunk was made so a full disk fails then, and
+mapped there. A table's chunks start at 64 KiB and double up to 64 MB,
+so the file reserves about what the tables hold: a database has hundreds
+of tables, every library master's among them, most of a few pages.
+dbDatabase::pageOut and dbBlock::pageOut(dbObjectType) write the pages
+of every table, or of one, to the file and free them; they are read
+back as they are touched. write_db pages each table out once it is
+written, so it holds one table in memory at a time. Without
+-backing_file nothing changes. The file is unlinked once open.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ include/ord/OpenRoad.hh                 |   4 +-
+ openroad/OpenRoad.cc                    |   7 +-
+ openroad/OpenRoad.i                     |   4 +-
+ openroad/OpenRoad.tcl                   |  10 +-
+ openroad/odb/include/odb/db.h           |  20 +++
+ openroad/odb/src/db/dbBacking.cpp       | 214 ++++++++++++++++++++++++
+ openroad/odb/src/db/dbBacking.h         |  71 ++++++++
+ openroad/odb/src/db/dbBlock.cpp         |  68 ++++++++
+ openroad/odb/src/db/dbDatabase.cpp      |  24 +++
+ openroad/odb/src/db/dbDatabase.h        |   3 +
+ openroad/odb/src/db/dbTable.inc         |  21 ++-
+ openroad/odb/test/cpp/BUILD             |  12 ++
+ openroad/odb/test/cpp/TestDbBacking.cpp | 129 ++++++++++++++
+ 13 files changed, 577 insertions(+), 10 deletions(-)
+ create mode 100644 openroad/odb/src/db/dbBacking.cpp
+ create mode 100644 openroad/odb/src/db/dbBacking.h
+ create mode 100644 openroad/odb/test/cpp/TestDbBacking.cpp
+
+diff --git a/include/ord/OpenRoad.hh b/include/ord/OpenRoad.hh
+index 1a97b0d..0af538b 100644
+--- a/include/ord/OpenRoad.hh
++++ b/include/ord/OpenRoad.hh
+@@ -249,7 +249,9 @@ class OpenRoad
+   void check3DBlox();
+ 
+   void readDb(std::istream& stream);
+-  void readDb(const char* filename, bool hierarchy = false);
++  void readDb(const char* filename,
++              bool hierarchy = false,
++              const char* backing_file = nullptr);
+   void writeDb(std::ostream& stream);
+   void writeDb(const char* filename,
+                std::optional<int> compression_level = std::nullopt);
+diff --git a/openroad/OpenRoad.cc b/openroad/OpenRoad.cc
+index cac79f7..5670875 100644
+--- a/openroad/OpenRoad.cc
++++ b/openroad/OpenRoad.cc
+@@ -567,8 +567,13 @@ void OpenRoad::write3Dbx(const std::string& filename)
+ 
+ // TODO: bool hierarchy should be removed in the future.
+ // It is retained for a while for backward compatibility.
+-void OpenRoad::readDb(const char* filename, bool hierarchy)
++void OpenRoad::readDb(const char* filename,
++                      bool hierarchy,
++                      const char* backing_file)
+ {
++  if (backing_file != nullptr && backing_file[0] != '\0') {
++    db_->setBackingFile(backing_file);
++  }
+   try {
+     utl::InStreamHandler handler(filename, true);
+     readDb(handler.getStream());
+diff --git a/openroad/OpenRoad.i b/openroad/OpenRoad.i
+index 0672c92..2859848 100644
+--- a/openroad/OpenRoad.i
++++ b/openroad/OpenRoad.i
+@@ -414,10 +414,10 @@ write_3dbx_cmd(const char *filename)
+ }
+ 
+ void
+-read_db_cmd(const char *filename, bool hierarchy)
++read_db_cmd(const char *filename, bool hierarchy, const char *backing_file)
+ {
+   OpenRoad *ord = getOpenRoad();
+-  ord->readDb(filename, hierarchy);
++  ord->readDb(filename, hierarchy, backing_file);
+ }
+ 
+ void
+diff --git a/openroad/OpenRoad.tcl b/openroad/OpenRoad.tcl
+index 7c55866..bd38392 100644
+--- a/openroad/OpenRoad.tcl
++++ b/openroad/OpenRoad.tcl
+@@ -234,13 +234,13 @@ proc check_3dblox { args } {
+ 
+ sta::define_cmd_args "write_db" {filename}
+ 
+-sta::define_cmd_args "read_db" {[-hier] filename}
++sta::define_cmd_args "read_db" {[-hier] [-backing_file file] filename}
+ 
+ proc read_db { args } {
+   # TODO: -hier is not needed anymore.
+   # - It will be removed in a future release.
+   # - It is currently retained for backward compatibility.
+-  sta::parse_key_args "read_db" args keys {} flags {-hier}
++  sta::parse_key_args "read_db" args keys {-backing_file} flags {-hier}
+   sta::check_argc_eq1or2 "read_db" $args
+   set filename [file nativename [lindex $args 0]]
+   if { ![file exists $filename] } {
+@@ -250,7 +250,11 @@ proc read_db { args } {
+   if { ![file readable $filename] } {
+     utl::error "ORD" 8 "$filename is not readable."
+   }
+-  ord::read_db_cmd $filename $hierarchy
++  set backing_file ""
++  if { [info exists keys(-backing_file)] } {
++    set backing_file $keys(-backing_file)
++  }
++  ord::read_db_cmd $filename $hierarchy $backing_file
+ }
+ 
+ sta::define_cmd_args "write_db" {[-compression level] filename}
+diff --git a/openroad/odb/include/odb/db.h b/openroad/odb/include/odb/db.h
+index 99e8582..7f7ada8 100644
+--- a/openroad/odb/include/odb/db.h
++++ b/openroad/odb/include/odb/db.h
+@@ -1286,6 +1286,13 @@ class dbBlock : public dbObject
+   ///
+   void destroyNetWires();
+ 
++  ///
++  /// With a backing file, write the pages of the block's table of objects
++  /// of this type to it and free them; they are read back as they are
++  /// touched. Types the block holds no table of are ignored.
++  ///
++  void pageOut(dbObjectType type);
++
+   ///
+   /// clear
+   ///
+@@ -7782,6 +7789,19 @@ class dbDatabase : public dbObject
+   ///
+   void write(std::ostream& file);
+ 
++  ///
++  /// Keep the tables' pages in a file at path, unlinked once open, instead
++  /// of memory alone, so they can be paged out to it (pageOut) rather than
++  /// to swap. Set before anything is read into the database.
++  ///
++  void setBackingFile(const std::string& path);
++
++  ///
++  /// With a backing file, write every table's pages to it and free them;
++  /// they are read back as they are touched.
++  ///
++  void pageOut();
++
+   ///
+   /// ECO - The following methods implement a simple ECO mechanism for capturing
+   /// netlist changes. The intent of the ECO mechanism is to support delta
+diff --git a/openroad/odb/src/db/dbBacking.cpp b/openroad/odb/src/db/dbBacking.cpp
+new file mode 100644
+index 0000000..aad3f49
+--- /dev/null
++++ b/openroad/odb/src/db/dbBacking.cpp
+@@ -0,0 +1,214 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#include "dbBacking.h"
++
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <cerrno>
++#include <cstddef>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "dbDatabase.h"
++#include "utl/Logger.h"
++
++// Linux 5.4; older system headers lack it, older kernels refuse it.
++#ifndef MADV_PAGEOUT
++#define MADV_PAGEOUT 21
++#endif
++
++namespace odb {
++
++namespace {
++// A table's chunks start small and double up to kChunkSize: each is
++// reserved in the file when it is made, and a database has hundreds of
++// tables (every library master has its own), most of them a few pages.
++constexpr size_t kFirstChunkSize = size_t{64} << 10;
++constexpr size_t kChunkSize = size_t{64} << 20;
++
++size_t pageRound(size_t size)
++{
++  const size_t page = sysconf(_SC_PAGESIZE);
++  return (size + page - 1) & ~(page - 1);
++}
++}  // namespace
++
++dbBacking::dbBacking(utl::Logger* logger, const std::string& path)
++    : logger_(logger), path_(path)
++{
++  fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
++  if (fd_ < 0) {
++    logger_->error(utl::ODB,
++                   1222,
++                   "Cannot create the backing file {}: {}.",
++                   path,
++                   strerror(errno));
++  }
++  unlink(path.c_str());
++}
++
++dbBacking::~dbBacking()
++{
++  for (auto& [table, chunks] : tables_) {
++    for (const Chunk& chunk : chunks) {
++      munmap(chunk.base, chunk.size);
++    }
++  }
++  if (fd_ >= 0) {
++    close(fd_);
++  }
++}
++
++void* dbBacking::alloc(const void* table, const size_t size)
++{
++  std::vector<Chunk>& chunks = tables_[table];
++  if (chunks.empty() || chunks.back().size - chunks.back().used < size) {
++    const size_t grown = chunks.empty()
++                             ? kFirstChunkSize
++                             : std::min(kChunkSize, 2 * chunks.back().size);
++    const size_t chunk_size = pageRound(std::max(grown, size));
++    const int err
++        = posix_fallocate(fd_, static_cast<off_t>(file_size_), chunk_size);
++    if (err != 0) {
++      logger_->error(utl::ODB,
++                     1223,
++                     "Cannot reserve {:.1f} MB more for the database in {}: "
++                     "{}.",
++                     chunk_size / 1e6,
++                     path_,
++                     strerror(err));
++    }
++    void* base = mmap(nullptr,
++                      chunk_size,
++                      PROT_READ | PROT_WRITE,
++                      MAP_PRIVATE | MAP_ANONYMOUS,
++                      -1,
++                      0);
++    if (base == MAP_FAILED) {
++      logger_->error(utl::ODB,
++                     1224,
++                     "Cannot allocate {:.1f} MB for the database: {}.",
++                     chunk_size / 1e6,
++                     strerror(errno));
++    }
++    chunks.push_back(
++        {static_cast<char*>(base), chunk_size, 0, file_size_, false});
++    file_size_ += chunk_size;
++  }
++  Chunk& chunk = chunks.back();
++  // keep the pages aligned as malloc would
++  const size_t aligned = (size + 15) & ~size_t{15};
++  void* page = chunk.base + chunk.used;
++  chunk.used += aligned;
++  return page;
++}
++
++bool dbBacking::owns(const void* table) const
++{
++  return tables_.contains(table);
++}
++
++void dbBacking::release(const void* table)
++{
++  auto it = tables_.find(table);
++  if (it == tables_.end()) {
++    return;
++  }
++  for (const Chunk& chunk : it->second) {
++    munmap(chunk.base, chunk.size);
++  }
++  // Their room in the file stays reserved: the file only grows.
++  tables_.erase(it);
++}
++
++void dbBacking::moveToFile(Chunk& chunk)
++{
++  const size_t len = pageRound(chunk.used);
++  size_t done = 0;
++  while (done < len) {
++    const ssize_t n
++        = pwrite(fd_, chunk.base + done, len - done, chunk.offset + done);
++    if (n <= 0) {
++      logger_->error(utl::ODB,
++                     1225,
++                     "Cannot write the backing file {}: {}.",
++                     path_,
++                     strerror(errno));
++    }
++    done += n;
++  }
++  if (mmap(chunk.base,
++           chunk.size,
++           PROT_READ | PROT_WRITE,
++           MAP_SHARED | MAP_FIXED,
++           fd_,
++           static_cast<off_t>(chunk.offset))
++      == MAP_FAILED) {
++    logger_->error(utl::ODB,
++                   1226,
++                   "Cannot map the backing file {}: {}.",
++                   path_,
++                   strerror(errno));
++  }
++  chunk.in_file = true;
++}
++
++void dbBacking::pageOut(std::vector<Chunk>& chunks)
++{
++  for (Chunk& chunk : chunks) {
++    if (chunk.used == 0) {
++      continue;
++    }
++    if (!chunk.in_file) {
++      moveToFile(chunk);
++    }
++    msync(chunk.base, chunk.size, MS_SYNC);
++    madvise(chunk.base, chunk.size, MADV_PAGEOUT);
++  }
++}
++
++void dbBacking::pageOut(const void* table)
++{
++  auto it = tables_.find(table);
++  if (it != tables_.end()) {
++    pageOut(it->second);
++  }
++}
++
++void dbBacking::pageOutAll()
++{
++  for (auto& [table, chunks] : tables_) {
++    pageOut(chunks);
++  }
++}
++
++void* dbBackingAlloc(_dbDatabase* db, const void* table, const size_t size)
++{
++  return db && db->backing_ ? db->backing_->alloc(table, size) : nullptr;
++}
++
++bool dbBackingOwns(_dbDatabase* db, const void* table)
++{
++  return db && db->backing_ && db->backing_->owns(table);
++}
++
++void dbBackingRelease(_dbDatabase* db, const void* table)
++{
++  if (db && db->backing_) {
++    db->backing_->release(table);
++  }
++}
++
++void dbBackingPageOut(_dbDatabase* db, const void* table)
++{
++  if (db && db->backing_) {
++    db->backing_->pageOut(table);
++  }
++}
++
++}  // namespace odb
+diff --git a/openroad/odb/src/db/dbBacking.h b/openroad/odb/src/db/dbBacking.h
+new file mode 100644
+index 0000000..e18b51d
+--- /dev/null
++++ b/openroad/odb/src/db/dbBacking.h
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#pragma once
++
++#include <cstddef>
++#include <map>
++#include <string>
++#include <vector>
++
++namespace utl {
++class Logger;
++}
++
++namespace odb {
++
++class _dbDatabase;
++
++// The pages of a database's tables, in a file (read_db -backing_file).
++// Each table gets its pages from chunks of its own, so a table pages out in
++// a few calls. A chunk is ordinary memory until its first page-out, when it
++// is copied to its room in the file and mapped there; the room is reserved
++// (posix_fallocate) when the chunk is made, so a disk that cannot hold the
++// database fails then, not when a page is written back. The file is
++// unlinked once open and leaves nothing behind.
++class dbBacking
++{
++ public:
++  dbBacking(utl::Logger* logger, const std::string& path);
++  ~dbBacking();
++  dbBacking(const dbBacking&) = delete;
++  dbBacking& operator=(const dbBacking&) = delete;
++
++  void* alloc(const void* table, size_t size);
++  bool owns(const void* table) const;
++  // Frees a table's chunks: its pages are gone (dbTable::clear).
++  void release(const void* table);
++  // Writes a table's pages to the file and frees them; they are read back
++  // as they are touched.
++  void pageOut(const void* table);
++  void pageOutAll();
++
++ private:
++  struct Chunk
++  {
++    char* base;
++    size_t size;
++    size_t used;
++    size_t offset;  // its room in the file
++    bool in_file;
++  };
++
++  void moveToFile(Chunk& chunk);
++  void pageOut(std::vector<Chunk>& chunks);
++
++  utl::Logger* logger_;
++  std::string path_;
++  int fd_ = -1;
++  size_t file_size_ = 0;
++  std::map<const void*, std::vector<Chunk>> tables_;
++};
++
++// For dbTable, which sees _dbDatabase only through its pointer: each is a
++// no-op, or nullptr / false, without a backing or a database (the table of
++// databases has none).
++void* dbBackingAlloc(_dbDatabase* db, const void* table, size_t size);
++bool dbBackingOwns(_dbDatabase* db, const void* table);
++void dbBackingRelease(_dbDatabase* db, const void* table);
++void dbBackingPageOut(_dbDatabase* db, const void* table);
++
++}  // namespace odb
+diff --git a/openroad/odb/src/db/dbBlock.cpp b/openroad/odb/src/db/dbBlock.cpp
+index 5479ad1..1605366 100644
+--- a/openroad/odb/src/db/dbBlock.cpp
++++ b/openroad/odb/src/db/dbBlock.cpp
+@@ -37,6 +37,7 @@
+ #include "dbBPinItr.h"
+ #include "dbBTerm.h"
+ #include "dbBTermItr.h"
++#include "dbBacking.h"
+ #include "dbBlockItr.h"
+ #include "dbBlockage.h"
+ #include "dbBox.h"
+@@ -3350,6 +3351,73 @@ bool dbBlock::designIsRouted(bool verbose)
+   return design_is_routed;
+ }
+ 
++void dbBlock::pageOut(const dbObjectType type)
++{
++  // The block's own tables, named here: getObjectTable passes types it does
++  // not list (the hierarchy's nets and terminals among them) to its owner.
++  _dbBlock* block = (_dbBlock*) this;
++  dbObjectTable* table = nullptr;
++  switch (type) {
++    case dbInstObj:
++      table = block->inst_tbl_;
++      break;
++    case dbNetObj:
++      table = block->net_tbl_;
++      break;
++    case dbITermObj:
++      table = block->iterm_tbl_;
++      break;
++    case dbBTermObj:
++      table = block->bterm_tbl_;
++      break;
++    case dbBPinObj:
++      table = block->bpin_tbl_;
++      break;
++    case dbGuideObj:
++      table = block->guide_tbl_;
++      break;
++    case dbWireObj:
++      table = block->wire_tbl_;
++      break;
++    case dbSWireObj:
++      table = block->swire_tbl_;
++      break;
++    case dbSBoxObj:
++      table = block->sbox_tbl_;
++      break;
++    case dbObstructionObj:
++      table = block->obstruction_tbl_;
++      break;
++    case dbBlockageObj:
++      table = block->blockage_tbl_;
++      break;
++    case dbRowObj:
++      table = block->row_tbl_;
++      break;
++    case dbGCellGridObj:
++      table = block->gcell_grid_tbl_;
++      break;
++    case dbModuleObj:
++      table = block->module_tbl_;
++      break;
++    case dbModInstObj:
++      table = block->modinst_tbl_;
++      break;
++    case dbModNetObj:
++      table = block->modnet_tbl_;
++      break;
++    case dbModITermObj:
++      table = block->moditerm_tbl_;
++      break;
++    case dbModBTermObj:
++      table = block->modbterm_tbl_;
++      break;
++    default:
++      return;
++  }
++  dbBackingPageOut(block->getDatabase(), table);
++}
++
+ void dbBlock::destroyNetWires()
+ {
+   for (dbNet* db_net : getNets()) {
+diff --git a/openroad/odb/src/db/dbDatabase.cpp b/openroad/odb/src/db/dbDatabase.cpp
+index c03fceb..e1942fc 100644
+--- a/openroad/odb/src/db/dbDatabase.cpp
++++ b/openroad/odb/src/db/dbDatabase.cpp
+@@ -43,6 +43,7 @@
+ 
+ #include "absl/synchronization/mutex.h"
+ #include "dbBTerm.h"
++#include "dbBacking.h"
+ #include "dbBlock.h"
+ #include "dbCCSeg.h"
+ #include "dbCapNode.h"
+@@ -594,6 +595,8 @@ _dbDatabase::~_dbDatabase()
+   delete chip_net_itr_;
+   delete unfolded_region_itr_;
+   delete unfolded_bump_itr_;
++  // after every table: their pages are in it
++  delete backing_;
+   // User Code End Destructor
+ }
+ 
+@@ -953,6 +956,27 @@ static void resumeSuspendedEco(_dbBlock* block)
+   block->journal_stack_.pop();
+ }
+ 
++void dbDatabase::setBackingFile(const std::string& path)
++{
++  _dbDatabase* db = (_dbDatabase*) this;
++  if (!getChips().empty() || !getTechs().empty() || !getLibs().empty()) {
++    db->getLogger()->error(utl::ODB,
++                           1227,
++                           "A backing file must be set before anything is "
++                           "read into the database.");
++  }
++  delete db->backing_;
++  db->backing_ = new dbBacking(db->getLogger(), path);
++}
++
++void dbDatabase::pageOut()
++{
++  _dbDatabase* db = (_dbDatabase*) this;
++  if (db->backing_) {
++    db->backing_->pageOutAll();
++  }
++}
++
+ void dbDatabase::beginEco(dbBlock* block_)
+ {
+   _dbBlock* block = (_dbBlock*) block_;
+diff --git a/openroad/odb/src/db/dbDatabase.h b/openroad/odb/src/db/dbDatabase.h
+index b920118..127c09d 100644
+--- a/openroad/odb/src/db/dbDatabase.h
++++ b/openroad/odb/src/db/dbDatabase.h
+@@ -327,6 +327,7 @@ class _dbUnfoldedChipBumpInst;
+ class _dbUnfoldedChipConn;
+ class _dbUnfoldedChipNet;
+ // User Code Begin Classes
++class dbBacking;
+ class dbPropertyItr;
+ class dbChipInstItr;
+ class dbChipRegionInstItr;
+@@ -383,6 +384,8 @@ class _dbDatabase : public _dbObject
+   dbTable<_dbUnfoldedChipNet>* unfolded_chip_net_tbl_;
+ 
+   // User Code Begin Fields
++  // read_db -backing_file: the tables' pages in a file; nullptr without
++  dbBacking* backing_ = nullptr;
+   dbTable<_dbTech, 2>* tech_tbl_;
+   dbTable<_dbLib>* lib_tbl_;
+   dbTable<_dbGDSLib, 2>* gds_lib_tbl_;
+diff --git a/openroad/odb/src/db/dbTable.inc b/openroad/odb/src/db/dbTable.inc
+index ab68b7c..f4fd7c0 100644
+--- a/openroad/odb/src/db/dbTable.inc
++++ b/openroad/odb/src/db/dbTable.inc
+@@ -11,6 +11,7 @@
+ 
+ #include "dbCommon.h"
+ #include "dbCore.h"
++#include "dbBacking.h"
+ #include "dbDatabase.h"
+ #include "odb/dbId.h"
+ #include "odb/dbObject.h"
+@@ -91,6 +92,7 @@ inline _dbFreeObject* dbTable<T, page_size>::popQ(uint32_t& Q)
+ template <class T, uint32_t page_size>
+ void dbTable<T, page_size>::clear()
+ {
++  const bool backed = dbBackingOwns(db_, this);
+   for (uint32_t i = 0; i < page_cnt_; ++i) {
+     dbTablePage* page = pages_[i];
+     const T* t = (T*) page->objects_;
+@@ -102,7 +104,12 @@ void dbTable<T, page_size>::clear()
+       }
+     }
+ 
+-    free(page);
++    if (!backed) {
++      free(page);
++    }
++  }
++  if (backed) {
++    dbBackingRelease(db_, this);
+   }
+ 
+   delete[] pages_;
+@@ -163,7 +170,10 @@ template <class T, uint32_t page_size>
+ void dbTable<T, page_size>::newPage()
+ {
+   const uint32_t size = (pageSize() * sizeof(T)) + sizeof(dbObjectPage);
+-  dbTablePage* page = (dbTablePage*) safe_malloc(size);
++  dbTablePage* page = (dbTablePage*) dbBackingAlloc(db_, this, size);
++  if (page == nullptr) {
++    page = (dbTablePage*) safe_malloc(size);
++  }
+   memset(page, 0, size);
+ 
+   const uint32_t page_id = page_cnt_;
+@@ -554,6 +564,8 @@ dbOStream& operator<<(dbOStream& stream, const dbTable<T, page_size>& table)
+     const dbTablePage* page = table.pages_[i];
+     table.writePage(stream, page);
+   }
++  // write_db with a backing file brings one table back at a time
++  dbBackingPageOut(table.db_, &table);
+ 
+   stream << table.prop_list_;
+ 
+@@ -598,7 +610,10 @@ dbIStream& operator>>(dbIStream& stream, dbTable<T, page_size>& table)
+   uint32_t i;
+   for (i = 0; i < table.page_cnt_; ++i) {
+     uint32_t size = (table.pageSize() * sizeof(T)) + sizeof(dbObjectPage);
+-    dbTablePage* page = (dbTablePage*) safe_malloc(size);
++    dbTablePage* page = (dbTablePage*) dbBackingAlloc(db, &table, size);
++    if (page == nullptr) {
++      page = (dbTablePage*) safe_malloc(size);
++    }
+     memset(page, 0, size);
+     page->page_addr_ = i << table.kPageShift;
+     page->table_ = &table;
+diff --git a/openroad/odb/test/cpp/BUILD b/openroad/odb/test/cpp/BUILD
+index be6a405..ebdf3b0 100644
+--- a/openroad/odb/test/cpp/BUILD
++++ b/openroad/odb/test/cpp/BUILD
+@@ -464,6 +464,18 @@ cc_test(
+     ],
+ )
+ 
++cc_test(
++    name = "TestDbBacking",
++    srcs = ["TestDbBacking.cpp"],
++    data = ["//openroad/odb/test:regression_resources"],
++    deps = [
++        "//openroad/odb/src/db",
++        "//openroad/tst:db_fixture",
++        "@googletest//:gtest",
++        "@googletest//:gtest_main",
++    ],
++)
++
+ cc_test(
+     name = "TestDbStream",
+     srcs = ["TestDbStream.cpp"],
+diff --git a/openroad/odb/test/cpp/TestDbBacking.cpp b/openroad/odb/test/cpp/TestDbBacking.cpp
+new file mode 100644
+index 0000000..d1c05b0
+--- /dev/null
++++ b/openroad/odb/test/cpp/TestDbBacking.cpp
+@@ -0,0 +1,129 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#include <gtest/gtest.h>
++#include <sys/stat.h>
++
++#include <cstdint>
++#include <filesystem>
++#include <fstream>
++#include <memory>
++#include <sstream>
++#include <string>
++
++#include "odb/db.h"
++#include "odb/dbObject.h"
++#include "tst/db_fixture.h"
++
++namespace odb {
++namespace {
++
++using DbPtr = std::unique_ptr<dbDatabase, void (*)(dbDatabase*)>;
++
++/// A database read with a backing file (read_db -backing_file) holds the
++/// same design as one read into memory alone, whether or not its pages
++/// were paged out to the file.
++class DbBackingTest : public tst::DbFixture
++{
++ protected:
++  DbPtr read(const std::string& backing_file)
++  {
++    DbPtr db(dbDatabase::create(), dbDatabase::destroy);
++    db->setLogger(getLogger());
++    if (!backing_file.empty()) {
++      db->setBackingFile(backing_file);
++    }
++    std::ifstream in(getFilePath("_main/openroad/odb/test/data/design.odb"),
++                     std::ios::binary);
++    db->read(in);
++    return db;
++  }
++
++  static std::string write(dbDatabase* db)
++  {
++    std::stringstream out;
++    db->write(out);
++    return out.str();
++  }
++
++  static std::string backingPath(const char* name)
++  {
++    return (std::filesystem::path(testing::TempDir()) / name).string();
++  }
++
++  // The disk the unlinked backing file holds, found through this process's
++  // open file descriptors.
++  static int64_t reservedBytes(const std::string& path)
++  {
++    for (const auto& fd :
++         std::filesystem::directory_iterator("/proc/self/fd")) {
++      std::error_code ec;
++      const std::string target
++          = std::filesystem::read_symlink(fd.path(), ec).string();
++      if (!ec && target.starts_with(path)) {
++        struct stat st;
++        if (stat(fd.path().c_str(), &st) == 0) {
++          return static_cast<int64_t>(st.st_blocks) * 512;
++        }
++      }
++    }
++    return -1;
++  }
++};
++
++// The file reserves room for what the tables hold, not a large chunk for
++// every table: a design of a few hundred cells reserved tens of GB, and
++// four global routes side by side filled a CI runner's disk.
++TEST_F(DbBackingTest, ReservesWhatTheTablesHold)
++{
++  const std::string path = backingPath("reserved.db");
++  const DbPtr backed = read(path);
++  const int64_t reserved = reservedBytes(path);
++  ASSERT_GE(reserved, 0) << "no open backing file " << path;
++  EXPECT_LT(reserved, int64_t{256} << 20);
++}
++
++TEST_F(DbBackingTest, PagedOutDatabaseWritesTheSame)
++{
++  const DbPtr plain = read("");
++  const std::string expected = write(plain.get());
++
++  const std::string path = backingPath("paged_out.db");
++  const DbPtr backed = read(path);
++  // the file is unlinked once open: nothing left behind
++  EXPECT_FALSE(std::filesystem::exists(path));
++
++  backed->pageOut();
++  ASSERT_NE(backed->getChip(), nullptr);
++  dbBlock* block = backed->getChip()->getBlock();
++  ASSERT_NE(block, nullptr);
++  EXPECT_EQ(block->getNets().size(),
++            plain->getChip()->getBlock()->getNets().size());
++  EXPECT_EQ(block->getInsts().size(),
++            plain->getChip()->getBlock()->getInsts().size());
++
++  EXPECT_EQ(write(backed.get()), expected);
++  // write_db pages each table out once written; a second write reads them
++  // back again
++  EXPECT_EQ(write(backed.get()), expected);
++}
++
++TEST_F(DbBackingTest, OneTablePagedOutWritesTheSame)
++{
++  const DbPtr plain = read("");
++  const DbPtr backed = read(backingPath("one_table.db"));
++  backed->getChip()->getBlock()->pageOut(dbNetObj);
++  EXPECT_EQ(write(backed.get()), write(plain.get()));
++}
++
++TEST_F(DbBackingTest, PageOutWithoutBackingFileDoesNothing)
++{
++  const DbPtr plain = read("");
++  const std::string expected = write(plain.get());
++  plain->pageOut();
++  plain->getChip()->getBlock()->pageOut(dbInstObj);
++  EXPECT_EQ(write(plain.get()), expected);
++}
++
++}  // namespace
++}  // namespace odb
+-- 
+2.53.0
+
