@@ -87,6 +87,226 @@ def _token_precedes(source: str, first: str, second: str) -> bool:
     return first_index >= 0 and second_index >= 0 and first_index < second_index
 
 
+def _cacheable_sampler_canonicalizes_shadow_names(source: str) -> bool:
+    """Return whether the cacheable sampler uses one fail-closed semantic reader.
+
+    The accepted shape is intentionally narrow and mirrors the current sampler:
+    ``_native_signal_names`` removes only the ``.__Vtogcov__`` namespace marker,
+    appends the unprefixed native alias, and ``_read_first`` reads only the
+    projected names.  Any helper alias, dead projection, raw fallback, duplicate
+    definition, or alternate return path is treated as not proven.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+
+    reserved = {"_native_signal_names", "_read_first"}
+    top_level: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {
+        name: [] for name in reserved
+    }
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in reserved:
+            top_level[node.name].append(node)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, ast.Name) and target.id in reserved for target in targets):
+                return False
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if any((alias.asname or alias.name.split(".")[-1]) in reserved for alias in node.names):
+                return False
+
+    native_nodes = top_level["_native_signal_names"]
+    read_nodes = top_level["_read_first"]
+    if len(native_nodes) != 1 or len(read_nodes) != 1:
+        return False
+    native_projection = native_nodes[0]
+    read_first = read_nodes[0]
+    if isinstance(native_projection, ast.AsyncFunctionDef) or isinstance(read_first, ast.AsyncFunctionDef):
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in reserved and node is not native_projection and node is not read_first:
+                return False
+        if isinstance(node, ast.Global) and reserved.intersection(node.names):
+            return False
+
+    def positional_args(node: ast.FunctionDef) -> list[str]:
+        args = node.args
+        if args.vararg is not None or args.kwarg is not None or args.kwonlyargs:
+            raise ValueError
+        if args.defaults:
+            raise ValueError
+        return [arg.arg for arg in (*args.posonlyargs, *args.args)]
+
+    def body_without_docstring(node: ast.FunctionDef) -> list[ast.stmt]:
+        body = list(node.body)
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+            body = body[1:]
+        return body
+
+    try:
+        if positional_args(native_projection) != ["names"]:
+            return False
+        if positional_args(read_first) != ["recorder", "names"]:
+            return False
+    except ValueError:
+        return False
+
+    native_body = body_without_docstring(native_projection)
+    if len(native_body) != 3:
+        return False
+    initialize, outer_loop, native_return = native_body
+    if not (
+        isinstance(initialize, ast.Assign)
+        and len(initialize.targets) == 1
+        and isinstance(initialize.targets[0], ast.Name)
+        and isinstance(initialize.value, ast.List)
+        and not initialize.value.elts
+    ):
+        return False
+    result_name = initialize.targets[0].id
+    if not (
+        isinstance(outer_loop, ast.For)
+        and isinstance(outer_loop.target, ast.Name)
+        and isinstance(outer_loop.iter, ast.Name)
+        and outer_loop.iter.id == "names"
+        and not outer_loop.orelse
+        and len(outer_loop.body) == 2
+    ):
+        return False
+    raw_name = outer_loop.target.id
+    projection, candidate_loop = outer_loop.body
+    if not (
+        isinstance(projection, ast.Assign)
+        and len(projection.targets) == 1
+        and isinstance(projection.targets[0], ast.Name)
+        and isinstance(projection.value, ast.Call)
+        and isinstance(projection.value.func, ast.Attribute)
+        and projection.value.func.attr == "replace"
+        and not projection.value.keywords
+        and isinstance(projection.value.func.value, ast.Call)
+        and isinstance(projection.value.func.value.func, ast.Name)
+        and projection.value.func.value.func.id == "str"
+        and len(projection.value.func.value.args) == 1
+        and not projection.value.func.value.keywords
+        and isinstance(projection.value.func.value.args[0], ast.Name)
+        and projection.value.func.value.args[0].id == raw_name
+        and len(projection.value.args) == 2
+        and isinstance(projection.value.args[0], ast.Constant)
+        and projection.value.args[0].value == ".__Vtogcov__"
+        and isinstance(projection.value.args[1], ast.Constant)
+        and projection.value.args[1].value == "."
+    ):
+        return False
+    projected_name = projection.targets[0].id
+
+    if not (
+        isinstance(candidate_loop, ast.For)
+        and isinstance(candidate_loop.iter, ast.Tuple)
+        and len(candidate_loop.iter.elts) == 2
+        and isinstance(candidate_loop.target, ast.Name)
+        and not candidate_loop.orelse
+        and len(candidate_loop.body) == 1
+    ):
+        return False
+    candidate_name = candidate_loop.target.id
+    semantic_name, native_alias = candidate_loop.iter.elts
+    if not (
+        isinstance(semantic_name, ast.Name)
+        and semantic_name.id == projected_name
+        and isinstance(native_alias, ast.Call)
+        and isinstance(native_alias.func, ast.Attribute)
+        and native_alias.func.attr == "removeprefix"
+        and isinstance(native_alias.func.value, ast.Name)
+        and native_alias.func.value.id == projected_name
+        and len(native_alias.args) == 1
+        and isinstance(native_alias.args[0], ast.Constant)
+        and native_alias.args[0].value == "Frontend_top.Frontend."
+        and not native_alias.keywords
+    ):
+        return False
+    append_guard = candidate_loop.body[0]
+    if not (
+        isinstance(append_guard, ast.If)
+        and isinstance(append_guard.test, ast.Compare)
+        and isinstance(append_guard.test.left, ast.Name)
+        and append_guard.test.left.id == candidate_name
+        and len(append_guard.test.ops) == 1
+        and isinstance(append_guard.test.ops[0], ast.NotIn)
+        and len(append_guard.test.comparators) == 1
+        and isinstance(append_guard.test.comparators[0], ast.Name)
+        and append_guard.test.comparators[0].id == result_name
+        and not append_guard.orelse
+        and len(append_guard.body) == 1
+    ):
+        return False
+    append = append_guard.body[0]
+    if not (
+        isinstance(append, ast.Expr)
+        and isinstance(append.value, ast.Call)
+        and isinstance(append.value.func, ast.Attribute)
+        and append.value.func.attr == "append"
+        and isinstance(append.value.func.value, ast.Name)
+        and append.value.func.value.id == result_name
+        and len(append.value.args) == 1
+        and isinstance(append.value.args[0], ast.Name)
+        and append.value.args[0].id == candidate_name
+        and not append.value.keywords
+    ):
+        return False
+    if not (
+        isinstance(native_return, ast.Return)
+        and isinstance(native_return.value, ast.Call)
+        and isinstance(native_return.value.func, ast.Name)
+        and native_return.value.func.id == "tuple"
+        and len(native_return.value.args) == 1
+        and isinstance(native_return.value.args[0], ast.Name)
+        and native_return.value.args[0].id == result_name
+        and not native_return.value.keywords
+    ):
+        return False
+
+    read_body = body_without_docstring(read_first)
+    if len(read_body) != 1 or not isinstance(read_body[0], ast.Return):
+        return False
+    normalized_read = read_body[0].value
+    if not (
+        isinstance(normalized_read, ast.Call)
+        and isinstance(normalized_read.func, ast.Name)
+        and normalized_read.func.id == "_read_first_raw"
+        and len(normalized_read.args) == 2
+        and isinstance(normalized_read.args[0], ast.Name)
+        and normalized_read.args[0].id == "recorder"
+        and isinstance(normalized_read.args[1], ast.Call)
+        and isinstance(normalized_read.args[1].func, ast.Name)
+        and normalized_read.args[1].func.id == "_native_signal_names"
+        and len(normalized_read.args[1].args) == 1
+        and isinstance(normalized_read.args[1].args[0], ast.Name)
+        and normalized_read.args[1].args[0].id == "names"
+        and not normalized_read.keywords
+        and not normalized_read.args[1].keywords
+    ):
+        return False
+
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    raw_calls: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+            continue
+        if node.id not in {"_native_signal_names", "_read_first", "_read_first_raw"}:
+            continue
+        parent = parents.get(node)
+        if not isinstance(parent, ast.Call) or parent.func is not node:
+            return False
+        if node.id == "_read_first_raw":
+            raw_calls.append(parent)
+    return raw_calls == [normalized_read]
+
 def _definition_indexes(
     definitions: Iterable[dict[str, Any]],
 ) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], str]]:
@@ -178,6 +398,10 @@ def build_quarantine_policy(
                 "source_path": relative_path,
                 "source_sha256": _sha256_bytes(content.encode("utf-8")),
                 "toggle_shadow_reference_count": content.count("__Vtogcov__"),
+                "semantic_shadow_projection": (
+                    _cacheable_sampler_canonicalizes_shadow_names(content)
+                    if name == "cacheable_pipeline" else False
+                ),
             }
         )
     for record in source_audit:
@@ -204,6 +428,9 @@ def build_quarantine_policy(
     } | mmio_explicit_ids
 
     cache_source = source_text["cacheable_pipeline"]
+    cache_semantic_projection = _cacheable_sampler_canonicalizes_shadow_names(
+        cache_source
+    )
     wb_shadow_only = (
         '"wb_redirect": (' in cache_source
         and '__Vtogcov__wbRedirect_valid' in cache_source
@@ -214,11 +441,14 @@ def build_quarantine_policy(
                 "Frontend_top.Frontend._inner_ifu_io_toFtq_wbRedirect_valid",
             )
         )
-    )
-    bpu_shadow_first = _token_precedes(
-        cache_source,
-        '__Vtogcov__io_fromFtq_flushFromBpu_s3_valid',
-        'mainPipe.io_flushFromBpu_s3_valid',
+    ) and not cache_semantic_projection
+    bpu_shadow_first = (
+        _token_precedes(
+            cache_source,
+            '__Vtogcov__io_fromFtq_flushFromBpu_s3_valid',
+            'mainPipe.io_flushFromBpu_s3_valid',
+        )
+        and not cache_semantic_projection
     )
     late_fault_shadow = all(
         token in cache_source
@@ -227,7 +457,7 @@ def build_quarantine_policy(
             '__Vtogcov__io_toIBuffer_bits_exceptionType_value',
             '__Vtogcov__io_toIBuffer_bits_enqEnable',
         )
-    ) and not all(
+    ) and not cache_semantic_projection and not all(
         any(token in cache_source for token in candidates)
         for candidates in (
             (

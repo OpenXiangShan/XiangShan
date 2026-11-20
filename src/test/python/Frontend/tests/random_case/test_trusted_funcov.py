@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from .trusted_funcov import (
+    SAMPLER_SOURCES,
+    _cacheable_sampler_canonicalizes_shadow_names,
     _prefix_order,
     _token_precedes,
     build_quarantine_policy,
@@ -131,6 +133,263 @@ def test_quarantine_policy_keeps_semantic_first_mmio_v3_out() -> None:
     )
     assert mmio_v3["ifu_prefix_order"] == "semantic_first"
 
+
+_CACHEABLE_SEMANTIC_READER = '''
+
+
+def _native_signal_names(names):
+    """Resolve semantic storage only."""
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+'''
+
+
+def test_cacheable_detector_accepts_current_sampler_source() -> None:
+    sampler_path = (
+        Path(__file__).resolve().parents[6]
+        / SAMPLER_SOURCES["cacheable_pipeline"]
+    )
+
+    assert _cacheable_sampler_canonicalizes_shadow_names(
+        sampler_path.read_text(encoding="utf-8")
+    )
+
+
+def test_quarantine_policy_recognizes_cacheable_semantic_projection() -> None:
+    definitions = [
+        _definition("BIN-004", "ifu_cacheable_flush", "wb_redirect_blocks"),
+        _definition("BIN-005", "ifu_cacheable_flush", "bpu_match_blocks"),
+        _definition("BIN-006", "ifu_cacheable_flush", "bpu_miss_allows"),
+        _definition("BIN-906", "owner_misc", "late_fault"),
+    ]
+    sources = _sources(shadow_first=True)
+    cacheable_path = (
+        "src/test/python/Frontend/env/funcov/py/ifu/cacheable_pipeline_funcov.py"
+    )
+    sources[cacheable_path] += _CACHEABLE_SEMANTIC_READER
+
+    policy = build_quarantine_policy(
+        definitions,
+        {"BIN-004", "BIN-005", "BIN-906"},
+        source_loader=sources.__getitem__,
+    )
+
+    assert "cacheable_wb_redirect_shadow_only" not in policy["active_rule_ids"]
+    assert "cacheable_bpu_flush_shadow_first" not in policy["active_rule_ids"]
+    assert "cacheable_late_fault_shadow_first" not in policy["active_rule_ids"]
+    cacheable_audit = next(
+        item for item in policy["source_audit"] if item["source"] == "cacheable_pipeline"
+    )
+    assert cacheable_audit["semantic_shadow_projection"] is True
+
+
+def test_quarantine_policy_requires_cacheable_projection_application() -> None:
+    definitions = [
+        _definition("BIN-004", "ifu_cacheable_flush", "wb_redirect_blocks"),
+        _definition("BIN-906", "owner_misc", "late_fault"),
+    ]
+    sources = _sources(shadow_first=True)
+    cacheable_path = (
+        "src/test/python/Frontend/env/funcov/py/ifu/cacheable_pipeline_funcov.py"
+    )
+    sources[cacheable_path] += '''
+
+def _native_signal_names(names):
+    return tuple(str(raw).replace(".__Vtogcov__", ".") for raw in names)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, names)
+'''
+
+    policy = build_quarantine_policy(
+        definitions,
+        {"BIN-004", "BIN-906"},
+        source_loader=sources.__getitem__,
+    )
+
+    assert "cacheable_wb_redirect_shadow_only" in policy["active_rule_ids"]
+    assert "cacheable_late_fault_shadow_first" in policy["active_rule_ids"]
+    cacheable_audit = next(
+        item for item in policy["source_audit"] if item["source"] == "cacheable_pipeline"
+    )
+    assert cacheable_audit["semantic_shadow_projection"] is False
+
+
+def _cacheable_policy_with_sampler(fragment: str) -> dict[str, object]:
+    definitions = [
+        _definition("BIN-004", "ifu_cacheable_flush", "wb_redirect_blocks"),
+        _definition("BIN-906", "owner_misc", "late_fault"),
+    ]
+    sources = _sources(shadow_first=True)
+    cacheable_path = (
+        "src/test/python/Frontend/env/funcov/py/ifu/cacheable_pipeline_funcov.py"
+    )
+    sources[cacheable_path] += fragment
+    return build_quarantine_policy(
+        definitions,
+        {"BIN-004", "BIN-906"},
+        source_loader=sources.__getitem__,
+    )
+
+
+def _assert_cacheable_quarantine_remains(fragment: str) -> None:
+    policy = _cacheable_policy_with_sampler(fragment)
+    assert "cacheable_wb_redirect_shadow_only" in policy["active_rule_ids"]
+    assert "cacheable_late_fault_shadow_first" in policy["active_rule_ids"]
+
+
+def test_quarantine_policy_rejects_dead_projection_replace() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        dead = str(raw).replace(".__Vtogcov__", ".")
+        result.append(raw)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+''')
+
+
+def test_quarantine_policy_rejects_raw_read_fallback() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    value = _read_first_raw(recorder, _native_signal_names(names))
+    if value is not None:
+        return value
+    return _read_first_raw(recorder, names)
+''')
+
+
+def test_quarantine_policy_rejects_alternate_read_first_override() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names, raw=False):
+    if raw:
+        return _read_first_raw(recorder, names)
+    return _read_first_raw(recorder, _native_signal_names(names))
+''')
+
+
+def test_quarantine_policy_rejects_raw_reader_alias() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+_RAW_READ = _read_first_raw
+
+
+def _read_first(recorder, names):
+    return _RAW_READ(recorder, _native_signal_names(names))
+''')
+
+
+def test_quarantine_policy_rejects_native_helper_alias() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+_NATIVE_NAMES = _native_signal_names
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _NATIVE_NAMES(names))
+''')
+
+def test_quarantine_policy_rejects_name_only_and_comment_string_lookalikes() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+# def _native_signal_names(names): str(raw).replace(".__Vtogcov__", ".")
+LOOKS_LIKE_READER = """
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+"""
+''')
+
+
+def test_quarantine_policy_rejects_missing_native_alias_projection() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name,):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+''')
+
+def test_quarantine_policy_rejects_native_alias_before_semantic_name() -> None:
+    _assert_cacheable_quarantine_remains('''
+
+def _native_signal_names(names):
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name.removeprefix("Frontend_top.Frontend."), name):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+''')
 
 def test_build_trusted_report_preserves_denominator(tmp_path: Path) -> None:
     definitions = [
