@@ -387,7 +387,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
+    redirect.bits.debug_runahead_checkpoint_id.foreach(_ := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id)
     redirect
   })
   io.rollback := allRedirect
