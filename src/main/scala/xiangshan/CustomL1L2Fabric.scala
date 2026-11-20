@@ -21,8 +21,6 @@ import xiangshan.cache.SpecMissFabricIO
 /**
   * The private L1-to-L2 TileLink fabric.
   *
-  * Unlike the old topology, arbitration and the downstream channel buffers live in one
-  * module. There is deliberately no input buffer in front of the arbitration point.
   * In SpecMiss mode, tentative DCache Acquire requests share the input and xbar A
   * arbiters with ordinary requests, then wait in the post-arbitration A queue for S2.
   *
@@ -215,6 +213,8 @@ class CustomL1L2Fabric(
         arbitrationOut.d <> d(downstream.d)
         downstream.e <> e(arbitrationOut.e)
       }
+      // MissQueue commits ownership without waiting for feedback from the A buffer.
+      // Check that every resolution reaches its reserved slot here in the fabric.
       for (w <- 0 until specOwners) {
         val committed = VecInit(committedBySlice.map(_(w)))
         val matched = VecInit(matchedBySlice.map(_(w)))
@@ -222,7 +222,8 @@ class CustomL1L2Fabric(
           assert(PopCount(matched) === 1.U, "SpecMiss resolution must match one post-xbar A slot")
         }
         assert(PopCount(committed) <= 1.U, "SpecMiss committed in multiple L2 slices")
-        spec.committed(w) := committed.asUInt.orR
+        assert(committed.asUInt.orR === (spec.resolve(w).valid && spec.resolve(w).bits.commit),
+          "SpecMiss A-buffer commit must match the MissQueue resolution")
       }
     }
   }
