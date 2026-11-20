@@ -43,9 +43,13 @@ class SpecMissABufferTest extends AnyFlatSpec with ChiselSim {
       val enqReady = records.size < depth
       val deqValid = records.headOption.exists(r =>
         !r.speculative || r.committed || resolution(r).exists(_.commit))
+      val headPending = records.headOption.exists(r => resolution(r).nonEmpty)
+      val headPresent = records.headOption.exists(r => !r.speculative || r.committed) || headPending
       c.io.enq.ready.expect(enqReady.B)
+      c.io.preview.present.expect(headPresent.B)
+      c.io.preview.pending.expect(headPending.B)
       c.io.deq.valid.expect(deqValid.B)
-      if (deqValid) {
+      if (headPresent) {
         c.io.deq.bits.expect(records.head.data.U)
         c.io.deq_speculative.expect(records.head.speculative.B)
       }
