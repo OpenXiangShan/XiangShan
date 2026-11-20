@@ -40,6 +40,7 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
+      |--enable-dma-sim           generate the DMA AXI simulation fixture (default: off)
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
@@ -109,6 +110,10 @@ object ArgParser {
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
+          }), tail)
+        case "--enable-dma-sim" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDMASim = true)
           }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {

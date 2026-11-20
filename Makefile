@@ -185,6 +185,15 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# Generate the DMA AXI simulation fixture only when explicitly enabled.
+ENABLE_DMA_SIM ?= 0
+ifneq ($(filter $(ENABLE_DMA_SIM),0 1),$(ENABLE_DMA_SIM))
+$(error ENABLE_DMA_SIM must be 0 or 1)
+endif
+ifeq ($(ENABLE_DMA_SIM),1)
+override SIM_ARGS += --enable-dma-sim
+endif
+
 # SimAXIMem size in GB (for sim-verilog only)
 ifneq ($(SIM_MEM_SIZE),)
 override SIM_ARGS += --sim-mem-size $(SIM_MEM_SIZE)

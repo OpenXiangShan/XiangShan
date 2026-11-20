@@ -25,6 +25,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import difftest._
 import utility.AXI4Error
 import system.{HasPeripheralRanges, HasSoCParameter}
+import xiangshan.DebugOptionsKey
 
 class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
@@ -41,7 +42,11 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val sdRange = AddressSet(0x40002000L, 0xfff)
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
 
-  val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ Seq(
+  private val enableDMASim = p(DebugOptionsKey).EnableDMASim
+  val dmaControl = Option.when(enableDMASim)(LazyModule(new SimDMAControl))
+  private val dmaTestRanges = Option.when(enableDMASim)(AddressSet(DMASystemTest.base, DMASystemTest.bytes - 1)).toSeq
+
+  val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ dmaTestRanges ++ Seq(
     soc.UARTLiteRange,
     soc.UART16550Range,
     flashRange,
@@ -78,6 +83,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   sd.node := axiBus
   intrGen.node := axiBus
   error.node := axiBus
+  dmaControl.foreach(_.node := axiBus)
 
   axiBus := node
 
@@ -87,9 +93,12 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   class SimMMIOImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle() {
+      val dmaTest = Option.when(enableDMASim)(new DMAFixtureHost)
       val uart = new UARTIO
       val interrupt = new IntrGenIO
     })
+
+    dmaControl.foreach { control => io.dmaTest.get <> control.module.io.extra.get }
 
     // FIXME: char will be lost if both devices send or receive char in the same cycle
     io.uart.in.valid := uartLite.module.io.extra.get.in.valid | uart16550.module.io.uart.in.valid
