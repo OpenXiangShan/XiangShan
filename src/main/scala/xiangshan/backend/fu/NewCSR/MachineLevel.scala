@@ -223,10 +223,20 @@ trait MachineLevel { self: NewCSR =>
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmevent", new MhpmeventBundle) with HasOfFromPerfCntBundle with HasSiregCfgBundle {
       toSireg2 := regOut.asUInt
+      // OPTYPE0-2 are WARL ({OR, AND, XOR, ADD}): a field written with an illegal value keeps its old value.
+      // The whole-register writes below would otherwise bypass CSRModule's per-field legality check, so each
+      // write goes through this function, which returns the value to store (the three fields are independent).
+      def legalOptypes(w: MhpmeventBundle): MhpmeventBundle = {
+        val res = WireInit(w)
+        res.OPTYPE0 := Mux(w.OPTYPE0.isLegal, w.OPTYPE0, reg.OPTYPE0)
+        res.OPTYPE1 := Mux(w.OPTYPE1.isLegal, w.OPTYPE1, reg.OPTYPE1)
+        res.OPTYPE2 := Mux(w.OPTYPE2.isLegal, w.OPTYPE2, reg.OPTYPE2)
+        res
+      }
       when(wen) {
-        reg := wdata
+        reg := legalOptypes(wdata)
       }.elsewhen(fromSireg2.valid) {
-        reg := fromSireg2.bits
+        reg := legalOptypes(fromSireg2.bits.asTypeOf(new MhpmeventBundle))
       }.elsewhen(ofFromPerfCnt) {
         reg.OF := ofFromPerfCnt
       }
