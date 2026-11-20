@@ -264,9 +264,13 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
     )
   }
 
-  io.backend.fromFtq.wen     := fetchHelper.io.out_ftqPackData(6)
-  io.backend.fromFtq.ftqIdx  := fetchHelper.io.out_ftqPackData(5, 0)
-  io.backend.fromFtq.startPc := GuardedPcInit(fetchHelper.io.out_ftqPc(GuardedVAddrBits - 1, 0))
+  // the fetch helper writes at most one pc mem entry per cycle, so only the first write port is used
+  io.backend.fromFtq.wen.head     := fetchHelper.io.out_ftqPackData(6)
+  io.backend.fromFtq.ftqIdx.head  := fetchHelper.io.out_ftqPackData(5, 0)
+  io.backend.fromFtq.startPc.head := GuardedPcInit(fetchHelper.io.out_ftqPc(GuardedVAddrBits - 1, 0))
+  io.backend.fromFtq.wen.tail.foreach(_ := false.B)
+  io.backend.fromFtq.ftqIdx.tail.foreach(_ := 0.U)
+  io.backend.fromFtq.startPc.tail.foreach(pc => pc := 0.U.asTypeOf(pc))
 
   XSPerfAccumulate("all_redirect", io.backend.toFtq.redirect.valid)
   XSPerfAccumulate("mispred_redirect", io.backend.toFtq.redirect.valid && io.backend.toFtq.redirect.bits.isMisPred)
