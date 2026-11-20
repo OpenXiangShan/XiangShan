@@ -20,6 +20,8 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils.tapAndRead
+import freechips.rocketchip.tilelink.TLMessages
 import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
@@ -34,6 +36,7 @@ import system.SoCParamsKey
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
+  private val enableDMASim = debugOpts.EnableDMASim
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -41,7 +44,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   // so that we can re-use this XiangShanSim for any generated Verilog RTL.
   dontTouch(soc.io)
 
-  if (!l_soc.module.dma.isEmpty) {
+  if (!enableDMASim && !l_soc.module.dma.isEmpty) {
     l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
   }
   l_soc.module.imsic_axi4.foreach { port =>
@@ -58,6 +61,46 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   })))
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.viewAs[AXI4Bundle]
+
+  if (enableDMASim) {
+    require(p(coupledL2.WithoutLLC) && l_soc.core_with_l2.size == 1)
+    val port = soc.dma.get
+    val driver = Module(new SimDMAAXIMaster(port.params))
+    port.viewAs[AXI4Bundle] <> driver.io.axi
+    val host = simMMIO.io.dmaTest.get
+    driver.io.start := host.start
+    host.status := driver.io.status
+    val tile = l_soc.core_with_l2.head
+    val mem = tile.memBlock
+    // Read-only observations: never force internal requests, responses or cache state.
+    val dc = mem.dcache.dcache.module
+    val store = tapAndRead(mem.dcache.module.io.lsu.store)
+    val sbuffer = tapAndRead(mem.module.sbuffer.io.dcache.req)
+    val dmaGet = tapAndRead(mem.dma.get.readNode.out.head._1.a)
+    val bus = tapAndRead(dc.bus)
+    val dmaId = tile.coreParams.StoreBufferSize.U
+    def watched(addr: UInt) = (addr & host.watchMask) === host.watchBase
+    val ram = soc.memory.viewAs[AXI4Bundle]
+    val events = Seq(
+      dmaGet.fire && watched(dmaGet.bits.address),
+      bus.b.fire && watched(bus.b.bits.address),
+      bus.c.fire && bus.c.bits.opcode === TLMessages.ProbeAckData && watched(bus.c.bits.address),
+      store.req.fire && store.req.bits.id === dmaId && watched(store.req.bits.addr),
+      store.replay_resp.valid && store.replay_resp.bits.id === dmaId,
+      store.main_pipe_hit_resp.valid && store.main_pipe_hit_resp.bits.id === dmaId,
+      store.req.fire && store.req.bits.id =/= dmaId && watched(store.req.bits.addr),
+      store.req.valid && store.req.bits.id === dmaId && sbuffer.valid,
+      bus.c.fire && bus.c.bits.opcode === TLMessages.ReleaseData && watched(bus.c.bits.address),
+      bus.d.fire && bus.d.bits.opcode === TLMessages.GrantData,
+      ram.ar.fire && watched(ram.ar.bits.addr),
+      ram.aw.fire && watched(ram.aw.bits.addr)
+    )
+    for ((event, index) <- events.zipWithIndex) {
+      val count = RegInit(0.U(64.W))
+      when(host.clear) { count := 0.U }.elsewhen(event) { count := count + 1.U }
+      host.counters(index) := count
+    }
+  }
 
   val l_simAXIMem = AXI4MemorySlave(
     l_soc.misc.memAXI4SlaveNode,
@@ -127,7 +170,9 @@ object XiangShanSim extends App {
   val (baseConfig, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
   // Fixed SimTop PMA map. Unlisted addresses retain the hardware's default deny.
   val config = new Config((_, _, up) => {
-    case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = Seq(
+    case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = Option.when(baseConfig(DebugOptionsKey).EnableDMASim)(
+      PMAConfigEntry(DMASystemTest.base, range = DMASystemTest.bytes, a = 3, r = true, w = true)
+    ).toSeq ++ Seq(
       // pma_init reverses the table: the OFF lower bound precedes the DDR TOR.
       PMAConfigEntry(0x880000000L, a = 1, r = true, w = true, x = true, c = true, atomic = true), // DDR
       PMAConfigEntry(0x80000000L), // DDR lower bound
