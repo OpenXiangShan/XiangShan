@@ -11,9 +11,10 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
+from env.support import PcMapping, random_pc, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until
 from tests.py.support.translation_scenarios import (
+    executable_napot_entry,
     ptw_responses_complete,
     randomize_ptw_response,
 )
@@ -67,18 +68,8 @@ def randomize_context_timing(
 def permissions(*, pa: int = OLD_PA) -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
     region_base = pa & ~0x3FFF
     return (
-        (
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True),
-                region_base, size=0x4000,
-            ),
-        ),
-        (
-            TranslationPmpPmaEntry(
-                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
-                region_base, size=0x4000,
-            ),
-        ),
+        (executable_napot_entry("pmp", region_base, size=0x4000),),
+        (executable_napot_entry("pma", region_base, size=0x4000, cacheable=True),),
     )
 
 

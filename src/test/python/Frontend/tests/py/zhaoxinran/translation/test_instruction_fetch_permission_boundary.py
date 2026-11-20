@@ -10,6 +10,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioPhase,
     TranslationScenarioSequence,
+    TranslationScenarioState,
 )
 from env.support import PmpPmaConfig
 from tests.py.support.backend_fault_recovery import (
@@ -392,13 +393,9 @@ _PERMISSION_CASES = (
 )
 
 
-@pytest.mark.parametrize("scenario,expected_fault", _PERMISSION_CASES)
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_instruction_fetch_permission_boundary(
-    env,
-    scenario: TranslationScenario,
-    expected_fault: str,
-) -> None:
+def _run_fetch_permission_phase(
+    env, scenario: TranslationScenario, *, expected_fault: str | None,
+) -> TranslationScenarioState:
     scenario = randomize_permission_entry(env, scenario)
     scenario = _randomize_ptw_response_timing(
         env,
@@ -416,9 +413,19 @@ def test_instruction_fetch_permission_boundary(
     )
     sequence.initialize_first_phase(env)
     phases = [record for record in sequence.run(env) if record["kind"] == "phase"]
-
     assert len(phases) == 1
-    state = phases[0]["state"]
+    return phases[0]["state"]
+
+
+@pytest.mark.parametrize("scenario,expected_fault", _PERMISSION_CASES)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_instruction_fetch_permission_boundary(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str,
+) -> None:
+    state = _run_fetch_permission_phase(env, scenario, expected_fault=expected_fault)
+    scenario = state.scenario
     expected_outcome = "normal" if expected_fault is None else expected_fault
     assert state.expected_page_outcomes[0]["outcome"] == expected_outcome
     if expected_fault is None:
@@ -501,23 +508,8 @@ def test_pmp_lock_mode(env, scenario: TranslationScenario) -> None:
     expected_fault = (
         "instruction_access_fault" if scenario.expected_path == "fault" else None
     )
-    scenario = randomize_permission_entry(env, scenario)
-    scenario = _randomize_ptw_response_timing(
-        env,
-        scenario,
-        scenario_key=f"zhaoxinran/translation/permission/{scenario.scenario_id}",
-        parameters={
-            "page_count": scenario.page_count,
-            "priv_imode": scenario.priv_imode,
-            "expected_path": scenario.expected_path,
-            "expected_fault": expected_fault,
-        },
-    )
-    sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),))
-    sequence.initialize_first_phase(env)
-    phases = [record for record in sequence.run(env) if record["kind"] == "phase"]
-
-    assert len(phases) == 1
+    state = _run_fetch_permission_phase(env, scenario, expected_fault=expected_fault)
+    scenario = state.scenario
     if scenario.expected_path == "fault":
         assert env.monitor.exception_mark_count > 0
     else:

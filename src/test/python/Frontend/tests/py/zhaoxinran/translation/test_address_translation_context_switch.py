@@ -10,7 +10,6 @@ from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
     InjectRedirectSequence,
     TranslationPte,
-    TranslationScenario,
     TranslationScenarioBuilder,
 )
 from tests.py.support.dut_support import wait_until as _wait_until
@@ -30,24 +29,6 @@ from tests.py.zhaoxinran.support.translation import (
 )
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-
-
-def _run_to_refill(env, scenario: TranslationScenario):
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            reset_vector=scenario.va,
-            bare_mode=str(scenario.mode).lower() == "bare" and not scenario.s2xlate,
-            reset_cycles=20,
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(scenario.va)
-    env.arm_translation_scenario(state)
-    _wait_until(env, lambda: _translation_complete(env), description=f"{scenario.scenario_id} translation refill")
-    env.assert_translation_scenario()
-    return state
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")

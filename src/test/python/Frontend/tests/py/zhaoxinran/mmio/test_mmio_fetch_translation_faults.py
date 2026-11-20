@@ -17,7 +17,11 @@ from tests.py.support import translation_faults
 from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
-from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots, prepare_sv39_mmio_page_tail
+from tests.py.zhaoxinran.support.mmio import (
+    capture_mmio_snapshots,
+    configure_random_mmio_latency,
+    prepare_sv39_mmio_page_tail,
+)
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -30,11 +34,7 @@ def _randomize_mmio_fault_timing(
     scenario_key = f"zhaoxinran/mmio/translation-fault/{scenario.scenario_id}"
     base_seed, seed, rng = scenario_rng(scenario_key)
     ptw_latency = rng.randint(1, 8)
-    uncache_latency = rng.randint(1, 16)
-    env.uncache_agent.configure(
-        latency=uncache_latency,
-        mmio_latency=uncache_latency,
-    )
+    uncache_latency = configure_random_mmio_latency(env, rng)
     randomized = replace(
         scenario,
         ptw_response_latency=ptw_latency,
@@ -177,11 +177,7 @@ def test_mmio_cross_page_second_page_translation_fault(
         cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1),
         max_cycles=12000,
     )
-    for _ in range(12000):
-        active = env.translation_oracle.get_active()
-        if active is not None and active.get("fault_seen"):
-            break
-        env.step(1)
+    translation_faults.poll_for_oracle_fault(env, max_cycles=12000)
 
     active = env.translation_oracle.get_active()
     assert int(env.ptw_agent.get_stats().get("response_override_hit_count", 0)) >= 1

@@ -317,9 +317,9 @@ def _initialize_sv39_fetch(env, *, reset_vector: int) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(int(reset_vector))
 
-def _configure_exec_cacheable_pma(env, *, base_addr: int, size: int) -> None:
+def _configure_exec_cacheable_pma(env, *, base_addr: int, size: int, index: int = 0) -> None:
     env.write_pma_entry(
-        0,
+        index,
         PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
         int(base_addr),
         size=int(size),
@@ -335,9 +335,9 @@ def _configure_exec_mmio_pma(env, *, base_addr: int, size: int) -> None:
         settle_cycles=4,
     )
 
-def _configure_exec_pmp(env, *, base_addr: int, size: int) -> None:
+def _configure_exec_pmp(env, *, base_addr: int, size: int, index: int = 0) -> None:
     env.write_pmp_entry(
-        0,
+        index,
         PmpPmaConfig(match="napot", read=True, write=True, execute=True),
         int(base_addr),
         size=int(size),

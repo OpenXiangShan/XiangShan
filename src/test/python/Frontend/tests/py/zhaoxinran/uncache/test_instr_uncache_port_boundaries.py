@@ -44,7 +44,6 @@ from tests.py.support.uncache_scenarios import (
     _IFU_UNCACHE_WAIT_RESP,
     _INSTR_UNCACHE_REFILL_RESP,
     _JAL_X0_PLUS_4,
-    _MMIO_BASE,
     _NORMAL_PHYS_BASE,
     _PBMT_IO,
     _PBMT_NC,
@@ -225,27 +224,6 @@ def _queue_stream_cfi_redirect(env, *, source_pc: int, target_pc: int) -> None:
         level=0,
         delay_cycles=3,
     )
-
-
-def _count_mmio_observations(env) -> int:
-    return sum(1 for obs in env.monitor.observations if _MMIO_BASE <= int(obs.pc) < (_MMIO_BASE + 0x1000))
-
-
-def _wait_for_mmio_observations(env, *, min_count: int, max_cycles: int) -> int:
-    for _ in range(max(0, int(max_cycles))):
-        count = _count_mmio_observations(env)
-        if count >= int(min_count):
-            return count
-        env.step(1)
-    return _count_mmio_observations(env)
-
-
-def _recent_mmio_pcs(env, *, window: int) -> list[int]:
-    return [
-        int(obs.pc)
-        for obs in list(env.monitor.observations)[-max(0, int(window)) :]
-        if _MMIO_BASE <= int(obs.pc) < (_MMIO_BASE + 0x1000)
-    ]
 
 
 @pytest.mark.funcov_bins("BIN-1094")

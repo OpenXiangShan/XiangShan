@@ -5,16 +5,16 @@ import os
 import pytest
 
 from env.sequences import (
-    TranslationPmpPmaEntry,
     TranslationPte,
     TranslationScenario,
     TranslationScenarioPhase,
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import record_scenario, scenario_rng
 from tests.py.support.translation_context_switch import _context_entry
 from tests.py.support.translation_faults import assert_exact_oracle_fault
+from tests.py.support.translation_scenarios import executable_napot_entry
 from tests.py.zhaoxinran.support.translation import randomize_ptw_timing, relocate_translation_entry
 
 
@@ -61,31 +61,6 @@ def _randomize_ptw_timing(
     return randomized
 
 
-def _physical_permissions(
-    *, cacheable: bool = True
-) -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
-    return (
-        (
-            TranslationPmpPmaEntry(
-                "pmp",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True),
-                _PA & ~(_PAGE_SIZE - 1),
-                size=0x2000,
-            ),
-        ),
-        (
-            TranslationPmpPmaEntry(
-                "pma",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=cacheable),
-                _PA & ~(_PAGE_SIZE - 1),
-                size=0x2000,
-            ),
-        ),
-    )
-
-
 def _scenario(
     scenario_id: str,
     *,
@@ -93,9 +68,11 @@ def _scenario(
     physical_cacheable: bool = True,
     **kwargs,
 ) -> TranslationScenario:
-    pmp_entries, pma_entries = (
-        _physical_permissions(cacheable=physical_cacheable) if with_physical_permissions else ((), ())
-    )
+    pmp_entries = pma_entries = ()
+    if with_physical_permissions:
+        page_base = _PA & ~(_PAGE_SIZE - 1)
+        pmp_entries = (executable_napot_entry("pmp", page_base, size=0x2000),)
+        pma_entries = (executable_napot_entry("pma", page_base, size=0x2000, cacheable=physical_cacheable),)
     return TranslationScenario(
         scenario_id=scenario_id,
         va=_VA,

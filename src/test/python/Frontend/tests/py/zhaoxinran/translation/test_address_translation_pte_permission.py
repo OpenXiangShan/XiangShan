@@ -6,6 +6,7 @@ import pytest
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationScenarioBuilder
 from env.support import PmpPmaConfig
+from tests.py.support.dut_support import poll_until
 from tests.py.support.translation_scenarios import FAULT_NOP_PAYLOAD, randomize_translation_fault_entry
 
 
@@ -169,15 +170,15 @@ def test_address_translation_pte_permission(env, scenario: TranslationScenario, 
     env.reset(before_release=arm_before_reset_release)
     state = prepared["state"]
 
-    for _ in range(6000):
+    def fault_or_error() -> bool:
         active = env.translation_oracle.get_active()
-        if active is not None and (
+        return active is not None and bool(
             active["fault_seen"]
             or env.get_errors()
             or env.translation_oracle.get_stats()["errors"]
-        ):
-            break
-        env.step(1)
+        )
+
+    poll_until(env, fault_or_error, max_cycles=6000)
 
     assert state.expected_page_outcomes[0]["outcome"] == expected_fault
     assert env.monitor.exception_mark_count > 0

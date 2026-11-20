@@ -29,6 +29,7 @@ from tests.py.support.dut_support import (
     _wait_for_req_count,
     _wait_for_req_delta,
     _wait_for_resp_delta,
+    run_until,
 )
 from tests.py.support.translation_scenarios import ptw_responses_complete
 from tests.py.support import uncache_scenarios as uncache
@@ -174,14 +175,6 @@ def _s2_has_taken_prediction_at(env, target_pc: int) -> bool:
     return False
 
 
-def _wait_for_taken_prediction(env, target_pc: int, *, max_cycles: int) -> bool:
-    for _ in range(int(max_cycles)):
-        if _s2_has_taken_prediction_at(env, target_pc):
-            return True
-        env.step(1)
-    return _s2_has_taken_prediction_at(env, target_pc)
-
-
 def _register_cfvec_exception_observer(env) -> list[dict]:
     records: list[dict] = []
 
@@ -209,26 +202,11 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
 
 def _configure_exec_attrs_for_pages(env, pages: tuple[int, ...]) -> None:
     for index, page in enumerate(pages):
-        env.write_pmp_entry(
-            index,
-            PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-            int(page),
-            size=uncache._SV39_PAGE_SIZE,
-            settle_cycles=4,
+        uncache._configure_exec_pmp(
+            env, base_addr=page, size=uncache._SV39_PAGE_SIZE, index=index,
         )
-        env.write_pma_entry(
-            index,
-            PmpPmaConfig(
-                match="napot",
-                read=True,
-                write=True,
-                execute=True,
-                cacheable=True,
-                atomic=True,
-            ),
-            int(page),
-            size=uncache._SV39_PAGE_SIZE,
-            settle_cycles=4,
+        uncache._configure_exec_cacheable_pma(
+            env, base_addr=page, size=uncache._SV39_PAGE_SIZE, index=index,
         )
 
 
@@ -990,11 +968,7 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
     timing_samples = _register_nc_timing_observer(env)
 
     first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
-    for _ in range(12000):
-        active = env.translation_oracle.get_active()
-        if active is not None and active.get("fault_seen"):
-            break
-        env.step(1)
+    translation_faults.poll_for_oracle_fault(env, max_cycles=12000)
 
     active = env.translation_oracle.get_active()
     assert int(env.ptw_agent.get_stats().get("response_override_hit_count", 0)) >= 1, {
@@ -1126,11 +1100,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
                 }
             )
 
-        for _ in range(12000):
-            active = env.translation_oracle.get_active()
-            if active is not None and active.get("fault_seen"):
-                break
-            env.step(1)
+        translation_faults.poll_for_oracle_fault(env, max_cycles=12000)
         active = env.translation_oracle.get_active()
         assert active is not None and active.get("fault_seen"), {
             "s2xlate": s2xlate,
@@ -1240,11 +1210,7 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
     env.arm_translation_scenario(state)
     uncache._force_redirect_to(env, scenario.va)
 
-    for _ in range(6000):
-        active = env.translation_oracle.get_active()
-        if active is not None and active.get("fault_seen"):
-            break
-        env.step(1)
+    translation_faults.poll_for_oracle_fault(env, max_cycles=6000)
 
     active = env.translation_oracle.get_active()
     assert active is not None and active.get("fault_seen"), {
@@ -1492,7 +1458,7 @@ def test_nc_request_selection_overlaps_natural_predchecker_redirect(env, tmp_pat
     _configure_exec_attrs_for_pages(env, mapping.paddr_pages)
     uncache._force_redirect_to(env, source_va)
 
-    assert _wait_for_taken_prediction(env, source_branch_pc, max_cycles=24000), {
+    assert run_until(env, lambda: _s2_has_taken_prediction_at(env, source_branch_pc), max_cycles=24000), {
         "reason": "cacheable page-tail JAL did not become a taken prediction",
         "source_branch_pc": hex(int(source_branch_pc)),
         "backend": env.backend_model.get_stats(),

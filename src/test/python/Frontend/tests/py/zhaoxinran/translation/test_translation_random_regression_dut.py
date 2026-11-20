@@ -16,6 +16,7 @@ from env.sequences import (
     TranslationScenarioSequence,
 )
 from env.support import PmpPmaConfig, record_scenario
+from tests.py.support.dut_support import poll_until
 from tests.py.support.translation_scenarios import ptw_responses_complete
 from tests.py.zhaoxinran.support.translation import randomize_permission_entry, randomize_translation_layout
 
@@ -202,10 +203,11 @@ def test_translation_constrained_random_stream_dut(env) -> None:
             ordinal=ordinal,
             parameters=scenario_parameters,
         )
-        for _ in range(12000):
-            if _translation_complete(env) or env.translation_oracle.get_stats()["errors"]:
-                break
-            env.step(1)
+        poll_until(
+            env,
+            lambda: _translation_complete(env) or bool(env.translation_oracle.get_stats()["errors"]),
+            max_cycles=12000,
+        )
         env.assert_translation_scenario()
         phase_results.append(
             {

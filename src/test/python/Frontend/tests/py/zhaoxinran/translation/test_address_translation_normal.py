@@ -15,6 +15,7 @@ from env.sequences import (
 )
 from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.cross_page_cases import run_mapped_cross_page_rvi
+from tests.py.support.translation_scenarios import executable_napot_entry
 from tests.py.zhaoxinran.support.translation import randomize_ptw_timing, relocate_translation_entry
 
 
@@ -82,54 +83,6 @@ def _randomize_normal_ptw_timing(
     return randomized
 
 
-def _pmp_allow(*, base: int = _PA, size: int = 0x2000) -> tuple[TranslationPmpPmaEntry, ...]:
-    return (
-        TranslationPmpPmaEntry(
-            "pmp",
-            0,
-            PmpPmaConfig(match="napot", read=True, execute=True),
-            base & ~(size - 1),
-            size=size,
-        ),
-    )
-
-
-def _pma(
-    *,
-    first_cacheable: bool,
-    second_cacheable: bool | None = None,
-    base: int = _PA,
-    size: int = 0x2000,
-) -> tuple[TranslationPmpPmaEntry, ...]:
-    page_base = base & ~(size - 1) if second_cacheable is None else base & ~(_PAGE_SIZE - 1)
-    if second_cacheable is None:
-        return (
-            TranslationPmpPmaEntry(
-                "pma",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=first_cacheable),
-                page_base,
-                size=size,
-            ),
-        )
-    return (
-        TranslationPmpPmaEntry(
-            "pma",
-            0,
-            PmpPmaConfig(match="napot", read=True, execute=True, cacheable=first_cacheable),
-            page_base,
-            size=_PAGE_SIZE,
-        ),
-        TranslationPmpPmaEntry(
-            "pma",
-            1,
-            PmpPmaConfig(match="napot", read=True, execute=True, cacheable=second_cacheable),
-            page_base + _PAGE_SIZE,
-            size=_PAGE_SIZE,
-        ),
-    )
-
-
 def _scenario(
     scenario_id: str,
     *,
@@ -147,6 +100,17 @@ def _scenario(
         raise ValueError("mixed cacheability is currently defined only for two-page normal scenarios")
     first_cacheable = expected_paths[0] == "cacheable"
     second_cacheable = expected_paths[1] == "cacheable"
+    region_base = pa & ~(physical_size - 1)
+    if first_cacheable == second_cacheable:
+        pma_entries = (executable_napot_entry("pma", region_base, size=physical_size, cacheable=first_cacheable),)
+    else:
+        page_base = pa & ~(_PAGE_SIZE - 1)
+        pma_entries = tuple(
+            executable_napot_entry(
+                "pma", page_base + index * _PAGE_SIZE, size=_PAGE_SIZE, index=index, cacheable=cacheable,
+            )
+            for index, cacheable in enumerate((first_cacheable, second_cacheable))
+        )
     return (
         TranslationScenario(
         scenario_id=scenario_id,
@@ -154,13 +118,8 @@ def _scenario(
         pa=pa,
         payload=payload,
         page_count=page_count,
-        pmp_entries=_pmp_allow(base=pa, size=physical_size),
-        pma_entries=_pma(
-            first_cacheable=first_cacheable,
-            second_cacheable=None if first_cacheable == second_cacheable else second_cacheable,
-            base=pa,
-            size=physical_size,
-            ),
+            pmp_entries=(executable_napot_entry("pmp", region_base, size=physical_size),),
+            pma_entries=pma_entries,
             **kwargs,
         ),
         expected_paths,
@@ -627,7 +586,9 @@ def _assert_all_stage_pbmt_route(
         priv_virt=1,
         expected_paths=("uncache", "uncache"),
     )
-    scenario = replace(scenario, pma_entries=_pma(first_cacheable=pma_cacheable))
+    scenario = replace(
+        scenario, pma_entries=(executable_napot_entry("pma", _PA & ~0x1FFF, size=0x2000, cacheable=pma_cacheable),),
+    )
     scenario = _randomize_normal_ptw_timing(env, scenario, expected_paths)
     pa_lo = scenario.pa & ~(_PAGE_SIZE - 1)
     pa_hi = pa_lo + scenario.page_count * _PAGE_SIZE - 1

@@ -10,6 +10,7 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from tests.py.support.cross_page_cases import run_cross_page_fault_after_wrong_path_second_page_refill
+from tests.py.support.dut_support import poll_until
 from tests.py.support.translation_faults import (
     _CROSS_PAGE_FAULT_CASES,
     _assert_fault_ftq_identity,
@@ -17,7 +18,11 @@ from tests.py.support.translation_faults import (
     _capture_gpaddr_writes,
     run_cacheable_cross_page_second_page_fault,
 )
-from tests.py.support.translation_scenarios import FAULT_NOP_PAYLOAD, randomize_translation_fault_entry
+from tests.py.support.translation_scenarios import (
+    FAULT_NOP_PAYLOAD,
+    ptw_responses_complete,
+    randomize_translation_fault_entry,
+)
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -229,26 +234,13 @@ def test_address_translation_fault(env, frontend_init_config, scenario: Translat
 
     env.reset(before_release=arm_before_reset_release)
 
-    for _ in range(6000):
+    def fault_or_error() -> bool:
         active = env.translation_oracle.get_active()
-        if active is not None:
-            expected_responses = {
-                (
-                    int(request["vpn"]),
-                    int(request["s2xlate"]),
-                    int(request["get_gpa"]),
-                )
-                for request in active["expected_ptw_requests"]
-            }
-            observed_responses = {
-                tuple(int(field) for field in response)
-                for response in active["responded_ptw_request_keys"]
-            }
-            if active["fault_seen"] and expected_responses.issubset(observed_responses):
-                break
-        if env.get_errors():
-            break
-        env.step(1)
+        if active is not None and active["fault_seen"] and ptw_responses_complete(active):
+            return True
+        return bool(env.get_errors())
+
+    poll_until(env, fault_or_error, max_cycles=6000)
 
     assert state.expected_page_outcomes[0]["ok"] is False
     assert state.expected_page_outcomes[0]["outcome"] == expected_fault

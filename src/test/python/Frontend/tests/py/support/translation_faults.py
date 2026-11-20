@@ -12,6 +12,7 @@ from env.sequences import (
 )
 from env.support import PmpPmaConfig, fold_pc, scenario_rng
 from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
+from tests.py.support.dut_support import poll_until
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
 CACHEABLE_CROSS_PAGE_VA = 0x8020_0000
@@ -29,6 +30,14 @@ _FAULT_BITS = {
     "instruction_guest_page_fault": 20,
     "instruction_page_fault": 12,
 }
+
+
+def poll_for_oracle_fault(env, *, max_cycles: int) -> bool:
+    def fault_seen() -> bool:
+        active = env.translation_oracle.get_active()
+        return active is not None and bool(active.get("fault_seen"))
+
+    return poll_until(env, fault_seen, max_cycles=max_cycles)
 
 
 def assert_exact_oracle_fault(env, *, pc: int, expected_fault: str) -> None:

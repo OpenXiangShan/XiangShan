@@ -4,8 +4,8 @@ import random
 from collections.abc import Mapping
 from dataclasses import replace
 
-from env.sequences import TranslationScenario
-from env.support import PcMapping, RandomPc, random_pc, record_scenario, scenario_rng
+from env.sequences import TranslationPmpPmaEntry, TranslationScenario
+from env.support import PcMapping, PmpPmaConfig, RandomPc, random_pc, record_scenario, scenario_rng
 
 
 FAULT_NOP_PAYLOAD = b"\x13\x00\x00\x00" * 512
@@ -25,6 +25,15 @@ def ptw_responses_complete(active: dict, *, required_only: bool = False) -> bool
         for request in active["expected_ptw_requests"]
     }
     return expected.issubset(tuple(map(int, key)) for key in responded)
+
+
+def executable_napot_entry(
+    kind: str, addr: int, *, size: int, index: int = 0, cacheable: bool = False,
+) -> TranslationPmpPmaEntry:
+    """Build an executable entry without rounding the caller's address."""
+    return TranslationPmpPmaEntry(
+        kind, index, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=cacheable), addr, size=size,
+    )
 
 
 def relocate_translation_entry(
