@@ -21,8 +21,8 @@ import xiangshan.cache.SpecMissFabricIO
 /**
   * The private L1-to-L2 TileLink fabric.
   *
-  * In SpecMiss mode, tentative DCache Acquire requests share the input and xbar A
-  * arbiters with ordinary requests, then wait in the post-arbitration A queue for S2.
+  * Ordinary A takes priority over tentative Acquires at each DCache input.
+  * Accepted candidates wait in the destination bank's A queue for S2.
   *
   * The nexus keeps all protocol duties of TLXbar (global source IDs, B/D return routing,
   * C/E arbitration and multi-beat locking). Each downstream port (one per L2 slice) has
@@ -129,6 +129,14 @@ class CustomL1L2Fabric(
       }
       require(dcacheInputs.distinct.size == specChannels)
 
+      // Input zero is the ordinary A port. Only peers in the speculative class rotate;
+      // an ordinary transfer does not advance their round-robin state.
+      val ordinaryFirst: TLArbiter.Policy = (width, valids, select) => {
+        val ordinary = valids(0)
+        val lanes = TLArbiter.roundRobin(width - 1, valids(width - 1, 1), select && !ordinary)
+        Cat(lanes & Fill(width - 1, !ordinary), true.B)
+      }
+
       val candidateFire = Wire(Vec(specOwners, Bool()))
       val candidateReady = Wire(Vec(specChannels, Vec(specOwners, Bool())))
       val candidateAccepted = Wire(Vec(specChannels, Vec(specOwners, Bool())))
@@ -161,7 +169,7 @@ class CustomL1L2Fabric(
             candidateAccepted(ch)(w) := candidate.fire
             candidate
           }
-          TLArbiter.robin(edge, merged.a, (Seq(input.a) ++ candidates):_*)
+          TLArbiter(ordinaryFirst)(merged.a, (input.a +: candidates).map(a => (edge.numBeats1(a.bits), a)): _*)
           input.b.valid := merged.b.valid
           input.b.bits := merged.b.bits
           merged.b.ready := input.b.ready
