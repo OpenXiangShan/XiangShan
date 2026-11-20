@@ -550,6 +550,7 @@ def test_upstream_dual_block_suppression_reaches_single_block_output(
         "second_itlb_exception": int(cause == "second_itlb"),
         "first_ftq_flag": 0,
         "first_ftq_value": 11,
+        "first_start": 0x40000000,
         "real_two_fetch": 0,
     }.items():
         dut.set(_UPSTREAM_SIGNALS[key][0], value)
