@@ -3,14 +3,6 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 
-class SpecMissBufferedA[T <: Data](gen: T, nOwners: Int, idBits: Int) extends Bundle {
-  val data = gen.cloneType
-  val speculative = Bool()
-  val committed = Bool()
-  val owner = UInt(math.max(1, log2Ceil(nOwners)).W)
-  val id = UInt(idBits.W)
-}
-
 class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) extends Module {
   require(depth >= 2)
   require(nOwners >= 1)
