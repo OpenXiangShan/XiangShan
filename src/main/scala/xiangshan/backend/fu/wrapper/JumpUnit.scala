@@ -1,6 +1,7 @@
 package xiangshan.backend.fu.wrapper
 
 import chisel3._
+import chisel3.util.Cat
 import org.chipsalliance.cde.config.Parameters
 import utility.SignExt
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -20,7 +21,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   // j:  pc       + imm -> pc
   // ja: GPR[rs1] + imm -> pc
   private val isJr = JumpOpType.jumpUopisjr(func)
-  private val jumpTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
+  private val jumpTarget = Cat((Mux(isJr, src, pc) + SignExt(imm, XLEN))(XLEN - 1, 1), false.B)
 
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
   private val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
