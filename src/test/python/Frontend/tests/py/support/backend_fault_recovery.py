@@ -15,6 +15,7 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig, fold_pc
+from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
 from tests.py.support.dut_support import wait_until as _wait_until
 
 
@@ -25,7 +26,6 @@ _SINGLE_PAGE_PA = 0x8040_0800
 _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 64
 _CROSS_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 512
-_OBSERVED_EXCEPTION_BITS = (1, 2, 12, 19, 20)
 
 
 def _entry(
@@ -93,9 +93,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
             )
 
         observe = active_env.backend_cfvec_if
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
+        for slot in iter_valid_cfvec_slots(observe):
             backend_exception = getattr(
                 active_env.dut,
                 f"io_backend_cfVec_{slot}_bits_backendException",
@@ -113,11 +111,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
                     "ftq_offset": int(observe.cfvec_ftq_offset[slot].value),
                     "is_rvc": int(observe.cfvec_is_rvc[slot].value),
                     "backend_exception": int(backend_exception.value or 0),
-                    "exception_bits": tuple(
-                        bit
-                        for bit in _OBSERVED_EXCEPTION_BITS
-                        if int(getattr(observe, f"cfvec_exception_vec_{bit}")[slot].value or 0) == 1
-                    ),
+                    "exception_bits": read_cfvec_exception_bits(observe, slot, require_value=True),
                 }
             )
 

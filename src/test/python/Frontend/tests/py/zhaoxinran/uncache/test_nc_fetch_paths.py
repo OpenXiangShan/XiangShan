@@ -23,6 +23,7 @@ from env.runtime.frontend_init import (
 )
 from env.support import PmpPmaConfig, RandomPc, record_scenario, scenario_rng
 from tests.py.support import translation_faults
+from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
 from tests.py.support.instructions import encode_jal_x0 as _encode_jal_x0
 from tests.py.support.dut_support import (
     _wait_for_req_count,
@@ -37,9 +38,6 @@ from tests.py.zhaoxinran.support.uncache import (
 )
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-
-
-_CFVEC_EXCEPTION_BITS = (1, 2, 12, 19, 20)
 
 
 _NC_TIMING_SNAPSHOT_KEYS = {
@@ -188,14 +186,8 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
 
     def capture(cycle, current_env) -> None:
         observe = current_env.backend_cfvec_if
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
-            bits = tuple(
-                bit
-                for bit in _CFVEC_EXCEPTION_BITS
-                if translation_faults._read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) != 0
-            )
+        for slot in iter_valid_cfvec_slots(observe):
+            bits = read_cfvec_exception_bits(observe, slot, nonzero=True)
             if bits:
                 records.append(
                     {

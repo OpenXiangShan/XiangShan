@@ -7,12 +7,12 @@ import pytest
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 
 from env.support import record_scenario, scenario_rng
+from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
 from tests.py.support.dut_support import run_until
 from tests.py.support.icache_mainpipe import (
     initialize_cacheable_stream,
     register_mainpipe_observer,
 )
-from tests.py.support.translation_faults import _read_exception_bit
 from tests.py.zhaoxinran.support.exception import exception_entry
 
 
@@ -35,14 +35,8 @@ def _capture_backend_exception_state(env) -> list[dict]:
 
     def capture(cycle: int, active_env) -> None:
         observe = active_env.backend_cfvec_if
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
-            exception_bits = tuple(
-                bit
-                for bit in (1, 2, 12, 19, 20)
-                if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) == 1
-            )
+        for slot in iter_valid_cfvec_slots(observe):
+            exception_bits = read_cfvec_exception_bits(observe, slot)
             records.append(
                 {
                     "cycle": int(cycle),
@@ -66,9 +60,7 @@ def _capture_backend_cfvec_cycles(
     def capture(cycle: int, active_env) -> None:
         observe = active_env.backend_cfvec_if
         slots: list[dict] = []
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
+        for slot in iter_valid_cfvec_slots(observe):
             trigger = 0
             if include_trigger:
                 trigger = int(
@@ -83,11 +75,7 @@ def _capture_backend_cfvec_cycles(
                     "instr": int(observe.cfvec_instr[slot].value),
                     "is_rvc": bool(observe.cfvec_is_rvc[slot].value),
                     "trigger": trigger,
-                    "exception_bits": tuple(
-                        bit
-                        for bit in (1, 2, 12, 19, 20)
-                        if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) == 1
-                    ),
+                    "exception_bits": read_cfvec_exception_bits(observe, slot),
                 }
             )
         records[int(cycle)] = slots

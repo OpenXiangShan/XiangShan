@@ -11,6 +11,7 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig, scenario_rng
+from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
 CACHEABLE_CROSS_PAGE_VA = 0x8020_0000
@@ -29,9 +30,6 @@ _FAULT_BITS = {
     "instruction_page_fault": 12,
 }
 
-def _read_exception_bit(signal) -> int:
-    value = getattr(signal, "value", None)
-    return 0 if value is None else int(value)
 
 _CROSS_PAGE_FAULT_CASES = (
     pytest.param(0, "s1_pf", "page_fault", "instruction_page_fault", id="no-stage-page-fault"),
@@ -72,14 +70,8 @@ def _capture_cfvec_deliveries(env) -> list[dict]:
 
     def capture(cycle: int, active_env) -> None:
         observe = active_env.backend_cfvec_if
-        for slot in range(8):
-            if int(observe.cfvec_valid[slot].value) != 1:
-                continue
-            exception_bits = tuple(
-                bit
-                for bit in (1, 2, 12, 19, 20)
-                if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) == 1
-            )
+        for slot in iter_valid_cfvec_slots(observe):
+            exception_bits = read_cfvec_exception_bits(observe, slot)
             records.append(
                 {
                     "cycle": int(cycle),
