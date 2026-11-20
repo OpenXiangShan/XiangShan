@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import replace
 
 from env.core.transactions import RedirectTxn
@@ -26,6 +27,10 @@ from tests.py.support.translation_context_switch import (
     _context_entry,
     permissions as _permissions,
     randomize_context_timing as _randomize_context_timing,
+)
+from tests.py.support.translation_scenarios import (
+    randomize_ptw_response,
+    relocate_translation_entry,
 )
 
 
@@ -114,6 +119,18 @@ def _sfence_stage_scenario(env, scenario_id: str, *, s2xlate: int) -> Translatio
     raise ValueError(f"unsupported SFENCE stage s2xlate={s2xlate}")
 
 
+def randomize_ptw_timing(
+    scenario: TranslationScenario, rng: random.Random, *, seed: int, latency_limit: int | None,
+) -> TranslationScenario:
+    return randomize_ptw_response(
+        scenario, rng, seed=seed,
+        latency_range=(1, latency_limit) if latency_limit is not None else None,
+        latency_max_limit=8 if latency_limit is not None and scenario.ptw_response_latency_max is not None else None,
+        keep_latency_max=False,
+        randomize_ready=True,
+    )
+
+
 def randomize_translation_layout(
     env, scenario: TranslationScenario, *, scenario_key: str, stride: int = 0x4000,
 ) -> TranslationScenario:
@@ -126,20 +143,11 @@ def randomize_translation_layout(
         instruction_bytes=4,
     )
     va_delta = entry.va - scenario.va
-    pa_delta = entry.pa - scenario.pa
+    lane_delta = va_delta if scenario.s2xlate == 3 else entry.pa - scenario.pa
     relocated = replace(
-        scenario,
-        va=entry.va,
-        pa=entry.pa,
-        gpa=scenario.gpa + va_delta if scenario.gpa is not None else None,
-        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
-        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
+        relocate_translation_entry(scenario, entry, s1_ppn_delta=lane_delta >> 12),
         ptw_response_overrides=tuple(
             replace(item, vpn=item.vpn + (va_delta >> 12)) for item in scenario.ptw_response_overrides
-        ),
-        s1_sector_lanes=tuple(
-            replace(lane, ppn=lane.ppn + ((va_delta if scenario.s2xlate == 3 else pa_delta) >> 12))
-            for lane in scenario.s1_sector_lanes
         ),
         permission_probes=tuple(replace(probe, va=probe.va + va_delta) for probe in scenario.permission_probes),
     )
@@ -179,14 +187,7 @@ def randomize_permission_entry(env, scenario: TranslationScenario) -> Translatio
         entry_offsets=tuple(slot * 0x4000 + (scenario.va & 0x3FFF) for slot in range(128)),
         instruction_bytes=4,
     )
-    pa_delta = entry.pa - scenario.pa
-    relocated = replace(
-        scenario,
-        va=entry.va,
-        pa=entry.pa,
-        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
-        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
-    )
+    relocated = relocate_translation_entry(scenario, entry, relocate_gpa=False)
     record_scenario(
         env, scenario_key, base_seed=base_seed, seed=seed,
         parameters={"va": relocated.va, "pa": relocated.pa},

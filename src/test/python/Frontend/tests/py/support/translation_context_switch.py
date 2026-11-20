@@ -13,6 +13,9 @@ from env.sequences import (
 )
 from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until
+from tests.py.support.translation_scenarios import (
+    randomize_ptw_response,
+)
 
 
 OLD_VA = 0x8020_0F00
@@ -33,17 +36,11 @@ def randomize_context_timing(
 ) -> TranslationScenario:
     scenario_key = f"zhaoxinran/translation/context/{scenario.scenario_id}"
     base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(int(latency_min), int(latency_max))
-    response_latency_max = (
-        rng.randint(latency, max(latency, int(scenario.ptw_response_latency_max)))
-        if keep_latency_max and scenario.ptw_response_latency_max is not None
-        else scenario.ptw_response_latency_max
-    )
-    randomized = replace(
-        scenario,
-        ptw_response_latency=latency,
-        ptw_response_latency_max=response_latency_max,
-        ptw_response_seed=seed,
+    randomized = randomize_ptw_response(
+        scenario, rng, seed=seed,
+        latency_range=(int(latency_min), int(latency_max)),
+        latency_max_limit=scenario.ptw_response_latency_max if keep_latency_max else None,
+        clamp_latency_max_limit=True,
     )
     record_scenario(
         env,
@@ -55,8 +52,8 @@ def randomize_context_timing(
             "va": scenario.va,
             "pa": scenario.pa,
             "s2xlate": scenario.s2xlate,
-            "latency": latency,
-            "latency_max": response_latency_max,
+            "latency": randomized.ptw_response_latency,
+            "latency_max": randomized.ptw_response_latency_max,
             "satp_asid": scenario.satp_asid,
             "vsatp_asid": scenario.vsatp_asid,
             "hgatp_vmid": scenario.hgatp_vmid,

@@ -15,6 +15,7 @@ from env.sequences import (
 )
 from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.cross_page_cases import run_mapped_cross_page_rvi
+from tests.py.zhaoxinran.support.translation import randomize_ptw_timing, relocate_translation_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -50,37 +51,10 @@ def _randomize_normal_ptw_timing(
         entry_offsets=tuple(slot * 0x8000 + (scenario.va & 0x7FFF) for slot in range(64)),
         instruction_bytes=4,
     )
-    va_delta = entry.va - scenario.va
-    pa_delta = entry.pa - scenario.pa
+    lane_delta = entry.va - scenario.va if scenario.gpa is not None else entry.pa - scenario.pa
+    relocated = relocate_translation_entry(scenario, entry, s1_ppn_delta=lane_delta >> 12)
     has_ptw = scenario.mode != "bare" or int(scenario.s2xlate) in (2, 3)
-    latency = rng.randint(1, 5) if has_ptw else int(scenario.ptw_response_latency)
-    latency_max = (
-        rng.randint(latency, 8)
-        if has_ptw and scenario.ptw_response_latency_max is not None
-        else None
-    )
-    ready_high_cycles = int(scenario.ptw_req_ready_high_cycles)
-    ready_low_cycles = int(scenario.ptw_req_ready_low_cycles)
-    if scenario.ptw_req_ready_strategy == "periodic":
-        ready_high_cycles = rng.randint(1, 2)
-        ready_low_cycles = rng.randint(1, 4)
-    randomized = replace(
-        scenario,
-        va=entry.va,
-        pa=entry.pa,
-        gpa=scenario.gpa + va_delta if scenario.gpa is not None else None,
-        pmp_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pmp_entries),
-        pma_entries=tuple(replace(item, addr=item.addr + pa_delta) for item in scenario.pma_entries),
-        s1_sector_lanes=tuple(
-            replace(lane, ppn=lane.ppn + ((va_delta if scenario.gpa is not None else pa_delta) >> 12))
-            for lane in scenario.s1_sector_lanes
-        ),
-        ptw_response_latency=latency,
-        ptw_response_latency_max=latency_max,
-        ptw_response_seed=seed,
-        ptw_req_ready_high_cycles=ready_high_cycles,
-        ptw_req_ready_low_cycles=ready_low_cycles,
-    )
+    randomized = randomize_ptw_timing(relocated, rng, seed=seed, latency_limit=5 if has_ptw else None)
     record_scenario(
         env,
         scenario_key,
@@ -97,11 +71,11 @@ def _randomize_normal_ptw_timing(
             "stage2_mode": scenario.stage2_mode,
             "s2xlate": scenario.s2xlate,
             "ptw_timing_randomized": has_ptw,
-            "latency": latency,
-            "latency_max": latency_max,
+            "latency": randomized.ptw_response_latency,
+            "latency_max": randomized.ptw_response_latency_max,
             "ready_strategy": scenario.ptw_req_ready_strategy,
-            "ready_high_cycles": ready_high_cycles,
-            "ready_low_cycles": ready_low_cycles,
+            "ready_high_cycles": randomized.ptw_req_ready_high_cycles,
+            "ready_low_cycles": randomized.ptw_req_ready_low_cycles,
             "expected_paths": expected_paths,
         },
     )
