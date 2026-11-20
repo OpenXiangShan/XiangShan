@@ -76,11 +76,13 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
   private val specMissEnabled = coreParams.dcacheParametersOpt.exists(_.enMissTrack)
+  private val useSpecPreview = specMissEnabled && coreParams.L2CacheParamsOpt.exists(_.innerBuf.a.depth == 0)
   val l1_l2_fabric = LazyModule(new CustomL1L2Fabric(
     specChannels = if (specMissEnabled) numMemChannelsFromDcache else 0,
     specOwners = if (specMissEnabled) LoadPipelineWidth else 0,
     specIdBits = if (specMissEnabled) log2Up(dcacheParameters.nMissEntries) else 0,
-    specBlockBytes = if (specMissEnabled) dcacheParameters.blockBytes else 0
+    specBlockBytes = if (specMissEnabled) dcacheParameters.blockBytes else 0,
+    specMissPreview = useSpecPreview
   ))
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
@@ -127,7 +129,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         FPGAPlatform = debugOpts.FPGAPlatform,
         hasMbist = hasMbist,
         PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
-        sliceCoherentClientMap = sliceCoherentClientMap
+        sliceCoherentClientMap = sliceCoherentClientMap,
+        specMissPreview = useSpecPreview
       )
       case CHIIssue => p(CHIIssue)
       case CHIAddrWidthKey => p(CHIAddrWidthKey)
@@ -324,6 +327,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module
+      l2.specPreview.foreach(_ := l1_l2_fabric.module.specPreview.get)
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
       l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
