@@ -189,6 +189,9 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     } else {
       checker.apply(tlbCsr.priv.imode, tlbCsr.priv.debug, pmp.io.pmp, pmp.io.pma, requestor.req)
     }
+    if (HasEpmp) {
+      checker.check_env.epmpCSR.get <> pmp.io.epmpCSR.get
+    }
     requestor.resp := checker.resp
   }
 
