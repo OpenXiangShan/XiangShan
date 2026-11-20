@@ -883,6 +883,8 @@ trait HasXSParameter {
   def icacheCtrlEnabled = coreParams.frontendParameters.icacheParameters.EnableCtrlUnit
   def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
 
+  def specMissAtL2S2: Boolean = coreParams.dcacheParametersOpt.exists(_.enMissTrack) &&
+    coreParams.L2CacheParamsOpt.exists(_.innerBuf.a.depth == 0)
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
   def numMemChannelsFromDcache = coreParams.dcacheParametersOpt.map(_.numMemChannels).getOrElse(1)
 
