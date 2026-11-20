@@ -139,9 +139,6 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   // cache req missed, merged into one of miss queue entries
   // i.e. !miss_merged means this access is the first miss for this cacheline
   val merged = Bool()
-  // This request is the leader that actually allocated a new MissEntry. Compressed
-  // followers may be handled by that allocation, but must not count as allocations.
-  val allocated = Bool()
 }
 
 class MissQueueBlockReqBundle(implicit p: Parameters) extends XSBundle {
@@ -1791,8 +1788,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // Compressed followers inherit whether the group leader targeted an existing
     // owner. Their local strategy only contains the compress bit.
     io.resp(i).merged := query_fire(i) && (groupStrategy & 2.U) =/= 0.U
-    io.resp(i).allocated := query_fire(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
-      analysis.compress_group(i) === i.U
   }
 
   val source_except_load_cnt = RegInit(0.U(10.W))
