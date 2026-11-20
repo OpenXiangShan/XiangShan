@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 
+from env.support.signal_utils import read_first_signal
+
 
 def cycle_limit(name: str, default: int) -> int:
     raw = os.getenv(str(name), "").strip()
@@ -35,32 +37,9 @@ def read_dut_signal(
     if cache is None:
         cache = {}
         setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = aliases
-    if cache_key in cache:
-        signal = cache[cache_key]
-        value = None if signal is None else getattr(signal, "value", None)
-        if value is not None:
-            return int(value)
-        if required:
-            raise AssertionError({
-                "reason": "required DUT signal is unavailable",
-                "candidates": aliases,
-            })
-        return default
-
-    for name in aliases:
-        try:
-            signal = getattr(env.dut, name, None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(name) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                cache[cache_key] = signal
-                return int(value)
-        except Exception:
-            continue
-    cache[cache_key] = None
+    value = read_first_signal(env.dut, aliases, cache=cache)
+    if value is not None:
+        return value
     if required:
         raise AssertionError({
             "reason": "required DUT signal is unavailable",
@@ -69,22 +48,26 @@ def read_dut_signal(
     return default
 
 
-def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
-    """Check a predicate before each DUT step."""
+def _poll(
+    env, predicate: Callable[[], bool], *, max_cycles: int, step_first: bool = False,
+) -> bool:
     for _ in range(int(max_cycles)):
-        if predicate():
+        if not step_first and predicate():
             return True
         env.step(1)
+        if step_first and predicate():
+            return True
     return False
+
+
+def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
+    """Check a predicate before each DUT step."""
+    return _poll(env, predicate, max_cycles=max_cycles)
 
 
 def run_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
     """Include a final predicate check after the last DUT step."""
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return True
-        env.step(1)
-    return bool(predicate())
+    return poll_until(env, predicate, max_cycles=max_cycles) or bool(predicate())
 
 
 def wait_until(
@@ -140,34 +123,37 @@ def _assert_observed_instrs(env, expected_block: list[tuple[int, int, bool]]) ->
         }
 
 
+def _wait_for_stat_count(env, agent, stat: str, count: int, *, max_cycles: int) -> bool:
+    return run_until(
+        env, lambda: int(agent.get_stats().get(stat, 0)) >= int(count), max_cycles=max_cycles,
+    )
+
+
+def _wait_for_stat_delta(env, agent, stat: str, delta: int, *, max_cycles: int) -> int:
+    start = int(agent.get_stats().get(stat, 0))
+    target = start + int(delta)
+    now = start
+
+    def reached() -> bool:
+        nonlocal now
+        now = int(agent.get_stats().get(stat, 0))
+        return now >= target
+
+    if _poll(env, reached, max_cycles=max_cycles, step_first=True):
+        return now
+    return int(agent.get_stats().get(stat, 0))
+
+
 def _wait_for_req_count(env, agent, count: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(agent.get_stats().get("req_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(agent.get_stats().get("req_count", 0)) >= int(count)
+    return _wait_for_stat_count(env, agent, "req_count", count, max_cycles=max_cycles)
 
 
 def _wait_for_req_delta(env, agent, delta: int = 1, *, max_cycles: int = 2000) -> int:
-    start = int(agent.get_stats().get("req_count", 0))
-    target = start + int(delta)
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(agent.get_stats().get("req_count", 0))
-        if now >= target:
-            return now
-    return int(agent.get_stats().get("req_count", 0))
+    return _wait_for_stat_delta(env, agent, "req_count", delta, max_cycles=max_cycles)
 
 
 def _wait_for_resp_delta(env, agent, delta: int = 1, *, max_cycles: int = 2000) -> int:
-    start = int(agent.get_stats().get("resp_count", 0))
-    target = start + int(delta)
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(agent.get_stats().get("resp_count", 0))
-        if now >= target:
-            return now
-    return int(agent.get_stats().get("resp_count", 0))
+    return _wait_for_stat_delta(env, agent, "resp_count", delta, max_cycles=max_cycles)
 
 
 def _wait_for_request_addr(
@@ -177,11 +163,9 @@ def _wait_for_request_addr(
     *,
     max_cycles: int = 2000,
 ) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(addr) in agent.get_stats().get("request_addrs", []):
-            return True
-        env.step(1)
-    return int(addr) in agent.get_stats().get("request_addrs", [])
+    return run_until(
+        env, lambda: int(addr) in agent.get_stats().get("request_addrs", []), max_cycles=max_cycles,
+    )
 
 
 def _wait_for_resp_count(
@@ -191,27 +175,17 @@ def _wait_for_resp_count(
     *,
     max_cycles: int = 2000,
 ) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(agent.get_stats().get("resp_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(agent.get_stats().get("resp_count", 0)) >= int(count)
+    return _wait_for_stat_count(env, agent, "resp_count", count, max_cycles=max_cycles)
 
 
 def _wait_for_monitor_exception(env, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.monitor.exception_mark_count) > 0:
-            return True
-        env.step(1)
-    return int(env.monitor.exception_mark_count) > 0
+    return run_until(env, lambda: int(env.monitor.exception_mark_count) > 0, max_cycles=max_cycles)
 
 
 def _wait_for_observed_pc(env, pc: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if any(int(obs.pc) == int(pc) for obs in env.monitor.observations):
-            return True
-        env.step(1)
-    return any(int(obs.pc) == int(pc) for obs in env.monitor.observations)
+    return run_until(
+        env, lambda: any(int(obs.pc) == int(pc) for obs in env.monitor.observations), max_cycles=max_cycles,
+    )
 
 
 def _wait_for_observed_pc_sequence(
@@ -221,18 +195,13 @@ def _wait_for_observed_pc_sequence(
     max_cycles: int = 2000,
 ) -> bool:
     expected = {int(pc) for pc in pcs}
-    for _ in range(int(max_cycles)):
+
+    def complete() -> bool:
         seen = {
             int(obs.pc)
             for obs in env.monitor.observations
             if int(obs.pc) in expected
         }
-        if expected.issubset(seen):
-            return True
-        env.step(1)
-    seen = {
-        int(obs.pc)
-        for obs in env.monitor.observations
-        if int(obs.pc) in expected
-    }
-    return expected.issubset(seen)
+        return expected.issubset(seen)
+
+    return run_until(env, complete, max_cycles=max_cycles)

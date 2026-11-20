@@ -9,7 +9,9 @@ from typing import Sequence
 from env.sequences import LoadProgramSequence
 from env.core.transactions import ProgramImage
 from env.support import PmpPmaConfig
+from env.support.signal_utils import read_first_signal, try_read_signal
 from tests.py.support.dut_support import (
+    run_until,
     _wait_for_monitor_exception as _wait_for_monitor_exception_common,
     _wait_for_observed_pc as _wait_for_observed_pc_common,
     _wait_for_observed_pc_sequence as _wait_for_observed_pc_sequence_common,
@@ -386,32 +388,10 @@ def _wait_for_observed_pc_sequence(env, pcs: list[int], *, max_cycles: int = 200
     return _wait_for_observed_pc_sequence_common(env, pcs, max_cycles=max_cycles)
 
 def _try_read_dut_signal(env, name: str) -> int | None:
-    try:
-        signal = getattr(env.dut, name, None)
-        if signal is None:
-            getter = getattr(env.dut, "GetInternalSignal", None)
-            if callable(getter):
-                signal = getter(str(name))
-        if signal is None:
-            return None
-        width = getattr(signal, "W", None)
-        if callable(width) and int(width()) > 32:
-            raw = signal.GetBytes()
-            data = raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
-            return int.from_bytes(data, byteorder="little", signed=False)
-        value = getattr(signal, "value", None)
-        if value is None:
-            return None
-        return int(value)
-    except Exception:
-        return None
+    return try_read_signal(env.dut, name, wide=True)
 
 def _read_first_dut_signal(env, names: Sequence[str]) -> int | None:
-    for name in names:
-        value = _try_read_dut_signal(env, str(name))
-        if value is not None:
-            return int(value)
-    return None
+    return read_first_signal(env.dut, names, wide=True)
 
 def _require_first_dut_signal(env, names: Sequence[str]) -> int:
     value = _read_first_dut_signal(env, names)
@@ -515,16 +495,11 @@ def _pending_uncache_samples(samples: Sequence[dict], addr: int) -> list[dict]:
     ]
 
 def _wait_for_uncache_a_valid_addr(env, addr: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if (
-            _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
-            and int(env.uncache_if.a_bits_address.value) == int(addr)
-        ):
-            return True
-        env.step(1)
-    return (
-        _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
-        and int(env.uncache_if.a_bits_address.value) == int(addr)
+    return run_until(
+        env,
+        lambda: _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
+        and int(env.uncache_if.a_bits_address.value) == int(addr),
+        max_cycles=max_cycles,
     )
 
 def _force_redirect_to(env, target_pc: int) -> None:

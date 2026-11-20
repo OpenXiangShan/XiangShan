@@ -16,6 +16,7 @@ from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.funcov.py.ifu.mmio_nc_owner_funcov import read_instr_uncache_response_valid
 from env.support import RandomPc, random_pc, record_scenario, scenario_rng
+from tests.py.support.dut_support import poll_until
 from tests.py.support.main_fetch import (
     register_main_fetch_observer as _register_main_fetch_observer,
     wait_for_three_main_fetches_after_redirect as _wait_for_three_main_fetches_after_redirect,
@@ -41,10 +42,12 @@ def _cacheable_entry(scenario_key: str, *, slot_size: int = 0x1000) -> int:
 
 
 def _wait_for_pc(env, pc: int, *, max_cycles: int = 8000) -> None:
-    for _ in range(int(max_cycles)):
-        if any(int(observation.pc) == int(pc) for observation in env.monitor.observations):
-            return
-        env.step(1)
+    if poll_until(
+        env,
+        lambda: any(int(observation.pc) == int(pc) for observation in env.monitor.observations),
+        max_cycles=max_cycles,
+    ):
+        return
     raise AssertionError(
         {
             "reason": "redirect target was not delivered",
@@ -199,14 +202,16 @@ def _register_uncache_redirect_observer(
 
 
 def _wait_for_monitor_taken_prediction(env, pc: int, *, max_cycles: int = 6000) -> None:
-    for _ in range(int(max_cycles)):
-        if any(
+    if poll_until(
+        env,
+        lambda: any(
             int(observation.pc) == int(pc)
             and bool(getattr(observation, "pred_taken", False))
             for observation in env.monitor.observations
-        ):
-            return
-        env.step(1)
+        ),
+        max_cycles=max_cycles,
+    ):
+        return
     raise AssertionError(
         {
             "reason": "target CFI never reached cfVec with pred_taken",

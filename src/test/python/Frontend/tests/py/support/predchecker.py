@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from env.core.transactions import ProgramImage
 from env.sequences import LoadProgramSequence
+from env.support.signal_utils import read_first_signal
 from tests.py.support.instructions import encode_c_j as _c_j, encode_jal_x0 as _jal_x0
 
 
@@ -71,18 +72,7 @@ def _read_optional(recorder, *names: str) -> int | None:
 
 
 def _read_direct(env, *names: str) -> int | None:
-    for name in names:
-        try:
-            signal = getattr(env.dut, str(name), None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(str(name)) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                return int(value)
-        except Exception:
-            continue
-    return None
+    return read_first_signal(env.dut, names)
 
 
 def _pulse_fencei(env) -> None:
