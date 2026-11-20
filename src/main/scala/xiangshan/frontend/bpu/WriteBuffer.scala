@@ -95,7 +95,7 @@ class WriteBuffer[T <: WriteReqBundle](
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))
   // Record the hitTouch situation for each row of all write requests
   private val hitTouchVec =
-    WireInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W))))))
+    WireInit(VecInit.fill(numPorts)(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W))))))
   private val writeTouchVec = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
 
   private val replacerWay  = Wire(Vec(numPorts, UInt(log2Ceil(numEntries).W)))
@@ -173,6 +173,11 @@ class WriteBuffer[T <: WriteReqBundle](
     val hitRowsVec   = VecInit(hitMask.map(_.reduce(_ || _))) // Mark hit status of each row
     val hitRowIdxVec = VecInit(hitMask.map(OHToUInt(_)))      // if hit record which entry hit each line
 
+    for (row <- 0 until numPorts) {
+      hitTouchVec(row)(portIdx).valid := hitRowsVec(row)
+      hitTouchVec(row)(portIdx).bits  := hitRowIdxVec(row)
+    }
+
     val rowIdx        = OHToUInt(hitRowsVec) // hitRow's idx
     val hitIdx        = hitRowIdxVec(rowIdx) // hit entry's idx
     val hitNotWritten = (hitMaskUInt & dirtyUInt).orR
@@ -199,8 +204,6 @@ class WriteBuffer[T <: WriteReqBundle](
 
       // if hit need to update the entry
       when(hit) {
-        hitTouchVec(rowIdx)(hitIdx).valid := hit
-        hitTouchVec(rowIdx)(hitIdx).bits  := hitIdx
         val mergedEntry =
           if (hasWayMask) mergeSameWay(entries(rowIdx)(hitIdx), io.write(portIdx).bits) else io.write(portIdx).bits
         when(hitNotWritten) {
@@ -259,7 +262,15 @@ class WriteBuffer[T <: WriteReqBundle](
     io.read(nRows).valid := !emptyVec(nRows)
     io.read(nRows).bits  := entries(nRows)(readIdx)
 
-    val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
+    val touchWays = if (numPorts == 1) {
+      val touch = WireInit(writeTouchVec(nRows))
+      when(hitTouchVec(nRows).head.valid) {
+        touch := hitTouchVec(nRows).head
+      }
+      Seq(touch)
+    } else {
+      Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).toSeq
+    }
     replacerWay(nRows) := replacer.way
     replacer.access(touchWays)
     when(flush) {
