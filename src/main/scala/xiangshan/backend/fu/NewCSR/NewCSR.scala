@@ -123,6 +123,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   import CSRConfig._
 
   val io = IO(new Bundle {
+    val entropy = new EntropySourceIO
     val fromTop = Input(new Bundle {
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
@@ -527,6 +528,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.csrAccess.ren := ren && valid
   permitMod.io.in.csrAccess.wen := wen
   permitMod.io.in.csrAccess.addr := addr
+  permitMod.io.in.sseed := mseccfg.regOut.SSEED.asBool
+  permitMod.io.in.useed := mseccfg.regOut.USEED.asBool
 
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
@@ -1110,6 +1113,15 @@ class NewCSR(implicit val p: Parameters) extends Module
     sireg.addr.U === addr && ((!V.asUInt.asBool && siselect.inIMSICRange) || (V.asUInt.asBool && vsiselect.inIMSICRange)) ||
     vsireg.addr.U === addr && vsiselect.inIMSICRange
   )
+
+  private val seedAccess = addr === CSRs.seed.U && wenLegal && !noCSRIllegal
+  private val seedPoll = io.in.fire && seedAccess && !redirectFlush && !hasTrap && !reset.asBool
+  seed.entropy <> io.entropy
+  seed.poll := seedPoll
+  seed.read := ren
+  private val seedPending = RegEnable(seedPoll, false.B, io.in.fire)
+  assert(!(state === s_finish && seedPending && (redirectFlush || hasTrap)),
+    "Accepted seed poll must complete without replay or cancellation")
 
   /** State machine of newCSR */
   switch(state) {

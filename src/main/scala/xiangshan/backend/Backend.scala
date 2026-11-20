@@ -201,6 +201,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   private val csrin = intRegion.io.csrin.get
   private val csrio = intRegion.io.csrio.get
+  io.entropy <> csrio.entropy
 
   private val vlFromIntIsVlmax = false.B // Todo: enable this when vs3 dependency elimination is ready
 
@@ -841,6 +842,7 @@ class BackendToTopBundle(implicit p: Parameters) extends XSBundle with HasSoCPar
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {
+  val entropy = new EntropySourceIO
   val fromTop = Flipped(new TopToBackendBundle)
 
   val toTop = new BackendToTopBundle

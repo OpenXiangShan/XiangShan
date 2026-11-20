@@ -62,6 +62,12 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   )
 
   private val csrAccess = WireInit(ren || wen)
+  private val seedAccess = csrAccess && io.in.csrAccess.addr === CSRs.seed.U
+  private val seedModeAllowed = io.in.privState.isModeM ||
+    io.in.privState.isModeHS && io.in.sseed || io.in.privState.isModeHU && io.in.useed ||
+    io.in.privState.isVirtual && io.in.sseed
+  private val seed_EX_II = seedAccess && (!wen || !seedModeAllowed)
+  private val seed_EX_VI = seedAccess && wen && io.in.privState.isVirtual && io.in.sseed
 
   val mPermit_EX_II = mLevelPermitMod.io.out.mLevelPermit_EX_II
 
@@ -90,8 +96,8 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II
   val Xret_EX_VI = xRetPermitMod.io.out.Xret_EX_VI
 
-  io.out.EX_II := csrAccess_EX_II || Xret_EX_II
-  io.out.EX_VI := !io.out.EX_II && (csrAccess_EX_VI || Xret_EX_VI)
+  io.out.EX_II := csrAccess_EX_II || Xret_EX_II || seed_EX_II
+  io.out.EX_VI := !io.out.EX_II && (csrAccess_EX_VI || Xret_EX_VI || seed_EX_VI)
 
   io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
   io.out.hasLegalMNret := xRetPermitMod.io.out.hasLegalMNret
@@ -579,6 +585,8 @@ class aiaIO extends Bundle {
 
 class CSRPermitIO extends Bundle {
   val in = Input(new Bundle {
+    val sseed = Bool()
+    val useed = Bool()
     val csrAccess = new csrAccessIO
     val privState = new PrivState
     val debugMode = Bool()

@@ -79,6 +79,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
 }
 
 class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
+  val entropy = new EntropySourceIO
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)

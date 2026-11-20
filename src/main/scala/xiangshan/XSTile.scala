@@ -109,6 +109,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
+      val entropy = new EntropySourceIO
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
@@ -144,6 +145,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
+    io.entropy <> core.module.io.entropy
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
     core.module.io.reset_mtvec.foreach(_ := l2top.module.io.reset_mtvec.get.toCore)
     core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
