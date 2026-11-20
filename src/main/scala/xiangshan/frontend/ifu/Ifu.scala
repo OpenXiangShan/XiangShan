@@ -668,6 +668,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
   uncacheFlushWb.bits.attribute := BranchAttribute.None
   uncacheFlushWb.bits.target    := uncacheTarget.toUInt
+  uncacheFlushWb.bits.blockSel  := false.B
 
   when(s2_useUncacheFetch) {
     val inst        = s2_uncacheData
@@ -726,6 +727,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbAlignFetchBlock = RegEnable(s2_fetchBlock, wbEnable)
   private val wbPrevIBufEnqPtr  = RegEnable(s2_prevIBufEnqPtr, wbEnable)
   private val wbInstrCount      = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
+  private val advanceFtqIdx     = VecInit(s2_fetchBlock.map(_.ftqIdx))
 
   private val wbFirstEndHalfRvi = RegEnable(s2_firstEndHalfRvi, wbEnable)
   private val wbTotalEndHalfRvi = RegEnable(s2_totalEndHalfRvi, wbEnable)
@@ -743,6 +745,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken
     b.valid          := wbValid && checkerRedirect.valid
     b.bits.canTrain  := canTrain
+    b.bits.blockSel  := select
     b.bits.ftqIdx    := Mux(select, ftqIdx(1), ftqIdx(0))
     b.bits.pc        := Mux(select, startAddr(1), startAddr(0))
     b.bits.taken     := checkerRedirect.bits.taken
@@ -753,7 +756,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b
   }
 
-  toFtq.wbRedirect := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.wbRedirect    := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.advanceFtqIdx := advanceFtqIdx
 
   private val wbSelectedEndHalfRvi = Mux(
     !checkerRedirect.bits.blockSel,
