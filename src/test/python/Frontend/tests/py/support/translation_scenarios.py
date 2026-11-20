@@ -15,6 +15,18 @@ _FAULT_GPA_BASE = 0x8060_0000
 _SUPERPAGE_SIZE = 0x20_0000
 
 
+def ptw_responses_complete(active: dict, *, required_only: bool = False) -> bool:
+    """Check all expected PTW keys, or only those required by the oracle."""
+    responded = active["responded_ptw_request_keys"]
+    if required_only:
+        return set(active["required_ptw_request_keys"]).issubset(responded)
+    expected = {
+        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+        for request in active["expected_ptw_requests"]
+    }
+    return expected.issubset(tuple(map(int, key)) for key in responded)
+
+
 def relocate_translation_entry(
     scenario: TranslationScenario,
     entry: RandomPc,

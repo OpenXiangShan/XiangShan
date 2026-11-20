@@ -12,8 +12,9 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
+from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support.translation_context_switch import _context_entry
+from tests.py.support.translation_faults import assert_exact_oracle_fault
 from tests.py.zhaoxinran.support.translation import randomize_ptw_timing, relocate_translation_entry
 
 
@@ -286,20 +287,5 @@ def test_ptw_timing_by_translation_stage(
         assert all(outcome["ok"] for outcome in state.expected_page_outcomes)
     else:
         assert state.expected_page_outcomes[0]["outcome"] == expected_fault
-        exception_records = [
-            record
-            for record in env.translation_oracle.get_stats()["records"]
-            if record["kind"] == "cfvec_exception"
-        ]
-        assert any(
-            record["fault"] == expected_fault
-            and (
-                int(record["pc"]) == int(scenario.va)
-                or (
-                    int(record["pc"]) == 0
-                    and int(record["folded_pc"]) == fold_pc(scenario.va)
-                )
-            )
-            for record in exception_records
-        ), exception_records
+        assert_exact_oracle_fault(env, pc=scenario.va, expected_fault=expected_fault)
     assert not env.get_errors()

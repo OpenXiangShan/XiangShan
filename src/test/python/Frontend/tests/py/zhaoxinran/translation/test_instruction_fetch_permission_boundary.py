@@ -11,8 +11,7 @@ from env.sequences import (
     TranslationScenarioPhase,
     TranslationScenarioSequence,
 )
-from env.support import PmpPmaConfig, fold_pc
-from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
+from env.support import PmpPmaConfig
 from tests.py.support.backend_fault_recovery import (
     _PA,
     _PAGE_SIZE,
@@ -20,6 +19,8 @@ from tests.py.support.backend_fault_recovery import (
     _scenario,
     _run_backend_fault_redirect_recovery,
 )
+from tests.py.support.translation_faults import assert_exact_oracle_fault
+from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 from tests.py.zhaoxinran.support.translation import backend_fault_entry, randomize_permission_entry
 
 
@@ -29,25 +30,6 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 pytestmark = pytest.mark.parametrize(
     "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
 )
-
-
-def _assert_exact_oracle_fault(env, *, pc: int, expected_fault: str) -> None:
-    exception_records = [
-        record
-        for record in env.translation_oracle.get_stats()["records"]
-        if record["kind"] == "cfvec_exception"
-    ]
-    assert any(
-        record["fault"] == expected_fault
-        and (
-            int(record["pc"]) == int(pc)
-            or (
-                int(record["pc"]) == 0
-                and int(record["folded_pc"]) == fold_pc(pc)
-            )
-        )
-        for record in exception_records
-    ), exception_records
 
 
 _PMP_ALLOW = _entry(
@@ -442,7 +424,7 @@ def test_instruction_fetch_permission_boundary(
     if expected_fault is None:
         assert any(int(observation.pc) == scenario.va for observation in env.monitor.observations)
     else:
-        _assert_exact_oracle_fault(env, pc=scenario.va, expected_fault=expected_fault)
+        assert_exact_oracle_fault(env, pc=scenario.va, expected_fault=expected_fault)
     assert not env.get_errors()
 
 

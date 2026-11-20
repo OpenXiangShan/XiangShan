@@ -29,6 +29,7 @@ from tests.py.support.translation_context_switch import (
     randomize_context_timing as _randomize_context_timing,
 )
 from tests.py.support.translation_scenarios import (
+    ptw_responses_complete,
     randomize_ptw_response,
     relocate_translation_entry,
 )
@@ -38,12 +39,7 @@ def _sfence_retranslation_complete(env) -> bool:
     active = env.translation_oracle.get_active()
     if active is None:
         return False
-    expected_ptw = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
-    responded_ptw = {tuple(map(int, request)) for request in active["responded_ptw_request_keys"]}
-    return expected_ptw.issubset(responded_ptw) and bool(active["observed_normal_cfvec_pages"])
+    return ptw_responses_complete(active) and bool(active["observed_normal_cfvec_pages"])
 
 
 def _all_stage_scenario(scenario_id: str) -> TranslationScenario:

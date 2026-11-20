@@ -10,7 +10,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig, scenario_rng
+from env.support import PmpPmaConfig, fold_pc, scenario_rng
 from tests.py.support.cfvec import iter_valid_cfvec_slots, read_cfvec_exception_bits
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
@@ -29,6 +29,25 @@ _FAULT_BITS = {
     "instruction_guest_page_fault": 20,
     "instruction_page_fault": 12,
 }
+
+
+def assert_exact_oracle_fault(env, *, pc: int, expected_fault: str) -> None:
+    exception_records = [
+        record
+        for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] == "cfvec_exception"
+    ]
+    assert any(
+        record["fault"] == expected_fault
+        and (
+            int(record["pc"]) == int(pc)
+            or (
+                int(record["pc"]) == 0
+                and int(record["folded_pc"]) == fold_pc(pc)
+            )
+        )
+        for record in exception_records
+    ), exception_records
 
 
 _CROSS_PAGE_FAULT_CASES = (

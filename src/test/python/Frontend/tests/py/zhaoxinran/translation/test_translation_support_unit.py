@@ -1,13 +1,66 @@
 import random
+from types import SimpleNamespace
 
 import pytest
 
 from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationSectorLane
-from env.support import PC_MEMORY, PmpPmaConfig, RandomPc
+from env.support import PC_MEMORY, PmpPmaConfig, RandomPc, fold_pc
+from tests.py.support.translation_faults import assert_exact_oracle_fault
 from tests.py.support.translation_scenarios import (
+    ptw_responses_complete,
     randomize_ptw_response,
     relocate_translation_entry,
 )
+
+
+@pytest.mark.parametrize(
+    "responses,required_complete,all_complete",
+    (
+        ([], False, False),
+        ([(1, 3, 0)], True, False),
+        ([(1, 3, 0), (2, 3, 0)], True, False),
+        ([(1, 3, 0), (2, 3, 1)], True, True),
+    ),
+)
+def test_ptw_responses_complete(responses, required_complete, all_complete) -> None:
+    active = {
+        "expected_ptw_requests": [
+            {"vpn": 1, "s2xlate": 3, "get_gpa": 0},
+            {"vpn": 2, "s2xlate": 3, "get_gpa": 1},
+        ],
+        "required_ptw_request_keys": [(1, 3, 0)],
+        "responded_ptw_request_keys": responses,
+    }
+    assert ptw_responses_complete(active, required_only=True) is required_complete
+    assert ptw_responses_complete(active) is all_complete
+
+
+@pytest.mark.parametrize(
+    "kind,correct_fault,record_pc,correct_fold,accepted",
+    (
+        ("cfvec_exception", True, 0x8020_0F00, False, True),
+        ("cfvec_exception", True, 0, True, True),
+        ("cfvec_exception", True, 0, False, False),
+        ("cfvec_exception", True, 0x8020_0F02, True, False),
+        ("cfvec_exception", False, 0x8020_0F00, True, False),
+        ("cfvec_normal", True, 0x8020_0F00, True, False),
+    ),
+)
+def test_assert_exact_oracle_fault(kind, correct_fault, record_pc, correct_fold, accepted) -> None:
+    pc = 0x8020_0F00
+    expected_fault = "instruction_page_fault"
+    record = {
+        "kind": kind,
+        "fault": expected_fault if correct_fault else "instruction_access_fault",
+        "pc": record_pc,
+        "folded_pc": fold_pc(pc) ^ int(not correct_fold),
+    }
+    env = SimpleNamespace(translation_oracle=SimpleNamespace(get_stats=lambda: {"records": [record]}))
+    if accepted:
+        assert_exact_oracle_fault(env, pc=pc, expected_fault=expected_fault)
+    else:
+        with pytest.raises(AssertionError):
+            assert_exact_oracle_fault(env, pc=pc, expected_fault=expected_fault)
 
 
 @pytest.mark.parametrize("relocate_gpa", (False, True))

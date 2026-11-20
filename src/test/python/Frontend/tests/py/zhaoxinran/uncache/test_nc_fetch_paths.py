@@ -30,6 +30,7 @@ from tests.py.support.dut_support import (
     _wait_for_req_delta,
     _wait_for_resp_delta,
 )
+from tests.py.support.translation_scenarios import ptw_responses_complete
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.zhaoxinran.support.uncache import (
     prepare_sv39_cfi_stream,
@@ -1140,15 +1141,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
 
         for _ in range(6000):
             active = env.translation_oracle.get_active()
-            expected_keys = {
-                (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-                for request in active["expected_ptw_requests"]
-            }
-            responded_keys = {
-                tuple(int(value) for value in key)
-                for key in active["responded_ptw_request_keys"]
-            }
-            if expected_keys.issubset(responded_keys):
+            if ptw_responses_complete(active):
                 break
             env.step(1)
         else:

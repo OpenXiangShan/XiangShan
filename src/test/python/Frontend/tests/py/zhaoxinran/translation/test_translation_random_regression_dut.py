@@ -16,6 +16,7 @@ from env.sequences import (
     TranslationScenarioSequence,
 )
 from env.support import PmpPmaConfig, record_scenario
+from tests.py.support.translation_scenarios import ptw_responses_complete
 from tests.py.zhaoxinran.support.translation import randomize_permission_entry, randomize_translation_layout
 
 
@@ -60,7 +61,6 @@ def _translation_complete(env) -> bool:
     active = env.translation_oracle.get_active()
     if active is None:
         return False
-    expected_ptw_requests = set(active["required_ptw_request_keys"])
     if active["expected_path"] == "fault":
         required_gpaddr = next(
             (
@@ -72,7 +72,7 @@ def _translation_complete(env) -> bool:
         )
         return bool(
             active["fault_seen"]
-            and expected_ptw_requests.issubset(active["responded_ptw_request_keys"])
+            and ptw_responses_complete(active, required_only=True)
             and (required_gpaddr is None or any(
                 int(write["gpaddr"]) == required_gpaddr for write in active["observed_gpaddr_writes"]
             ))
@@ -85,7 +85,7 @@ def _translation_complete(env) -> bool:
         if bool(outcome.get("ok", False))
     }
     return bool(
-        expected_ptw_requests.issubset(active["responded_ptw_request_keys"])
+        ptw_responses_complete(active, required_only=True)
         and len(active["expected_fetches"]) == len(active["observed_fetch_pas"])
         and expected_cfvec_pages.issubset(active["observed_normal_cfvec_pages"])
         and int(active["observed_normal_cfvec_count"]) >= 2

@@ -14,6 +14,7 @@ from env.sequences import (
 from env.support import PcMapping, PmpPmaConfig, random_pc, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until
 from tests.py.support.translation_scenarios import (
+    ptw_responses_complete,
     randomize_ptw_response,
 )
 
@@ -111,14 +112,7 @@ def translation_complete(env) -> bool:
     active = env.translation_oracle.get_active()
     if active is None:
         return False
-    expected_ptw = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
-    responded_ptw = {tuple(map(int, request)) for request in active["responded_ptw_request_keys"]}
-    return expected_ptw.issubset(responded_ptw) and len(active["expected_fetches"]) == len(
-        active["observed_fetch_pas"]
-    )
+    return ptw_responses_complete(active) and len(active["expected_fetches"]) == len(active["observed_fetch_pas"])
 
 
 def _context_entry(scenario_key: str):
