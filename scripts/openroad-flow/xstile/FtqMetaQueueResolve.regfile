@@ -1,0 +1,21 @@
+# FtqMetaQueueResolve: XiangShan's Ftq keeps the BPU resolve (training) metadata in a Reg(Vec(FtqSize, ...)); patch 0002 on
+# the XiangShan archive makes it this module (utils.RegVecFile), one write at the
+# BPU's pointer and 1 read(s) by index. 64 words of 954 bits; the RTL
+# module is the simulation model.
+module FtqMetaQueueResolve
+words 64
+bits 954
+banks 1
+clock clock
+read io_readPorts_0_addr io_readPorts_0_data
+write io_writePorts_0_addr io_writePorts_0_data io_writePorts_0_wen
+cell flop DFFHQNx1_ASAP7_75t_R
+cell and2 AND2x2_ASAP7_75t_R
+cell or2 OR2x2_ASAP7_75t_R
+cell ao22 AO22x2_ASAP7_75t_R
+cell inv INVx1_ASAP7_75t_R
+cell tap TAPCELL_ASAP7_75t_R
+pin_layer M4
+tap_columns 8
+service_sites 40
+bit_folds 8

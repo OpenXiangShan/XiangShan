@@ -1,0 +1,53 @@
+# IntRegFile: XiangShan's integer register file, 224 words of 64 bits in
+# four banks of 56, with 12 read and 9 write ports. The RTL is a
+# RegfileBank: every read port carries one 6-bit address and one 64-bit
+# data bus per bank, and the bank mux sits outside in the data path;
+# writes carry the full 8-bit address. `read_banked` gives the per-bank
+# buses in bank order, and the array's banks are those banks, two wide
+# and two tall: 406 x 243 um instead of an 812 um strip.
+module IntRegFile
+mode netlist
+words 224
+bits 64
+banks 4
+clock clock
+read_banked io_readPorts_0_addr_0 io_readPorts_0_data_0 io_readPorts_0_addr_1 io_readPorts_0_data_1 io_readPorts_0_addr_2 io_readPorts_0_data_2 io_readPorts_0_addr_3 io_readPorts_0_data_3
+read_banked io_readPorts_1_addr_0 io_readPorts_1_data_0 io_readPorts_1_addr_1 io_readPorts_1_data_1 io_readPorts_1_addr_2 io_readPorts_1_data_2 io_readPorts_1_addr_3 io_readPorts_1_data_3
+read_banked io_readPorts_2_addr_0 io_readPorts_2_data_0 io_readPorts_2_addr_1 io_readPorts_2_data_1 io_readPorts_2_addr_2 io_readPorts_2_data_2 io_readPorts_2_addr_3 io_readPorts_2_data_3
+read_banked io_readPorts_3_addr_0 io_readPorts_3_data_0 io_readPorts_3_addr_1 io_readPorts_3_data_1 io_readPorts_3_addr_2 io_readPorts_3_data_2 io_readPorts_3_addr_3 io_readPorts_3_data_3
+read_banked io_readPorts_4_addr_0 io_readPorts_4_data_0 io_readPorts_4_addr_1 io_readPorts_4_data_1 io_readPorts_4_addr_2 io_readPorts_4_data_2 io_readPorts_4_addr_3 io_readPorts_4_data_3
+read_banked io_readPorts_5_addr_0 io_readPorts_5_data_0 io_readPorts_5_addr_1 io_readPorts_5_data_1 io_readPorts_5_addr_2 io_readPorts_5_data_2 io_readPorts_5_addr_3 io_readPorts_5_data_3
+read_banked io_readPorts_6_addr_0 io_readPorts_6_data_0 io_readPorts_6_addr_1 io_readPorts_6_data_1 io_readPorts_6_addr_2 io_readPorts_6_data_2 io_readPorts_6_addr_3 io_readPorts_6_data_3
+read_banked io_readPorts_7_addr_0 io_readPorts_7_data_0 io_readPorts_7_addr_1 io_readPorts_7_data_1 io_readPorts_7_addr_2 io_readPorts_7_data_2 io_readPorts_7_addr_3 io_readPorts_7_data_3
+read_banked io_readPorts_8_addr_0 io_readPorts_8_data_0 io_readPorts_8_addr_1 io_readPorts_8_data_1 io_readPorts_8_addr_2 io_readPorts_8_data_2 io_readPorts_8_addr_3 io_readPorts_8_data_3
+read_banked io_readPorts_9_addr_0 io_readPorts_9_data_0 io_readPorts_9_addr_1 io_readPorts_9_data_1 io_readPorts_9_addr_2 io_readPorts_9_data_2 io_readPorts_9_addr_3 io_readPorts_9_data_3
+read_banked io_readPorts_10_addr_0 io_readPorts_10_data_0 io_readPorts_10_addr_1 io_readPorts_10_data_1 io_readPorts_10_addr_2 io_readPorts_10_data_2 io_readPorts_10_addr_3 io_readPorts_10_data_3
+read_banked io_readPorts_11_addr_0 io_readPorts_11_data_0 io_readPorts_11_addr_1 io_readPorts_11_data_1 io_readPorts_11_addr_2 io_readPorts_11_data_2 io_readPorts_11_addr_3 io_readPorts_11_data_3
+write io_writePorts_0_addr io_writePorts_0_data io_writePorts_0_wen
+write io_writePorts_1_addr io_writePorts_1_data io_writePorts_1_wen
+write io_writePorts_2_addr io_writePorts_2_data io_writePorts_2_wen
+write io_writePorts_3_addr io_writePorts_3_data io_writePorts_3_wen
+write io_writePorts_4_addr io_writePorts_4_data io_writePorts_4_wen
+write io_writePorts_5_addr io_writePorts_5_data io_writePorts_5_wen
+write io_writePorts_6_addr io_writePorts_6_data io_writePorts_6_wen
+write io_writePorts_7_addr io_writePorts_7_data io_writePorts_7_wen
+write io_writePorts_8_addr io_writePorts_8_data io_writePorts_8_wen
+# The RTL registers each bank's read address (io_readPorts_N_data_K_REG),
+# interleaves the banks (bank k's entry l is word l * 4 + k) and has no
+# register for word 0, which reads zero (x0). The flops carry the RTL's
+# register names.
+read_latency 1
+bank_order interleaved
+zero_word 0
+store_name mem_{word}[{bit}]
+read_reg_name io_readPorts_{port}_data_{bank}_REG[{bit}]
+cell flop DFFHQNx1_ASAP7_75t_R
+cell and2 AND2x2_ASAP7_75t_R
+cell or2 OR2x2_ASAP7_75t_R
+cell ao22 AO22x2_ASAP7_75t_R
+cell inv INVx1_ASAP7_75t_R
+cell tap TAPCELL_ASAP7_75t_R
+pin_layer M4
+tap_columns 8
+service_sites 40
+bank_columns 2

@@ -1,0 +1,53 @@
+# RobEntryFile: the reorder buffer's entry payload, the fields written once
+# at enqueue and read at commit and walk (fflagsWen, commitType, ftqIdx,
+# ftqOffset, isRVC, needVTB, isHls, rfWen, fpWen, dirtyVs), as XiangShan
+# patch 0008 extracts them from the RobEntryCells into a utils.RegVecFile.
+# 352 words; RenameWidth (8) write ports at the allocate pointers; one read
+# port per bank and line (8 banks x this/next line = 16). In eight banks of
+# 44 words, one wide and eight tall. With grouped generate_ram (patches
+# 0163-0170) four wide is 710.5 um; one wide is an array of 228.3 x
+# 381.2 um, the height of RenameBufferFile's (215.6 x 381.2 um), which has
+# no column knob. The plan gives it a 232.4 x 385.8 um outline in the
+# parent: ORFS patch 0172's core around the array, one site and one row
+# pair larger, plus a 2 um margin on each side. Two wide has not been
+# built.
+module RobEntryFile
+mode netlist
+words 352
+bits 21
+banks 8
+bank_columns 1
+clock clock
+read io_readPorts_0_addr io_readPorts_0_data
+read io_readPorts_1_addr io_readPorts_1_data
+read io_readPorts_2_addr io_readPorts_2_data
+read io_readPorts_3_addr io_readPorts_3_data
+read io_readPorts_4_addr io_readPorts_4_data
+read io_readPorts_5_addr io_readPorts_5_data
+read io_readPorts_6_addr io_readPorts_6_data
+read io_readPorts_7_addr io_readPorts_7_data
+read io_readPorts_8_addr io_readPorts_8_data
+read io_readPorts_9_addr io_readPorts_9_data
+read io_readPorts_10_addr io_readPorts_10_data
+read io_readPorts_11_addr io_readPorts_11_data
+read io_readPorts_12_addr io_readPorts_12_data
+read io_readPorts_13_addr io_readPorts_13_data
+read io_readPorts_14_addr io_readPorts_14_data
+read io_readPorts_15_addr io_readPorts_15_data
+write io_writePorts_0_addr io_writePorts_0_data io_writePorts_0_wen
+write io_writePorts_1_addr io_writePorts_1_data io_writePorts_1_wen
+write io_writePorts_2_addr io_writePorts_2_data io_writePorts_2_wen
+write io_writePorts_3_addr io_writePorts_3_data io_writePorts_3_wen
+write io_writePorts_4_addr io_writePorts_4_data io_writePorts_4_wen
+write io_writePorts_5_addr io_writePorts_5_data io_writePorts_5_wen
+write io_writePorts_6_addr io_writePorts_6_data io_writePorts_6_wen
+write io_writePorts_7_addr io_writePorts_7_data io_writePorts_7_wen
+cell flop DFFHQNx1_ASAP7_75t_R
+cell and2 AND2x2_ASAP7_75t_R
+cell or2 OR2x2_ASAP7_75t_R
+cell ao22 AO22x2_ASAP7_75t_R
+cell inv INVx1_ASAP7_75t_R
+cell tap TAPCELL_ASAP7_75t_R
+pin_layer M4
+tap_columns 8
+service_sites 40

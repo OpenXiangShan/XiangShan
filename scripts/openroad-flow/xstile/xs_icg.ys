@@ -1,0 +1,16 @@
+# Map XiangShan's ClockGate onto ASAP7's integrated clock gate.
+#
+# Runs through SYNTH_POST_HIERARCHY_SCRIPTS (patches/0068), after
+# hierarchy and before flatten: the only window in which a ClockGate
+# instance is still a cell of its own type.
+#
+# chtype first, because the slang frontend elaborates one module per
+# instance and names it after the instance path (ClockGate$<path>), so
+# there is no cell of type ClockGate for techmap to match and a bare
+# techmap -map maps nothing. chtype folds the copies back onto the one
+# name xs_icg_map.v defines. The VeeR flow does the same for its
+# clockhdr (bazel-orfs, test/coremark_joule/flow/cmj_veer_icg.ys).
+#
+# SPDX-License-Identifier: Apache-2.0
+chtype -set ClockGate t:ClockGate$*
+techmap -map xstile/xs_icg_map.v

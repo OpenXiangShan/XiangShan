@@ -1,0 +1,49 @@
+# VfRegFile: XiangShan's vector register file, 128 words of 128 bits with
+# 14 read and 7 write ports. Not banked in the RTL: each read port is one
+# 7-bit address and one 128-bit bus. It is the last flop register file of
+# the core at this scale, and it lives inside the VecRegionModule block,
+# whose config names this spec. Four banks stacked in one column: a
+# 128-bit word makes a bank 400 um wide, so side by side the four were a
+# 1.6 mm strip; stacked, the macro is 404 x 279 um.
+module VfRegFile
+words 128
+bits 128
+banks 4
+clock clock
+read io_readPorts_0_addr io_readPorts_0_data
+read io_readPorts_1_addr io_readPorts_1_data
+read io_readPorts_2_addr io_readPorts_2_data
+read io_readPorts_3_addr io_readPorts_3_data
+read io_readPorts_4_addr io_readPorts_4_data
+read io_readPorts_5_addr io_readPorts_5_data
+read io_readPorts_6_addr io_readPorts_6_data
+read io_readPorts_7_addr io_readPorts_7_data
+read io_readPorts_8_addr io_readPorts_8_data
+read io_readPorts_9_addr io_readPorts_9_data
+read io_readPorts_10_addr io_readPorts_10_data
+read io_readPorts_11_addr io_readPorts_11_data
+read io_readPorts_12_addr io_readPorts_12_data
+read io_readPorts_13_addr io_readPorts_13_data
+write io_writePorts_0_addr io_writePorts_0_data io_writePorts_0_wen
+write io_writePorts_1_addr io_writePorts_1_data io_writePorts_1_wen
+write io_writePorts_2_addr io_writePorts_2_data io_writePorts_2_wen
+write io_writePorts_3_addr io_writePorts_3_data io_writePorts_3_wen
+write io_writePorts_4_addr io_writePorts_4_data io_writePorts_4_wen
+write io_writePorts_5_addr io_writePorts_5_data io_writePorts_5_wen
+write io_writePorts_6_addr io_writePorts_6_data io_writePorts_6_wen
+# The RTL registers each read address (io_readPorts_N_data_REG) and
+# reads from the register; the flops carry the RTL's register names.
+read_latency 1
+store_name mem_{word}[{bit}]
+read_reg_name io_readPorts_{port}_data_REG[{bit}]
+cell flop DFFHQNx1_ASAP7_75t_R
+cell and2 AND2x2_ASAP7_75t_R
+cell or2 OR2x2_ASAP7_75t_R
+cell ao22 AO22x2_ASAP7_75t_R
+cell inv INVx1_ASAP7_75t_R
+cell tap TAPCELL_ASAP7_75t_R
+pin_layer M4
+tap_columns 8
+service_sites 40
+banks 4
+bank_columns 1
