@@ -63,7 +63,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
   val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent)
+  val perfEventsHc        = Vec(numL2PerfEvents, new PerfEvent)
   val retiredInstr = UInt(7.W)
   val ctrlInfo = new Bundle {
     val robFull   = Bool()
@@ -743,10 +743,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     perfEventscounten(i) := (perfEvents(i)(63,60) & privilegeModeOH).orR
   }
 
-  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
-  for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
-    hpmEvents(i) := csrio.perf.perfEventsHc(i)
-  }
+  val hpmEvents = csrio.perf.perfEventsHc
+  require(hpmEvents.length == numL2PerfEvents, "CSR must receive the complete L2 event pool, including noEvent")
 
   // print perfEvents
   val allPerfEvents = hpmEvents.map(x => (s"Hc", x.value))
