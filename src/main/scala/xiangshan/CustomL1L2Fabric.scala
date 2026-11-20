@@ -41,7 +41,8 @@ class CustomL1L2Fabric(
   specChannels: Int = 0,
   specOwners: Int = 0,
   specIdBits: Int = 0,
-  specBlockBytes: Int = 0
+  specBlockBytes: Int = 0,
+  specMissPreview: Boolean = false
 )(implicit p: Parameters) extends LazyModule {
 
   require(specChannels == 0 || (specOwners > 0 && specIdBits > 0 && specBlockBytes > 0 && a.depth >= 2))
@@ -94,8 +95,12 @@ class CustomL1L2Fabric(
     override def circuitIdentity: Boolean = false
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new FabricImp
+
+  class FabricImp extends LazyModuleImp(CustomL1L2Fabric.this) {
     require(node.out.nonEmpty, "CustomL1L2Fabric requires at least one downstream connection")
+    require(!specMissPreview || specChannels > 0)
+    val specPreview = Option.when(specMissPreview)(IO(Output(Vec(node.out.size, new xscache.coupledL2.SpecMissAPreview))))
 
     val arbitrationOutputs = node.out.map { case (downstream, downstreamEdge) =>
       (Wire(TLBundle(downstream.params)), downstreamEdge)
@@ -203,6 +208,7 @@ class CustomL1L2Fabric(
           matchedBySlice(slice)(w) := buffer.io.matched(w)
         }
         downstream.a <> buffer.io.deq
+        specPreview.foreach(_(slice) := buffer.io.preview)
         XSPerfAccumulate(s"specmiss_a_fire_$slice", buffer.io.deq.fire && buffer.io.deq_speculative)
         arbitrationOut.b <> b(downstream.b)
         downstream.c <> c(arbitrationOut.c)
