@@ -1,4 +1,4 @@
-"""Negative contracts for BIN-947's same-transaction FTQ writeback."""
+"""Contracts for BIN-944/BIN-947 same-transaction FTQ writeback."""
 
 import pytest
 
@@ -43,8 +43,9 @@ def test_second_owner_matches_both_raw_second_and_cross_block_rvi(tmp_path, raw_
     recorder, _env, dut, _memory = _make_recorder(tmp_path)
     _drive(recorder, dut, raw_owner=raw_owner, cross=cross)
     _sample_predchecker_v3(recorder, dut, 11)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_046")
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_049")
-    detail = recorder.hit_detail_by_bin_id("BIN-947")
+    detail = recorder.hit_detail_by_bin_id("BIN-944")
     assert detail is not None
     evidence = detail["evidence"][-1]["observations"]
     assert evidence["checkpoint_passed"]
@@ -70,6 +71,7 @@ def test_second_owner_rejects_missing_wrong_or_unwritten_payload(tmp_path, field
     else:
         dut.set(_PREFIX + field, value)
     _sample_predchecker_v3(recorder, dut, 11)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_046")
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_049")
     assert any(r.get("event") == "ifu_second_owner_writeback_rejected" for r in recorder.risk_observations)
 
@@ -78,4 +80,5 @@ def test_second_owner_rejects_stale_checker_cycle(tmp_path):
     recorder, _env, dut, _memory = _make_recorder(tmp_path)
     _drive(recorder, dut, raw_owner=0, cross=1)
     _sample_predchecker_v3(recorder, dut, 12)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_046")
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_049")

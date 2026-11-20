@@ -22,7 +22,7 @@ from tests.py.jiabowen.test_ifu_predchecker_v3_dut import (
 )
 
 
-@pytest.mark.funcov_bins("BIN-947")
+@pytest.mark.funcov_bins("BIN-944", "BIN-947")
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires real Frontend DUT")
 def test_second_block_non_cfi_redirect_writes_second_ftq_entry(env):
     _load_and_reset(env, branch_halfword=13, rvi_jal=True)
@@ -162,6 +162,7 @@ def test_second_block_non_cfi_redirect_writes_second_ftq_entry(env):
     delivered = env.monitor.observations[start:]
     assert any(item.pc == fault_pc and item.instr == _ADDI_X0_X0_0 for item in delivered)
     assert any(item.pc == target_pc for item in delivered)
-    spec = recorder.definition_by_bin_id["BIN-947"]
-    assert recorder.key_hit(spec.coverage_group, spec.bin_name, coverpoint=spec.coverpoint)
+    for bin_id in ("BIN-944", "BIN-947"):
+        spec = recorder.definition_by_bin_id[bin_id]
+        assert recorder.key_hit(spec.coverage_group, spec.bin_name, coverpoint=spec.coverpoint)
     assert not env.monitor.get_errors()

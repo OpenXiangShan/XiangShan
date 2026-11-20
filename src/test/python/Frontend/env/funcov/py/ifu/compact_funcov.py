@@ -3149,8 +3149,9 @@ def _check_second_owner_writeback(recorder, dut, cycle, pending, checked_redirec
                     source_blocks=blocks, writeback=values, expected_writeback=expected,
                     missing_probes=missing, signal_paths=paths, checkpoint_passed=bool(accepted))
     if accepted:
-        mark_owner_v3_checked(recorder, "BIN-947", cycle, evidence,
-                              producer="ifu_second_owner_writeback_sampler")
+        for owner_bin_id in ("BIN-944", "BIN-947"):
+            mark_owner_v3_checked(recorder, owner_bin_id, cycle, evidence,
+                                  producer="ifu_second_owner_writeback_sampler")
     else:
         _record_preclip_witness_risk_once(recorder, cycle, "ifu_second_owner_writeback_rejected", **evidence)
 

@@ -34,7 +34,6 @@ _PREDICTOR_WARMUP_OWNER_BINS = (
     "BIN-938",
     "BIN-939",
     "BIN-941",
-    "BIN-944",
     "BIN-945",
     "BIN-946",
     "BIN-966",
