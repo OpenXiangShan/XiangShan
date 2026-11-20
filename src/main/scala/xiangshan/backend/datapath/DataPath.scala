@@ -18,7 +18,8 @@ import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemSche
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.mem.{LqPtr, SqPtr}
 
@@ -567,6 +568,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
   is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.common.fuType))
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
+  // Retries must not replenish younger stores while the ROB head waits for a store port.
+  val storeHeadPrev = RegNext(io.robPendingPtr)
+  val storeHeadChanged = storeHeadPrev =/= io.robPendingPtr
+  // Bound store-head starvation regardless of the translation or replay cause.
+  val storeHeadStallCycles = RegInit(0.U(12.W))
+  val storeHeadOnly = RegInit(false.B)
+  when (storeHeadChanged || io.flush.valid || !io.robHeadIsStore) {
+    storeHeadStallCycles := 0.U
+    storeHeadOnly := false.B
+  }.otherwise {
+    when (!storeHeadStallCycles.andR) { storeHeadStallCycles := storeHeadStallCycles + 1.U }
+    when (storeHeadStallCycles.andR) { storeHeadOnly := true.B }
+  }
+  XSPerfAccumulate("store_head_only_cycles", storeHeadOnly)
+
+  val s1_storeNotHead = WireInit(VecInit(Seq.fill(toFlattenExu.size)(false.B)))
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -576,6 +593,14 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s1_data = s1_toExuData(i)(j)
       val s1_addrOH = s1_addrOHs(i)(j)
       val s0 = fromIQ(i)(j) // s0
+      val flatIdx = fromIQ.take(i).map(_.size).sum + j
+      if (s0.bits.exuParams.hasStoreAddrExu || s0.bits.exuParams.hasVStoreFu) {
+        // Compare at OG0; OG1 only gates with registered single-bit results.
+        val storeNotHead = RegEnable(
+          (FuType.isStore(s0.bits.common.fuType) || FuType.isVStore(s0.bits.common.fuType)) &&
+            (s0.bits.common.robIdx =/= io.robPendingPtr), false.B, s0.valid)
+        s1_storeNotHead(flatIdx) := storeNotHead
+      }
       PerfCCT.updateInstPos(s0.bits.common.debug_seqNum, PerfCCT.InstPos.AtIssueArb.id.U, s0.valid, clock, reset)
       PerfCCT.updateInstPos(s1_data.debug_seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, s1_valid, clock, reset)
 
@@ -672,8 +697,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       // refs
       val sinkData = toExu(i)(j).bits
       // assign
-      toExu(i)(j).valid := s1_toExuValid(i)(j)
-      s1_toExuReady(i)(j) := toExu(i)(j).ready
+      val flatIdx = toExu.take(i).map(_.size).sum + j
+      val storeBlocked = storeHeadOnly && s1_storeNotHead(flatIdx)
+      toExu(i)(j).valid := s1_toExuValid(i)(j) && !storeBlocked
+      s1_toExuReady(i)(j) := toExu(i)(j).ready && !storeBlocked
+      XSPerfAccumulate(s"store_head_og1_block_${i}_${j}", s1_toExuValid(i)(j) && storeBlocked)
       sinkData := s1_toExuData(i)(j)
       // s1Reg --[Ctrl]--> exu(s1) ---------- end
 
@@ -885,6 +913,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val hartId = Input(UInt(8.W))
 
   val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
+
+  val robPendingPtr = Input(new RobPtr)
+  val robHeadIsStore = Input(Bool())
 
   val wbConfictRead = Input(MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => x.genWbConflictBundle())))))
 
