@@ -20,7 +20,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.GuardedPc
-import xiangshan.frontend.Pc
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
@@ -62,23 +61,14 @@ class IttagePrediction(implicit p: Parameters) extends IttageBundle {
 }
 
 class IttageMeta(implicit p: Parameters) extends IttageBundle {
-  val valid: Bool = Bool()
+  // The hit flag controls training reads; the index tracks provider changes.
+  // Counters, targets and allocation candidates are re-read during training.
+  val provider: Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
 
-  val provider:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
-  val altProvider:       Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
-  val altDiffers:        Bool            = Bool()
-  val providerUsefulCnt: SaturateCounter = UsefulCounter()
-  val providerCnt:       SaturateCounter = ConfidenceCounter()
-  val altProviderCnt:    SaturateCounter = ConfidenceCounter()
-  val allocate:          Valid[UInt]     = Valid(UInt(log2Ceil(NumTables).W))
-  val providerTarget:    Pc              = Pc()
-  val altProviderTarget: Pc              = Pc()
-
+  // Associate training logs with the original prediction.
   val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 
-  override def toPrintable =
-    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCnt u:$providerUsefulCnt tar:${Hexadecimal(providerTarget.toUInt)}), " +
-      p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCnt, tar:${Hexadecimal(altProviderTarget.toUInt)})"
+  override def toPrintable = p"pvdr(v:${provider.valid} num:${provider.bits})"
 }
 
 class IttageWriteReq(tagLen: Int, nRows: Int, ittageEntrySz: Int)(implicit p: Parameters) extends WriteReqBundle
