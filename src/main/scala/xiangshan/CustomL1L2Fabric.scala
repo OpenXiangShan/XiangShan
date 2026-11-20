@@ -21,7 +21,7 @@ import xiangshan.cache.SpecMissFabricIO
 /**
   * The private L1-to-L2 TileLink fabric.
   *
-  * Ordinary A takes priority over tentative Acquires at each DCache input.
+  * Ordinary A takes priority over tentative Acquires at each DCache input and L2 bank.
   * Accepted candidates wait in the destination bank's A queue for S2.
   *
   * The nexus keeps all protocol duties of TLXbar (global source IDs, B/D return routing,
@@ -137,6 +137,21 @@ class CustomL1L2Fabric(
         Cat(lanes & Fill(width - 1, !ordinary), true.B)
       }
 
+      // Use the same negotiated address sets as TLXbar. Only the bits that distinguish
+      // banks are needed. Use the original A.valid so backpressure cannot hide a contender.
+      val bankAddresses = node.out.map(_._2.manager.managers.flatMap(_.address))
+      val bankMask = AddressDecoder(bankAddresses)
+      val bankSelect = bankAddresses.map { addresses =>
+        val routes = AddressSet.unify(addresses.map(_.widen(~bankMask)).distinct)
+        (addr: UInt) => routes.map(_.contains(addr)).reduce(_ || _)
+      }
+      val bankHasOrdinary = bankSelect.map { selects =>
+        node.in.map { case (in, edge) => in.a.valid && selects(edge.address(in.a.bits)) }.reduce(_ || _)
+      }
+      val bankAvailable = spec.candidate.map { request =>
+        !Mux1H(bankSelect.map(_(request.bits.paddr)), bankHasOrdinary)
+      }
+
       val candidateFire = Wire(Vec(specOwners, Bool()))
       val candidateReady = Wire(Vec(specChannels, Vec(specOwners, Bool())))
       val candidateAccepted = Wire(Vec(specChannels, Vec(specOwners, Bool())))
@@ -149,7 +164,7 @@ class CustomL1L2Fabric(
           val candidates = (0 until specOwners).map { w =>
             val request = spec.candidate(w)
             val candidate = Wire(Decoupled(new TLBundleA(input.params)))
-            candidate.valid := request.valid && request.bits.channel === ch.U
+            candidate.valid := request.valid && request.bits.channel === ch.U && bankAvailable(w)
             candidate.bits := 0.U.asTypeOf(candidate.bits)
             candidate.bits.opcode := TLMessages.AcquireBlock
             candidate.bits.param := request.bits.grow
@@ -165,7 +180,7 @@ class CustomL1L2Fabric(
             candidate.bits.user.lift(MemBackTypeMM).foreach(_ := true.B)
             candidate.bits.user.lift(MemPageTypeNC).foreach(_ := false.B)
             candidate.bits.echo.lift(IsKeywordKey).foreach(_ := false.B)
-            candidateReady(ch)(w) := candidate.ready
+            candidateReady(ch)(w) := candidate.ready && bankAvailable(w)
             candidateAccepted(ch)(w) := candidate.fire
             candidate
           }
