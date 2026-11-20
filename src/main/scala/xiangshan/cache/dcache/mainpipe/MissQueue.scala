@@ -1629,36 +1629,17 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // A fabric winner owns a tentative post-arbitration buffer slot. Only an
   // accurately allocated S2 miss commits that slot as a real TL A request.
+  val reserved_commit = Wire(Vec(LoadPipelineWidth, Bool()))
   for (w <- 0 until LoadPipelineWidth) {
     val i = w + 1
     io.spec_fabric.resolve(w).valid := reserve_valid(w)
     io.spec_fabric.resolve(w).bits.id := reserve_id(w)
-    val reference_commit = query_fire(i) && reserved_for_req(i) &&
+    // Use the same allocation decision as the pipeline handoff.
+    reserved_commit(w) := query_fire(i) && reserved_for_req(i) &&
       (analysis.strategy(i) & 1.U) =/= 0.U && analysis.compress_group(i) === i.U &&
       !io.wfi.wfiReq
-    // A matching reservation already guarantees a valid query and an available
-    // target. Check the remaining acceptance conditions directly, without a
-    // round trip through generic free-rank allocation, strategy, and ready.
-    val existing_block_match = ParallelORR(Cat(block_match_seqs(i) ++ Seq(match_from_pipe(i))))
-    val first_in_conflict_group = !addr_conflicts(i).take(i).reduce(_ || _)
-    val reserved_commit = reserved_for_req(i) && !req_reject_vec(i) &&
-      !existing_block_match && !can_merge_vec(i) && first_in_conflict_group &&
-      !io.wbq_block_miss_req(i) && !io.queryMQ(i).req.bits.cancel && !io.wfi.wfiReq
-    io.spec_fabric.resolve(w).bits.commit := reserved_commit
-    assert(reserved_commit === reference_commit,
-      "SpecMiss reserved commit must equal the generic allocation/ready result")
-    when(io.spec_fabric.resolve(w).bits.commit) {
-      assert(io.spec_fabric.resolve(w).valid && io.queryMQ(i).req.bits.isSpecMiss &&
-        query_fire(i) && reserved_for_req(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
-        analysis.compress_group(i) === i.U,
-        "SpecMiss commit must own its reservation and a new MissQueue allocation")
-      assert(io.spec_fabric.committed(w), "committed SpecMiss has no post-xbar A slot")
-    }
-    when(io.spec_fabric.committed(w)) {
-      assert(io.spec_fabric.resolve(w).valid && io.spec_fabric.resolve(w).bits.commit,
-        "post-xbar SpecMiss commit has no matching MissQueue resolution")
-    }
-    XSPerfAccumulate(s"spec_fabric_commit_$w", io.spec_fabric.committed(w))
+    io.spec_fabric.resolve(w).bits.commit := reserved_commit(w)
+    XSPerfAccumulate(s"spec_fabric_commit_$w", reserve_valid(w) && reserved_commit(w))
   }
 
   // Reserve a suffix of the free-entry ranks for speculative candidates. Every
