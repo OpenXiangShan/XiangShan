@@ -139,7 +139,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         axiMasterOrder              = EnumAXIMasterOrder.None,
         readCompDMT                 = false,
         writeCancelable             = false,
-        writeNoError                = true,
+        // report AXI SLVERR/DECERR as CHI NDERR: the core turns it into a precise load/store access fault (#6657)
+        writeNoError                = false,
         asEndpoint                  = false,
         acceptOrderEndpoint         = true,
         acceptMemAttrDevice         = true,
