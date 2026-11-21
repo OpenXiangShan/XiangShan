@@ -138,6 +138,7 @@ class MinimalConfig(n: Int = 1) extends Config(
               ),
               utageParameters = MicroTageParameters(
                 TableInfos = Seq(
+                  new MicroTageInfo(512, 5, 5, 15),
                   new MicroTageInfo(512, 6, 6, 15),
                   new MicroTageInfo(512, 12, 6, 15)
                 ),

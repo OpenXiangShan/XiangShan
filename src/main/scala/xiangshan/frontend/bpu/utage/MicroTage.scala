@@ -57,7 +57,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a0_indexFoldedPathHist = io.normalPathHist
 
   /* *** submodules *** */
-  private val tables = TableInfos.zipWithIndex.map {
+  private val tables = TableInfos.tail.zipWithIndex.map {
     case (info, i) =>
       val t = Module(new MicroTageTable(
         numSets = info.NumSets,
@@ -71,7 +71,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))
   private val highTickCounter = RegInit(0.U((HighTickWidth + 1).W))
   private val a0_readIndex = VecInit.tabulate(NumTables) {
-    i => computeHashIdx(a0_indexPc, a0_indexFoldedPathHist, TableInfos, i)
+    i => computeHashIdx(a0_indexPc, a0_indexFoldedPathHist, TableInfos, i + 1)
   }
   // Predict
   tables.zipWithIndex.foreach {
@@ -90,7 +90,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a1_readIndex   = RegEnable(a0_readIndex, a0_fire)
   private val a1_predRead    = Wire(Vec(NumTables, new MicroTageTablePred))
   for (i <- 0 until NumTables) {
-    val predTag = computeHashTag(io.newStartPc, io.s1PathHist, TableInfos, i)
+    val predTag = computeHashTag(io.newStartPc, io.s1PathHist, TableInfos, i + 1)
     a1_predRead(i).taken := a1_predEntries(i).takenCtr.isPositive
     a1_predRead(i).valid := a1_predEntries(i).valid
     a1_predRead(i).tag   := a1_predEntries(i).tag
@@ -143,7 +143,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val overridePosHitVec      = Mux(io.bpuS3Override, a3_posHitVec, a2_posHitVec)
   private val overridePredRead       = Wire(Vec(NumTables, new MicroTageTablePred))
   for (i <- 0 until NumTables) {
-    val predTag = computeHashTag(io.overrideStartPc.unGuard, io.overridePathHist, TableInfos, i)
+    val predTag = computeHashTag(io.overrideStartPc.unGuard, io.overridePathHist, TableInfos, i + 1)
     overridePredRead(i).taken       := overrideSourcePredRead(i).taken
     overridePredRead(i).valid       := overrideSourcePredRead(i).valid
     overridePredRead(i).tag         := overrideSourcePredRead(i).tag
@@ -333,7 +333,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   for (i <- 0 until NumTables) {
     tables(i).train.t0_trainIndex.valid := t0_fire
     tables(i).train.t0_trainIndex.bits  := t0_trainIdx(i)
-    val t1_trainTag     = computeHashTag(t1_trainStartPc, t1_foldedPathHistForTrain, TableInfos, i)
+    val t1_trainTag     = computeHashTag(t1_trainStartPc, t1_foldedPathHistForTrain, TableInfos, i + 1)
     val predCfiPosition = t1_trainRead(i).cfiPosition
     val canGetPosition  = t1_trainRead(i).canGetPosition
     // Use cfiPosition as an additional check to ensure the entry being updated
