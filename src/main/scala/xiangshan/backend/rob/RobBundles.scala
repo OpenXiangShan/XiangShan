@@ -76,7 +76,9 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val entryPairType = CompressType()
   val noCompressReason = UInt(2.W) // used for Perf
 
-  val uopState = UInt(PackedUopStateWidth.W)
+  // Remaining writeback uops per slot. Unpaired entries have no latter uops.
+  val formerNumWb = UInt(FormerNumWbWidth.W)
+  val latterNumWb = UInt(LatterNumWbWidth.W)
   val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
   val complexSlotHasDest = UInt(1.W)
   val entryHasStore = Bool()
@@ -126,62 +128,13 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
   val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
 
-  def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
-  def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
-  def isWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
-  def isUopWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
-
-  def PackedUopStateWidth: Int = {
-    math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
-  }
-
-  private def fitUopStateWidth(value: UInt, width: Int): UInt = {
-    val valueWidth = value.getWidth
-    if (valueWidth == width) {
-      value
-    } else if (valueWidth > width) {
-      value(width - 1, 0)
-    } else {
-      Cat(0.U((width - valueWidth).W), value)
-    }
-  }
-
-  def encodeUopState(entryPairType: UInt, formerUopNum: UInt, latterUopNum: UInt): UInt = {
-    val normalState = fitUopStateWidth(formerUopNum, PackedUopStateWidth)
-    val compressedState = fitUopStateWidth(
-      Cat(
-        fitUopStateWidth(latterUopNum, CompressedSlotUopNumWidth),
-        fitUopStateWidth(formerUopNum, CompressedSlotUopNumWidth)
-      ),
-      PackedUopStateWidth
-    )
-    Mux(CompressType.isNORMAL(entryPairType), normalState, compressedState)
-  }
-
-  def decodeFormerUopNum(entryPairType: UInt, uopState: UInt): UInt = {
-    Mux(
-      CompressType.isNORMAL(entryPairType),
-      uopState(NormalUopNumWidth - 1, 0),
-      fitUopStateWidth(uopState(CompressedSlotUopNumWidth - 1, 0), NormalUopNumWidth)
-    )
-  }
-
-  def decodeLatterUopNum(entryPairType: UInt, uopState: UInt): UInt = {
-    Mux(
-      CompressType.isNORMAL(entryPairType),
-      0.U(NormalUopNumWidth.W),
-      fitUopStateWidth(
-        uopState(2 * CompressedSlotUopNumWidth - 1, CompressedSlotUopNumWidth),
-        NormalUopNumWidth
-      )
-    )
-  }
+  def isWritebacked: Bool = !formerNumWb.orR && !latterNumWb.orR
+  def isUopWritebacked: Bool = isWritebacked
 
   def connectEnq(robEnq: EnqRobUop): Unit = {
     this.entryPairType := robEnq.entryPairType
     this.noCompressReason := robEnq.noCompressReason
 
-    this.uopState := encodeUopState(robEnq.entryPairType, robEnq.formerNumWB, robEnq.latterNumWB)
     this.complexSlotHasDest := robEnq.complexSlotHasDest
     this.entryHasStore := robEnq.entryHasStore
 
