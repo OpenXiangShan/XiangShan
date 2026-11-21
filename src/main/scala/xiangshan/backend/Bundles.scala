@@ -30,11 +30,14 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
-  def NormalUopNumWidth(implicit p: Parameters): Int =
-    log2Up(2 * p(XSCoreParamsKey).MaxUopSize + 1)
+  def MaxFormerNumWb(implicit p: Parameters): Int =
+    math.max(p(XSCoreParamsKey).RenameWidth, NumWB.maxVectorNumWb)
 
-  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
-    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+  def MaxLatterNumWb(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).RenameWidth - 1
+
+  def FormerNumWbWidth(implicit p: Parameters): Int = log2Ceil(MaxFormerNumWb + 1)
+  def LatterNumWbWidth(implicit p: Parameters): Int = log2Up(MaxLatterNumWb + 1)
 
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
@@ -286,8 +289,8 @@ object Bundles {
     val lastUop = Bool()
     val numWB = NumWB() // rob need this
     val latency = Latency()
-    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
-    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
+    val formerNumWb = UInt(FormerNumWbWidth.W) // rob need this
+    val latterNumWb = UInt(LatterNumWbWidth.W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
@@ -347,8 +350,8 @@ object Bundles {
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
       this.hasException := source.hasException || source.singleStep
-      this.formerNumWB  := Mux(source.singleStep, 0.U, source.formerNumWB)
-      this.latterNumWB  := Mux(source.singleStep, 0.U, source.latterNumWB)
+      this.formerNumWb  := Mux(source.singleStep, 0.U, source.formerNumWb)
+      this.latterNumWb  := Mux(source.singleStep, 0.U, source.latterNumWb)
       this.stdwriteNeed := FuType.isStore(source.fuType)
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
@@ -665,8 +668,8 @@ object Bundles {
     val lastUop         = Bool()
     val numWB           = NumWB() // rob need this
     val latency         = Latency()
-    val formerNumWB     = UInt(NormalUopNumWidth.W) // rob need this
-    val latterNumWB     = UInt(CompressedSlotUopNumWidth.W) // rob need this
+    val formerNumWb     = UInt(FormerNumWbWidth.W) // rob need this
+    val latterNumWb     = UInt(LatterNumWbWidth.W) // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
@@ -1762,9 +1765,10 @@ object Bundles {
       UInt(width.W)
     }
 
-    def width(implicit p: Parameters): Int = {
-      log2Up(2 * p(XSCoreParamsKey).MaxUopSize + 1)
-    }
+    // A vector store issues separate address and data uops for every split.
+    def maxVectorNumWb(implicit p: Parameters): Int = 2 * p(XSCoreParamsKey).MaxUopSize
+
+    def width(implicit p: Parameters): Int = log2Up(maxVectorNumWb + 1)
   }
 
   object FuLatency {

@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
-import xiangshan.backend.Bundles.{CompressedSlotUopNumWidth, DecodeOutUop, NormalUopNumWidth, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeOutUop, MaxFormerNumWb, MaxLatterNumWb, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z}
 import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
@@ -422,12 +422,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case (prefetch, in) => prefetch := Mux(in.exceptionVec.orR, false.B, in.isSoftPrefetch)
   }
   // Move elimination and software prefetches do not produce a writeback.
-  // Keep them in the ROB, but exclude them from the packed writeback count.
+  // Keep them in the ROB without adding to the expected writeback counts.
   val noWriteback = VecInit(isMove.zip(isSoftPrefetch).map { case (move, prefetch) => move || prefetch })
   val noWritebackMask = Cat(noWriteback.reverse)
   val dropMask = noWritebackMask | Cat(fusionValidVec.reverse)
   val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
-  def compactSlotNumWB(mask: UInt): UInt = {
+  def compactSlotNumWb(mask: UInt): UInt = {
     PopCount(mask & ~dropMask) +& PopCount(mask & numWBIs2Mask)
   }
 
@@ -531,27 +531,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       assert(CompressType.isNORMAL(entryPairType(i)))
     }
 
-    val compactFormerRaw = compactSlotNumWB(formerMask)
-    val compactLatterRaw = compactSlotNumWB(latterMask)
-    val compactFormerNumWB = compactFormerRaw.pad(NormalUopNumWidth)
-    val wideFormerNumWB = io.in(i).bits.numWB - dropMask(i)
-    val entryFormerNumWB = Mux(hasWideFormer, wideFormerNumWB, compactFormerNumWB)
-    val entryLatterNumWB = compactLatterRaw(CompressedSlotUopNumWidth - 1, 0)
+    val wideFormerNumWb = io.in(i).bits.numWB - dropMask(i)
+    val entryFormerNumWb = Mux(hasWideFormer, wideFormerNumWb, compactSlotNumWb(formerMask))
+    val entryLatterNumWb = compactSlotNumWb(latterMask)
 
-    assert(entryFormerNumWB <= (2 * MaxUopSize).U)
-    assert(compactLatterRaw <= (2 * (RenameWidth - 1)).U)
+    // Check the full counts before connecting them to the narrower ROB fields.
+    assert(entryFormerNumWb <= MaxFormerNumWb.U)
+    assert(entryLatterNumWb <= MaxLatterNumWb.U)
     when(CompressType.isNORMAL(entryPairType(i))) {
-      assert(entryLatterNumWB === 0.U)
-    }.otherwise {
-      assert(entryFormerNumWB <= (2 * (RenameWidth - 1)).U)
-      assert(entryLatterNumWB <= (2 * (RenameWidth - 1)).U)
+      assert(entryLatterNumWb === 0.U)
     }
-    uops(i).formerNumWB := entryFormerNumWB
-    uops(i).latterNumWB := entryLatterNumWB
+    uops(i).formerNumWb := entryFormerNumWb
+    uops(i).latterNumWb := entryLatterNumWb
     val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
     when(hasExceptionExceptFlushPipe) {
-      uops(i).formerNumWB := 0.U
-      uops(i).latterNumWB := 0.U
+      uops(i).formerNumWb := 0.U
+      uops(i).latterNumWb := 0.U
     }
     // Keep slot metadata attached to the instruction that produced it.  ROB entry
     // aggregation is performed at the ROB enqueue boundary; doing it here would
