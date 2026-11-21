@@ -276,9 +276,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // This data does not drive the next state of robEntries.
   val deqBankRdataUpdate = WireInit(deqBankRdata)
 
-  // Use for enqueue forward to deqBankRdataUpdate
-  // TODO: maybe we can remove enqueue forwarding to deqBankRdataUpdate
-  val rdataUpdateRobIdx = deqBanking.rowIndices(deqPtr.value)
+  // Match forwarding to the rows actually read, including during recovery walk.
+  val rdataUpdateRobIdx = deqBanking.rowIndices(deqBankRaddr)
 
   /**
    * Commit and walk stage

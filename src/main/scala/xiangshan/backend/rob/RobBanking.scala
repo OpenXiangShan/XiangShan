@@ -72,8 +72,9 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
   def firstRowSelect: UInt = 1.U(rowCount.W)
   // Decode the row bits of a ROB entry index into a one-hot selector.
   def rowSelect(index: UInt): UInt = UIntToOH(rowIndex(index), rowCount)
-  // Advance the selector by one row, wrapping from the last row to row zero.
-  def nextRowSelect(select: UInt): UInt = Mux(select.head(1) === 1.U, 1.U, select << 1)
+  // Rotate the one-hot selector to advance by one row, wrapping to row zero.
+  def nextRowSelect(select: UInt): UInt =
+    if (rowCount == 1) select else Cat(select(rowCount - 2, 0), select(rowCount - 1))
 
   /**
    * Selects one enqueue payload per bank from the allocation pointers.
@@ -113,11 +114,11 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
     VecInit(current ++ next)
   }
 
-  // Labels follow the supplied pointer, independently of the registered read address.
-  def rowIndices(index: UInt): Vec[UInt] = {
-    val current = rowIndex(index)
-    val next = Mux(current === (rowCount - 1).U, 0.U, current + 1.U)
-    VecInit(Seq(current, next).flatMap { row =>
+  // Derive the indices from the same row selector used to read the entries.
+  def rowIndices(select: UInt): Vec[UInt] = {
+    require(select.getWidth == rowCount)
+    val rows = if (rowCount == 1) Seq(0.U, 0.U) else Seq(OHToUInt(select), OHToUInt(nextRowSelect(select)))
+    VecInit(rows.flatMap { row =>
       (0 until bankNum).map { bank =>
         if (bankBits == 0) row else Cat(row, bank.U(bankBits.W))
       }
