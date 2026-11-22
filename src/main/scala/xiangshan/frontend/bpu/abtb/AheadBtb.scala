@@ -93,7 +93,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s0_fire := io.enable && bpuS0Fire
 
   private val s0_simpleHash = io.normalPathHist.getHistWithInfo(AbtbHashFhInfo).foldedHist(AheadBtbHashBitWidth - 1, 0)
-  private val s0_hashIndex  = io.startPc(log2Ceil(NumEntries / NumWays), 1) ^ s0_simpleHash
+  private val s0_hashIndex  = io.startPc(log2Ceil(NumEntries / NumWays), 1) // ^ s0_simpleHash
   private val s0_setIdx     = s0_hashIndex(log2Ceil(NumEntries / NumWays) - 1, log2Ceil(NumBanks))
   private val s0_bankIdx    = s0_hashIndex(log2Ceil(NumBanks) - 1, 0)
   private val s0_bankMask   = UIntToOH(s0_bankIdx)
