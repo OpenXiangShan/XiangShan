@@ -51,6 +51,15 @@ class SDBPIntegrationTest extends AnyFlatSpec {
     assert(core.L2CacheParamsOpt.get.sdbp.splitPrefetchSources)
   }
 
+  it should "change only L2 replacement in the LRU data-prefetch preset" in {
+    val (config, _, _) = ArgParser.parse(Array("--config", "SDBPLRUDataPrefetchConfig"))
+    val core = config(XSTileKey).head
+    val baseline = (new SDBPDataPrefetchConfig(1))(XSTileKey).head
+    assert(core.EnableCachePrefetch && baseline.EnableCachePrefetch)
+    assert(core.prefetcher == baseline.prefetcher)
+    assert(core.L2CacheParamsOpt == baseline.L2CacheParamsOpt.map(_.copy(replacement = "lru")))
+  }
+
   behavior of "SDBP three-stage commits"
   it should "predict by current source and train by the displaced or hit sampler entry's source" in {
     import SDBPSource.{Demand, L1Stream, L2Stream, L2SmsAgt, L2Pht, Other}
