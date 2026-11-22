@@ -101,7 +101,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtbEnabled     = enableAbtbUtage.B && ctrl.abtbEnable
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := abtbEnabled
+  utage.io.enable       := false.B
   uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
   ubtb.io.enable        := ctrl.ubtbEnable
   abtb.io.enable        := abtbEnabled
