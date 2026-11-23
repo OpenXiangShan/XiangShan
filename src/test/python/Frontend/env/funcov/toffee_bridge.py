@@ -82,6 +82,7 @@ class ToffeeCoverageSink:
         self._native_models_by_group: dict[str, Any] = {}
         self._owner_model = None
         self._native_only = bool(native_only)
+        self._program_address_mapping: dict[int, int] | None = None
         self._hit_details: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.bin_ids = {
             (str(group), str(point), str(bin_name)): str(bin_id)
@@ -126,6 +127,29 @@ class ToffeeCoverageSink:
 
     def attach_sample_hub(self, sample_hub) -> None:
         self._sample_hub = sample_hub
+
+    def configure_program_address_mapping(self, page_outcomes) -> None:
+        """Bind successful translation pages for native coverage attribution."""
+        if self._program_address_mapping is not None:
+            raise RuntimeError("translation program mapping is already configured")
+        pages: dict[int, int] = {}
+        for outcome in page_outcomes:
+            if not outcome.get("ok"):
+                continue
+            va, pa = int(outcome["va"]), int(outcome["pa"])
+            if va < 0 or pa < 0 or va % 4096 != pa % 4096:
+                raise ValueError("translation program mapping requires matching page offsets")
+            virtual_page, physical_page = va & ~4095, pa & ~4095
+            if virtual_page in pages and pages[virtual_page] != physical_page:
+                raise ValueError("conflicting translation program page mapping")
+            pages[virtual_page] = physical_page
+        if not pages:
+            raise ValueError("translation program mapping contains no successful pages")
+        self._program_address_mapping = pages
+
+    @property
+    def program_address_mapping(self) -> dict[int, int] | None:
+        return None if self._program_address_mapping is None else dict(self._program_address_mapping)
 
     def attach_owner_model(self, owner_model) -> None:
         self._owner_model = owner_model

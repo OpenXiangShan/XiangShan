@@ -8,6 +8,7 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.funcov.recorder import FrontendFuncovSampleHub
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import TranslationScenarioBuilder
 
@@ -53,6 +54,46 @@ def test_translation_coverage_forwards_exact_page_outcomes_and_propagates_errors
         _configure_translation_coverage(
             NS(configure_program_address_mapping=reject), pages
         )
+
+
+def test_toffee_sink_binds_successful_translation_page_mapping_once():
+    sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
+    pages = (
+        {"va": 0x80000000, "pa": 0x80400000, "ok": True},
+        {"va": 0x80001000, "pa": 0x80401000, "ok": True},
+        {"va": 0x80002000, "pa": 0x80402000, "ok": False},
+    )
+
+    assert _configure_translation_coverage(sink, pages) is True
+    assert sink.program_address_mapping == {
+        0x80000000: 0x80400000,
+        0x80001000: 0x80401000,
+    }
+    with pytest.raises(RuntimeError, match="already configured"):
+        _configure_translation_coverage(sink, pages)
+
+
+@pytest.mark.parametrize(
+    "pages,match",
+    [
+        (({"va": 0x80000000, "pa": 0x80400000, "ok": False},), "no successful pages"),
+        (({"va": 0x80000001, "pa": 0x80400000, "ok": True},), "matching page offsets"),
+        (
+            (
+                {"va": 0x80000000, "pa": 0x80400000, "ok": True},
+                {"va": 0x80000001, "pa": 0x80401001, "ok": True},
+            ),
+            "conflicting translation program page mapping",
+        ),
+    ],
+)
+def test_toffee_sink_rejects_incomplete_or_ambiguous_translation_mapping(
+    pages, match
+):
+    sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
+    with pytest.raises(ValueError, match=match):
+        _configure_translation_coverage(sink, pages)
+    assert sink.program_address_mapping is None
 
 
 @pytest.mark.parametrize("applied", [None, False, 0, 1, "true"])
