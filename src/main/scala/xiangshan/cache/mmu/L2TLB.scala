@@ -968,39 +968,41 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   def ptwResp_to_sector_4kptwResp(pte: PtwMergeResp) : PtwSectorResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_sector_resp = Wire(new PtwSectorResp)
-    ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
-    ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid
-    ptw_sector_resp.entry.vmid.map(_ := pte.entry(OHToUInt(pte.pteidx)).vmid.getOrElse(0.U))
-    ptw_sector_resp.entry.ppn := pageNumberFromVpn(pte.entry(OHToUInt(pte.pteidx)).ppn, pte.entry(OHToUInt(pte.pteidx)).tag,
-      pte.entry(OHToUInt(pte.pteidx)).level.get, pte.entry(OHToUInt(pte.pteidx)).n.get.asBool, tagOffset = sectortlbwidth)
-    ptw_sector_resp.entry.pbmt := pte.entry(OHToUInt(pte.pteidx)).pbmt
+    val idx = OHToUInt(pte.pteidx)
+    val selected = pte.entry(idx)
+    ptw_sector_resp.entry.tag := selected.tag
+    ptw_sector_resp.entry.asid := selected.asid
+    ptw_sector_resp.entry.vmid.map(_ := selected.vmid.getOrElse(0.U))
+    ptw_sector_resp.entry.ppn := pageNumberFromVpn(selected.ppn, selected.tag,
+      selected.level.get, selected.n.get.asBool, tagOffset = sectortlbwidth)
+    ptw_sector_resp.entry.pbmt := selected.pbmt
     ptw_sector_resp.entry.n.map(_ := false.B)
-    ptw_sector_resp.entry.perm.map(_ := pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
+    ptw_sector_resp.entry.perm.map(_ := selected.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
     ptw_sector_resp.entry.level.map(_ := (0.U(log2Up(Level + 1).W)))
-    ptw_sector_resp.entry.prefetch := pte.entry(OHToUInt(pte.pteidx)).prefetch
-    ptw_sector_resp.entry.v := pte.entry(OHToUInt(pte.pteidx)).v
-    ptw_sector_resp.af := pte.entry(OHToUInt(pte.pteidx)).af
-    ptw_sector_resp.pf := pte.entry(OHToUInt(pte.pteidx)).pf
-    ptw_sector_resp.addr_low := OHToUInt(pte.pteidx)
+    ptw_sector_resp.entry.prefetch := selected.prefetch
+    ptw_sector_resp.entry.v := selected.v
+    ptw_sector_resp.af := selected.af
+    ptw_sector_resp.pf := selected.pf
+    ptw_sector_resp.addr_low := idx
     ptw_sector_resp.pteidx := pte.pteidx
     for (i <- 0 until tlbcontiguous) {
-      val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
-      val pbmt_equal = pte.entry(i).pbmt === pte.entry(OHToUInt(pte.pteidx)).pbmt
-      val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
-      val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
-      val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      val cf_equal = pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf
+      val ppn_equal = pte.entry(i).ppn === selected.ppn
+      val pbmt_equal = pte.entry(i).pbmt === selected.pbmt
+      val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === selected.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      val v_equal = pte.entry(i).v === selected.v
+      val af_equal = pte.entry(i).af === selected.af
+      val pf_equal = pte.entry(i).pf === selected.pf
+      val cf_equal = pte.entry(i).cf === selected.cf
       ptw_sector_resp.valididx(i) := (ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     when (!pte.not_super) {
       for (i <- 0 until tlbcontiguous) {
         ptw_sector_resp.valididx(i) := false.B
-        ptw_sector_resp.ppn_low(i) := OHToUInt(pte.pteidx)
+        ptw_sector_resp.ppn_low(i) := idx
       }
     }
-    ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
+    ptw_sector_resp.valididx(idx) := true.B
     ptw_sector_resp
   }
 
