@@ -167,6 +167,18 @@ package seq_pkg;
     `include "memblock_dtlb_0101_source_vseq.sv"
     `include "memblock_dtlb_0102_pipeline_vseq.sv"
     `include "memblock_dtlb_0103_0105_vseq.sv"
+    `include "dtlb/0201-0204/memblock_dtlb_0201_0204_vseq.sv"
+    `include "dtlb/0301-0305/memblock_dtlb_0301_0305_vseq.sv"
+    `include "dtlb/0401-0402/memblock_dtlb_0401_0402_vseq.sv"
+    `include "dtlb/0501-0504/memblock_dtlb_0501_0504_vseq.sv"
+    `include "dtlb/0505-0508/memblock_dtlb_0505_0508_vseq.sv"
+    `include "dtlb/0701-0705/memblock_dtlb_0701_0705_vseq.sv"
+    `include "dtlb/allstage_mxr_live_20261120/memblock_dtlb_allstage_mxr_live_vseq.sv"
+    `include "dtlb/0601-0605/memblock_dtlb_0601_0605_vseq.sv"
+    `include "dtlb/0801-0806/memblock_dtlb_0801_0806_vseq.sv"
+    `include "dtlb/0801-0806/memblock_dtlb_0804_live_vseq.sv"
+    `include "dtlb/0403-0407/memblock_dtlb_0403_0407_vseq.sv"
+    `include "dtlb/0306-0307/memblock_dtlb_0306_0307_vseq.sv"
 
 endpackage
 

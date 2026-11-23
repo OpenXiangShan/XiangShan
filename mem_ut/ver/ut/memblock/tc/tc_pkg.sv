@@ -72,6 +72,9 @@ package tc_pkg;
     import seq_pkg::*;
 
     `include "basicTest.sv"
+    `include "tc_dtlb_0501_0504_live.sv"
+    `include "tc_dtlb_0505_0508_live.sv"
+    `include "tc_dtlb_0801_0806_live.sv"
     `include "tc_rm_cmo_uncache_final.sv"
     `include "tc_base.sv"
     `include "tc_sanity.sv"

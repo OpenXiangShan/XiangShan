@@ -7,6 +7,17 @@
 +incdir+./virtual_sequence/dtlb_0101
 +incdir+./virtual_sequence/dtlb_0102
 +incdir+./virtual_sequence/dtlb_0103_0105
++incdir+./virtual_sequence/dtlb/0201-0204
++incdir+./virtual_sequence/dtlb/0301-0305
++incdir+./virtual_sequence/dtlb/0306-0307
++incdir+./virtual_sequence/dtlb/0401-0402
++incdir+./virtual_sequence/dtlb/0403-0407
++incdir+./virtual_sequence/dtlb/0501-0504
++incdir+./virtual_sequence/dtlb/0505-0508
++incdir+./virtual_sequence/dtlb/0701-0705
++incdir+./virtual_sequence/dtlb/allstage_mxr_live_20261120
++incdir+./virtual_sequence/dtlb/0601-0605
++incdir+./virtual_sequence/dtlb/0801-0806
 +incdir+./csr_scalar_stress/base_seq
 +incdir+./csr_scalar_stress/main_sequence
 +incdir+./csr_scalar_stress/virtual_sequence

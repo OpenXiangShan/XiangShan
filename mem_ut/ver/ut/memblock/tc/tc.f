@@ -1,6 +1,9 @@
 
 +incdir+./src
 +incdir+./src/soft_test
++incdir+./src/dtlb_0501_0504_20261103
++incdir+./src/dtlb_0505_0508_20261104
++incdir+./src/dtlb_0801_0806_20261105
 tc_pkg.sv
 
 // ./src/tc_if.sv
