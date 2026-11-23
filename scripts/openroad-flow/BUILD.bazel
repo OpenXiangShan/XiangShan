@@ -1,1 +1,2 @@
-# The flow lives in verilog/ and xstile/ (README.md).
+# Optional OpenROAD physical-design and synthesis PPA flow (README.md).
+exports_files(["openroad.MODULE.bazel"])

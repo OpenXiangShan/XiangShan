@@ -13,4 +13,4 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 chtype -set ClockGate t:ClockGate$*
-techmap -map xstile/xs_icg_map.v
+techmap -map scripts/openroad-flow/xstile/xs_icg_map.v

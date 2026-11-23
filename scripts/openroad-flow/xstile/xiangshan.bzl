@@ -23,12 +23,12 @@ XS_USER_SOURCES = ["ANNEAL_DUMP_TCL", "ANNEAL_PY"]
 # never handed to the frontend (the template defines a second ClockGate).
 # Synthesis only: test/xs_clockgate checks the mapping.
 XS_ICG_USER_ARGUMENTS = {
-    "SYNTH_POST_HIERARCHY_SCRIPTS": "xstile/xs_icg.ys",
+    "SYNTH_POST_HIERARCHY_SCRIPTS": "scripts/openroad-flow/xstile/xs_icg.ys",
 }
 XS_ICG_USER_SOURCES = {
     "XS_ICG_MAP": [
-        "//xstile:xs_icg.ys",
-        "//xstile:xs_icg_map.v",
+        "//scripts/openroad-flow/xstile:xs_icg.ys",
+        "//scripts/openroad-flow/xstile:xs_icg_map.v",
     ],
 }
 XS_USER_STAGES = {v: ["floorplan"] for v in XS_USER_ARGUMENTS + XS_USER_SOURCES} | {
@@ -44,7 +44,7 @@ XS_USER_STAGES = {v: ["floorplan"] for v in XS_USER_ARGUMENTS + XS_USER_SOURCES}
 # generator's firtool arguments), so slang reads it with the hierarchy kept.
 # After the surgery that folds the constants XiangShan ties into the
 # modules this flow keeps (surgery/xs_surgery.py, surgery/manifest.json).
-XS_VERILOG = ["//xstile/surgery:xiangshan_surgered.sv"]
+XS_VERILOG = ["//scripts/openroad-flow/xstile/surgery:xiangshan_surgered.sv"]
 
 # The modules the arrays front end replaces (arrays/: each found, extracted
 # as one entry cell instanced per entry, and proven against the module it
@@ -66,7 +66,7 @@ XS_EXTRACTED = {
         "modules": ["Rob"],
     },
 }
-XS_EXTRACTED_VERILOG = ["//xstile/arrays:xiangshan_extracted.sv"]
+XS_EXTRACTED_VERILOG = ["//scripts/openroad-flow/xstile/arrays:xiangshan_extracted.sv"]
 
 def _extracted(part, arguments, sources, user_arguments):
     """A part's Verilog, arguments, sources and user arguments with its
@@ -77,7 +77,7 @@ def _extracted(part, arguments, sources, user_arguments):
     entries = ["%sEntry" % m for m in XS_EXTRACTED[part]["modules"]]
     keep = [k for k in arguments.get("SYNTH_KEEP_MODULES", "").split(" ") if k and k not in XS_EXTRACTED[part]["absorbed"]]
     arguments = dict(arguments, SYNTH_KEEP_MODULES = " ".join(keep + entries))
-    sources = dict(sources, SYNTH_CANONICALIZE_TCL = ["//xstile:fold_entries.tcl"])
+    sources = dict(sources, SYNTH_CANONICALIZE_TCL = ["//scripts/openroad-flow/xstile:fold_entries.tcl"])
     user_arguments = dict(user_arguments, XS_FOLD_MODULES = " ".join(entries))
     return XS_EXTRACTED_VERILOG, arguments, sources, user_arguments
 
@@ -130,9 +130,9 @@ XS_PARENT = {
         "ANNEAL_PY": ["@bazel-orfs//tools/macro_anneal:macro_anneal.py"],
     },
     "sources": {
-        "MACRO_PLACEMENT_TCL": ["//xstile:anneal_in_flow.tcl"],
+        "MACRO_PLACEMENT_TCL": ["//scripts/openroad-flow/xstile:anneal_in_flow.tcl"],
         "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCKS_grid_strategy.tcl"],
-        "SDC_FILE": ["//xstile:constraints.sdc"],
+        "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
     },
 }
 
@@ -180,9 +180,9 @@ XS_BLOCKS = {
             "ANNEAL_PY": ["@bazel-orfs//tools/macro_anneal:macro_anneal.py"],
         },
         "sources": {
-            "MACRO_PLACEMENT_TCL": ["//xstile:anneal_in_flow.tcl"],
+            "MACRO_PLACEMENT_TCL": ["//scripts/openroad-flow/xstile:anneal_in_flow.tcl"],
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "DCacheWrapper": {
@@ -210,7 +210,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "DataPath": {
@@ -237,8 +237,8 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
-            "AUTO_MEMORIES_REGFILES": ["//xstile:IntRegFile.regfile"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+            "AUTO_MEMORIES_REGFILES": ["//scripts/openroad-flow/xstile:IntRegFile.regfile"],
         },
     },
     "Dispatch": {
@@ -266,7 +266,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "ExuBlock": {
@@ -294,7 +294,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "Ftq": {
@@ -322,8 +322,8 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
-            "AUTO_MEMORIES_REGFILES": ["//xstile:FtqEntryQueue.regfile", "//xstile:FtqMetaQueueRedirect.regfile", "//xstile:FtqMetaQueueResolve.regfile", "//xstile:FtqMetaQueueCommit.regfile"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+            "AUTO_MEMORIES_REGFILES": ["//scripts/openroad-flow/xstile:FtqEntryQueue.regfile", "//scripts/openroad-flow/xstile:FtqMetaQueueRedirect.regfile", "//scripts/openroad-flow/xstile:FtqMetaQueueResolve.regfile", "//scripts/openroad-flow/xstile:FtqMetaQueueCommit.regfile"],
         },
     },
     "HPerfMonitor_3": {
@@ -350,7 +350,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IBuffer": {
@@ -377,7 +377,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "ICache": {
@@ -404,7 +404,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "Ifu": {
@@ -431,7 +431,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueAluBkuVset": {
@@ -459,7 +459,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueAluCsrFenceLinkBrhNjmp": {
@@ -487,7 +487,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueAluDivBrhNjmp": {
@@ -515,7 +515,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueAluI2fBrhNjmp": {
@@ -543,7 +543,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueAluMul": {
@@ -571,7 +571,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueLdu": {
@@ -599,7 +599,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueStaMou": {
@@ -627,7 +627,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueStaMou_1": {
@@ -655,7 +655,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueStdMoud": {
@@ -683,7 +683,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "IssueQueueStdMoud_1": {
@@ -711,7 +711,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "L2TLBWrapper": {
@@ -739,7 +739,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "LsqWrapper": {
@@ -767,7 +767,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "MemCtrl": {
@@ -795,7 +795,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "PrefetcherWrapper": {
@@ -822,7 +822,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "FltRegionModule": {
@@ -850,8 +850,8 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
-            "AUTO_MEMORIES_REGFILES": ["//xstile:FpRegFile.regfile"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+            "AUTO_MEMORIES_REGFILES": ["//scripts/openroad-flow/xstile:FpRegFile.regfile"],
         },
     },
     "Rename": {
@@ -879,7 +879,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "Rob": {
@@ -912,8 +912,8 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
-            "AUTO_MEMORIES_REGFILES": ["//xstile:RenameBufferFile.regfile", "//xstile:RobEntryFile.regfile"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+            "AUTO_MEMORIES_REGFILES": ["//scripts/openroad-flow/xstile:RenameBufferFile.regfile", "//scripts/openroad-flow/xstile:RobEntryFile.regfile"],
         },
     },
     "Sbuffer": {
@@ -941,7 +941,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "TLB": {
@@ -968,7 +968,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "TLBNonBlock": {
@@ -995,7 +995,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "TLBNonBlock_1": {
@@ -1022,7 +1022,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "TLBNonBlock_2": {
@@ -1049,7 +1049,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
     "VecRegionModule": {
@@ -1077,8 +1077,8 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
-            "AUTO_MEMORIES_REGFILES": ["//xstile:VfRegFile.regfile"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+            "AUTO_MEMORIES_REGFILES": ["//scripts/openroad-flow/xstile:VfRegFile.regfile"],
         },
     },
     "VectorDecodeChannel": {
@@ -1105,7 +1105,7 @@ XS_BLOCKS = {
         "user_sources": {},
         "sources": {
             "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-            "SDC_FILE": ["//xstile:constraints.sdc"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
         },
     },
 }
@@ -1200,7 +1200,7 @@ def _regfile_macro(spec, made, tags, outlines = {}, variant = None, pins = {}):
                 "AUTO_MEMORIES_REGFILES": [spec],
                 # a block's grid, so its parent's macro grid connects to it
                 "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
-                "SDC_FILE": ["//xstile:constraints.sdc"],
+                "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
             } | ({"IO_CONSTRAINTS": [pins[module]]} if module in pins else {}),
             # a variant changes nothing synthesis reads; shared only by a
             # flow without macros: a later stage takes its macros from its
@@ -1392,7 +1392,7 @@ def _gpl_switches():
     user_arguments = {}
     user_sources = {}
     if XS_GPL_COHESION:
-        user_sources["XS_GPL_CLUSTERS_FILE"] = ["//xstile:gpl_clusters.json"]
+        user_sources["XS_GPL_CLUSTERS_FILE"] = ["//scripts/openroad-flow/xstile:gpl_clusters.json"]
     return user_arguments, user_sources
 
 def _planned_block(cfg, entry, plan_dir, block, blocks):
@@ -1432,7 +1432,7 @@ def _planned_block(cfg, entry, plan_dir, block, blocks):
     # the block's register files are macros of their own (_regfile_macro)
     sources.pop("AUTO_MEMORIES_REGFILES", None)
     sources["IO_CONSTRAINTS"] = [":%s/%s_pins.tcl" % (plan_dir, block)]
-    sources["SDC_FILE"] = ["//xstile:constraints.sdc"]
+    sources["SDC_FILE"] = ["//scripts/openroad-flow/xstile:constraints.sdc"]
     return arguments, sources
 
 def _kpi(part, stage, arguments, sources, tags, variant = None):
@@ -1446,7 +1446,7 @@ def _kpi(part, stage, arguments, sources, tags, variant = None):
         src = ":%s_%s" % (flow, stage),
         outs = ["%s_kpi.txt" % flow, "%s_kpi_paths.txt" % flow],
         arguments = arguments,
-        script = "//xstile:kpi_run.tcl",
+        script = "//scripts/openroad-flow/xstile:kpi_run.tcl",
         sources = sources,
         tags = tags,
         user_arguments = {
@@ -1640,14 +1640,14 @@ def xiangshan_flow(name, plan, blocks = XS_BLOCKS, parent = XS_PARENT, tags = ["
     # its window. Without it detailed placement fails on a few of the
     # thousands of buffers left there (DPL-0036).
     for hook in ["PRE_DETAIL_PLACE_TCL", "PRE_CTS_TCL", "PRE_GLOBAL_ROUTE_TCL"]:
-        sources[hook] = ["//xstile:legalize_out_of_blocks.tcl"]
-    sources["SDC_FILE"] = ["//xstile:constraints.sdc"]
+        sources[hook] = ["//scripts/openroad-flow/xstile:legalize_out_of_blocks.tcl"]
+    sources["SDC_FILE"] = ["//scripts/openroad-flow/xstile:constraints.sdc"]
 
     # the switch on 3_3's global placement (XS_GPL_COHESION); with it
     # off nothing here is set
     gpl_arguments, gpl_sources = _gpl_switches()
     if gpl_arguments or gpl_sources:
-        sources["PRE_GLOBAL_PLACE_TCL"] = ["//xstile:global_place_args.tcl"]
+        sources["PRE_GLOBAL_PLACE_TCL"] = ["//scripts/openroad-flow/xstile:global_place_args.tcl"]
     verilog, arguments, sources, user_arguments = _extracted("parent", arguments, sources, XS_ICG_USER_ARGUMENTS | gpl_arguments)
     user_sources = XS_ICG_USER_SOURCES | gpl_sources
     orfs_flow(
@@ -1744,7 +1744,7 @@ def xiangshan_flat_flow(name, variant, parent = XS_PARENT, blocks = XS_BLOCKS, p
     # cells the resizer or CTS leave inside a register file's footprint,
     # out before each legalization (DPL-0036), as in the planned parent
     for hook in ["PRE_DETAIL_PLACE_TCL", "PRE_CTS_TCL", "PRE_GLOBAL_ROUTE_TCL"]:
-        sources[hook] = ["//xstile:legalize_out_of_blocks.tcl"]
+        sources[hook] = ["//scripts/openroad-flow/xstile:legalize_out_of_blocks.tcl"]
 
     # every register file of the tile, each the macro xiangshan_flow made
     regfiles = [":%s_generate_abstract" % m for m in xs_regfile_modules(parent, blocks)]
@@ -1767,7 +1767,7 @@ def xiangshan_flat_flow(name, variant, parent = XS_PARENT, blocks = XS_BLOCKS, p
         kept = [m for m in sorted(keep.keys()) if m and m not in absorbed and m not in entries]
         verilog = XS_EXTRACTED_VERILOG
         arguments["SYNTH_KEEP_MODULES"] = " ".join(kept + entries)
-        sources["SYNTH_CANONICALIZE_TCL"] = ["//xstile:fold_entries.tcl"]
+        sources["SYNTH_CANONICALIZE_TCL"] = ["//scripts/openroad-flow/xstile:fold_entries.tcl"]
         user_arguments = user_arguments | {"XS_FOLD_MODULES": " ".join(entries)}
     orfs_flow(
         name = name,

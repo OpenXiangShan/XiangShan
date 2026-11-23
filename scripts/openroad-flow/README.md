@@ -6,12 +6,15 @@
 > Verilog builds; nothing else has been run yet. The
 > [reference results](#reference-results) are bazel-orfs's.
 
-This directory generates XiangShan's Verilog from this checkout and takes
-XSTile (the core, its L1 caches and the L2) through synthesis, floorplan,
-placement, clock tree synthesis and global route on the ASAP7 predictive
-PDK with yosys and OpenROAD, and opens the result in OpenROAD's web
-viewer. Nothing outside this directory changes: no RTL, no `build.mill`,
-no `Makefile`.
+This package (`scripts/openroad-flow/`) and the optional root Bazel files
+(`MODULE.bazel`, `BUILD.bazel`, `.bazelrc`, `.bazelignore`) generate
+XiangShan's Verilog from this checkout, provide fast-turnaround module PPA
+and FO4 timing signals (`bazelisk run //:ppa`), and take XSTile (the core,
+its L1 caches and the L2) through synthesis, floorplan, placement, clock
+tree synthesis and global route on the ASAP7 predictive PDK with yosys and
+OpenROAD, opening the result in OpenROAD's web viewer. No RTL, `build.mill`
+or `Makefile` changes, and `--symlink_prefix=.bazel/` keeps the repository
+root clean for Mill and Makefile users.
 
 **The terms.** This is an experimental flow:
 
@@ -36,9 +39,91 @@ bazel-orfs use. mill remains XiangShan's build; this directory does not
 replace or change it.
 
 The flow's rules, its scheduler, its debugging tools and most of what is
-known about running it live in bazel-orfs, which this directory depends on
-at commit [`e2f12648`][pin] (`MODULE.bazel`). Links into bazel-orfs below
-are pinned to that commit.
+known about running it live in bazel-orfs, which this repository depends on
+at commit [`e2f12648`][pin] (`scripts/openroad-flow/openroad.MODULE.bazel`,
+included from root `MODULE.bazel`). Links into bazel-orfs below are pinned
+to that commit.
+
+## Fast-turnaround PPA & FO4 signal (`//:ppa`)
+
+Before waiting hours on full-tile global route, two fast commands run from
+any directory in the checkout to check structural hygiene (flops, flop bits,
+combinational area, inferred SRAM bits, clock gates, max fanout, combinational
+`mem2mem` hazards) and logic depth in PDK-independent **FO4** units
+(`1 FO4 = 14.37 ps` on ASAP7 `INVx1_ASAP7_75t_R`; Kunminghu's 3.0 GHz /
+333 ps 7 nm target is `41.1 FO4`, or `591 ps` on ASAP7):
+
+```sh
+bazelisk run //:ppa -- --stage=fir        # Static CIRCT MLIR (.fir) FO4 & structure (~9 s cold parse, <1 s cached)
+bazelisk run //:ppa                       # Yosys + ABC speed synthesis + OpenSTA across 18 representative modules
+bazelisk run //:ppa -- --stage=place      # Or floorplan, place, cts, grt
+bazelisk run //:plot_stages               # Runtime vs. global-route accuracy across fir -> grt
+```
+
+Design principles (minimum cognitive load, minimum false positives, POLA):
+
+- **Always a complete report, silent git diff when clean:** `bazelisk run //:ppa`
+  always prints the full 18-module subsystem panel (FO4 summary first, then
+  ASAP7 picoseconds and area, then worst endpoints with Chisel `file.scala:line`
+  locators). When files changed relative to `git merge-base`, affected modules
+  are sorted to the top with `*`; when no RTL module changed (docs, CI, sim-only
+  Scala, or a clean branch), the `git merge-base` apparatus stays silent.
+- **100 % core-wide PR coverage in `--stage=fir`:** `fir_ppa.py` analyzes all
+  1,652 elaborated `MinimalConfig` modules in ~9 s using an exact per-port
+  Interface Logic Model (ILM). Untouched runs show the 18-module subsystem
+  panel; if a branch modifies any module outside the 18-module panel, its
+  direct CIRCT `#loc` match surfaces automatically, and `--module=<pattern>`
+  queries any of the 1,652 modules.
+- **Fast `bazelisk build //...` and `bazelisk test //...`:** Heavy Verilog
+  elaboration and physical P&R targets are tagged `manual`, so default wildcard
+  builds compile Scala/Chisel and run unit tests in seconds.
+
+### Stage running time vs. global-route (`grt`) accuracy
+
+Measured across all 18 representative XiangShan modules (`AheadBtb`,
+`BusyTable`, `DecodeStage`, `Directory`, `FMulFlt`, `IBuffer`,
+`IssueQueueAluMul`, `IssueQueueLdu`, `Ittage`, `LoadQueueRAR`, `NewCSR`,
+`RenameTableWrapper`, `Rob`, `Sbuffer`, `Sc`, `TLB`, `VIMacU`,
+`VirtualStoreQueue`):
+
+![Stage running time vs. global-route accuracy](ppa/ppa_stages_accuracy.png)
+
+| Stage | Modules | Median time (s) | Total time (s) | Median accuracy vs. `grt` (%) | MAPE (%) | Spearman $\rho$ vs. `grt` | What it catches |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `fir` | 18 | 0.18 | 3.2 (+ ~9 s `.fir` parse) | 72.7 | 26.6 | 0.578 | Exact flop/SRAM/ICG/port counts, fanout explosions, gross logic-depth jumps |
+| `synth` | 18 | 61.6 | 1,649.0 | 56.3 | 44.9 | **0.901** | Technology-mapped gate count/area, real SRAM blackboxes, logic-cone rank order (no wire RC yet) |
+| `floorplan` | 18 | 69.3 | 1,936.6 | 57.9 | 41.4 | **0.901** | Post-floorplan `repair_timing` (`unbuffer,sizeup,swap,vt_swap`) |
+| `place` | 18 | 187.6 | 4,477.1 | **96.6** | **3.6** | **0.958** | Timing- & routability-driven placement wire RC |
+| `cts` | 18 | 196.1 | 4,924.6 | **97.6** | **2.6** | **0.964** | Propagated clock tree skew & post-CTS repair |
+| `grt` | 18 | 231.0 | 5,886.5 | **100.0** | **0.0** | **1.000** | Global-route parasitics & setup repair (ground truth) |
+
+`synth` underpredicts absolute routed period by ~44 % because wire and repeater
+delay are absent before placement, yet its module rank correlation with `grt`
+is already **$\rho = 0.901$**; `place` reaches **96.6 %** median accuracy
+(**3.6 %** MAPE). Fast signals catch structural and logic-depth regressions in
+seconds to a minute; subtle floorplan, congestion and cross-block wire effects
+still require global route.
+
+### 10-topic historical XiangShan PR backtest (`--stage=fir`)
+
+Validated across 10 recent XiangShan commits/PRs spanning critical-path fixes,
+SRAM/queue sizing, decode PLA, BPU gating, LSU replay, CSR, vector-FP datapaths,
+and 3 negative controls (CI workflow `#6604`, sim-only DPI Scala `#6444`, and
+pure `Backend.scala` wiring reorder `ce3ea7907`):
+
+- **0 / 3 false positives** on negative controls (`0 / 1,652` modules changed on
+  pure RTL wiring reorganization `ce3ea7907`; git banner silent on CI and
+  sim-only DPI Scala edits).
+- **PR `#6489` (`timing(ubtb): check hit in t1`):** Static `fir` caught `Bpu`
+  `reg2reg` dropping `60.64 -> 58.16 FO4` (`-2.48 FO4`, `-2` levels) and
+  `MicroBtb` `in2reg` dropping `29.42 -> 17.75 FO4` (`-11.67 FO4`, `-12` flops,
+  `-376 GE`), eliminating `ubtb/t1_hit` as `Bpu`'s critical endpoint.
+- **PR `#6590` (`fix(unalign, lsu)`):** Caught `LoadQueueReplay` `reg2reg`
+  rising `42.46 -> 44.41 FO4` (`+1.95 FO4` at `LoadQueueReplay.scala:288`),
+  `+7` flops, and `max_fanout` `1,239 -> 1,316` (`+77`).
+- **PR `#6586` (`fix(decode): zicbop`):** Caught `+2,672 GE` (`8 x +334 GE` in
+  `PseudoDecodeChannel`) with `0.00 FO4` change on `DecodeStage` `reg2reg`
+  (non-critical slack, no false timing alarm).
 
 ## Machine requirements
 
@@ -56,54 +141,55 @@ the first time, and some tens of GB of disk in Bazel's cache.
 | The whole tile: five blocks, then the parent | 128 GB | days |
 
 One parent build at a time: the parent's global route peaks at 53 to
-85 GB. The scheduler (`//xstile:build`) packs the blocks into waves that
+85 GB. The scheduler (`//scripts/openroad-flow/xstile:build`) packs the blocks into waves that
 fit free memory and runs the parent alone.
 
 ## Run book
 
-Run every command from this directory (`scripts/openroad-flow`). Each step
+Run commands from any directory in the XiangShan checkout. Each step
 has a prediction (as of bazel-orfs `e2f12648`), a gate that says it
 passed, and the bazel-orfs skill or document that owns its failures. The
 skills are in bazel-orfs's [`.claude/skills/`][skills]; an agent gets them
 locally ([Definition of done](#definition-of-done)).
 
 **0. Sources.** `make init` in the XiangShan checkout. Gate: `rocket-chip`,
-`rocket-chip/hardfloat`, `rocket-chip/cde`, `XSCache/OpenNCB` and
-`XSCache/ZhuJiang` are populated. Without them the first Bazel command
-stops with "run `make init`".
+`rocket-chip/hardfloat`, `rocket-chip/cde`, `XSCache/OpenNCB`,
+`XSCache/ZhuJiang`, `utility`, `yunsuan`, `difftest`, `ChiselAIA` and
+`ChiselIOPMP` are populated.
 
-**1. Analysis.** `bazelisk build --nobuild //...` -- minutes the first
-time. Gate: `Build completed successfully`. On a failure, the
-[`analyze-before-push`][skills] skill.
+**1. Analysis & unit tests.** `bazelisk build --nobuild //... && bazelisk test //...` --
+minutes the first time, seconds warm. Gate: `Build completed successfully` and
+all unit tests pass. On a failure, the [`analyze-before-push`][skills] skill.
 
-**2. Verilog, minimal configuration.**
-`bazelisk build //verilog:xiangshan_flat_minimal`. Gate: the file exists
-and holds `module XSTile` (about 100 MB, 1,852 modules).
+**2. Verilog, unpatched configurations.**
+`bazelisk build //:verilog_minimal` (or `bazelisk build //:verilog` for
+`DefaultConfig`, or `bazelisk build //scripts/openroad-flow/verilog:xiangshan_flat_minimal`).
+Gate: split SystemVerilog files including `XSTile.sv` are emitted.
 
 **3. Verilog, the flow's configuration, and the surgery.**
-`bazelisk build //verilog:xiangshan_flat //xstile/surgery:xiangshan_surgered //xstile/arrays:xiangshan_extracted`
--- 32 GB; its time is not yet measured here. Gate: `bazelisk build //xstile/surgery:xiangshan_surgered_elaborates`
+`bazelisk build //scripts/openroad-flow/verilog:xiangshan_flat //scripts/openroad-flow/xstile/surgery:xiangshan_surgered //scripts/openroad-flow/xstile/arrays:xiangshan_extracted`
+-- 32 GB; its time is not yet measured here. Gate: `bazelisk build //scripts/openroad-flow/xstile/surgery:xiangshan_surgered_elaborates`
 passes (slang elaborates the surgered core under XSTile), and
-`bazelisk test $(bazelisk query 'tests(//xstile/arrays/...)')` passes: each
+`bazelisk test $(bazelisk query 'tests(//scripts/openroad-flow/xstile/arrays/...)')` passes: each
 extraction proven equal to its module, each negative control different
 (the Rob's proof takes over half an hour). On a surgery precondition
 failure, xs_surgery.py names the entry; the [`surgery`][skills] skill.
 
-**4. One block.** `bazelisk build //xstile:FltRegionModule_grt //xstile:FltRegionModule_kpi //xstile:FltRegionModule_gpl_driven`
+**4. One block.** `bazelisk build //scripts/openroad-flow/xstile:FltRegionModule_grt //scripts/openroad-flow/xstile:FltRegionModule_kpi //scripts/openroad-flow/xstile:FltRegionModule_gpl_driven`
 -- about 2 h from nothing on 16 cores and 32 GB, the block's own global
 route about 10 min at 7 GB. Gate: `FltRegionModule_gpl_driven` passes,
-and the period in `bazel-bin/xstile/FltRegionModule_kpi.txt` is near the
+and the period in `.bazel/bin/scripts/openroad-flow/xstile/FltRegionModule_kpi.txt` is near the
 reference's 1,033 ps. The global route log ending in `RSZ-0062 Unable to
 repair all setup violations` is expected: repair gave up, the period is
-what is measured. Then `bazelisk run //xstile:FltRegionModule_grt gui_grt`
+what is measured. Then `bazelisk run //scripts/openroad-flow/xstile:FltRegionModule_grt gui_grt`
 opens the web viewer.
 
 **5. Every block, then the parent.**
 
 ```sh
-bazelisk run //xstile:build -- --plan-only   # the waves, nothing built
-bazelisk run //xstile:build                  # days on 128 GB
-bazelisk run //xstile:XSTile_grt gui_grt     # the web viewer
+bazelisk run //scripts/openroad-flow/xstile:build -- --plan-only   # the waves, nothing built
+bazelisk run //scripts/openroad-flow/xstile:build                  # days on 128 GB
+bazelisk run //scripts/openroad-flow/xstile:XSTile_grt gui_grt     # the web viewer
 ```
 
 `--plan-only` says which unit is over the free memory. Gate: every
@@ -115,9 +201,9 @@ on a global route repair that runs for hours, [`repair-timing-grt`][skills];
 on a rebuild nobody expected, [`cache-miss`][skills]. A stage can be taken
 out of Bazel and iterated on by hand in the dirty lane
 ([`dirty-lane`][skills]):
-`bazelisk run @bazel-orfs//:dirty -- start //xstile:FltRegionModule grt`.
+`bazelisk run @bazel-orfs//:dirty -- start //scripts/openroad-flow/xstile:FltRegionModule grt`.
 
-**6. Look and ask.** `bazelisk run //xstile:XSTile_grt_odb_debug` starts a
+**6. Look and ask.** `bazelisk run //scripts/openroad-flow/xstile:XSTile_grt_odb_debug` starts a
 persistent OpenROAD session on the parent's global route: the
 [`odb-debug`][skills] skill (macros, worst paths, legality, headless
 images). The period's headroom: [`repair-headroom`][skills].
@@ -336,8 +422,8 @@ Tasks for whoever continues, each with how to check it and how it retires.
 
 `bazelisk run @bazel-orfs//:bump` moves the bazel-orfs, OpenROAD and ORFS
 pins and rewrites the OpenROAD, qt-bazel and sv-elab blocks of
-`MODULE.bazel` and `bazel-orfs-patches/`. Everything else in the root-only
-section of `MODULE.bazel`, `patches/` and `.bazelrc` is synced by hand:
+`scripts/openroad-flow/openroad.MODULE.bazel` and `bazel-orfs-patches/`. Everything else in the root-only
+section of `openroad.MODULE.bazel`, `patches/` and `.bazelrc` is synced by hand:
 diff bazel-orfs's `MODULE.bazel` and `patches/` between the old pin and the
 new one and carry each change here with its reason. bazel-orfs's
 [`docs/openroad.md`][openroad], "Root MODULE.bazel requirements".
@@ -348,10 +434,10 @@ For whoever continues, a person or an AI agent. The work is complete when
 all of these hold:
 
 1. `bazelisk build --nobuild //...` passes.
-2. `//verilog:xiangshan_flat`, `//xstile/surgery:xiangshan_surgered_elaborates`
-   and `//xstile/arrays:xiangshan_extracted` build, and every test in
+2. `//scripts/openroad-flow/verilog:xiangshan_flat`, `//scripts/openroad-flow/xstile/surgery:xiangshan_surgered_elaborates`
+   and `//scripts/openroad-flow/xstile/arrays:xiangshan_extracted` build, and every test in
    `bazelisk query 'tests(//...)'` passes.
-3. `bazelisk run //xstile:build` finishes: every block and the parent
+3. `bazelisk run //scripts/openroad-flow/xstile:build` finishes: every block and the parent
    through global route, every `<part>_gpl_driven` gate passes, every
    `<part>_kpi` is written.
 4. Each part's period is compared with the reference results and every
@@ -374,9 +460,9 @@ version `MODULE.bazel` pins:
 bazelisk run @bazel-orfs//:agent -- setup
 ```
 
-run here, writes `.mcp.json`, `.claude/settings.json` (a session hook that
+writes `.mcp.json`, `.claude/settings.json` (a session hook that
 links the skills) and `CLAUDE.md` (which imports bazel-orfs's
-[agent rules][rules]); this directory's `.gitignore` keeps them local. The
+[agent rules][rules]); `.gitignore` keeps them local. The
 hook links bazel-orfs's whole source tree as `.claude/bazel-orfs`, so the
 timing inventory and the design README are readable offline:
 [`tools/agent/README.md`][agent].
@@ -387,7 +473,7 @@ A problem with the flow on XiangShan: an issue here, saying it concerns
 this experimental flow. A problem in yosys, OpenROAD or ORFS that the flow
 exposes: an issue in bazel-orfs, which carries the fix as a patch until
 upstream has it. An untar-and-run reproducer of a stage:
-`bazelisk run @bazel-orfs//:dirty -- archive //xstile:<part> <stage> <file.tar.gz>`.
+`bazelisk run @bazel-orfs//:dirty -- archive //scripts/openroad-flow/xstile:<part> <stage> <file.tar.gz>`.
 
 ## Future work
 

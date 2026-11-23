@@ -1,0 +1,11 @@
+# Mill, Makefile, IDE and simulation output directories: Bazel never scans or
+# touches them, so Mill and Bazel coexist without interference.
+.bazel
+.bloop
+.bsp
+.metals
+build
+out
+ready-to-run
+test_run_dir
+tmp

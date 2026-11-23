@@ -15,7 +15,7 @@ package(default_visibility = ["//:__subpackages__"])
 
 # The RTL every module is extracted from: the surgered core XSTile's flows
 # read, so an extracted module has the ports its parent instances.
-SURGERED = "//xstile/surgery:xiangshan_surgered"
+SURGERED = "//scripts/openroad-flow/xstile/surgery:xiangshan_surgered"
 
 # The modules extracted and put back into the core.
 INTEGRATED = [
@@ -170,7 +170,7 @@ py_test(
     args = [
         "$(rootpath @yosys)",
         "$(rootpath @sv-elab//src/yosys_plugin:slang.so)",
-        "$(rootpath //xstile:fold_entries.tcl)",
+        "$(rootpath //scripts/openroad-flow/xstile:fold_entries.tcl)",
     ],
     data = [
         "check.py",
@@ -178,7 +178,7 @@ py_test(
         "entries.py",
         "extract.py",
         "proc_json.py",
-        "//xstile:fold_entries.tcl",
+        "//scripts/openroad-flow/xstile:fold_entries.tcl",
         "@sv-elab//src/yosys_plugin:slang.so",
         "@yosys",
     ],

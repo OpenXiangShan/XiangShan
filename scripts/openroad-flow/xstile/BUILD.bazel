@@ -86,8 +86,8 @@ sh_test(
 # parent alone. resources.json beside this file is the record it plans
 # from and refreshes.
 #
-#   bazelisk run //xstile:build -- --plan-only
-#   bazelisk run //xstile:build
+#   bazelisk run //scripts/openroad-flow/xstile:build -- --plan-only
+#   bazelisk run //scripts/openroad-flow/xstile:build
 orfs_schedule(
     name = "build",
     macros = {
@@ -108,11 +108,12 @@ orfs_schedule(
 # Checkpoints to ask questions of in a persistent OpenROAD session (the
 # odb-debug skill), and the web viewer:
 #
-#   bazelisk run //xstile:XSTile_grt_odb_debug
+#   bazelisk run //scripts/openroad-flow/xstile:XSTile_grt_odb_debug
 [
     odb_debug(
         name = "XSTile_%s_odb_debug" % stage,
         src = ":XSTile_" + stage,
+        tags = ["manual"],
     )
     for stage in [
         "synth",
@@ -126,6 +127,7 @@ orfs_schedule(
     odb_debug(
         name = "%s_%s_odb_debug" % (block, stage),
         src = ":%s_%s" % (block, stage),
+        tags = ["manual"],
     )
     for block in PLAN["macros"].keys()
     for stage in [
@@ -142,13 +144,13 @@ orfs_schedule(
 genrule(
     name = "XSTile_boundary_constants",
     srcs = [
-        "//verilog:xiangshan_flat",
+        "//scripts/openroad-flow/verilog:xiangshan_flat",
         "plan/plan.json",
         "plan/plan.bzl",
     ],
     outs = ["XSTile_boundary_constants.json"],
     cmd = "$(execpath @bazel-orfs//tools/boundary_constants) " +
-          "$(location //verilog:xiangshan_flat) --top XSTile " +
+          "$(location //scripts/openroad-flow/verilog:xiangshan_flat) --top XSTile " +
           "--plan $(location plan/plan.json) --plan-bzl $(location plan/plan.bzl) --out $@",
     tags = ["manual"],
     tools = ["@bazel-orfs//tools/boundary_constants"],

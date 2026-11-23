@@ -1,7 +1,7 @@
 """The surgery's rounds as a chain of genrules (xs_surgery.py)."""
 
-_PLAN_JSON = "//xstile:plan/plan.json"
-_PLAN_BZL = "//xstile:plan/plan.bzl"
+_PLAN_JSON = "//scripts/openroad-flow/xstile:plan/plan.json"
+_PLAN_BZL = "//scripts/openroad-flow/xstile:plan/plan.bzl"
 _YOSYS = "@yosys//:yosys"
 _SLANG = "@sv-elab//src/yosys_plugin:slang.so"
 
@@ -20,6 +20,7 @@ def _proven(name, src):
             "$(execpath :constant_outputs) scan $(@D)/%s.kept.json $$PLAN --out $@" % name,
             "rm $(@D)/%s.kept.json $(@D)/%s.ys" % (name, name),
         ]),
+        tags = ["manual"],
         tools = [":constant_outputs", _SLANG, _YOSYS],
     )
 
@@ -69,6 +70,7 @@ def xs_surgery_chain(name, src, manifest, rounds, protect):
                   # flattens a module drops its boundary's constants
                   "--plan $(location %s) --plan-bzl $(location %s) " % (_PLAN_JSON, _PLAN_BZL) +
                   "$(location %s) $@" % prev,
+            tags = ["manual"],
             tools = [":xs_surgery"],
             visibility = ["//:__subpackages__"],
         )

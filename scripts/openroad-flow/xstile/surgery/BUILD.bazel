@@ -52,9 +52,10 @@ py_test(
 
 genrule(
     name = "xiangshan_bju",
-    srcs = ["//verilog:xiangshan_flat"],
+    srcs = ["//scripts/openroad-flow/verilog:xiangshan_flat"],
     outs = ["xiangshan_bju.sv"],
     cmd = "$(execpath :xs_bju_surgery) $< $@",
+    tags = ["manual"],
     tools = [":xs_bju_surgery"],
 )
 
@@ -99,7 +100,7 @@ py_binary(
 # bits of every kept module without it and with it.
 kept_cells(
     name = "kept_cells_before",
-    src = "//verilog:xiangshan_flat",
+    src = "//scripts/openroad-flow/verilog:xiangshan_flat",
 )
 
 kept_cells(

@@ -1,0 +1,28 @@
+# Optional Bazel build for Verilog generation, PPA synthesis reports and the
+# experimental OpenROAD physical flow (scripts/openroad-flow/README.md).
+#
+# Keep convenience symlinks inside .bazel/ so `ls` at the repository root
+# stays clean for Mill / Makefile users.
+build --symlink_prefix=.bazel/
+
+# Flags OpenROAD's and yosys's from-source builds need when consumed as
+# dependencies (bazel-orfs docs/openroad.md).
+build --incompatible_strict_action_env
+build --features=external_include_paths
+build --per_file_copt=.*external/.*@-w
+build --host_per_file_copt=.*external/.*@-w
+build --cxxopt "-std=c++20" --host_cxxopt "-std=c++20"
+build --java_runtime_version=remotejdk_21
+build --tool_java_runtime_version=remotejdk_21
+build --@rules_python//python/config_settings:bootstrap_impl=script
+
+common --lockfile_mode=off
+common --@@protobuf+//bazel/toolchains:prefer_prebuilt_protoc
+common --downloader_config=scripts/openroad-flow/bazel/downloader.cfg
+common --incompatible_default_to_explicit_init_py
+
+# Avoid reading /usr/share/terminfo, which minimal Linux hosts lack.
+common --@ncurses//:use_terminfo_data_target=false
+
+# Local settings, never committed: a remote/shared cache, --jobs, a disk cache.
+try-import %workspace%/user.bazelrc

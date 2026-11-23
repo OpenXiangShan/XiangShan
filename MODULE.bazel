@@ -1,0 +1,104 @@
+"""XiangShan optional Bazel build: Chisel-to-Verilog, PPA synthesis reports, and OpenROAD P&R.
+
+Mill (`build.mill` / `Makefile`) remains XiangShan's primary build system.
+Bazel is additive and self-contained: with only `bazelisk` installed, it
+fetches and builds every tool from source (JDK, Scala, Chisel, firtool,
+espresso, yosys, slang, OpenROAD, ORFS and the ASAP7 PDK) so `bazelisk run //:ppa`
+works identically across Linux distributions from any directory in this checkout.
+"""
+
+module(
+    name = "xiangshan",
+    version = "0.0.0",
+    bazel_compatibility = [">=9.1.1"],
+)
+
+# OpenROAD, yosys, sv-elab, ORFS and bazel-orfs root overrides live under
+# scripts/openroad-flow/ so this root file stays compact.
+include("//scripts/openroad-flow:openroad.MODULE.bazel")
+
+# --- Python & plotting (//:ppa, //:plot_stages) ----------------------------
+bazel_dep(name = "rules_python", version = "2.3.2")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.13",
+)
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    extra_pip_args = ["--index-url=https://pypi.org/simple"],
+    hub_name = "xs_pip",
+    python_version = "3.13",
+    quiet = True,
+    requirements_lock = "//scripts/openroad-flow/ppa:requirements_lock_3_13.txt",
+)
+use_repo(pip, "xs_pip")
+
+# --- Chisel to Verilog (versions matching build.mill) ----------------------
+bazel_dep(name = "rules_chisel", version = "0.4.2")
+
+chisel = use_extension("@rules_chisel//chisel:extensions.bzl", "chisel")
+chisel.toolchain(
+    chisel_version = "7.13.0",
+    scala_version = "2.13.17",
+)
+use_repo(chisel, "chisel_firtool", "chisel_maven")
+
+bazel_dep(name = "rules_jvm_external", version = "6.7")
+bazel_dep(name = "rules_scala", version = "7.1.5")
+
+scala_config = use_extension("@rules_scala//scala/extensions:config.bzl", "scala_config")
+scala_config.settings(scala_version = "2.13.17")
+use_repo(scala_config, "rules_scala_config")
+
+scala_deps = use_extension("@rules_scala//scala/extensions:deps.bzl", "scala_deps")
+scala_deps.scala()
+use_repo(scala_deps, "rules_scala_toolchains")
+
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "xs_maven",
+    artifacts = [
+        "com.chuusai:shapeless_2.13:2.3.12",
+        "com.github.scopt:scopt_2.13:4.1.0",
+        "com.lihaoyi:mainargs_2.13:0.7.7",
+        "com.lihaoyi:os-lib_2.13:0.11.3",
+        "com.lihaoyi:sourcecode_2.13:0.4.4",
+        "io.circe:circe-core_2.13:0.14.10",
+        "io.circe:circe-generic-extras_2.13:0.14.4",
+        "io.circe:circe-generic_2.13:0.14.10",
+        "io.circe:circe-parser_2.13:0.14.10",
+        "io.circe:circe-yaml-common_2.13:0.16.1",
+        "io.circe:circe-yaml_2.13:0.16.1",
+        "io.github.alexarchambault:data-class_2.13:0.2.11",
+        "org.json4s:json4s-ast_2.13:4.0.7",
+        "org.json4s:json4s-core_2.13:4.0.7",
+        "org.json4s:json4s-jackson-core_2.13:4.0.7",
+        "org.json4s:json4s-jackson_2.13:4.0.7",
+        "org.json4s:json4s-native-core_2.13:4.0.7",
+        "org.json4s:json4s-native_2.13:4.0.7",
+        "org.scala-lang:scala-reflect:2.13.17",
+        "org.scalactic:scalactic_2.13:3.2.19",
+        "org.scalatest:scalatest-compatible:3.2.19",
+        "org.scalatest:scalatest-core_2.13:3.2.19",
+        "org.scalatest:scalatest-flatspec_2.13:3.2.19",
+        "org.scalatest:scalatest-matchers-core_2.13:3.2.19",
+        "org.scalatest:scalatest-mustmatchers_2.13:3.2.19",
+        "org.scalatest:scalatest-shouldmatchers_2.13:3.2.19",
+        "org.typelevel:cats-core_2.13:2.12.0",
+    ],
+)
+use_repo(maven, "xs_maven")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Chisel's EspressoMinimizer runs `espresso` from PATH during elaboration.
+http_archive(
+    name = "espresso",
+    build_file = "//scripts/openroad-flow/verilog:espresso.BUILD.bazel",
+    sha256 = "560e34f57b0a57e6d8e77e9638a97677759b15a2d58b2d89272a77393753a968",
+    strip_prefix = "espresso-2.5.1",
+    urls = ["https://github.com/chipsalliance/espresso/archive/refs/tags/v2.5.1.tar.gz"],
+)

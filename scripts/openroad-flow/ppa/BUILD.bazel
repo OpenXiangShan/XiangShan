@@ -1,0 +1,349 @@
+load("@bazel-orfs//:openroad.bzl", "orfs_flow", "orfs_run")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "ppa_constraints.sdc",
+    "requirements_lock_3_13.txt",
+    "stage_ppa.tcl",
+])
+
+ASAP7_LIBS = [
+    ("RVT", "@orfs//flow:platforms/asap7/lib/NLDM/asap7sc7p5t_INVBUF_RVT_FF_nldm_220122.lib.gz", "INVx1_ASAP7_75t_R"),
+    ("LVT", "@orfs//flow:platforms/asap7/lib/NLDM/asap7sc7p5t_INVBUF_LVT_FF_nldm_220122.lib.gz", "INVx1_ASAP7_75t_L"),
+    ("SLVT", "@orfs//flow:platforms/asap7/lib/NLDM/asap7sc7p5t_INVBUF_SLVT_FF_nldm_220122.lib.gz", "INVx1_ASAP7_75t_SL"),
+]
+
+py_library(
+    name = "ppa_lib",
+    srcs = [
+        "collect_stage.py",
+        "fir_ppa.py",
+        "fo4.py",
+        "ppa_report.py",
+        "slice_module.py",
+    ],
+    imports = ["."],
+)
+
+py_binary(
+    name = "fo4_bin",
+    srcs = ["fo4.py"],
+    main = "fo4.py",
+)
+
+genrule(
+    name = "asap7_fo4",
+    srcs = [lib for _, lib, _ in ASAP7_LIBS],
+    outs = ["asap7_fo4.json"],
+    cmd = "$(execpath :fo4_bin) --out $@ " + " ".join([
+        "%s $(location %s) %s" % (vt, lib, cell)
+        for vt, lib, cell in ASAP7_LIBS
+    ]),
+    tools = [":fo4_bin"],
+)
+
+py_test(
+    name = "fo4_test",
+    size = "small",
+    srcs = ["fo4_test.py"],
+    args = [
+        arg
+        for vt, lib, cell in ASAP7_LIBS
+        for arg in [vt, "$(rootpath %s)" % lib, cell]
+    ],
+    data = [lib for _, lib, _ in ASAP7_LIBS],
+    deps = [":ppa_lib"],
+)
+
+py_binary(
+    name = "fir_ppa_bin",
+    srcs = ["fir_ppa.py"],
+    main = "fir_ppa.py",
+)
+
+py_test(
+    name = "fir_ppa_test",
+    size = "small",
+    srcs = ["fir_ppa_test.py"],
+    deps = [":ppa_lib"],
+)
+
+py_binary(
+    name = "slice_module_bin",
+    srcs = ["slice_module.py"],
+    main = "slice_module.py",
+)
+
+py_test(
+    name = "slice_module_test",
+    size = "small",
+    srcs = ["slice_module_test.py"],
+    deps = [":ppa_lib"],
+)
+
+py_test(
+    name = "ppa_report_test",
+    size = "small",
+    srcs = ["ppa_report_test.py"],
+    deps = [":ppa_lib"],
+)
+
+py_test(
+    name = "plot_stages_test",
+    size = "small",
+    srcs = [
+        "plot_stages.py",
+        "plot_stages_test.py",
+    ],
+    imports = ["."],
+    main = "plot_stages_test.py",
+    deps = ["@xs_pip//matplotlib"],
+)
+
+py_binary(
+    name = "collect_stage_bin",
+    srcs = ["collect_stage.py"],
+    main = "collect_stage.py",
+)
+
+py_binary(
+    name = "ppa",
+    srcs = ["ppa_report.py"],
+    main = "ppa_report.py",
+    deps = [":ppa_lib"],
+)
+
+py_binary(
+    name = "plot_stages",
+    srcs = ["plot_stages.py"],
+    main = "plot_stages.py",
+    deps = ["@xs_pip//matplotlib"],
+)
+
+# Representative XiangShan modules across every subsystem (Frontend/BPU,
+# Decode, Rename, Dispatch, ROB, Int/Mem Issue, CSR, FPU, VPU, LSU, MMU, L2).
+# Kept `manual` so `bazelisk build //...` and `bazelisk test //...` stay fast;
+# built on demand via `bazelisk run //:ppa` or `bazelisk run //:plot_stages`.
+PPA_MODULES = [
+    "AheadBtb",
+    "BusyTable",
+    "DecodeStage",
+    "Directory",
+    "FMulFlt",
+    "IBuffer",
+    "IssueQueueAluMul",
+    "IssueQueueLdu",
+    "Ittage",
+    "LoadQueueRAR",
+    "NewCSR",
+    "RenameTableWrapper",
+    "Rob",
+    "Sbuffer",
+    "Sc",
+    "TLB",
+    "VIMacU",
+    "VirtualStoreQueue",
+]
+
+# Lower utilization on compact or pin-dense modules so PDN straps, pin
+# placement, and SRAM macros always fit comfortably.
+PPA_UTILIZATION = {
+    "AheadBtb": "25",
+    "BusyTable": "20",
+    "DecodeStage": "18",
+    "Directory": "20",
+    "FMulFlt": "20",
+    "IBuffer": "20",
+    "Ittage": "25",
+    "LoadQueueRAR": "20",
+    "Sc": "25",
+    "TLB": "20",
+    "VIMacU": "20",
+    "VirtualStoreQueue": "20",
+}
+
+# DecodeStage instantiates 6 decode channels + UopBufferCtrlDecoder; matching
+# XSTile's SYNTH_KEEP_MODULES keeps synthesis under ~1 min instead of flattening
+# all 6 instruction decoders into one 30-min ABC cone.
+PPA_MOD_ARGS = {
+    "DecodeStage": {
+        "SYNTH_HIERARCHICAL": "1",
+        "SYNTH_KEEP_MODULES": "SimpleDecodeChannel VectorDecodeChannel PseudoDecodeChannel UopBufferCtrlDecoder",
+    },
+}
+
+PPA_STAGES = [
+    "synth",
+    "floorplan",
+    "place",
+    "cts",
+    "grt",
+]
+
+PPA_FLOW_ARGS = {
+    "ASAP7_USE_VT": "RVT LVT SLVT",
+    "AUTO_MEMORIES": "1",
+    "CORE_ASPECT_RATIO": "1",
+    "ENABLE_DPO": "0",
+    "GLOBAL_ROUTE_ARGS": "-congestion_iterations 0 -allow_congestion -verbose",
+    "IO_PLACER_H": "M2 M4 M6",
+    "IO_PLACER_V": "M3 M5 M7",
+    "MAX_ROUTING_LAYER": "M9",
+    "MIN_ROUTING_LAYER": "M2",
+    "OPENROAD_HIERARCHICAL": "0",
+    "PLACE_DENSITY": "0.6",
+    "PLACE_PINS_ARGS": "-annealing",
+    "ROUTING_LAYER_ADJUSTMENT": "0.1",
+    "RTLMP_MIN_CHANNEL_SIZE": "4 4",
+    "SKIP_ANTENNA_REPAIR": "1",
+    "SKIP_EXTRACT_FA": "1",
+    "SKIP_LAST_GASP": "1",
+    "SKIP_PIN_ACCESS": "1",
+    "SKIP_REPORT_METRICS": "1",
+    "SYNTH_HIERARCHICAL": "0",
+    "TNS_END_PERCENT": "1",
+}
+
+PPA_FLOW_SOURCES = {
+    "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
+    "SDC_FILE": [":ppa_constraints.sdc"],
+}
+
+PPA_ICG_USER_ARGS = {
+    "SYNTH_POST_HIERARCHY_SCRIPTS": "scripts/openroad-flow/xstile/xs_icg.ys",
+}
+
+PPA_ICG_USER_SOURCES = {
+    "XS_ICG_MAP": [
+        "//scripts/openroad-flow/xstile:xs_icg.ys",
+        "//scripts/openroad-flow/xstile:xs_icg_map.v",
+    ],
+}
+
+PPA_USER_STAGES = {
+    "SYNTH_POST_HIERARCHY_SCRIPTS": ["synth"],
+    "XS_ICG_MAP": ["synth"],
+}
+
+genrule(
+    name = "ppa_fir_bundle",
+    srcs = ["//scripts/openroad-flow/verilog:xiangshan_minimal_fir"],
+    outs = ["ppa_fir.json"],
+    cmd = "$(execpath :fir_ppa_bin) " +
+          "--fir $(location //scripts/openroad-flow/verilog:xiangshan_minimal_fir) " +
+          "--out $@ --panel-modules " + " ".join(PPA_MODULES),
+    tags = ["manual"],
+    tools = [":fir_ppa_bin"],
+)
+
+[
+    genrule(
+        name = "%s_slice" % mod,
+        srcs = ["//scripts/openroad-flow/verilog:xiangshan_minimal_sv"],
+        outs = [
+            "%s_slice.sv" % mod,
+            "%s_srcmap.json" % mod,
+        ],
+        cmd = "$(execpath :slice_module_bin) " +
+              "--sv-dir $(location //scripts/openroad-flow/verilog:xiangshan_minimal_sv) " +
+              "--top %s " % mod +
+              "--out-sv $(location %s_slice.sv) " % mod +
+              "--out-srcmap $(location %s_srcmap.json)" % mod,
+        tags = ["manual"],
+        tools = [":slice_module_bin"],
+    )
+    for mod in PPA_MODULES
+]
+
+[
+    orfs_flow(
+        name = mod,
+        arguments = PPA_FLOW_ARGS | {
+            "CORE_UTILIZATION": PPA_UTILIZATION.get(mod, "30"),
+        } | PPA_MOD_ARGS.get(mod, {}),
+        pdk = "@orfs//flow:asap7",
+        sources = PPA_FLOW_SOURCES,
+        stage_arguments = {"grt": {"HOLD_SLACK_MARGIN": "-1000"}},
+        tags = ["manual"],
+        user_arguments = PPA_ICG_USER_ARGS,
+        user_sources = PPA_ICG_USER_SOURCES,
+        user_stages = PPA_USER_STAGES,
+        verilog_files = [":%s_slice.sv" % mod],
+    )
+    for mod in PPA_MODULES
+]
+
+[
+    filegroup(
+        name = "%s_%s_logs" % (mod, st),
+        srcs = [":%s_%s" % (mod, st)],
+        output_group = "logs",
+        tags = ["manual"],
+    )
+    for mod in PPA_MODULES
+    for st in PPA_STAGES
+]
+
+[
+    orfs_run(
+        name = "%s_%s_ppa" % (mod, st),
+        src = ":%s_%s" % (mod, st),
+        outs = ["%s_%s_ppa.json" % (mod, st)],
+        arguments = PPA_FLOW_ARGS | {
+            "CORE_UTILIZATION": PPA_UTILIZATION.get(mod, "30"),
+        } | PPA_MOD_ARGS.get(mod, {}),
+        script = ":stage_ppa.tcl",
+        sources = PPA_FLOW_SOURCES,
+        tags = ["manual"],
+        user_arguments = {
+            "PPA_MODULE": mod,
+            "PPA_OUT_JSON": "$(location %s_%s_ppa.json)" % (mod, st),
+            "PPA_STAGE": st,
+        },
+    )
+    for mod in PPA_MODULES
+    for st in PPA_STAGES
+]
+
+[
+    genrule(
+        name = "ppa_%s_bundle" % st,
+        srcs = [
+            ":asap7_fo4",
+            ":ppa_fir_bundle",
+        ] + [
+            ":%s_%s_ppa.json" % (mod, st)
+            for mod in PPA_MODULES
+        ] + [
+            ":%s_srcmap.json" % mod
+            for mod in PPA_MODULES
+        ] + [
+            ":%s_%s_logs" % (mod, prev_st)
+            for mod in PPA_MODULES
+            for prev_st in PPA_STAGES[:idx + 1]
+        ],
+        outs = ["ppa_%s.json" % st],
+        cmd = "$(execpath :collect_stage_bin) " +
+              "--fo4 $(location :asap7_fo4) " +
+              "--stage %s " % st +
+              "--fir-json $(location :ppa_fir_bundle) " +
+              "--out $@ " + " ".join([
+            "--entry %s $(location :%s_%s_ppa.json) $(location :%s_srcmap.json) \"$$(echo %s | tr ' ' ',')\"" % (
+                mod,
+                mod,
+                st,
+                mod,
+                " ".join([
+                    "$(locations :%s_%s_logs)" % (mod, prev_st)
+                    for prev_st in PPA_STAGES[:idx + 1]
+                ]),
+            )
+            for mod in PPA_MODULES
+        ]),
+        tags = ["manual"],
+        tools = [":collect_stage_bin"],
+    )
+    for idx, st in enumerate(PPA_STAGES)
+]

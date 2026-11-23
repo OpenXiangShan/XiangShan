@@ -1,0 +1,291 @@
+"""XiangShan Chisel/Scala targets and top-level Bazel entry points.
+
+Mirrors `build.mill` directly over the checkout's own directories (`make init`
+populates the git submodules). Named `BUILD.bazel` so it never collides with
+the Makefile's `./build` directory, even on case-insensitive filesystems.
+
+Common commands (work from any directory in the checkout):
+  bazelisk run //:ppa                       # Synthesis PPA report, git changes highlighted
+  bazelisk run //:ppa -- --stage=fir        # Fast static FIRRTL FO4 & structure estimate
+  bazelisk run //:plot_stages               # Runtime vs. global-route accuracy across stages
+  bazelisk build //:verilog_minimal         # MinimalConfig SystemVerilog
+  bazelisk build //:verilog                 # DefaultConfig SystemVerilog
+"""
+
+load("@rules_chisel//chisel:defs.bzl", "chisel_library")
+load("@rules_scala//scala:scala.bzl", "scala_library", "scala_macro_library")
+
+package(default_visibility = ["//visibility:public"])
+
+SCALACOPTS = [
+    "-Ymacro-annotations",
+    "-Xcheckinit:false",
+]
+
+scala_library(
+    name = "cde",
+    srcs = glob(["rocket-chip/cde/cde/src/**/*.scala"]),
+)
+
+chisel_library(
+    name = "hardfloat",
+    srcs = glob(["rocket-chip/hardfloat/hardfloat/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    deps = ["@xs_maven//:com_lihaoyi_sourcecode_2_13"],
+)
+
+scala_macro_library(
+    name = "rocket_chip_macros",
+    srcs = glob(["rocket-chip/macros/src/main/scala/**/*.scala"]),
+    deps = ["@xs_maven//:org_scala_lang_scala_reflect"],
+)
+
+chisel_library(
+    name = "rocket_chip",
+    srcs = glob(
+        ["rocket-chip/src/main/scala/**/*.scala"],
+        exclude = ["rocket-chip/src/main/scala/diplomacy/Main.scala"],
+    ),
+    scalacopts = SCALACOPTS,
+    exports = [
+        ":cde",
+        ":hardfloat",
+        ":rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+    deps = [
+        ":cde",
+        ":hardfloat",
+        ":rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_maven//:org_json4s_json4s_ast_2_13",
+        "@xs_maven//:org_json4s_json4s_core_2_13",
+        "@xs_maven//:org_json4s_json4s_jackson_2_13",
+        "@xs_maven//:org_json4s_json4s_jackson_core_2_13",
+    ],
+)
+
+chisel_library(
+    name = "utility",
+    srcs = glob(["utility/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "yunsuan",
+    srcs = glob(["yunsuan/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    deps = ["@xs_maven//:com_lihaoyi_sourcecode_2_13"],
+)
+
+chisel_library(
+    name = "difftest",
+    srcs = glob(["difftest/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    deps = [
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_maven//:org_json4s_json4s_ast_2_13",
+        "@xs_maven//:org_json4s_json4s_core_2_13",
+        "@xs_maven//:org_json4s_json4s_jackson_2_13",
+        "@xs_maven//:org_json4s_json4s_jackson_core_2_13",
+        "@xs_maven//:org_json4s_json4s_native_2_13",
+        "@xs_maven//:org_json4s_json4s_native_core_2_13",
+    ],
+)
+
+chisel_library(
+    name = "openncb",
+    srcs = glob(["XSCache/OpenNCB/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_maven//:io_github_alexarchambault_data_class_2_13",
+        "@xs_maven//:org_scala_lang_scala_reflect",
+    ],
+)
+
+chisel_library(
+    name = "zhujiang",
+    srcs = glob([
+        "XSCache/ZhuJiang/src/main/scala/**/*.scala",
+        "XSCache/ZhuJiang/xs-utils/src/main/scala/**/*.scala",
+    ]),
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":difftest",
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        ":utility",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "xscache",
+    srcs = glob(["XSCache/src/main/scala/**/*.scala"]) + [
+        "XSCache/src/test/scala/ZhuJiangBridge.scala",
+    ],
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":openncb",
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        ":utility",
+        ":zhujiang",
+        "@xs_maven//:com_github_scopt_scopt_2_13",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "chiselaia",
+    srcs = glob(["ChiselAIA/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        ":utility",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "chiseliopmp",
+    srcs = glob(["ChiselIOPMP/src/main/scala/**/*.scala"]),
+    scalacopts = SCALACOPTS,
+    exports = [":rocket_chip"],
+    deps = [
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        ":utility",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+scala_macro_library(
+    name = "macros",
+    srcs = glob(["macros/src/main/scala/**/*.scala"]),
+    deps = ["@xs_maven//:org_scala_lang_scala_reflect"],
+)
+
+chisel_library(
+    name = "xiangshan",
+    srcs = glob(["src/main/scala/**/*.scala"]),
+    resource_strip_prefix = "src/main/resources",
+    resources = glob(["src/main/resources/**"]),
+    scalacopts = SCALACOPTS,
+    deps = [
+        ":chiselaia",
+        ":chiseliopmp",
+        ":difftest",
+        ":macros",
+        ":openncb",
+        ":rocket_chip",
+        ":rocket_chip_macros",
+        ":utility",
+        ":xscache",
+        ":yunsuan",
+        ":zhujiang",
+        "@xs_maven//:com_chuusai_shapeless_2_13",
+        "@xs_maven//:com_github_scopt_scopt_2_13",
+        "@xs_maven//:com_lihaoyi_os_lib_2_13",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_maven//:io_circe_circe_core_2_13",
+        "@xs_maven//:io_circe_circe_generic_2_13",
+        "@xs_maven//:io_circe_circe_generic_extras_2_13",
+        "@xs_maven//:io_circe_circe_parser_2_13",
+        "@xs_maven//:io_circe_circe_yaml_2_13",
+        "@xs_maven//:io_circe_circe_yaml_common_2_13",
+        "@xs_maven//:org_scalactic_scalactic_2_13",
+        "@xs_maven//:org_scalatest_scalatest_compatible",
+        "@xs_maven//:org_scalatest_scalatest_core_2_13",
+        "@xs_maven//:org_scalatest_scalatest_flatspec_2_13",
+        "@xs_maven//:org_scalatest_scalatest_matchers_core_2_13",
+        "@xs_maven//:org_scalatest_scalatest_mustmatchers_2_13",
+        "@xs_maven//:org_scalatest_scalatest_shouldmatchers_2_13",
+        "@xs_maven//:org_typelevel_cats_core_2_13",
+    ],
+)
+
+# Source filegroups read by scripts/openroad-flow/verilog's hermetic patch
+# actions for the XSTile physical flow; the checkout itself is never modified.
+filegroup(
+    name = "xiangshan_scala_srcs",
+    srcs = glob(["src/main/scala/**/*.scala"]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "xiangshan_resources",
+    srcs = glob(["src/main/resources/**"]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "utility_scala_srcs",
+    srcs = glob(["utility/src/main/scala/**/*.scala"]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "zhujiang_scala_srcs",
+    srcs = glob([
+        "XSCache/ZhuJiang/src/main/scala/**/*.scala",
+        "XSCache/ZhuJiang/xs-utils/src/main/scala/**/*.scala",
+    ]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "xscache_scala_srcs",
+    srcs = glob(["XSCache/src/main/scala/**/*.scala"]) + [
+        "XSCache/src/test/scala/ZhuJiangBridge.scala",
+    ],
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "chiselaia_scala_srcs",
+    srcs = glob(["ChiselAIA/src/main/scala/**/*.scala"]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+filegroup(
+    name = "chiseliopmp_scala_srcs",
+    srcs = glob(["ChiselIOPMP/src/main/scala/**/*.scala"]),
+    visibility = ["//scripts/openroad-flow:__subpackages__"],
+)
+
+alias(
+    name = "verilog",
+    actual = "//scripts/openroad-flow/verilog:xiangshan_default_sv",
+    tags = ["manual"],
+)
+
+alias(
+    name = "verilog_minimal",
+    actual = "//scripts/openroad-flow/verilog:xiangshan_minimal_sv",
+    tags = ["manual"],
+)
+
+alias(
+    name = "ppa",
+    actual = "//scripts/openroad-flow/ppa:ppa",
+)
+
+alias(
+    name = "plot_stages",
+    actual = "//scripts/openroad-flow/ppa:plot_stages",
+)

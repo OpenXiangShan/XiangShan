@@ -1,20 +1,8 @@
-"""XiangShan's experimental open-source physical-design flow (README.md).
+"""OpenROAD, yosys, sv-elab and ORFS module overrides for XiangShan's physical flow.
 
-An optional Bazel module beside XiangShan's own build: mill stays
-XiangShan's build. Bazel is used here because it fetches and builds every
-dependency of the flow -- JDK, Scala, Chisel, firtool, espresso, yosys,
-OpenROAD, ORFS and the ASAP7 PDK -- with one tool, and because it is what
-OpenROAD and bazel-orfs use. The flow's rules come from bazel-orfs; what
-follows the bazel-orfs pin is what Bazel honours only from the root module,
-copied from bazel-orfs's MODULE.bazel at that commit (see README.md,
-"Keeping up with bazel-orfs").
+Included from the root MODULE.bazel so the root file stays compact while
+carrying the root-only dependency overrides Bazel requires.
 """
-
-module(
-    name = "xiangshan_openroad_flow",
-    version = "0.0.0",
-    bazel_compatibility = [">=9.1.1"],
-)
 
 # --- bazel-orfs ------------------------------------------------------------
 #
@@ -61,14 +49,14 @@ single_version_override(
     module_name = "yosys",
     patch_strip = 1,
     patches = [
-        "//patches:yosys-0001-aiger2-holes-output-order.patch",
-        "//patches:yosys-0002-abc-new-script-option.patch",
-        "//patches:yosys-0003-rom-names-per-module-proc-rom.patch",
-        "//patches:yosys-0004-rom-names-per-module-proc-rom-test.patch",
-        "//patches:yosys-0005-rom-names-per-module-memory-bmux2rom.patch",
-        "//patches:yosys-0006-rom-names-per-module-memory-bmux2rom-test.patch",
-        "//patches:yosys-0007-techmap-order-by-name.patch",
-        "//patches:yosys-0008-techmap-order-by-name-test.patch",
+        "//scripts/openroad-flow/patches:yosys-0001-aiger2-holes-output-order.patch",
+        "//scripts/openroad-flow/patches:yosys-0002-abc-new-script-option.patch",
+        "//scripts/openroad-flow/patches:yosys-0003-rom-names-per-module-proc-rom.patch",
+        "//scripts/openroad-flow/patches:yosys-0004-rom-names-per-module-proc-rom-test.patch",
+        "//scripts/openroad-flow/patches:yosys-0005-rom-names-per-module-memory-bmux2rom.patch",
+        "//scripts/openroad-flow/patches:yosys-0006-rom-names-per-module-memory-bmux2rom-test.patch",
+        "//scripts/openroad-flow/patches:yosys-0007-techmap-order-by-name.patch",
+        "//scripts/openroad-flow/patches:yosys-0008-techmap-order-by-name-test.patch",
     ],
 )
 
@@ -97,13 +85,13 @@ single_version_override(
         # named 'flush_ex_o'"). The redefinition now shares the wire name
         # lookup finds. Not upstreamed; retires at an sv-elab release that
         # carries it.
-        "//bazel-orfs-patches:sv-elab-0001-redefinition-shares-wire.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:sv-elab-0001-redefinition-shares-wire.patch",
         # The plugin's headers were staged at two paths, src/ and
         # _virtual_includes/; on remote execution those are distinct inodes,
         # so #pragma once let slang_frontend.h be included twice. Copied from
         # OpenROAD's root MODULE.bazel (bazel/sv-elab-patches), which a
         # dependency's override does not reach; retires with OpenROAD's.
-        "//bazel-orfs-patches:sv-elab-0002-avoid-duplicate-header-paths.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:sv-elab-0002-avoid-duplicate-header-paths.patch",
         # A module's ports had no port_id, so yosys ordered them by the
         # order their names were first interned in the process: the same
         # definition got one port order alone and another under a parent,
@@ -114,7 +102,7 @@ single_version_override(
         # code, so OpenROAD's syn, built with SLANG_NO_YOSYS, compiles the
         # same objects. Not upstreamed; retires at an sv-elab release that
         # carries it.
-        "//bazel-orfs-patches:sv-elab-0003-ports-in-declaration-order.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:sv-elab-0003-ports-in-declaration-order.patch",
     ],
     version = "2026-10-29",
 )
@@ -223,125 +211,125 @@ archive_override(
         # channels narrower than they needed). Not upstreamed; the upstream
         # pull request carries a gtest. Retires at a bump onto an OpenROAD
         # that has it.
-        "//bazel-orfs-patches:0004-openroad-dpl-window-supply.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0004-openroad-dpl-window-supply.patch",
         # 0156: generate_array -spec builds a register-file spec through
         # generate_ram_netlist and stops, naming the part, on any other
         # structure (ideas/structured-macros.md). Not upstreamed.
-        "//bazel-orfs-patches:0156-openroad-ram-generate-array.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0156-openroad-ram-generate-array.patch",
         # 0164: generate_ram's read side per group: a port decoding more
         # than eight words takes its address literals per eight words, and
         # an AND-OR read's word select reaches its bits per eight, from a
         # buffer beside the bits it selects. As OpenROAD #12240 has it.
         # Not upstreamed; retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0164-openroad-ram-read-drive-groups.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0164-openroad-ram-read-drive-groups.patch",
         # Global route's memory (OpenROAD#12075), one concern per patch, the
         # guides unchanged in every one.
         # The 3D maze's search directions in a byte (4 -> 1 per GCell-layer).
-        "//bazel-orfs-patches:0183-openroad-grt-direction-byte.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0183-openroad-grt-direction-byte.patch",
         # The 3D maze's parents in int16 coordinates (12 -> 6 bytes).
-        "//bazel-orfs-patches:0184-openroad-grt-parent3d-int16.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0184-openroad-grt-parent3d-int16.patch",
         # The maze arrays sized to the grid rather than a square of at
         # least 1000 x 1000; cost_hvh_test_ sized along x as it is indexed.
-        "//bazel-orfs-patches:0185-openroad-grt-maze-arrays-grid.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0185-openroad-grt-maze-arrays-grid.patch",
         # A merged route gives back its unmerged per-GCell segments.
-        "//bazel-orfs-patches:0186-openroad-grt-route-shrink.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0186-openroad-grt-route-shrink.patch",
         # The maze heaps grow to the search frontier instead of a pointer per
         # GCell and layer up front.
-        "//bazel-orfs-patches:0187-openroad-grt-maze-heaps-frontier.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0187-openroad-grt-maze-heaps-frontier.patch",
         # global_route -backing_file: the routing grid in a file reserved
         # when the grid is set up (failing at once when the disk cannot hold
         # it) and paged there instead of to swap. ORFS passes a file in
         # OBJECTS_DIR (0189).
-        "//bazel-orfs-patches:0188-openroad-grt-backing-file.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0188-openroad-grt-backing-file.patch",
         # The 3D maze's work arrays allocated only while it runs.
-        "//bazel-orfs-patches:0190-openroad-grt-maze3d-scoped.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0190-openroad-grt-maze3d-scoped.patch",
         # A backed grid written out and freed before the routes are converted,
         # where global route peaks (msync, then MADV_PAGEOUT).
-        "//bazel-orfs-patches:0191-openroad-grt-backing-pageout.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0191-openroad-grt-backing-pageout.patch",
         # The blocked intervals freed once applied as capacity adjustments.
-        "//bazel-orfs-patches:0192-openroad-grt-free-blocked-intervals.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0192-openroad-grt-free-blocked-intervals.patch",
         # The 2D maze's work arrays allocated only for the overflow iterations.
-        "//bazel-orfs-patches:0193-openroad-grt-maze2d-scoped.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0193-openroad-grt-maze2d-scoped.patch",
         # Each route finished (remaining guides, pad pins, merge) as FastRoute
         # hands it over, never every net's per-GCell segments at once. Not
         # upstreamed; each of 0183-0194 retires at a //:bump onto an
         # OpenROAD that has it.
-        "//bazel-orfs-patches:0194-openroad-grt-finish-routes-per-net.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0194-openroad-grt-finish-routes-per-net.patch",
         # global_route -no_incremental: the router's nets, trees and grid
         # freed once the routes and congestion are saved, for a flow that
         # reroutes nothing afterwards.
-        "//bazel-orfs-patches:0195-openroad-grt-no-incremental.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0195-openroad-grt-no-incremental.patch",
         # The grid's backing file mapped only at its first page-out, and the
         # grid paged out while the nets are built from the database.
-        "//bazel-orfs-patches:0196-openroad-grt-backing-lazy.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0196-openroad-grt-backing-lazy.patch",
         # read_db -backing_file: the tables' pages in a file, paged out per
         # table (dbBlock::pageOut) or whole (dbDatabase::pageOut); write_db
         # holds one table at a time. Global route pages each part out once it
         # stops reading it. Not upstreamed; 0195-0198 retire at a //:bump onto
         # an OpenROAD that has them.
-        "//bazel-orfs-patches:0197-openroad-odb-backing-file.patch",
-        "//bazel-orfs-patches:0198-openroad-grt-page-out-database.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0197-openroad-odb-backing-file.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0198-openroad-grt-page-out-database.patch",
         # 0209: repair_timing -path_group takes a group the SDC defines.
         # Not upstreamed.
-        "//bazel-orfs-patches:0209-openroad-rsz-sdc-path-group.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0209-openroad-rsz-sdc-path-group.patch",
         # 0216: CTS clustering's min-cost flow costs are int64_t. With int,
         # a reduced cost near INT_MAX wrapped in LEMON's network simplex and
         # XSTile's parent CTS never returned. Not upstreamed; retires at a
         # //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0216-openroad-cts-clustering-cost-int64.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0216-openroad-cts-clustering-cost-int64.patch",
         # 0217: a global placement that a routability pass has just put
         # back on its snapshot does not converge on the overflow of the
         # placement it replaced; the next iteration's measurement decides.
         # Not upstreamed; retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0217-openroad-gpl-reverted-placement-stale-overflow.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0217-openroad-gpl-reverted-placement-stale-overflow.patch",
         # 0218: a routability pass that is waiting for the cells to settle
         # runs when the placement reaches the target overflow first. Before,
         # convergence ended the placement with no pass, exit status 0:
         # XSTile's parent placed with timing and routability drivers on and
         # ran none. Not upstreamed; retires at a //:bump onto an OpenROAD
         # that has it.
-        "//bazel-orfs-patches:0218-openroad-gpl-routability-wait-not-cancelled.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0218-openroad-gpl-routability-wait-not-cancelled.patch",
         # 0171: dissolve_macro, a placed block instance replaced by the
         # block's own cells, nets and global route guides as a module
         # instance (//tools/carve: the parent as a macro, its top level
         # dissolving every macro after its global route). Not upstreamed;
         # retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0171-openroad-odb-dissolve-macro.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0171-openroad-odb-dissolve-macro.patch",
         # 0173: global_route -unguided_only keeps every net's guides and
         # routes only the nets without (the carve's top level: its blocks'
         # routes kept, its clock tree routed). Not upstreamed; retires at a
         # //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0173-openroad-grt-route-unguided-only.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0173-openroad-grt-route-unguided-only.patch",
         # 0174: crossing_cones, crossing_signatures, crossing_strip: the
         # carve's top level timed for the paths not contained in one
         # macro, in sets that fit memory (//tools/carve). Not upstreamed;
         # retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0174-openroad-dbsta-crossing-cones.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0174-openroad-dbsta-crossing-cones.patch",
         # 0176: the web viewer's slack histogram bar drills down with the
         # histogram's path groups and clock, not every path in its slack
         # range. Not upstreamed; retires at a //:bump onto an OpenROAD
         # that has it.
-        "//bazel-orfs-patches:0176-openroad-web-histogram-drill-down-filters.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0176-openroad-web-histogram-drill-down-filters.patch",
         # 0233: generate_ram -write_select mask: a write port names its
         # words by a mask, a bit a word, each word's select its own bit
         # with no decoder, so one write writes many words; generate_array
         # takes select=mask. On 0156 and the per-word decoder. Not
         # upstreamed; retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0233-openroad-ram-write-select-mask.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0233-openroad-ram-write-select-mask.patch",
         # 0216: detailed placement's negotiation legalizer runs its diamond
         # recovery when phase 2 reaches its iteration limit, as it does on a
         # stall (OpenROAD #12233), and says why cells were left to it, in
         # numbers that name the fix (DPL-0703, DPL-0704). The recovery is
         # #12233; the diagnosis is not upstreamed. Retires at a //:bump
         # onto an OpenROAD that has both.
-        "//bazel-orfs-patches:0216-openroad-dpl-recovery-diagnosis.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0216-openroad-dpl-recovery-diagnosis.patch",
         # 0220: CTS connects every sink when two share a location. A
         # second sink at a point overwrote the first in HTreeBuilder's map
         # and was left with its clock pin on no net, silently (XSTile's
         # Top, 7 registers); a sink in no subnet is now CTS-0138. Test
         # colocated_registers. Not upstreamed; retires at a //:bump onto an
         # OpenROAD that has it.
-        "//bazel-orfs-patches:0220-openroad-cts-coincident-sinks.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0220-openroad-cts-coincident-sinks.patch",
         # 0222: link_hier_module <module> links a module read with
         # read_verilog after read_db -hier into the loaded design, as
         # link_design links an unused one, so replace_hier_module can switch
@@ -349,7 +337,7 @@ archive_override(
         # of the rest of the design without reading the rest again
         # (tools/module_sta). Not upstreamed; retires at a //:bump onto
         # an OpenROAD that has it.
-        "//bazel-orfs-patches:0222-openroad-link-hier-module.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0222-openroad-link-hier-module.patch",
         # 0223: replace_hier_module copies a module's child module instances,
         # recursively, with net names relative to the copied module's root,
         # so a module that has children of its own can be swapped (odb's
@@ -357,14 +345,14 @@ archive_override(
         # out is saved before its instance goes, so two nets of one base
         # name are no longer merged. Test replace_hier_mod7. Not upstreamed;
         # retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0223-openroad-replace-hier-module-children.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0223-openroad-replace-hier-module-children.patch",
         # 0224: after global placement's routability phase goes back to the
         # pass with the least congestion, the overflow is a fraction of the
         # cells' area as they now are, not of the sizes they left. On
         # XSTile's parent it read 7.7 % low, and GPL-1014 reported +7.74 %
         # area with no inflation left. Test routability_minimum_test. Not
         # upstreamed; retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0224-openroad-gpl-areas-after-routability-revert.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0224-openroad-gpl-areas-after-routability-revert.patch",
         # 0225: a routability phase whose minimum is its first pass ends on
         # the placement that pass measured, on its look-ahead coordinates,
         # not on a descent replayed from the routability snapshot that no
@@ -372,7 +360,7 @@ archive_override(
         # 60.3 M um where pass 1 had measured 1.16. Tests
         # routability_minimum_test and routability_first_pass_minimum. Not
         # upstreamed; retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0225-openroad-gpl-routability-ends-on-first-pass.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0225-openroad-gpl-routability-ends-on-first-pass.patch",
         # 0226: global placement ends on Nesterov's iterate, not on the
         # look-ahead one momentum step past it, which it measured, stopped
         # on and wrote. Every placement moves, 0 to 3 iterations later:
@@ -380,7 +368,7 @@ archive_override(
         # under 25 iterations move either way. Tests end_of_descent_test
         # and routability_minimum_test. Not upstreamed; retires at a
         # //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0226-openroad-gpl-end-on-iterate.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0226-openroad-gpl-end-on-iterate.patch",
         # 0227: a Nesterov descent restarts its momentum on any iteration
         # whose HPWL rose by more than the density penalty controller's
         # reference (phiCoef below 1) with the overflow at or below 0.2,
@@ -392,7 +380,7 @@ archive_override(
         # rises that fast is unchanged: gpl's test logs are 0226's. Tests
         # end_of_descent_test, routability_minimum_test. Not upstreamed;
         # retires at a //:bump onto an OpenROAD that has it.
-        "//bazel-orfs-patches:0227-openroad-gpl-momentum-restart-on-rise.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0227-openroad-gpl-momentum-restart-on-rise.patch",
         # 0240: CTS's latency balancer subtracts a sink instance's
         # cts_latency_offset property (cts::set_latency_offset) from its
         # insertion delay, so a flow can clock a hardened block later or
@@ -402,7 +390,7 @@ archive_override(
         # STA does not read it. test/planned_parent's
         # cts_latency_offset_test. Not upstreamed; retires at a //:bump
         # onto an OpenROAD with a per-sink latency target in CTS.
-        "//bazel-orfs-patches:0240-openroad-cts-latency-offset.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0240-openroad-cts-latency-offset.patch",
         # 0242: global_placement -clusters_file: named groups of cells
         # (instance-name prefixes) pulled toward their centroid or an
         # anchor, weight x the mean wirelength gradient at one RMS radius,
@@ -412,14 +400,14 @@ archive_override(
         # the option gpl's test logs are unchanged. Test cohesion_test.
         # Not upstreamed; retires at a //:bump onto an OpenROAD that has
         # it, or is dropped if XSTile does not hold the gain.
-        "//bazel-orfs-patches:0242-openroad-gpl-cohesion.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0242-openroad-gpl-cohesion.patch",
         # 0243: in GUI mode Qt owns the main loop and nothing services
         # Tcl's event queue, so `after`, `fileevent` and `socket -server`
         # callbacks never run; a QTimer drains it on the Qt main thread.
         # Lets a Tcl server sourced into a GUI session answer. Built by
         # @openroad//:openroad-qt only. Not upstreamed; retires at a
         # //:bump onto an OpenROAD whose GUI services the Tcl event loop.
-        "//bazel-orfs-patches:0243-openroad-gui-tcl-event-pump.patch",
+        "//scripts/openroad-flow/bazel-orfs-patches:0243-openroad-gui-tcl-event-pump.patch",
     ],
     strip_prefix = "OpenROAD-4543b6b65b4285823b4f20953dd4a8999f6c3126",
     urls = ["https://github.com/The-OpenROAD-Project/OpenROAD/archive/4543b6b65b4285823b4f20953dd4a8999f6c3126.tar.gz"],
@@ -432,7 +420,7 @@ single_version_override(
     module_name = "boost.icl",
     patch_strip = 1,
     patches = [
-        "//patches:0001-refactor-interval-lookup-operations-icl-54.patch",
+        "//scripts/openroad-flow/patches:0001-refactor-interval-lookup-operations-icl-54.patch",
     ],
 )
 
@@ -480,7 +468,7 @@ single_version_override(
 single_version_override(
     module_name = "rules_pycross",
     patch_strip = 0,
-    patches = ["//patches:rules_pycross_no_warning.patch"],
+    patches = ["//scripts/openroad-flow/patches:rules_pycross_no_warning.patch"],
 )
 
 # pybind11_abseil (transitive: openroad -> or-tools): its pip extension
@@ -502,7 +490,7 @@ single_version_override(
 single_version_override(
     module_name = "pybind11_abseil",
     patch_strip = 0,
-    patches = ["//patches:pybind11_abseil_quiet.patch"],
+    patches = ["//scripts/openroad-flow/patches:pybind11_abseil_quiet.patch"],
     version = "202402.0",
 )
 
@@ -511,7 +499,7 @@ single_version_override(
 single_version_override(
     module_name = "protoc-gen-validate",
     patch_strip = 0,
-    patches = ["//patches:protoc_gen_validate_quiet.patch"],
+    patches = ["//scripts/openroad-flow/patches:protoc_gen_validate_quiet.patch"],
     version = "1.0.4.bcr.2",
 )
 
@@ -520,7 +508,7 @@ single_version_override(
 single_version_override(
     module_name = "grpc",
     patch_strip = 0,
-    patches = ["//patches:grpc_quiet.patch"],
+    patches = ["//scripts/openroad-flow/patches:grpc_quiet.patch"],
     version = "1.69.0",
 )
 
@@ -529,7 +517,7 @@ single_version_override(
 single_version_override(
     module_name = "rules_jvm_external",
     patch_strip = 0,
-    patches = ["//patches:rules_jvm_external_quiet.patch"],
+    patches = ["//scripts/openroad-flow/patches:rules_jvm_external_quiet.patch"],
 )
 
 # --- kepler-formal, dev-only --------------------------------------------
@@ -598,13 +586,6 @@ single_version_override(
 
 register_toolchains("@llvm//toolchain:all")
 
-bazel_dep(name = "rules_python", version = "2.3.2")
-
-python = use_extension("@rules_python//python/extensions:python.bzl", "python")
-python.toolchain(
-    is_default = True,
-    python_version = "3.13",
-)
 
 # ORFS, at the commit bazel-orfs pins; bazel-orfs applies its own patches.
 orfs = use_extension("@bazel-orfs//:extension.bzl", "orfs_repositories")
@@ -617,173 +598,3 @@ orfs.default(
 )
 use_repo(orfs, "gnumake", "orfs")
 
-# --- Chisel to Verilog ----------------------------------------------------
-#
-# Chisel 7.13.0 on Scala 2.13.17, the versions build.mill names.
-bazel_dep(name = "rules_chisel", version = "0.4.2")
-
-chisel = use_extension("@rules_chisel//chisel:extensions.bzl", "chisel")
-chisel.toolchain(
-    chisel_version = "7.13.0",
-    scala_version = "2.13.17",
-)
-use_repo(chisel, "chisel_firtool", "chisel_maven")
-
-bazel_dep(name = "rules_jvm_external", version = "6.7")
-bazel_dep(name = "rules_scala", version = "7.1.5")
-
-scala_config = use_extension("@rules_scala//scala/extensions:config.bzl", "scala_config")
-scala_config.settings(scala_version = "2.13.17")
-use_repo(scala_config, "rules_scala_config")
-
-scala_deps = use_extension("@rules_scala//scala/extensions:deps.bzl", "scala_deps")
-scala_deps.scala()
-use_repo(scala_deps, "rules_scala_toolchains")
-
-# The Maven artifacts build.mill names beyond Chisel itself.
-maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
-maven.install(
-    name = "xs_maven",
-    artifacts = [
-        "com.lihaoyi:sourcecode_2.13:0.4.4",
-        "io.github.alexarchambault:data-class_2.13:0.2.11",
-        "com.github.scopt:scopt_2.13:4.1.0",
-        "com.lihaoyi:os-lib_2.13:0.11.3",
-        "io.circe:circe-core_2.13:0.14.10",
-        "org.typelevel:cats-core_2.13:2.12.0",
-        "com.chuusai:shapeless_2.13:2.3.12",
-        "org.scalatest:scalatest-core_2.13:3.2.19",
-        "org.scalatest:scalatest-compatible:3.2.19",
-        "org.scalatest:scalatest-flatspec_2.13:3.2.19",
-        "org.scalatest:scalatest-shouldmatchers_2.13:3.2.19",
-        "org.scalatest:scalatest-matchers-core_2.13:3.2.19",
-        "org.scalatest:scalatest-mustmatchers_2.13:3.2.19",
-        "org.scalactic:scalactic_2.13:3.2.19",
-        "io.circe:circe-generic_2.13:0.14.10",
-        "io.circe:circe-parser_2.13:0.14.10",
-        "io.circe:circe-yaml-common_2.13:0.16.1",
-        "com.lihaoyi:mainargs_2.13:0.7.7",
-        "org.json4s:json4s-jackson_2.13:4.0.7",
-        "org.json4s:json4s-jackson-core_2.13:4.0.7",
-        "org.json4s:json4s-native_2.13:4.0.7",
-        "org.json4s:json4s-native-core_2.13:4.0.7",
-        "org.json4s:json4s-core_2.13:4.0.7",
-        "org.json4s:json4s-ast_2.13:4.0.7",
-        "org.scala-lang:scala-reflect:2.13.17",
-        "io.circe:circe-yaml_2.13:0.16.1",
-        "io.circe:circe-generic-extras_2.13:0.14.4",
-    ],
-)
-use_repo(maven, "xs_maven")
-
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-# espresso: Chisel's EspressoMinimizer runs it by name from PATH, and
-# XiangShan names that minimizer explicitly.
-http_archive(
-    name = "espresso",
-    build_file = "//verilog:espresso.BUILD.bazel",
-    sha256 = "560e34f57b0a57e6d8e77e9638a97677759b15a2d58b2d89272a77393753a968",
-    strip_prefix = "espresso-2.5.1",
-    urls = ["https://github.com/chipsalliance/espresso/archive/refs/tags/v2.5.1.tar.gz"],
-)
-
-# --- XiangShan, from this checkout ----------------------------------------
-#
-# The sources and the submodules are read where they are (`make init`
-# first). XiangShan's own sources and Utility are copied and patched by
-# xs_source (bazel/xs_source.bzl): verilog/patches, each header says why;
-# the checkout is never written. Nothing under scripts/openroad-flow is
-# read as XiangShan source.
-xs_source = use_repo_rule("//bazel:xs_source.bzl", "xs_source")
-
-xs_source(
-    name = "xiangshan",
-    build_file = "//verilog:xiangshan.BUILD.bazel",
-    dirs = [
-        "macros",
-        "src/main/resources",
-        "src/main/scala",
-    ],
-    patches = [
-        "//verilog:patches/0002-xiangshan-ftq-queues-as-register-files.patch",
-        "//verilog:patches/0003-xiangshan-rob-entry-cell.patch",
-        "//verilog:patches/0004-xiangshan-sq-entry-cell.patch",
-        "//verilog:patches/0005-xiangshan-rename-buffer-file.patch",
-        "//verilog:patches/0006-xiangshan-sq-forward-pipe.patch",
-        "//verilog:patches/0007-xiangshan-rob-cell-packed-ports.patch",
-        "//verilog:patches/0008-xiangshan-rob-entry-file.patch",
-        "//verilog:patches/0011-xiangshan-runahead-checkpoint-id-debug-only.patch",
-    ],
-    path = "../..",
-)
-
-xs_source(
-    name = "xs_utility",
-    build_file = "//verilog:utility.BUILD.bazel",
-    dirs = ["src/main/scala"],
-    patches = ["//verilog:patches/0010-utility-clockgate-circt-intrinsic.patch"],
-    path = "../../utility",
-)
-
-new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
-
-new_local_repository(
-    name = "xs_rocket_chip",
-    build_file = "//verilog:rocket_chip.BUILD.bazel",
-    path = "../../rocket-chip",
-)
-
-new_local_repository(
-    name = "xs_hardfloat",
-    build_file = "//verilog:hardfloat.BUILD.bazel",
-    path = "../../rocket-chip/hardfloat",
-)
-
-new_local_repository(
-    name = "xs_cde",
-    build_file = "//verilog:cde.BUILD.bazel",
-    path = "../../rocket-chip/cde",
-)
-
-new_local_repository(
-    name = "xs_yunsuan",
-    build_file = "//verilog:yunsuan.BUILD.bazel",
-    path = "../../yunsuan",
-)
-
-new_local_repository(
-    name = "xs_cache",
-    build_file = "//verilog:xscache.BUILD.bazel",
-    path = "../../XSCache",
-)
-
-new_local_repository(
-    name = "xs_openncb",
-    build_file = "//verilog:openncb.BUILD.bazel",
-    path = "../../XSCache/OpenNCB",
-)
-
-new_local_repository(
-    name = "xs_zhujiang",
-    build_file = "//verilog:zhujiang.BUILD.bazel",
-    path = "../../XSCache/ZhuJiang",
-)
-
-new_local_repository(
-    name = "xs_difftest",
-    build_file = "//verilog:difftest.BUILD.bazel",
-    path = "../../difftest",
-)
-
-new_local_repository(
-    name = "xs_chiselaia",
-    build_file = "//verilog:chiselaia.BUILD.bazel",
-    path = "../../ChiselAIA",
-)
-
-new_local_repository(
-    name = "xs_chiseliopmp",
-    build_file = "//verilog:chiseliopmp.BUILD.bazel",
-    path = "../../ChiselIOPMP",
-)
