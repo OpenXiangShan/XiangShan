@@ -285,16 +285,6 @@ trait HasTlbConst extends HasXSParameter {
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
-
-  import scala.language.implicitConversions
-
-  implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
-    Wire(new TlbPermBundle(hasV = false)).applyS2(hptwResp)
-  }
-
-  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
-    Wire(new TlbPermBundle()).apply(ptwResp)
-  }
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
