@@ -216,6 +216,7 @@ class FrontendEnv:
             miss_latency=self.config.icache.miss_latency,
             miss_rate=self.config.icache.miss_rate,
             seed=self.config.icache.seed,
+            back_to_back_rate=self.config.icache.back_to_back_rate,
         )
         self.uncache_agent.configure(
             latency=self.config.uncache.latency,

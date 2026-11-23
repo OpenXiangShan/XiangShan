@@ -22,6 +22,7 @@ class _ICachePending:
     corrupt: int = 0
     fault_beat: Optional[int] = None
     beat_idx: int = 0
+    next_back_to_back: bool = False
 
 
 class ICacheAgent:
@@ -33,6 +34,9 @@ class ICacheAgent:
         self.miss_latency = 20
         self.miss_rate = 0.0
         self.rng = random.Random(1)
+        self.back_to_back_rate = 0.2
+        self.back_to_back_rng = random.Random(1 ^ 0xB2B)
+        self._back_to_back_cycle: Optional[int] = None
         self.pending = deque()
         self.event_sink: Optional[Callable[[Dict], None]] = None
         self.req_count = 0
@@ -62,6 +66,7 @@ class ICacheAgent:
 
     def reset(self) -> None:
         self.pending.clear()
+        self._back_to_back_cycle = None
         if self.interface is None:
             return
         self._write(self.interface.a_ready, 0)
@@ -96,17 +101,28 @@ class ICacheAgent:
             }
         )
 
-    def configure(self, hit_latency: int = 1, miss_latency: int = 20, miss_rate: float = 0.0, seed: int = 1) -> None:
+    def configure(
+        self,
+        hit_latency: int = 1,
+        miss_latency: int = 20,
+        miss_rate: float = 0.0,
+        seed: int = 1,
+        *,
+        back_to_back_rate: float = 0.2,
+    ) -> None:
         self.hit_latency = max(0, int(hit_latency))
         self.miss_latency = max(0, int(miss_latency))
         self.miss_rate = min(1.0, max(0.0, float(miss_rate)))
         self.rng.seed(int(seed))
+        self.back_to_back_rate = min(1.0, max(0.0, float(back_to_back_rate)))
+        self.back_to_back_rng.seed(int(seed) ^ 0xB2B)
         self.logger.info(
-            "configured: hit_latency=%d miss_latency=%d miss_rate=%.4f seed=%d",
+            "configured: hit_latency=%d miss_latency=%d miss_rate=%.4f seed=%d back_to_back_rate=%.4f",
             self.hit_latency,
             self.miss_latency,
             self.miss_rate,
             int(seed),
+            self.back_to_back_rate,
         )
 
     @staticmethod
@@ -228,11 +244,20 @@ class ICacheAgent:
     def _drive_response(self, cycle: int) -> None:
         assert self.interface is not None
         self._write(self.interface.d_valid, 0)
+        back_to_back = cycle == self._back_to_back_cycle
+        self._back_to_back_cycle = None
         if not self.pending:
             return
         top = self.pending[0]
-        if cycle < top.ready_cycle:
+        # A selected successor may start early; an active line always finishes
+        # on the following cycle, even if its original latency has not elapsed.
+        if top.beat_idx == 0 and cycle < top.ready_cycle and not back_to_back:
             return
+        if top.beat_idx == 0:
+            top.next_back_to_back = (
+                self.back_to_back_rate > 0.0
+                and self.back_to_back_rng.random() < self.back_to_back_rate
+            )
         sent_beat_idx = int(top.beat_idx)
         fault_this_beat = (
             top.fault_beat is None or int(top.fault_beat) == sent_beat_idx
@@ -259,6 +284,8 @@ class ICacheAgent:
             }
         )
         if top.beat_idx == 1:
+            if top.next_back_to_back:
+                self._back_to_back_cycle = cycle + 1
             self.resp_line_count += 1
             self.denied_resp_count += int(top.denied)
             self.corrupt_resp_count += int(top.corrupt)
@@ -296,6 +323,7 @@ class ICacheAgent:
             "max_pending_depth": self.max_pending_depth,
             "pending": len(self.pending),
             "a_ready_override": self.a_ready_override,
+            "back_to_back_rate": self.back_to_back_rate,
             "corrupt_resp_count": self.corrupt_resp_count,
             "denied_resp_count": self.denied_resp_count,
             "request_records": [dict(record) for record in self.request_records],

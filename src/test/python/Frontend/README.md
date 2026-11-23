@@ -154,6 +154,24 @@ def test_generated_stream(env):
 初始化失败会保留部分执行记录并抛出原异常。再次初始化不重复装配时钟回调，也不
 隐式清空已有错误或累计覆盖率。
 
+## ICache D 通道 back to back
+
+`ICacheConfig.back_to_back_rate`（默认 `0.2`）控制每笔响应开始时，随机选择下一笔
+连续返回的概率。也可以在测试中配置：
+
+```python
+env.icache_agent.configure(
+    hit_latency=1, miss_latency=20, miss_rate=0.1, seed=1,
+    back_to_back_rate=0.2,
+)
+```
+
+抽中后，下一笔已接收的请求可以跳过原来的响应延迟，紧接当前笔最后一个 beat 返回，
+形成 `请求0.beat0 → 请求0.beat1 → 请求1.beat0 → 请求1.beat1`。
+未抽中时沿用原来的延迟和 FIFO 顺序，仍可能自然形成连续响应。
+若衔接周期没有下一笔请求，本次选择失效，后续请求恢复正常延迟；当前笔不会等待下一笔。
+随机选择使用由 `seed` 初始化的独立随机源，保持原有 hit/miss 随机序列。
+
 ## 阅读建议
 
 如果是首次接触当前环境，建议按以下顺序阅读：

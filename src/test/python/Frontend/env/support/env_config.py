@@ -9,6 +9,7 @@ class ICacheConfig:
     miss_latency: int = 20
     miss_rate: float = 0.0
     seed: int = 1
+    back_to_back_rate: float = 0.2
 
 
 @dataclass(frozen=True)
