@@ -28,6 +28,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo,
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
+import xiangshan.backend.fu.NewCSR.{IcountEvent, IcountResponse}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
@@ -122,7 +123,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
+  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusionEnable
 
   private val s0_robFlushRedirect = rob.out.flushOut
   private val s0_robFlushPcInfo = rob.out.flushPcInfo
@@ -171,8 +172,7 @@ class CtrlBlockImp(
   }
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
-    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
-      (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
+    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B)
   }
 
   val wbData = io.fromWB.wbData
@@ -467,6 +467,16 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.in.fromCSR := io.fromCSR.toDecode
+  decode.in.icount := io.icountResponse
+  decode.in.commit := rob.out.commits.isCommit && rob.out.commits.commitValid(0)
+  decode.in.exception := rob.out.exception
+  io.icountEvent <> decode.out.icountEvent
+  decode.in.debugMode := io.fromCSR.debugMode
+  // Only the permitted single-step instruction can execute and request a
+  // non-trap flush-itself. A branch or flush-after has completed that step.
+  decode.in.stepReplay := Mux(s1_robFlushRedirect.valid,
+    s1_robFlushRedirect.bits.flushItself() && !s1_robFlushRedirect.bits.interrupt,
+    s3_redirectGen.valid && s3_redirectGen.bits.flushItself())
   decode.in.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.in.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
   decode.in.isResumeVType := rob.out.toDecode.isResumeVType
@@ -677,7 +687,7 @@ class CtrlBlockImp(
   rename.io.ratSnpt.snptSelect := snptSelect
   rename.io.ratSnpt.flushVec := flushVec
 
-  val decodeHasException = decode.out.uop.map(x => x.bits.exceptionVec.orR || (!TriggerAction.isNone(x.bits.trigger)))
+  val decodeHasException = decode.out.uop.map(x => x.bits.exceptionVec.orR)
   // fusion decoder
   fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
@@ -818,7 +828,11 @@ class CtrlBlockImp(
   dispatch.io.wbPregsV0 := io.toDispatch.wbPregsV0
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
-  dispatch.io.singleStep := io.fromCSR.toDecode.singlestep
+
+  val debugDispatched = dispatch.io.fromRename.map { uop =>
+    uop.fire && uop.bits.firstUop && uop.bits.debugSerial
+  }
+  decode.in.debugDispatched := VecInit(debugDispatched).asUInt.orR
 
   // lsqEnqCtrl assign
   lsqEnqCtrl.io.redirect := s1_s3_redirect
@@ -880,13 +894,13 @@ class CtrlBlockImp(
   io.robio.csr.fflags := rob.out.csr.fflags
   io.robio.csr.vxsat := rob.out.csr.vxsat
   io.robio.csr.vstart := rob.out.csr.vstart
-  io.robio.csr.dirty_fs := rob.out.csr.dirty_fs
-  io.robio.csr.dirty_vs := rob.out.csr.dirty_vs
+  io.robio.csr.dirtyFs := rob.out.csr.dirtyFs
+  io.robio.csr.dirtyVs := rob.out.csr.dirtyVs
   io.robio.csr.perfinfo := rob.out.csr.perfinfo
   // When wfi is disabled, it will not block ROB commit.
   rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.in.wfi_enable := decode.in.fromCSR.custom.wfi_enable
-  rob.in.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
+  rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
+  rob.in.commitStuckCheckEnable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
   io.toTop.cpuWfi := DelayN(rob.out.cpu_wfi, 5)
 
@@ -952,6 +966,8 @@ class CtrlBlockImp(
 }
 
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
+  val icountResponse = Input(new IcountResponse)
+  val icountEvent = Valid(new IcountEvent)
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
   }
@@ -961,6 +977,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val frontend = Flipped(new FrontendToCtrlIO())
   val fromBJUResolve = Flipped(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fromCSR = new Bundle{
+    val debugMode = Input(Bool())
     val toDecode = Input(new CSRToDecode)
     val traceCSR = Input(new TraceCSR)
     val instrAddrTransType = Input(new AddrTransType)

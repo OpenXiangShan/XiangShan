@@ -186,6 +186,10 @@ trait CSRDocDump { self: NewCSR =>
         new Mcontrol6,
         s"${tdata1Mod.modName}(tdata1.DATA view)",
       )
+      if (idx == 0) {
+        dumpBundleCSV(writer, "D", "icount[0]", CSRs.tdata1, new Icount,
+          s"${tdata1Mod.modName}(tdata1.DATA view)")
+      }
       dumpBundleCSV(
         writer,
         "D",
@@ -194,6 +198,16 @@ trait CSRDocDump { self: NewCSR =>
         tdata2Mod.bundle.asInstanceOf[CSRBundle],
         tdata2Mod.modName,
       )
+      Seq("itrigger" -> new Itrigger, "etrigger" -> new Etrigger).foreach { case (name, bundle) =>
+        dumpBundleCSV(
+          writer,
+          "D",
+          s"$name[$idx]",
+          CSRs.tdata1,
+          bundle,
+          s"${tdata1Mod.modName}(tdata1.DATA view)",
+        )
+      }
     }
   }
 
@@ -205,12 +219,12 @@ trait CSRDocDump { self: NewCSR =>
 
   private def pmaGenAddr(init: PMAConfigEntry): BigInt = {
     if (init.a < 2) {
-      init.base_addr >> PMPOffBits
+      init.baseAddr >> PMPOffBits
     } else {
       val platformGrainBytes = BigInt(1) << p(PMParameKey).PlatformGrain
-      require((init.base_addr % platformGrainBytes) == 0)
+      require((init.baseAddr % platformGrainBytes) == 0)
       require((init.range % platformGrainBytes) == 0)
-      (init.base_addr + (init.range / 2 - 1)) >> PMPOffBits
+      (init.baseAddr + (init.range / 2 - 1)) >> PMPOffBits
     }
   }
 

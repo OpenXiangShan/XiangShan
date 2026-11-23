@@ -1494,7 +1494,7 @@ class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val wfi = Flipped(new WfiReqBundle)
   val csr = new Bundle {
     val tlb = Input(new TlbCsrBundle)
-    val distribute_csr = Flipped(new DistributedCSRIO)
+    val distributeCsr = Flipped(new DistributedCSRIO)
   }
 }
 

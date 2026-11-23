@@ -29,6 +29,7 @@ import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
+import xiangshan.backend.fu.NewCSR.{IcountEvent, IcountResponse}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import xiangshan.backend.rob.RobPtr
@@ -41,7 +42,7 @@ import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 class FpuCsrIO extends Bundle {
   val fflags = Output(Vec(5, Bool()))
   val isIllegal = Output(Bool())
-  val dirty_fs = Output(Bool())
+  val dirtyFs = Output(Bool())
   val frm = Input(UInt(3.W))
 }
 
@@ -51,11 +52,11 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
   val diffVl = Option.when(backendParams.basicDebugEn)(Output(Vl()))
 
-  val set_vstart = Output(Valid(UInt(XLEN.W)))
-  val set_vtype = Output(Valid(UInt(XLEN.W)))
-  val set_vxsat = Output(Bool())
+  val setVstart = Output(Valid(UInt(XLEN.W)))
+  val setVtype = Output(Valid(UInt(XLEN.W)))
+  val setVxsat = Output(Bool())
 
-  val dirty_vs = Output(Bool())
+  val dirtyVs = Output(Bool())
 }
 
 
@@ -91,13 +92,15 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   val robDeqPtr = Input(new RobPtr)
+  val icountEvent = Input(Valid(new IcountEvent))
+  val icountResponse = Output(new IcountResponse)
   // Observation-only handshake: publish a latter trap after the former retires.
   val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Bool()))
   val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
   // to ROB
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
-  val wfi_event = Output(Bool())
+  val wfiEvent = Output(Bool())
   //trace
   val traceCSR = Output(new TraceCSR)
   // from LSQ

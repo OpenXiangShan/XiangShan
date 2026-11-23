@@ -1199,7 +1199,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val resp = Vec(reqNum, Output(new MissResp))
-    val refill_to_ldq = ValidIO(new Refill)
 
     // All accepted allocations stay distinct. Owners validate PENDING lifetime.
     val misstrack_alloc = Vec(reqNum, ValidIO(new MissTrackAlloc))
@@ -1624,12 +1623,22 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val has_merge = (analysis.strategy(i) & 2.U) =/= 0.U
     val has_alloc = (analysis.strategy(i) & 1.U) =/= 0.U
     val is_valid = analysis.valid(i)
-    val target_mshr = analysis.target_mshr(i)  // Explicit use to prevent Chisel optimization
     val target_group = analysis.compress_group(i)
+    val target_mshr = analysis.target_mshr(target_group)
 
     // Compress: only the first in group is master, others are slaves
     val is_first_in_group = target_group === i.U
-    val compress_ready = has_compress && Mux(is_first_in_group, has_merge || has_alloc, (analysis.strategy(target_group) & 3.U) =/= 0.U)
+    val group_has_alloc = (analysis.strategy(target_group) & 1.U) =/= 0.U
+    val group_has_merge = (analysis.strategy(target_group) & 2.U) =/= 0.U
+    // A follower must be able to merge into the leader's target. In particular,
+    // a store's late-merge eligibility must not admit a load after data refill.
+    val follower_can_merge = VecInit(secondary_ready_vec(i))(target_mshr) ||
+      (can_merge_from_pipe(i) && can_merge_from_pipe_mshr(i) === target_mshr)
+    val compress_ready = has_compress && Mux(
+      is_first_in_group,
+      has_merge || has_alloc,
+      group_has_alloc || (group_has_merge && follower_can_merge)
+    )
 
     val merge_ready = has_merge && !has_compress && is_valid
 
@@ -1802,8 +1811,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for(i <- 0 until reqNum) {
     val groupStrategy = analysis.strategy(analysis.compress_group(i))
     // merged to pipeline reg
+    // Compressed requests use the leader's target, including pipe-reg merges.
+    val has_compress = (analysis.strategy(i) & 4.U) =/= 0.U
     io.resp(i).id := Mux(
-      can_merge_from_pipe(i),
+      can_merge_from_pipe(i) && !has_compress,
       can_merge_from_pipe_mshr(i),
       actual_target_mshr_for_group(i)
     )
@@ -1996,10 +2007,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
   io.wfi.wfiSafe := (Seq(cmo_unit.io.wfi.wfiSafe) ++ entries.map(_.io.wfi.wfiSafe)).reduce(_&&_)
 
-  // io.req.ready := accept
-  io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
-  io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
-
   io.refill_info.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_info.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_info.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info.bits })
 
@@ -2131,61 +2138,25 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Difftest
   if (env.EnableDifftest) {
     val refillDiffValidVec = VecInit(entries.map(e =>
-      e.io.refill_to_ldq.valid &&
-      e.io.refill_to_ldq.bits.hasdata &&
-      e.io.refill_to_ldq.bits.refill_done
+      e.io.refill_to_ldq.valid && e.io.refill_to_ldq.bits.hasdata && e.io.refill_to_ldq.bits.refill_done
     ))
     val refillDiffMask = refillDiffValidVec.asUInt
-    val refillDiffFirstOH = PriorityEncoderOH(refillDiffMask)
-    val refillDiffRemainMask = refillDiffMask & ~refillDiffFirstOH
-    val refillDiffSecondOH = PriorityEncoderOH(refillDiffRemainMask)
-    val refillDiffFirstValid = refillDiffMask.orR
-    val refillDiffSecondValid = refillDiffRemainMask.orR
+    assert(PopCount(refillDiffMask) <= numMemChannels.U, s"simultaneous refills must not exceed numMemChannels ($numMemChannels)")
 
-    class RefillDiffEntry extends Bundle {
-      val addr = UInt(PAddrBits.W)
-      val data = Vec(8, UInt((cfg.blockBytes).W))
-      val mask = UInt((cfg.blockBytes / 8).W)
+    var remainMask = refillDiffMask
+    for (ch <- 0 until numMemChannels) {
+      val oh = PriorityEncoderOH(remainMask)
+      val valid = remainMask.orR
+      remainMask = remainMask & ~oh
+
+      val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
+      difftest.coreid := io.hartId
+      difftest.index  := (1 + ch).U   // 0=ICache, 1..numMemChannels=DCache, 1+numMemChannels=L2TLB
+      difftest.valid  := valid
+      difftest.addr   := Mux1H(oh, entries.map(_.io.refill_to_ldq.bits.addr))
+      difftest.data   := Mux1H(oh, entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)))
+      difftest.mask   := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
     }
-
-    val refillDiffFirstEntry = WireDefault(0.U.asTypeOf(new RefillDiffEntry))
-    val refillDiffSecondEntry = WireDefault(0.U.asTypeOf(new RefillDiffEntry))
-    when(refillDiffFirstValid) {
-      refillDiffFirstEntry.addr := Mux1H(refillDiffFirstOH, entries.map(_.io.refill_to_ldq.bits.addr))
-      refillDiffFirstEntry.data := Mux1H(
-        refillDiffFirstOH,
-        entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(refillDiffFirstEntry.data))
-      )
-      refillDiffFirstEntry.mask := VecInit.fill(refillDiffFirstEntry.mask.getWidth)(true.B).asUInt
-    }
-    when(refillDiffSecondValid) {
-      refillDiffSecondEntry.addr := Mux1H(refillDiffSecondOH, entries.map(_.io.refill_to_ldq.bits.addr))
-      refillDiffSecondEntry.data := Mux1H(
-        refillDiffSecondOH,
-        entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(refillDiffSecondEntry.data))
-      )
-      refillDiffSecondEntry.mask := VecInit.fill(refillDiffSecondEntry.mask.getWidth)(true.B).asUInt
-    }
-
-    val refillDiffQueue = Module(new Queue(new RefillDiffEntry, entries = cfg.nMissEntries, flow = false, pipe = false))
-    val queueHasPending = refillDiffQueue.io.deq.valid
-    val emitCurrent = refillDiffFirstValid && (!queueHasPending || refillDiffSecondValid)
-    val emitQueued = queueHasPending && !emitCurrent
-    val enqueueSecondCurrent = emitCurrent && refillDiffSecondValid
-    val enqueueFirstCurrent = emitQueued && refillDiffFirstValid
-
-    refillDiffQueue.io.deq.ready := emitQueued
-    refillDiffQueue.io.enq.valid := enqueueSecondCurrent || enqueueFirstCurrent
-    refillDiffQueue.io.enq.bits := Mux(enqueueSecondCurrent, refillDiffSecondEntry, refillDiffFirstEntry)
-    assert(!refillDiffQueue.io.enq.valid || refillDiffQueue.io.enq.ready, "refill difftest queue overflow")
-
-    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
-    difftest.coreid := io.hartId
-    difftest.index := 1.U
-    difftest.valid := emitCurrent || emitQueued
-    difftest.addr := Mux(emitQueued, refillDiffQueue.io.deq.bits.addr, refillDiffFirstEntry.addr)
-    difftest.data := Mux(emitQueued, refillDiffQueue.io.deq.bits.data, refillDiffFirstEntry.data)
-    difftest.mask := Mux(emitQueued, refillDiffQueue.io.deq.bits.mask, refillDiffFirstEntry.mask)
   }
 
   if (env.EnableDifftest) {

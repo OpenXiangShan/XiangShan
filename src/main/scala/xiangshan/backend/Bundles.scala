@@ -143,6 +143,7 @@ object Bundles {
 
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
+    val debugSerial = Bool()
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val satpFlushFirstFetchFault = Bool()
@@ -236,6 +237,7 @@ object Bundles {
   }
 
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
+    val debugSerial = Bool()
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val satpFlushFirstFetchFault = Bool()
@@ -313,7 +315,6 @@ object Bundles {
     // load inst will not be executed until ALL former store addr calcuated
     val loadWaitStrict = Bool()
     val ssid = UInt(SSIDWidth.W)
-    val singleStep = Bool() // debug module
     val numLsElem = NumLsElem()
     val lsqIdxStart = new LSIdx
     val lsqIdxEnd = new LSIdx
@@ -346,9 +347,9 @@ object Bundles {
 
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
-      this.hasException := source.hasException || source.singleStep
-      this.formerNumWB  := Mux(source.singleStep, 0.U, source.formerNumWB)
-      this.latterNumWB  := Mux(source.singleStep, 0.U, source.latterNumWB)
+      this.hasException := this.exceptionVec.orR
+      this.formerNumWB  := source.formerNumWB
+      this.latterNumWB  := source.latterNumWB
       this.stdwriteNeed := FuType.isStore(source.fuType)
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
@@ -450,10 +451,7 @@ object Bundles {
     // for scheduler drop amocas sta
     val isDropAmocasSta = Bool()
   }
-  class DispatchUpdateUop(implicit p: Parameters) extends DispatchOutUop {
-    // dispatch ctrl for debug module
-    val singleStep = Bool()
-  }
+  class DispatchUpdateUop(implicit p: Parameters) extends DispatchOutUop
   class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     // from frontend
@@ -1741,10 +1739,8 @@ object Bundles {
     val isStore = Bool()
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
     val satpFlushFirstFetchFault = Bool()
-    val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
     val gpaddr = UInt(XLEN.W)
-    val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
     val isHls = Bool()

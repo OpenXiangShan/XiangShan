@@ -88,7 +88,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   })
 
   val slotNeedsFlushVec = io.in.map { x =>
-    x.valid && (x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger) || x.bits.flushPipe)
+    x.valid && (x.bits.exceptionVec.orR || x.bits.flushPipe)
   }
 
   val allowInterruptsVec = io.in.map{ x =>
@@ -106,7 +106,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val cannotCompressVec = VecInit(io.in.zip(isVectorInstrVec).map { case (x, isVectorInstr) =>
     // All vector instructions retain the mainline retirement/exception path.
     // Split instructions also keep its firstUop/lastUop allocation semantics.
-    x.valid && (x.bits.waitForward || x.bits.blockBackward ||
+    x.valid && (x.bits.debugSerial || x.bits.waitForward || x.bits.blockBackward ||
       isVectorInstr ||
       !x.bits.firstUop || !x.bits.lastUop)
   })

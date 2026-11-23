@@ -46,9 +46,9 @@ class NewCSRHarness(implicit p: Parameters) extends Module {
   dut.io.in <> io.in
   io.out <> dut.io.out
 
-  io.commitStuckCheckEnable := dut.io.status.custom.commit_stuck_check_enable
-  io.commitStuckCheckEnableToDecode := dut.io.toDecode.custom.commit_stuck_check_enable
-  io.powerDownEnable := dut.io.status.custom.power_down_enable
+  io.commitStuckCheckEnable := dut.io.status.custom.commitStuckCheckEnable
+  io.commitStuckCheckEnableToDecode := dut.io.toDecode.custom.commitStuckCheckEnable
+  io.powerDownEnable := dut.io.status.custom.powerDownEnable
 }
 
 class McorepwrCommitStuckCheckTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {

@@ -48,9 +48,11 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tdata3)
 
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
-    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle {
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle with HasIcountUpdate {
       when(wen){
-        reg := wdata.writeTdata1(canWriteDmode, chainable, dmodeNextTrigger).asUInt
+        reg := wdata.writeTdata1(canWriteDmode, chainable, dmodeNextTrigger, i == 0).asUInt
+      }.elsewhen(icountUpdate.valid && reg.TYPE === Tdata1Type.Icount) {
+        reg.DATA := icountUpdate.bits.asUInt
       }
     })
   )
@@ -61,8 +63,12 @@ trait DebugLevel { self: NewCSR =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata3", new Tdata3Bundle))
   )
 
-  val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
+  val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle) {
+    val icountSupported = IO(Input(Bool()))
+    regOut.ICOUNTEN := icountSupported
+  })
     .setAddr(CSRs.tinfo)
+  tinfo.icountSupported := tselect.rdata === 0.U
 
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
     regOut.NMIP := nmip
@@ -140,30 +146,116 @@ class Tdata1Bundle extends CSRBundle{
   val DMODE   = RW(59).withReset(0.U)
     .withDescription("Only debug mode can write this trigger when set.")
   val DATA    = RW(58, 0).withReset(0.U)
-    .withDescription("Trigger-format-specific payload. XiangShan uses the mcontrol6 layout.")
+    .withDescription("Trigger-format-specific payload: itrigger, etrigger, mcontrol6, or icount in slot zero.")
+
+  def isMcontrol6: Bool = TYPE.isOneOf(Tdata1Type.Mcontrol6)
+  def isTrapTrigger: Bool = TYPE.isOneOf(Tdata1Type.Itrigger, Tdata1Type.Etrigger)
 
   def getTriggerAction: CSREnumType = {
-    val res = Wire(new Mcontrol6)
-    res := this.asUInt
+    val res = Wire(new Itrigger)
+    val mcontrol6 = Wire(new Mcontrol6)
+    res := DATA.asUInt
+    mcontrol6 := DATA.asUInt
+    when(isMcontrol6) { res.ACTION := mcontrol6.ACTION.asUInt }
     res.ACTION
   }
 
-  def writeTdata1(canWriteDmode: Bool, chainable: Bool, dmodeNextTrigger: Bool): Tdata1Bundle = {
+  def writeTdata1(canWriteDmode: Bool, chainable: Bool, dmodeNextTrigger: Bool, supportsIcount: Boolean = false): Tdata1Bundle = {
     val res = Wire(new Tdata1Bundle)
     res := this.asUInt
     val dmode = this.DMODE.asBool && canWriteDmode
     res.TYPE := this.TYPE.legalize.asUInt
     res.DMODE := dmode
-    when(this.TYPE.isLegal) {
+    res.DATA := 0.U
+    when(isMcontrol6) {
       val mcontrol6Res = Wire(new Mcontrol6)
       mcontrol6Res := this.DATA.asUInt
       val chain = chainable && !(!dmode && dmodeNextTrigger)
       res.DATA := mcontrol6Res.writeData(dmode, chain).asUInt
-    }.otherwise{
-      res.DATA := 0.U
+    }.elsewhen(TYPE.isOneOf(Tdata1Type.Itrigger)) {
+      val itrigger = Wire(new Itrigger)
+      itrigger := DATA.asUInt
+      res.DATA := itrigger.writeData(dmode).asUInt
+    }.elsewhen(TYPE.isOneOf(Tdata1Type.Etrigger)) {
+      val etrigger = Wire(new Etrigger)
+      etrigger := DATA.asUInt
+      res.DATA := etrigger.writeData(dmode).asUInt
+    }.elsewhen(TYPE.isOneOf(Tdata1Type.Icount) && supportsIcount.B) {
+      val icount = Wire(new Icount)
+      icount := DATA.asUInt
+      res.DATA := icount.writeData(dmode).asUInt
+    }.otherwise {
+      res.TYPE := Tdata1Type.Disabled
     }
    res
   }
+}
+
+object IcountCount extends CSREnum with RWApply {
+  val Zero = Value(0.U)
+  val One = Value(1.U)
+}
+
+class Icount extends CSRBundle {
+  override val len: Int = 59
+  val VS = RW(26).withReset(0.U).withDescription("Enable instruction counting in VS-mode.")
+  val VU = RW(25).withReset(0.U).withDescription("Enable instruction counting in VU-mode.")
+  val HIT = RO(24).withReset(0.U).withDescription("Not implemented; always reads zero.")
+  val COUNT = IcountCount(23, 10).withReset(IcountCount.One).withDescription("Remaining instruction/trap matches, from 0 to 16383.")
+  val M = RW(9).withReset(0.U).withDescription("Enable instruction counting in M-mode.")
+  val PENDING = RW(8).withReset(0.U).withDescription("Fire before the next enabled instruction; cleared only when the action is taken.")
+  val S = RW(7).withReset(0.U).withDescription("Enable instruction counting in S/HS-mode.")
+  val U = RW(6).withReset(0.U).withDescription("Enable instruction counting in U/HU-mode.")
+  val ACTION = TrigAction(3, 0, wNoFilter).withReset(TrigAction.BreakpointExp)
+    .withDescription("0 raises a breakpoint exception; 1 enters Debug Mode when dmode is set.")
+
+  def writeData(dmode: Bool): Icount = {
+    val res = Wire(new Icount)
+    res := this.asUInt
+    res.HIT := 0.U
+    res.ACTION := ACTION.legalize(dmode).asUInt
+    res
+  }
+
+  def modeEnabled(priv: PrivState): Bool = {
+    M && priv.isModeM || S && priv.isModeHS || U && priv.isModeHU || VS && priv.isModeVS || VU && priv.isModeVU
+  }
+}
+
+/** Common RV64 itrigger/etrigger payload (Debug Spec 1.0, sections 5.7.14/15). */
+abstract class TrapTriggerControl extends CSRBundle {
+  override val len: Int = 59
+  val HIT = RO(58).withReset(0.U)
+    .withDescription("Optional hit reporting is not implemented; reads zero.")
+  val VS = RW(12).withReset(0.U).withDescription("Enable for traps taken from VS-mode.")
+  val VU = RW(11).withReset(0.U).withDescription("Enable for traps taken from VU-mode.")
+  val M = RW(9).withReset(0.U).withDescription("Enable for traps taken from M-mode.")
+  val S = RW(7).withReset(0.U).withDescription("Enable for traps taken from HS-mode.")
+  val U = RW(6).withReset(0.U).withDescription("Enable for traps taken from HU-mode.")
+  val ACTION = TrigAction(3, 0, wNoFilter).withReset(TrigAction.BreakpointExp)
+    .withDescription("Trap trigger action: breakpoint, or Debug Mode when dmode is set.")
+
+  def modeEnabled(priv: PrivState): Bool =
+    M && priv.isModeM || S && priv.isModeHS || U && priv.isModeHU ||
+      VS && priv.isModeVS || VU && priv.isModeVU
+
+  protected def writeFields[T <: TrapTriggerControl](res: T, dmode: Bool): T = {
+    res := this.asUInt
+    res.HIT := 0.U
+    res.ACTION := ACTION.legalize(dmode).asUInt
+    res
+  }
+}
+
+class Itrigger extends TrapTriggerControl {
+  val NMI = RW(10).withReset(0.U)
+    .withDescription("Enable non-maskable interrupts, subject to the source mode and textra match.")
+
+  def writeData(dmode: Bool): Itrigger = writeFields(Wire(new Itrigger), dmode)
+}
+
+class Etrigger extends TrapTriggerControl {
+  def writeData(dmode: Bool): Etrigger = writeFields(Wire(new Etrigger), dmode)
 }
 
 class Mcontrol6 extends CSRBundle{
@@ -234,7 +326,7 @@ object Tdata1Type extends CSREnum with WARLApply {
   val Tmexttrigger = Value(7.U)
   val Disabled     = Value(15.U)
 
-  override protected def legalValues: Seq[EnumType] = Seq(Mcontrol6)
+  override protected def legalValues: Seq[EnumType] = Seq(Icount, Itrigger, Etrigger, Mcontrol6)
   override protected def illegalValueBehavior: Option[String] =
     Some(s"Other writes are legalized to ${Disabled.litValue}=disabled.")
 
@@ -261,10 +353,10 @@ object TrigAction extends CSREnum with WARLApply {
 
   override def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = {
     val res = WireInit(enumeration)
-    when(!enumeration.isLegal(dmode)){
+    when(!enumeration.isLegal(dmode)) {
       res := BreakpointExp
     }
-    res.asInstanceOf[CSREnumType]
+    res
   }
 }
 
@@ -338,6 +430,12 @@ class TinfoBundle extends CSRBundle{
     .withDescription("Trigger-information format version field. XiangShan reports version 1, matching the ratified Debug Spec 1.0 trigger encoding.")
   val MCONTROL6EN = RO(6).withReset(1.U)
     .withDescription("Indicates that the mcontrol6 trigger format is supported.")
+  val ETRIGGEREN = RO(5).withReset(1.U)
+    .withDescription("Indicates that the exception trigger format is supported.")
+  val ITRIGGEREN = RO(4).withReset(1.U)
+    .withDescription("Indicates that the interrupt trigger format is supported.")
+  val ICOUNTEN = RO(3).withReset(0.U)
+    .withDescription("Instruction-count triggers are supported only in trigger slot zero.")
 }
 
 object TriggerVer extends CSREnum with ROApply {
@@ -400,6 +498,10 @@ trait HasTriggerBundle { self: CSRModule[_] =>
   val dmodeNextTrigger = IO(Input(Bool()))
 }
 
+trait HasIcountUpdate { self: CSRModule[_] =>
+  val icountUpdate = IO(Input(Valid(new Icount)))
+}
+
 trait HasNmipBundle { self: CSRModule[_] =>
   val nmip = IO(Input(Bool()))
 }
@@ -451,16 +553,16 @@ object TriggerUtil {
    * @param  actionVec tdata.action
    * @param  triggerCanRaiseBpExp from csr
    */
-  def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool): Unit = {
+  def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool, isMem: Boolean = false): Unit = {
     val fireDebugModeVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
-    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.FetchTrigger)
     val fireDebugMode = fireDebugModeVec.asUInt.orR
     val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
 
     // todo: add more for trace
     triggerAction := MuxCase(TriggerAction.None, Seq(
       fireDebugMode -> TriggerAction.DebugMode,
-      breakPointExp -> TriggerAction.BreakpointExp,
+      breakPointExp -> (if (isMem) TriggerAction.MemTrigger else TriggerAction.FetchTrigger),
     ))
   }
 

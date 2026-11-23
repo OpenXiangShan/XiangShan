@@ -637,15 +637,14 @@ class LoadUnitS1(param: ExeUnitParams)(
   loadTrigger.io.isPrf.get := accessType.isPrefetch()
 
   val triggerAction = loadTrigger.io.toLoadStore.triggerAction
-  val isDebugMode = TriggerAction.isDmode(triggerAction)
-  val bp = TriggerAction.isExp(triggerAction)
+  val bp = TriggerAction.isBreakpoint(triggerAction)
   val vecVaddrOffset = Mux(
-    isDebugMode || bp,
+    bp,
     loadTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.get,
     vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.get
   )
   val vecTriggerMask = Mux(
-    isDebugMode || bp,
+    bp,
     loadTrigger.io.toLoadStore.triggerMask,
     0.U
   )
@@ -935,7 +934,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
   val afVectorUncache = accessType.isVector() && isUncache
   val afUnalignMMIO = !in.align.get && isMMIO
-  val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cache_error_enable
+  val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cacheErrorEnable
   val afForwardDenied = Wire(Bool())
   val afBypassDenied = Wire(Bool())
   val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afTagError || afForwardDenied || afBypassDenied
@@ -947,7 +946,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val hwe = uop.exceptionVec(hardwareError) || hweForwardCorrupt || hweBypassCorrupt
 
   val exceptionVec = uop.exceptionVec.selectByFu(LduCfg)
-  val exception = TriggerAction.isDmode(uop.trigger) || exceptionVec.orR
+  val exception = exceptionVec.orR
   exceptionVec(loadAddrMisaligned) := am
   exceptionVec(loadAccessFault) := af
   exceptionVec(hardwareError) := hwe
@@ -1427,9 +1426,9 @@ class LoadUnitS3(param: ExeUnitParams)(
     *
     * Noted that exception can affect control signals for wakeup and writeback
     */
-  val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
+  val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cacheErrorEnable && troubleMaker && io.dcacheError
   val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
-  val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
+  val s3Exception = s3ExceptionVec.orR
   val exceptionVec = ExceptSparseVec.mux2(
     s4HeadValid && s4HeadHasException,
     s4HeadExceptionVec,
@@ -1496,7 +1495,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   // RAR violation
   val rarResp = io.rarNukeQueryResp
-  val s3RarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldld_vio_check_enable && !s3Exception
+  val s3RarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldldVioCheckEnable && !s3Exception
   val rarViolation = s3RarViolation || s4HeadValid && s4HeadShouldRARViolation
   // vaddr / paddr mismatch in STLF
   val s3MatchInvalid = in.matchInvalid.get && !s3Exception

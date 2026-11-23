@@ -26,13 +26,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val csrOut = io.csrio.get
   val csrToDecode = io.csrToDecode.get
 
-  val setFsDirty = csrIn.fpu.dirty_fs
+  val setFsDirty = csrIn.fpu.dirtyFs
   val setFflags = csrIn.fpu.fflags
 
-  val setVsDirty = csrIn.vpu.dirty_vs
-  val setVstart = csrIn.vpu.set_vstart
-  val setVtype = csrIn.vpu.set_vtype
-  val setVxsat = csrIn.vpu.set_vxsat
+  val setVsDirty = csrIn.vpu.dirtyVs
+  val setVstart = csrIn.vpu.setVstart
+  val setVtype = csrIn.vpu.setVtype
+  val setVxsat = csrIn.vpu.setVxsat
 
   val flushPipe = Wire(Bool())
   val satpFlush = Wire(Bool())
@@ -133,8 +133,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Todo: shrink the width of trap vector.
   // We use 64bits trap vector in CSR, and 24 bits exceptionVec in exception bundle.
   csrMod.io.fromRob.trap.bits.trapVec := csrIn.exception.bits.exceptionVec.asUInt
-  csrMod.io.fromRob.trap.bits.isFetchBkpt := csrIn.exception.bits.isPcBkpt
-  csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
   csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
@@ -166,7 +164,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.valid := true.B  // Todo: valid control signal
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
-  csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+  csrMod.io.icountEvent := csrIn.icountEvent
+  csrOut.icountResponse := RegNext(csrMod.io.status.icount, 0.U.asTypeOf(new IcountResponse))
 
   csrMod.io.fromRename.diffVl.zip(csrIn.vpu.diffVl).foreach { case (sink, source) =>
     sink := source
@@ -255,10 +254,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     teemsiio.data := io.csrin.get.teemsiInfo.get.bits
     io.csrio.get.teemsiAck.get := teemsiio.vld_ack
   }
-  csrMod.fromAIA.notice_pending := false.B
+  csrMod.fromAIA.noticePending := false.B
   imsic.sec.foreach { imsicsec =>
     imsicsec.cmode := csrMod.io.tlb.mbmc.CMODE.asBool
-    csrMod.fromAIA.notice_pending := imsicsec.notice_pending
+    csrMod.fromAIA.noticePending := imsicsec.notice_pending
   }
 
   private val exceptionVec = Wire(ExceptSparseVec(cfg.exceptionOut))
@@ -311,7 +310,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.vsum := csrMod.io.tlb.vsum
   tlb.priv.spvp := csrMod.io.tlb.spvp
   tlb.priv.virt := csrMod.io.tlb.dvirt
-  tlb.priv.virt_changed := DataChanged(tlb.priv.virt)
+  tlb.priv.virtChanged := DataChanged(tlb.priv.virt)
   tlb.priv.fenceVirt := csrMod.io.tlb.virt
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
@@ -328,7 +327,17 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
-  io.out.valid := Mux(isXRetReg, csrModOutValid, DelayN(csrModOutValid, 3))
+  // CSR reads that are not serialised (CSROoORead) execute speculatively. The CtrlBlock only drops a write-back
+  // flushed by a redirect in the same or the previous cycle, so drop a uop flushed while it is in the delay stages.
+  private val outDelayValid = Wire(Vec(4, Bool()))
+  private val outDelayRobIdx = Wire(Vec(4, new RobPtr))
+  outDelayValid(0) := csrModOutValid && !isXRetReg
+  outDelayRobIdx(0) := robIdxReg
+  for (i <- 1 to 3) {
+    outDelayValid(i) := RegNext(outDelayValid(i - 1) && !outDelayRobIdx(i - 1).needFlush(io.flush), false.B)
+    outDelayRobIdx(i) := RegEnable(outDelayRobIdx(i - 1), outDelayValid(i - 1))
+  }
+  io.out.valid := Mux(isXRetReg, csrModOutValid, outDelayValid(3))
   io.out.bits.ctrl.exceptionVec := ExceptSparseVec.mux2(
     isXRetReg,
     exceptionVec,
@@ -368,8 +377,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.out.bits.ctrl.isRVC.foreach(_ := Mux(isXRetReg, isRVCReg, DelayNWithValid(isRVCReg, csrModOutValid, 3)._2))
   val perfDebugInfoReg = io.in.bits.perfDebugInfo.map(x => RegEnable(io.in.bits.perfDebugInfo.get, io.in.fire))
   io.out.bits.perfDebugInfo.foreach(_ := Mux(isXRetReg, perfDebugInfoReg.get, DelayNWithValid(perfDebugInfoReg.get, csrModOutValid, 3)._2))
-  val debug_seqNumReg = io.in.bits.debug_seqNum.map(x => RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
-  io.out.bits.debug_seqNum.foreach(_ := Mux(isXRetReg, debug_seqNumReg.get, DelayNWithValid(debug_seqNumReg.get, csrModOutValid, 3)._2))
+  val debugSeqNumReg = io.in.bits.debug_seqNum.map(x => RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
+  io.out.bits.debug_seqNum.foreach(_ := Mux(isXRetReg, debugSeqNumReg.get, DelayNWithValid(debugSeqNumReg.get, csrModOutValid, 3)._2))
 
   override val criticalErrors = csrMod.getCriticalErrors
   generateCriticalErrors()
@@ -382,7 +391,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.trapTarget := csrMod.io.trapTargetPc.bits
   csrOut.interrupt := csrMod.io.status.interrupt
-  csrOut.wfi_event := csrMod.io.status.wfiEvent
+  csrOut.wfiEvent := csrMod.io.status.wfiEvent
 
   csrOut.tlb := tlb
 
@@ -392,39 +401,39 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.customCtrl match {
     case custom =>
-      custom.pf_ctrl                  := csrMod.io.status.custom.pf_ctrl
+      custom.pfCtrl                  := csrMod.io.status.custom.pfCtrl
       // Load violation predictor
-      custom.lvpred_disable           := csrMod.io.status.custom.lvpred_disable
-      custom.no_spec_load             := csrMod.io.status.custom.no_spec_load
-      custom.storeset_wait_store      := csrMod.io.status.custom.storeset_wait_store
-      custom.storeset_no_fast_wakeup  := csrMod.io.status.custom.storeset_no_fast_wakeup
-      custom.lvpred_timeout           := csrMod.io.status.custom.lvpred_timeout
+      custom.lvpredDisable           := csrMod.io.status.custom.lvpredDisable
+      custom.noSpecLoad             := csrMod.io.status.custom.noSpecLoad
+      custom.storesetWaitStore      := csrMod.io.status.custom.storesetWaitStore
+      custom.storesetNoFastWakeup  := csrMod.io.status.custom.storesetNoFastWakeup
+      custom.lvpredTimeout           := csrMod.io.status.custom.lvpredTimeout
       // Branch predictor
-      custom.bp_ctrl                  := csrMod.io.status.custom.bp_ctrl
+      custom.bpCtrl                  := csrMod.io.status.custom.bpCtrl
       // Memory Block
-      custom.sbuffer_timeout                  := csrMod.io.status.custom.sbuffer_timeout
-      custom.sbuffer_threshold                := csrMod.io.status.custom.sbuffer_threshold
-      custom.ldld_vio_check_enable            := csrMod.io.status.custom.ldld_vio_check_enable
-      custom.soft_prefetch_enable             := csrMod.io.status.custom.soft_prefetch_enable
-      custom.cache_error_enable               := csrMod.io.status.custom.cache_error_enable
-      custom.uncache_write_outstanding_enable := csrMod.io.status.custom.uncache_write_outstanding_enable
-      custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
-      custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
-      custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
-      custom.commit_stuck_check_enable        := csrMod.io.status.custom.commit_stuck_check_enable
-      custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
+      custom.sbufferTimeout                  := csrMod.io.status.custom.sbufferTimeout
+      custom.sbufferThreshold                := csrMod.io.status.custom.sbufferThreshold
+      custom.ldldVioCheckEnable            := csrMod.io.status.custom.ldldVioCheckEnable
+      custom.softPrefetchEnable             := csrMod.io.status.custom.softPrefetchEnable
+      custom.cacheErrorEnable               := csrMod.io.status.custom.cacheErrorEnable
+      custom.uncacheWriteOutstandingEnable := csrMod.io.status.custom.uncacheWriteOutstandingEnable
+      custom.hdMisalignStEnable            := csrMod.io.status.custom.hdMisalignStEnable
+      custom.hdMisalignLdEnable            := csrMod.io.status.custom.hdMisalignLdEnable
+      custom.powerDownEnable                := csrMod.io.status.custom.powerDownEnable
+      custom.commitStuckCheckEnable        := csrMod.io.status.custom.commitStuckCheckEnable
+      custom.flushL2Enable                  := csrMod.io.status.custom.flushL2Enable
       // Rename
-      custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
-      custom.high_density_rob_compression_enable := csrMod.io.status.custom.high_density_rob_compression_enable
-      custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
+      custom.fusionEnable            := csrMod.io.status.custom.fusionEnable
+      custom.highDensityRobCompressionEnable := csrMod.io.status.custom.highDensityRobCompressionEnable
+      custom.wfiEnable               := csrMod.io.status.custom.wfiEnable
       // distribute csr write signal
       // write to frontend and memory
-      custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
-      custom.distribute_csr.w.bits.addr := waddrReg
-      custom.distribute_csr.w.bits.data := wdataReg
+      custom.distributeCsr.w.valid := csrMod.io.distributedWenLegal
+      custom.distributeCsr.w.bits.addr := waddrReg
+      custom.distributeCsr.w.bits.data := wdataReg
       // trigger
-      custom.frontend_trigger := csrMod.io.status.frontendTrigger
-      custom.mem_trigger      := csrMod.io.status.memTrigger
+      custom.frontendTrigger := csrMod.io.status.frontendTrigger
+      custom.memTrigger      := csrMod.io.status.memTrigger
       // virtual mode
       custom.virtMode := csrMod.io.status.privState.V.asBool
       // xstatus.fs field is off
@@ -508,7 +517,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * illegal wrs_nto
      * raise EX_II when !isModeM && mstatus.TW=1
      */
-    val wrs_nto = Bool()
+    val wrsNto = Bool()
 
     /**
      * frm reserved
@@ -570,7 +579,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * illegal wrs_nto
      * raise EX_VI when privState.V && mstatus.TW=0 && hstatus.VTW=1
      */
-    val wrs_nto = Bool()
+    val wrsNto = Bool()
 
     /**
      * illegal CBO.ZERO
@@ -607,11 +616,16 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
 
   val custom = new Bundle {
     // Rename
-    val fusion_enable = Bool()
-    val high_density_rob_compression_enable = Bool()
-    val wfi_enable = Bool()
-    val commit_stuck_check_enable = Bool()
+    val fusionEnable = Bool()
+    val highDensityRobCompressionEnable = Bool()
+    val wfiEnable = Bool()
+    val commitStuckCheckEnable = Bool()
   }
+
+  // Pipeline action: OtherTrigger for native BP, DebugMode for Debug entry.
+  // Every accepted trap replaces the pending action; None acknowledges a trap
+  // with no matching itrigger/etrigger. Raw tdata1.action=0 stays inside CSR.
+  val trapTrigger = Valid(TriggerAction())
 
   // rename single step
   val singlestep = Bool()

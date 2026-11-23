@@ -15,7 +15,6 @@ import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, Ev
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
@@ -143,8 +142,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
-        val isFetchBkpt = Bool()
-        val singleStep = Bool()
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
@@ -155,10 +152,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFormer = Bool()
       })
       val commit = Input(new RobCommitCSR)
-      val robDeqPtr = Input(new RobPtr)
       val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Bool())
     })
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
+    val icountEvent = Input(Valid(new IcountEvent))
 
     val fromRename = Input(new Bundle {
       val diffVl = Option.when(backendParams.basicDebugEn)(Vl())
@@ -200,6 +197,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       // trigger
       val frontendTrigger = new FrontendTdataDistributeIO()
       val memTrigger = new MemTdataDistributeIO()
+      val icount = new IcountResponse
       // Instruction fetch address translation type
       val instrAddrTransType = new AddrTransType
       // trace
@@ -282,10 +280,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val trigger = io.fromRob.trap.bits.trigger
-  val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
-  val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
   val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
 
@@ -294,7 +290,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldPrivState = io.oldPrivState
   val trapIsFormer = io.fromRob.trap.bits.isFormer
 
-  // debug_intrrupt
+  // Debug interrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
@@ -425,13 +421,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.platform.seip := platformIRP.SEIP
   intrMod.io.in.fromAIA.meip := fromAIA.meip
   intrMod.io.in.fromAIA.seip := fromAIA.seip
-  intrMod.io.in.fromAIA.notice_pending := fromAIA.notice_pending
+  intrMod.io.in.fromAIA.noticePending := fromAIA.noticePending
   intrMod.io.in.mvienSEIE := mvien.regOut.SEIE.asBool
   intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
-  val nmi = intrMod.io.out.nmi
+  val nmi = trapIsInterrupt && intrMod.io.out.nmi
   val virtualInterruptIsHvictlInject = intrMod.io.out.virtualInterruptIsHvictlInject
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
@@ -458,7 +454,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasTrap && !trapIsInterrupt && singleStep
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -732,7 +727,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.aiaToCSR.mtopei  := fromAIA.mtopei
         m.aiaToCSR.stopei  := fromAIA.stopei
         m.aiaToCSR.vstopei := fromAIA.vstopei
-        m.aiaToCSR.notice_pending := fromAIA.notice_pending
+        m.aiaToCSR.noticePending := fromAIA.noticePending
       case _ =>
     }
     mod match {
@@ -863,7 +858,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
-        in.isFetchBkpt := trapIsFetchBkpt
+        in.trigger := trigger
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
         in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
@@ -1037,6 +1032,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val triggerFrontendChange = Wire(Bool())
   val triggerBpGateChange = Wire(Bool())
+  val icountConfigChange = Wire(Bool())
 
   val vstartChange = vstart.w.wen && (
     vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
@@ -1054,7 +1050,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
 
   val flushPipe = resetSatp ||
-    triggerFrontendChange || triggerBpGateChange || floatStatusOnOff || vectorStatusOnOff ||
+    triggerFrontendChange || triggerBpGateChange || icountConfigChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange || writeContext
 
   /**
@@ -1264,13 +1260,52 @@ class NewCSR(implicit val p: Parameters) extends Module
     medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
     medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
 
+  // Match the trap while its source mode/context is still current. DecodeDebug
+  // marks the handler's instructions before they split into uops.
+  val trapTriggerMatcher = Module(new TrapTriggerMatcher)
+  trapTriggerMatcher.in.trap.valid := hasTrap && nonDebugTrapEventValid
+  trapTriggerMatcher.in.trap.bits := Mux1H(Seq(
+    trapEntryMEvent.valid -> trapEntryMEvent.out.mcause.bits,
+    trapEntryMNEvent.valid -> trapEntryMNEvent.out.mncause.bits,
+    trapEntryHSEvent.valid -> trapEntryHSEvent.out.scause.bits,
+    trapEntryVSEvent.valid -> trapEntryVSEvent.out.vscause.bits,
+  ))
+  trapTriggerMatcher.in.isNmi := hasTrap && nmi
+  trapTriggerMatcher.in.privState := privState
+  trapTriggerMatcher.in.debugMode := debugMode
+  trapTriggerMatcher.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  trapTriggerMatcher.in.tdata1 := tdata1Vec
+  trapTriggerMatcher.in.tdata2 := VecInit(tdata2RegVec.map(_.rdata))
+  trapTriggerMatcher.in.tdata3 := tdata3Vec
+  trapTriggerMatcher.in.scontext := scontext.regOut.ALL.asUInt
+  trapTriggerMatcher.in.mhcontext := mcontext.regOut.HCONTEXT.asUInt
+  trapTriggerMatcher.in.satpAsid := satp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vsatpAsid := vsatp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vmid := hgatp.regOut.VMID.asUInt
+
+  // Native triggers also obey reentrancy protection in the handler mode.
+  // Trap entry clears that mode's xIE, so action0 is allowed only when the
+  // breakpoint goes to a higher privilege. RNMI retains MIE unchanged.
+  val handlerCanRaiseBreakpoint = MuxCase(false.B, Seq(
+    trapEntryMNEvent.valid -> mstatus.regOut.MIE.asBool,
+    trapEntryHSEvent.valid -> !medeleg.regOut.EX_BP.asBool,
+    trapEntryVSEvent.valid -> !(medeleg.regOut.EX_BP.asBool && hedeleg.regOut.EX_BP.asBool),
+  ))
+  val matchedTrapTriggerAction = trapTriggerMatcher.out.action
+  io.toDecode.trapTrigger.valid := hasTrap
+  // Convert architectural action0 to the pipeline's native-trigger BP code
+  // before leaving CSR. DebugMode and None already use pipeline encodings.
+  io.toDecode.trapTrigger.bits := Mux(
+    matchedTrapTriggerAction === TrigAction.BreakpointExp.asUInt,
+    Mux(handlerCanRaiseBreakpoint, TriggerAction.OtherTrigger, TriggerAction.None),
+    matchedTrapTriggerAction)
+
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.isDebugIntr := debug
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
-  debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.trapInfo.bits.criticalErrorState := criticalErrorState
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -1291,6 +1326,28 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
+  val icountMod = Module(new IcountController)
+  val modifyIcount = tdata1Update && tselect.rdata === 0.U &&
+    (tdata1Vec.head.TYPE === Tdata1Type.Icount || wdata(63, 60) === Tdata1Type.Icount.asUInt)
+  icountMod.in.tdata1 := tdata1Vec.head
+  icountMod.in.priv := privState
+  icountMod.in.contextMatch := debugMod.io.out.icountContextMatch
+  icountMod.in.debugMode := debugMode
+  icountMod.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  icountMod.in.modifyIcount := modifyIcount
+  icountMod.in.trap.valid := hasTrap
+  icountMod.in.trap.bits.isInterrupt := trapIsInterrupt
+  icountMod.in.trap.bits.breakpoint := trapVec(ExceptionNO.breakPoint)
+  icountMod.in.trap.bits.trigger := trigger
+  icountMod.in.trap.bits.toDebug := entryDebugMode
+  icountMod.in.event <> io.icountEvent
+  io.status.icount := icountMod.out.response
+  icountConfigChange := modifyIcount || tdata3Update && tselect.rdata === 0.U && tdata1Vec.head.TYPE === Tdata1Type.Icount
+  tdata1RegVec.zipWithIndex.foreach { case (mod: HasIcountUpdate, idx) =>
+    mod.icountUpdate.valid := (idx == 0).B && icountMod.out.update.valid
+    mod.icountUpdate.bits := icountMod.out.update.bits
+  }
+
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
   trapEntryDEvent.valid                           := entryDebugMode
@@ -1310,7 +1367,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
     mcontrol6Pre := tdata1Pre.DATA.asUInt
     val canWriteDmode = WireInit(false.B)
-    canWriteDmode := (if (idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    canWriteDmode := (if (idx > 0) (Mux(tdata1Pre.isMcontrol6 && mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool, true.B)) && debugMode else debugMode).asBool
 
     val tdata1Next = Wire(new Tdata1Bundle)
     tdata1Next := (if (idx < TriggerNum - 1) tdata1RegVec(idx + 1) else tdata1RegVec(idx)).rdata.asUInt
@@ -1346,7 +1403,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val vsstatusWriteSDT = menvcfg.regOut.DTE && henvcfg.regOut.DTE && vsstatus.w.wdataFields.SDT
   val vsstatusWriteSIE = vsstatus.w.wdataFields.SIE && !vsstatusWriteSDT
   // Only the current mode's delegated breakpoint gate is affected by its interrupt enable.
-  triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
+  triggerBpGateChange := (debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR || tdata1Vec.head.TYPE === Tdata1Type.Icount) && (
     privState.isModeM && mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
     privState.isModeHS && medeleg.regOut.EX_BP &&
       mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||
@@ -1467,56 +1524,56 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * [[io.status.custom]] connection
    */
-  io.status.custom.pf_ctrl.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
-  io.status.custom.pf_ctrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
+  io.status.custom.pfCtrl.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
+  io.status.custom.pfCtrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
+  io.status.custom.pfCtrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
+  io.status.custom.pfCtrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
+  io.status.custom.pfCtrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
+  io.status.custom.pfCtrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
 
-  io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
-  io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
-  io.status.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
-  io.status.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
-  io.status.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
+  io.status.custom.lvpredDisable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
+  io.status.custom.noSpecLoad            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
+  io.status.custom.storesetWaitStore     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
+  io.status.custom.storesetNoFastWakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
+  io.status.custom.lvpredTimeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
 
-  io.status.custom.bp_ctrl.ubtbEnable   := sbpctl.regOut.UBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.abtbEnable   := sbpctl.regOut.ABTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.mbtbEnable   := sbpctl.regOut.MBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.tageEnable   := sbpctl.regOut.TAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
-  io.status.custom.bp_ctrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
+  io.status.custom.bpCtrl.ubtbEnable   := sbpctl.regOut.UBTB_ENABLE.asBool
+  io.status.custom.bpCtrl.abtbEnable   := sbpctl.regOut.ABTB_ENABLE.asBool
+  io.status.custom.bpCtrl.mbtbEnable   := sbpctl.regOut.MBTB_ENABLE.asBool
+  io.status.custom.bpCtrl.tageEnable   := sbpctl.regOut.TAGE_ENABLE.asBool
+  io.status.custom.bpCtrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
+  io.status.custom.bpCtrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
+  io.status.custom.bpCtrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
 
-  io.status.custom.sbuffer_timeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
-  io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
-  io.status.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
-  io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
-  io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
-  io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
-  io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
-  io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
+  io.status.custom.sbufferTimeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
+  io.status.custom.sbufferThreshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
+  io.status.custom.ldldVioCheckEnable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
+  io.status.custom.softPrefetchEnable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
+  io.status.custom.cacheErrorEnable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
+  io.status.custom.uncacheWriteOutstandingEnable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.status.custom.hdMisalignStEnable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
+  io.status.custom.hdMisalignLdEnable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
-  io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
-  io.status.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.status.custom.fusionEnable           := srnctl.regOut.FUSION_ENABLE.asBool
+  io.status.custom.highDensityRobCompressionEnable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
+  io.status.custom.wfiEnable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
 
-  io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
-  io.status.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.status.custom.powerDownEnable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+  io.status.custom.commitStuckCheckEnable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
 
-  io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
+  io.status.custom.flushL2Enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
@@ -1624,8 +1681,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
-  io.toDecode.illegalInst.wrs_nto    := !isModeM && mstatus.regOut.TW
-  io.toDecode.virtualInst.wrs_nto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
+  io.toDecode.illegalInst.wrsNto    := !isModeM && mstatus.regOut.TW
+  io.toDecode.virtualInst.wrsNto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
   io.toDecode.illegalInst.frm        := frmIsReserved
   // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
   io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
@@ -1651,10 +1708,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
   )
   // Rename
-  io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
-  io.toDecode.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
-  io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.toDecode.custom.fusionEnable := srnctl.regOut.FUSION_ENABLE.asBool
+  io.toDecode.custom.highDensityRobCompressionEnable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
+  io.toDecode.custom.wfiEnable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.custom.commitStuckCheckEnable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg
