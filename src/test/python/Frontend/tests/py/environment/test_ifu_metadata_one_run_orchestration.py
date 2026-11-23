@@ -32,6 +32,7 @@ def _orchestration(monkeypatch, failure=None):
     )
     coverage.toffee_sink = coverage
     run_errors, monitor_errors, clears, disarms, events, calls = [], [], [], [], [], []
+    phase_args = []
     env = SimpleNamespace(
         functional_coverage=coverage,
         current_cycle=10,
@@ -50,9 +51,12 @@ def _orchestration(monkeypatch, failure=None):
         disarm=lambda: disarms.append(env.current_cycle),
     )
     for index, (name, components) in enumerate(_COMPONENTS):
-        def phase(active_env, index=index, name=name, components=components):
+        def phase(
+            active_env, *args, index=index, name=name, components=components
+        ):
             assert active_env is env
             calls.append(name)
+            phase_args.append((name, args))
             if failure == "monitor-before-clear" and index == 0:
                 monitor_errors.append("retained monitor violation")
             active_env.monitor.clear()
@@ -69,16 +73,20 @@ def _orchestration(monkeypatch, failure=None):
         phase.__name__ = name
         monkeypatch.setattr(diagnostic, name, phase)
     return diagnostic, env, SimpleNamespace(
-        calls=calls, clears=clears, disarms=disarms, events=events,
-        run_errors=run_errors, monitor_errors=monitor_errors,
+        calls=calls, phase_args=phase_args, clears=clears, disarms=disarms,
+        events=events, run_errors=run_errors, monitor_errors=monitor_errors,
     )
 
 
 def test_one_run_metadata_orchestration_publishes_same_run_phase_evidence(monkeypatch):
     diagnostic, env, seen = _orchestration(monkeypatch)
-    diagnostic.test_ifu_exception_metadata_all_components_one_run(env, monkeypatch)
+    frontend_init_config = object()
+    diagnostic.test_ifu_exception_metadata_all_components_one_run(
+        env, monkeypatch, frontend_init_config
+    )
 
     assert seen.calls == [name for name, _ in _COMPONENTS]
+    assert seen.phase_args[2][1] == (frontend_init_config,)
     assert len(seen.clears) == len(seen.disarms) == 4
     starts = [payload["phase"] for name, payload in seen.events
               if name == "ifu.exception_metadata_phase_start"]
@@ -99,7 +107,9 @@ def test_one_run_metadata_orchestration_publishes_same_run_phase_evidence(monkey
 def test_one_run_metadata_orchestration_never_clears_or_accepts_failed_phase(monkeypatch, failure):
     diagnostic, env, seen = _orchestration(monkeypatch, failure)
     with pytest.raises(RuntimeError if failure == "phase-error" else AssertionError):
-        diagnostic.test_ifu_exception_metadata_all_components_one_run(env, monkeypatch)
+        diagnostic.test_ifu_exception_metadata_all_components_one_run(
+            env, monkeypatch, object()
+        )
     assert not any(name == "ifu.exception_metadata_one_run_checkpoint" for name, _ in seen.events)
     if failure == "monitor-before-clear":
         assert seen.monitor_errors == ["retained monitor violation"]
