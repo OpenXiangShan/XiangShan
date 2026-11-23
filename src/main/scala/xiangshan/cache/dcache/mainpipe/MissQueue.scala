@@ -24,6 +24,7 @@
 package xiangshan.cache
 
 import chisel3._
+import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.dataview._
 import chisel3.util._
 import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
@@ -866,8 +867,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
-    // acquire_not_sent && (new_req.isFromLoad || new_req.isFromStore)
-
     // Since most acquire requests have been issued from pipe_reg,
     // the number of such merge situations is currently small,
     // So dont Merge anything for better timing.
@@ -880,33 +879,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // Note that late prefetch will be ignored
-
   def should_merge(signals: MatchSignals, new_req: MissReqWoStoreData): Bool = {
     signals.block_match && signals.alias_match &&
-    (
-      before_req_sent_can_merge(new_req) ||
-      before_data_refill_can_merge(new_req)
-    )
-  }
-
-  def before_req_sent_merge_iskeyword(signals: MatchSignals, new_req: MissReqWoStoreData): Bool = {
-    val need_check_isKeyword = acquire_not_sent && req.isFromLoad && new_req.isFromLoad && should_merge(signals, new_req)
-    val use_new_req_isKeyword = isAfter(req.lqIdx, new_req.lqIdx)
-    Mux(
-      need_check_isKeyword,
-      Mux(
-        use_new_req_isKeyword,
-        new_req.vaddr(5).asBool,
-        req.vaddr(5).asBool
-      ),
-      isKeyword
-      )
+    (before_req_sent_can_merge(new_req) ||  before_data_refill_can_merge(new_req))
   }
 
   // load can be merged before io.mem_grant.fire
-  //
-  // TODO: merge store if possible? mem_acquire may need to be re-issued,
-  // but sbuffer entry can be freed
   def should_reject(signals: MatchSignals, new_req: MissReqWoStoreData): Bool = {
     req_valid && Mux(
         signals.block_match,
@@ -942,7 +920,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // should not allocate, merge or reject at the same time
-for(i <- 0 until reqNum) {
+  for(i <- 0 until reqNum) {
     assert(RegNext(PopCount(Seq(io.primary_ready, io.queryME(i).secondary_ready, io.queryME(i).secondary_reject)) <= 1.U || !io.queryME(i).req.valid))
   }
 
@@ -1248,7 +1226,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val cmo_unit = Module(new CMOUnit(edge))
 
   // Parallel pipeline registers for queryMQ path (reqNum ports)
-  val parallel_pipe_regs = RegInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))))
+  val parallel_pipe_regs = RegInit(VecInit.fill(reqNum)(
+    (new MissReqPipeRegBundle(edge)).Lit(_.alloc -> false.B, _.merge -> false.B, _.cancel -> false.B)
+  ))
   val active_pipe_regs = parallel_pipe_regs
   val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(memChannelBits.W))))
 
@@ -1293,7 +1273,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val can_merge_vec = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val match_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
-  val match_from_ith_pipe = WireInit(0.U(log2Up(reqNum).W))
+  val mainpipeMatchPipeIdx = WireInit(0.U(log2Up(reqNum).W))
   val can_merge_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val can_merge_from_pipe_mshr = Wire(Vec(reqNum, UInt(log2Up(cfg.nMissEntries).W)))
   val can_merge_store_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
@@ -1410,8 +1390,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val follower = io.queryMQ(i).req.bits
       val leader = io.queryMQ(j).req.bits
       (i != j).B && blockMatch(follower, leader) && aliasMatch(follower, leader) &&
-        (follower.isFromLoad || follower.isFromPrefetch) &&
-        (leader.isFromLoad || leader.isFromStore || leader.isFromPrefetch)
+      (follower.isFromLoad || follower.isFromPrefetch) &&
+      (leader.isFromLoad || leader.isFromStore || leader.isFromPrefetch)
     }
   }
   val leaderIdx = VecInit(MissQueueEnqLogic.mergeLeaders(
@@ -1422,8 +1402,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // than allocating another owner (e.g. an alias conflict or an AMO).
   val req_reject_vec = VecInit((0 until reqNum).map { i =>
     (0 until i).map { j =>
-      query_valid(j) && blockMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits) &&
-        !sameCycleMerge(i)(j)
+      query_valid(j) && blockMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits) && !sameCycleMerge(i)(j)
     }.foldLeft(false.B)(_ || _)
   })
 
@@ -1450,7 +1429,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && signals_j.block_match) {
         match_from_pipe(i) := true.B
         // Only request 0 consumes this index for prefetch late-source stats.
-        if (i == 0) { match_from_ith_pipe := j.U }
+        if (i == 0) { mainpipeMatchPipeIdx := j.U }
       }
     }
   }
@@ -1464,11 +1443,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // Late cancel/WBQ signals deliberately remain outside allocation ordering.
-  val needs_allocate = (0 until reqNum).map { i =>
+  val allocCandidates = (0 until reqNum).map { i =>
     query_valid(i) && isLeader(i) && can_allocate_vec(i) && !reserved_for_req(i)
   }
   val alloc_order = MissQueueEnqLogic.allocationRanks(
-    needs_allocate, io.queryMQ.map(_.req.bits.isFromPrefetch))
+    allocCandidates, io.queryMQ.map(_.req.bits.isFromPrefetch))
 
   for (i <- 0 until reqNum) {
     val entryMergeMask = secondary_ready_vec(i)
@@ -1944,7 +1923,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.prefetch_stat.pf_late_in_mshr_source := ParallelMux(
     Seq(late_in_reg) ++ entries.map(_.io.matched)
     zip
-    Seq(parallel_pipe_regs(match_from_ith_pipe).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+    Seq(parallel_pipe_regs(mainpipeMatchPipeIdx).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
   )
 
   io.prefetch_stat.prefetch_miss := query_fire(0) && io.queryMQ(0).req.bits.isFromPrefetch
@@ -1960,15 +1939,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     
     prefetch_hit_in_reg_vec(i) := hit_in_reg.asUInt.orR
     prefetch_hit_in_mshr_vec(i) := io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.isFromPrefetch && Cat(entries.map(_.io.prefetch_info.hit_prefetch(i))).orR
-  }
-  io.prefetch_stat.hit_pf_in_mshr := PopCount((0 until reqNum).map(i => prefetch_hit_in_reg_vec(i) || prefetch_hit_in_mshr_vec(i)))
-  for(i <- 0 until reqNum) {
     io.prefetch_stat.hit_pf_in_mshr_source(i) := ParallelMux(
-      Seq(prefetch_hit_in_reg_vec(i)) ++ entries.map(_.io.prefetch_info.hit_prefetch(i))
-      zip
-      Seq(parallel_pipe_regs(i).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+      hit_in_reg ++ entries.map(_.io.prefetch_info.hit_prefetch(i)),
+      parallel_pipe_regs.map(_.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
     )
   }
+  io.prefetch_stat.hit_pf_in_mshr := prefetch_hit_in_reg_vec.asUInt | prefetch_hit_in_mshr_vec.asUInt
 
   // L1MissTrace Chisel DB - support multiple enqueue ports
   val debug_miss_trace_vec = Wire(Vec(reqNum, new L1MissTrace))

@@ -45,7 +45,7 @@ class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
   val prefetch_miss = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
 
-  val hit_pf_in_mshr = UInt(MissReqPortCount.W) // from missqueue, demand miss match a existing pf mshr, then clear pf flag
+  val hit_pf_in_mshr = UInt(MissReqPortCount.W) // per-port mask: demand requests hitting prefetch owners
   val hit_pf_in_mshr_source = Vec(MissReqPortCount, UInt(L1PfSourceBits.W)) // from missqueue, the pf source of demand miss matched
   val load_miss = UInt(MissReqPortCount.W) // from missqueue, load demand miss allocate a new mshr
 }
@@ -99,8 +99,8 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
   // demand accesses from different ldu may hit different prefetch blocks
   val hit_pf_in_cache = PopCount(prefetch_info.loadinfo.map(t => t.hit_pf_in_cache) ++ Seq(prefetch_info.maininfo.hit_pf_in_cache))
-  val hit_pf_in_mshr = io.missinfo.hit_pf_in_mshr
-  val hit_pf = hit_pf_in_cache + hit_pf_in_mshr.asUInt
+  val hit_pf_in_mshr = PopCount(io.missinfo.hit_pf_in_mshr)
+  val hit_pf = hit_pf_in_cache +& hit_pf_in_mshr
   val pf_useless = io.replinfo.pf_useless
   val prefetch_miss = io.missinfo.prefetch_miss
   val load_miss_to_mshr = io.missinfo.load_miss
