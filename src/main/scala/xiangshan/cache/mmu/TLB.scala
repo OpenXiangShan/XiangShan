@@ -383,10 +383,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val req_need_gpa = hasGpf(idx)
     val req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
 
-    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), req_s2xlate,
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
-    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), req_s2xlate,
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     val ptw_getGpa = req_need_gpa && hitVec(idx)
     val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(idx).vaddr) && need_gpa_s2xlate === req_s2xlate
 
@@ -422,9 +424,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val vpn = query.vpn
     val s2xlate = query.s2xlate
     val onlyS2 = s2xlate === onlyStage2
-    val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
-    val resp_hit = ptw.resp.bits.hit(vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
-    result.hitFast := resp_hit && io.ptw.resp.fire && s2xlate_hit
+    result.hitFast := io.ptw.resp.fire && ptw.resp.bits.hit(vpn, s2xlate,
+      csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     result.hit := GatedValidRegNext(result.hitFast)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)(ppnLen - 1, 0)
     val gvpn = Mux(onlyS2, vpn, ppn_s1)

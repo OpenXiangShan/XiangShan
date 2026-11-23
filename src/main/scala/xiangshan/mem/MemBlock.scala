@@ -725,8 +725,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
-      dtlb_ld(0).ptw.req(i).bits.s2xlate === ptw_resp_next.data.s2xlate &&
-      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
+      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, dtlb_ld(0).ptw.req(i).bits.s2xlate,
+        tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
         allType = true, ignoreAsid = true) // Maybe need not ignoreAsid here, however not a functional bug
   }
 
@@ -741,8 +741,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       else                                 Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_pf_idx), TlbEndVec(dtlb_pf_idx))).orR
       ptwio.req(i).valid := tlb.valid &&
         !(ptw_resp_v && vector_hit &&
-          tlb.bits.s2xlate === ptw_resp_next.data.s2xlate &&
-          ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
+          ptw_resp_next.data.hit(tlb.bits.vpn, tlb.bits.s2xlate,
+            tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid,
             allType = true, ignoreAsid = true)) // // Maybe need not ignoreAsid here, however not a functional bug
     }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)

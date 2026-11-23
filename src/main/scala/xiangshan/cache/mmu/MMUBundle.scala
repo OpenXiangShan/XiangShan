@@ -1413,7 +1413,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     Mux(s2xlate === onlyStage2, s2_vpn, s1_vpn)
   }
 
-  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
+  def hit(vpn: UInt, requestStage: UInt, asid: UInt, vasid: UInt, vmid: UInt,
+    allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
+    val stage_hit = requestStage === s2xlate
     val noS2_hit = s1.hit(vpn, asid, vmid, allType, ignoreAsid, 
       (if (HasMptCheck) (this.mpt.get.mptOnly) else false.B), HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
     val onlyS2_hit = s2.hit(vpn, vmid, HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
@@ -1461,7 +1463,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     val vmid_hit = s1.entry.vmid.getOrElse(0.U) === vmid
     val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid || s1.entry.perm.get.g)
     val all_onlyS1_hit = vpn_hit && vmid_hit && vasid_hit
-    Mux(this.s2xlate === noS2xlate, noS2_hit,
+    stage_hit && Mux(this.s2xlate === noS2xlate, noS2_hit,
       Mux(this.s2xlate === onlyStage2, onlyS2_hit, all_onlyS1_hit))
   }
 }
