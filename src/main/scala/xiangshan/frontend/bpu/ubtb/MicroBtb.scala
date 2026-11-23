@@ -25,12 +25,14 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.history.commonhr.Helpers.dedupHitPositions
 
 // TODO: 2-taken
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
-    val prediction: Valid[Prediction] = Output(Valid(new Prediction))
+    val prediction:        Valid[Prediction] = Output(Valid(new Prediction))
+    val numNotTakenBefore: UInt              = Output(UInt(CfiPositionWidth.W))
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -95,6 +97,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.bits.cfiPosition := s1_hitEntry.slot1.position
   io.prediction.bits.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
+  io.numNotTakenBefore           := s1_hitEntry.slot1.numNotTakenBefore
 
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire
@@ -115,6 +118,13 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_position    = t0_branch.cfiPosition
   private val t0_fullTarget  = t0_branch.target
   private val t0_attribute   = t0_branch.attribute
+  private val t0_resolved          = io.train.branches
+  private val t0_resolvedPositions = VecInit(t0_resolved.map(_.bits.cfiPosition))
+  private val t0_resolvedPrefix = VecInit(t0_resolved.map { b =>
+    b.valid && b.bits.attribute.isConditional && !b.bits.taken && b.bits.cfiPosition < t0_position
+  })
+  private val t0_numResolvedBefore = PopCount(dedupHitPositions(t0_resolvedPrefix, t0_resolvedPositions))
+  private val t0_numNotTakenBefore = Mux(t0_useResolve, t0_numResolvedBefore, io.fastTrain.get.bits.numNotTakenBefore)
 
   private val t0_tag         = getTag(t0_startPc)
   private val t0_target      = getEntryTarget(t0_fullTarget)
@@ -128,12 +138,14 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - update replacer
    */
   t1_fire := RegNext(t0_fire, false.B)
-  private val t1_tag         = RegEnable(t0_tag, t0_fire)
-  private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
-  private val t1_position    = RegEnable(t0_position, t0_fire)
-  private val t1_target      = RegEnable(t0_target, t0_fire)
-  private val t1_attribute   = RegEnable(t0_attribute, t0_fire)
-  private val t1_targetCarry = t0_targetCarry.map(w => RegEnable(w, t0_fire)) // if (EnableTargetFix)
+  private val t1_tag               = RegEnable(t0_tag, t0_fire)
+  private val t1_actualTaken       = RegEnable(t0_actualTaken, t0_fire)
+  private val t1_position          = RegEnable(t0_position, t0_fire)
+  private val t1_target            = RegEnable(t0_target, t0_fire)
+  private val t1_attribute         = RegEnable(t0_attribute, t0_fire)
+  private val t1_fromResolve       = RegEnable(t0_useResolve, t0_fire)
+  private val t1_numNotTakenBefore = RegEnable(t0_numNotTakenBefore, t0_fire)
+  private val t1_targetCarry       = t0_targetCarry.map(w => RegEnable(w, t0_fire)) // if (EnableTargetFix)
 
   private val t1_hitOH    = VecInit(entries.map(e => e.valid && e.tag === t1_tag)).asUInt
   private val t1_hit      = t1_hitOH.orR
@@ -147,6 +159,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_hitPositionSame  = t1_hitEntry.slot1.position === t1_position
   private val t1_hitAttributeSame = t1_hitEntry.slot1.attribute === t1_attribute
   private val t1_hitTargetSame    = t1_hitEntry.slot1.target === t1_target
+  private val t1_sameBranch       = t1_hit && t1_hitPositionSame && t1_hitAttributeSame
+  // ResolveQueue can issue a partial batch for a fetch block.
+  private val t1_keepPrefix = t1_fromResolve && t1_sameBranch &&
+    t1_hitEntry.slot1.numNotTakenBefore > t1_numNotTakenBefore
+  private val t1_newPrefix = Mux(t1_keepPrefix, t1_hitEntry.slot1.numNotTakenBefore, t1_numNotTakenBefore)
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
     when(notUseful) {
@@ -157,6 +174,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
       t1_updatedEntry.slot1.attribute      := t1_attribute
       t1_updatedEntry.slot1.target         := t1_target
       t1_updatedEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
+      t1_updatedEntry.slot1.numNotTakenBefore := Mux(t1_actualTaken, t1_newPrefix, 0.U)
       t1_updatedEntry.slot1.targetCarry.foreach(_ := t1_targetCarry.get) // if (EnableTargetFix)
       // TODO: 2-taken train
       t1_updatedEntry.slot2.valid := false.B
@@ -181,6 +199,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
       // everything matches, and actually taken
       // increase usefulCnt
       t1_updatedEntry.usefulCnt := t1_hitEntry.usefulCnt.getIncrease()
+    }
+    when(t1_actualTaken && t1_sameBranch) {
+      t1_updatedEntry.slot1.numNotTakenBefore := t1_newPrefix
     }
   }
 

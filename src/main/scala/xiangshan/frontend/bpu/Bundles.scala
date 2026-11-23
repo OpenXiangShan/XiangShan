@@ -316,10 +316,11 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
 
 // use s3 prediction to train s1 predictors
 class FastTrain(implicit p: Parameters) extends BpuBundle {
-  val startPc:   Pc            = Pc()
-  val branch:    BranchInfo    = new BranchInfo
-  val abtbMeta:  AheadBtbMeta  = new AheadBtbMeta
-  val utageMeta: MicroTageMeta = new MicroTageMeta
+  val startPc:           Pc            = Pc()
+  val branch:            BranchInfo    = new BranchInfo
+  val numNotTakenBefore: UInt          = UInt(CfiPositionWidth.W)
+  val abtbMeta:          AheadBtbMeta  = new AheadBtbMeta
+  val utageMeta:         MicroTageMeta = new MicroTageMeta
 }
 
 // metadata for commit training (e.g. ras)

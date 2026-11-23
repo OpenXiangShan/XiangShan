@@ -16,10 +16,8 @@
 package xiangshan.frontend.bpu.history.commonhr
 
 import chisel3._
-import chisel3.util._
+import chisel3.util.Valid
 import org.chipsalliance.cde.config.Parameters
-import utility.CircularQueuePtr
-import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.Prediction
@@ -36,6 +34,14 @@ class Update(implicit p: Parameters) extends CommonHRBundle {
   val isOverride: Bool       = Bool()
   val startPc:    Pc         = Pc()
   val prediction: Prediction = new Prediction()
+}
+
+class S1Update(implicit p: Parameters) extends CommonHRBundle {
+  val startPc:               Pc          = Pc()
+  val prediction:            Prediction  = new Prediction
+  val condHitMask:           Vec[Bool]   = Vec(NumAheadBtbPredictionEntries, Bool())
+  val positions:             Vec[UInt]   = Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W))
+  val ubtbNumNotTakenBefore: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
 }
 
 class S2Update(implicit p: Parameters) extends Update {
@@ -71,21 +77,4 @@ class CommonHRRedirect(implicit p: Parameters) extends CommonHRBundle {
   val attribute: BranchAttribute = new BranchAttribute
   val target:    Pc              = Pc()
   val meta:      CommonHRMeta    = new CommonHRMeta
-}
-
-class HistPtr(entries: Int) extends CircularQueuePtr[HistPtr](entries) {
-  def this()(implicit p: Parameters) =
-    this(p(XSCoreParamsKey).frontendParameters.bpuParameters.commonHRParameters.HistQueueSize)
-}
-
-object HistPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): HistPtr = {
-    val ptr = Wire(new HistPtr)
-    ptr.flag  := f
-    ptr.value := v
-    ptr
-  }
-
-  def width(implicit p: Parameters): Int =
-    log2Up(p(XSCoreParamsKey).frontendParameters.bpuParameters.commonHRParameters.HistQueueSize)
 }

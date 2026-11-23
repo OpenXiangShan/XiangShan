@@ -20,7 +20,7 @@ import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.HalfAlignHelper
 
-trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
+trait Helpers extends HalfAlignHelper {
 
   def getNewHR(
       oldGhr:  UInt,
@@ -34,6 +34,11 @@ trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
     Mux(isCond && taken, Cat(oldGhr << numShift, histBit.getOrElse(taken)), oldGhr << numShift)(histLen - 1, 0)
   }
 
+  def isBackwardBranch(cfiPc: PrunedAddr, target: PrunedAddr): Bool =
+    cfiPc.addr(CompareAddrLowWidth - 1, 0) > target.addr(CompareAddrLowWidth - 1, 0)
+}
+
+private[bpu] object Helpers {
   def dedupHitPositions(hitMask: Vec[Bool], posVec: Vec[UInt]): Vec[Bool] = {
     require(hitMask.length == posVec.length, "hitMask and posVec must have the same length")
     val numLen = hitMask.length
@@ -50,7 +55,4 @@ trait Helpers extends HasCommonHRParameters with HalfAlignHelper {
     }
     keep
   }
-
-  def isBackwardBranch(cfiPc: PrunedAddr, target: PrunedAddr): Bool =
-    cfiPc.addr(CompareAddrLowWidth - 1, 0) > target.addr(CompareAddrLowWidth - 1, 0)
 }

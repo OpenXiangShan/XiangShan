@@ -167,11 +167,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   train := io.fromFtq.train.bits
 
   private val fastTrain = Wire(Valid(new FastTrain))
-  fastTrain.valid        := s3_valid
-  fastTrain.bits.startPc := s3_startPc.get.unGuard
+  fastTrain.valid                  := s3_valid
+  fastTrain.bits.startPc           := s3_startPc.get.unGuard
   fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
-  fastTrain.bits.abtbMeta  := s3_abtbMeta
-  fastTrain.bits.utageMeta := s3_utageMeta
+  fastTrain.bits.numNotTakenBefore := commonHR.io.s3NumNotTakenBefore
+  fastTrain.bits.abtbMeta          := s3_abtbMeta
+  fastTrain.bits.utageMeta         := s3_utageMeta
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
@@ -509,8 +510,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
-  s3_commonHRMeta.ghr       := commonHR.io.s3ResolveMeta.ghr
-  s3_commonHRMeta.bw        := commonHR.io.s3ResolveMeta.bw
+  s3_commonHRMeta.ghr       := commonHR.io.s3RedirectHR.ghr
+  s3_commonHRMeta.bw        := commonHR.io.s3RedirectHR.bw
   s3_commonHRMeta.imli      := commonHR.io.s3ResolveMeta.imli
   s3_commonHRMeta.hitMask   := commonHR.io.s3DedupHitMask
   s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))
@@ -628,6 +629,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.stageCtrl                   := stageCtrl
   commonHR.io.s0_startPc.get              := s0_startPc.get.unGuard
   commonHR.io.s1_imliTaken                := s1_imliTaken
+  commonHR.io.s1Update.startPc            := s1_startPc.get.unGuard
+  commonHR.io.s1Update.prediction         := s1_prediction
+  commonHR.io.s1Update.condHitMask        := VecInit(abtb.io.result.entries.map(p => p.valid && p.bits.attribute.isConditional))
+  commonHR.io.s1Update.positions          := s1_abtbPosition
+  commonHR.io.s1Update.ubtbNumNotTakenBefore.valid := !s1_abtbValid && ubtb.io.prediction.valid
+  commonHR.io.s1Update.ubtbNumNotTakenBefore.bits  := ubtb.io.numNotTakenBefore
   commonHR.io.s2Update.isOverride         := s2_override
   commonHR.io.s2Update.startPc            := s2_startPc.get.unGuard
   commonHR.io.s2Update.prediction         := s2_prediction

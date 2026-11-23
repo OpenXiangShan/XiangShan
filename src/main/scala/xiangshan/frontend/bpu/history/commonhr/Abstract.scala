@@ -19,5 +19,5 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-abstract class CommonHRBundle(implicit p: Parameters) extends BpuBundle with HasCommonHRParameters
-abstract class CommonHRModule(implicit p: Parameters) extends BpuModule with HasCommonHRParameters
+abstract class CommonHRBundle(implicit p: Parameters) extends BpuBundle
+abstract class CommonHRModule(implicit p: Parameters) extends BpuModule

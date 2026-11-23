@@ -19,15 +19,17 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
-import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import xiangshan.frontend.Pc
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
+import xiangshan.frontend.bpu.history.commonhr.Helpers.dedupHitPositions
 
-class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
+class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   class CommonHRIO extends CommonHRBundle {
     val stageCtrl:      StageCtrl           = Input(new StageCtrl)
     val s1_imliTaken:   Bool                = Input(Bool())
+    val s1Update:      S1Update            = Input(new S1Update)
     val s2Update:       S2Update            = Input(new S2Update)
     val s3Update:       S3Update            = Input(new S3Update)
     val redirect:       CommonHRRedirect    = Input(new CommonHRRedirect)
@@ -35,6 +37,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s0_commonHR:    CommonHREntry       = Output(new CommonHREntry)
     val s3DedupHitMask: Vec[Bool]           = Output(Vec(NumBtbResultEntries, Bool()))
     val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
+    val s3RedirectHR:   CommonHREntry       = Output(new CommonHREntry)
+    val s3NumNotTakenBefore: UInt = Output(UInt(CfiPositionWidth.W))
 
     val s0_startPc: Option[Pc] = Some(Input(Pc())) // for debug
   }
@@ -66,14 +70,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val r1_valid    = RegNext(io.redirect.valid, false.B)
   private val r1_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  private val enqPtr     = RegInit(HistPtr(false.B, 0.U))
-  private val predPtr    = RegInit(HistPtr(false.B, 0.U))
-  private val writePtr   = RegInit(HistPtr(false.B, 0.U))
-  private val recoverPtr = RegInit(HistPtr(false.B, 0.U))
-  private val histQueue  = RegInit(VecInit(Seq.fill(HistQueueSize)(0.U.asTypeOf(new CommonHREntry))))
-
   /*
-   * CommonHR train from redirect/s3_prediction
+   * SC trains with the history used for lookup. Redirect recovery uses
+   * the separate, in-order S3 history before the redirecting block updates it.
    */
   s3_commonHRResolveMeta.valid := s3_commonHR.valid
   s3_commonHRResolveMeta.ghr   := s3_commonHR.ghr
@@ -82,6 +81,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   io.s0_imli       := s0_imli
   io.s3ResolveMeta := s3_commonHRResolveMeta
+  io.s3RedirectHR  := commonHR
   io.s0_commonHR   := s0_commonHR
 
   /*
@@ -264,12 +264,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     debugCommonHR := s3_newCommonHR
   }
 
-  // On r1 redirect recovery, overwrite s1/s2 history with the recomputed CommonHR
-  when(r1_valid) {
-    s1_commonHR := r1_commonHR
-    s2_commonHR := r1_commonHR
-  }
-
   // imli update
   private val s2_overrideCfiPc   = getCfiPcFromPosition(s2_update.startPc, s2_prediction.cfiPosition)
   private val s2_overrideBwTaken = isBackwardBranch(s2_overrideCfiPc, s2_prediction.target.unGuard)
@@ -304,105 +298,81 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     s0_imli := imli
   }
 
-  /*
-   * NOTE:Only applicable to the current predicted flow structure
-   * if s3_override,  the current s0 should use s2,
-   * the next cycle should use the current s1,
-   * and the next cycle should use the current s0
-   * At the current flow level, a maximum of two levels of history need to be restored
-   */
-
-  private val enqEnable       = s0_fire
-  private val predEnable      = s0_fire && ((predPtr + 3.U) === enqPtr)
-  private val writeEnable     = s3_fire
-  private val hasOverrideHist = recoverPtr + 2.U === writePtr // There is sufficient history for restoration
-  private val recoverInc      = s3_fire && hasOverrideHist
-  private val sync            = predPtr === writePtr
-  private val initCommonHR    = WireInit(0.U.asTypeOf(new CommonHREntry))
-  initCommonHR.predStartPc.get := io.s0_startPc.get
-
-  when(r0_valid) {
-    enqPtr                            := writePtr + 1.U
-    recoverPtr                        := writePtr - 1.U
-    predPtr                           := writePtr - 1.U
-    histQueue(writePtr.value)         := initCommonHR // The queue value during redirect is used for diff
-    histQueue((writePtr - 1.U).value) := r0_commonHR  // The queue value during redirect is used for diff
-  }.elsewhen(s3_override) {
-    val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
-    histQueue(writePtr.value)         := s3_newCommonHR // update s3_fire block
-    histQueue((writePtr + 1.U).value) := initCommonHR   // write new s0_block
-    enqPtr                            := writePtr + 2.U
-    predPtr                           := realRecoverPtr
-    writePtr                          := writePtr + 1.U
-    recoverPtr                        := realRecoverPtr
-  }.elsewhen(s2_override) {
-    // S2 keeps the corrected block, flushes the younger S1 block, and starts a
-    // new S0 block. Compact the queue so the next write still corresponds to
-    // the block that will reach S3 next.
-    val writePtrPlus1 = writePtr + 1.U
-    val writePtrPlus2 = writePtr + 2.U
-    val writePtrPlus3 = writePtr + 3.U
-    val nextWritePtr  = Mux(s3_fire, writePtrPlus1, writePtr)
-    val newS0Ptr      = Mux(s3_fire, writePtrPlus2, writePtrPlus1)
-    val nextEnqPtr    = Mux(s3_fire, writePtrPlus3, writePtrPlus2)
-
-    when(s3_fire) {
-      histQueue(writePtr.value) := s3_newCommonHR
-    }
-    histQueue(newS0Ptr.value) := initCommonHR
-
-    enqPtr := nextEnqPtr
-    // Keep predPtr on the corresponding queue entry. The S0 block launched by
-    // an S2 override reuses the flushed S1 block's history below, and the
-    // following cycle must consume the S3 update before predPtr advances.
-    writePtr   := nextWritePtr
-    recoverPtr := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
-  }.otherwise {
-    when(enqEnable) {
-      histQueue(enqPtr.value) := initCommonHR
-      enqPtr                  := enqPtr + 1.U
-      predPtr                 := Mux(predEnable, predPtr + 1.U, predPtr)
-    }
-    when(writeEnable) {
-      histQueue(writePtr.value) := s3_newCommonHR
-      writePtr                  := writePtr + 1.U
-      recoverPtr                := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
-    }
-  }
-
-  private val redirectRecoverCommonHR = WireInit(r1_commonHR)
-  redirectRecoverCommonHR.valid := true.B
-  when(r1_valid) {
-    histQueue(recoverPtr.value) := redirectRecoverCommonHR
-  }
-
   io.s3DedupHitMask := s3_hitMask
+  // The conditional hits before the first taken branch were predicted not taken.
+  io.s3NumNotTakenBefore := Mux1H(s3_update.firstTakenBranchOH, s3_numLessCandidate)
 
-  // Use distance-based checks for circular pointers to avoid wrap-around ordering ambiguity.
-  private val writeToPredDist   = distanceBetween(writePtr, predPtr)
-  private val predToRecoverDist = distanceBetween(predPtr, recoverPtr)
-  XSError(
-    enqEnable && (writeToPredDist > 3.U || predToRecoverDist > 2.U),
-    "The predPtr exceeds the correct range"
+  private val specHR   = RegInit(0.U.asTypeOf(new CommonHREntry))
+  private val s1Update = io.s1Update
+  private val s1Pred   = s1Update.prediction
+  private val s1Hits = VecInit(s1Update.positions.zip(s1Update.condHitMask).map { case (pos, hit) =>
+    hit && pos >= getAlignedInstOffset(s1Update.startPc) && pos <= s1Pred.cfiPosition
+  })
+  private val s1DedupHits = dedupHitPositions(s1Hits, s1Update.positions)
+
+  private def updateHR(
+      base:                CommonHREntry,
+      startPc:             Pc,
+      pred:                Prediction,
+      positions:           Vec[UInt],
+      hitMask:             Vec[Bool],
+      bwTaken:             Bool,
+      takenPrefixOverride: Option[Valid[UInt]] = None
+  ): CommonHREntry = {
+    val numLessFromHits = PopCount(positions.zip(hitMask).map { case (pos, hit) =>
+      hit && pos < pred.cfiPosition
+    })
+    val numLess = takenPrefixOverride.fold(numLessFromHits)(prefix => Mux(prefix.valid, prefix.bits, numLessFromHits))
+    val numHit = PopCount(hitMask)
+    val isCond = pred.attribute.isConditional
+    val next   = Wire(new CommonHREntry)
+    next.valid           := true.B
+    next.predStartPc.get := startPc
+    next.ghr             := getNewHR(base.ghr, numLess, numHit, pred.taken, isCond)(GhrHistoryLength)
+    next.bw              := getNewHR(base.bw, numLess, numHit, pred.taken, isCond, Some(bwTaken))(BWHistoryLength)
+    next
+  }
+
+  // R1 can coincide with the first target block leaving S1. Apply its
+  // delta to the recovered history, and save that base for an S2 override.
+  private val recoveredHR = WireInit(r1_commonHR)
+  recoveredHR.valid := true.B
+  private val s1Base     = Mux(r1_valid, recoveredHR, specHR)
+  private val s2Repair   = s2_override && !s3_override
+  private val s1Advance  = s1_fire && !r0_valid && !s3_override && !s2_override
+  private val s2Base     = RegEnable(s1Base, 0.U.asTypeOf(new CommonHREntry), s1Advance)
+  private val s1Next     = updateHR(
+    s1Base,
+    s1Update.startPc,
+    s1Pred,
+    s1Update.positions,
+    s1DedupHits,
+    io.s1_imliTaken,
+    Some(s1Update.ubtbNumNotTakenBefore)
   )
-  XSError(
-    writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc.get,
-    "update history maybe mismatched!"
+  private val s2Next     = updateHR(
+    s2Base,
+    s2_update.startPc,
+    s2_prediction,
+    s2_update.positions,
+    s2_hitMask,
+    s2_overrideBwTaken
   )
 
+  // S3 overrides only redirect the PC. The flushed S1 block must not append
+  // history, but history appended by earlier S1 blocks is retained.
+  private val nextSpecHR = MuxCase(
+    s1Base,
+    Seq(s2Repair -> s2Next, s1Advance -> s1Next)
+  )
+  when(!r0_valid && (r1_valid || s1Advance || s2Repair)) {
+    specHR := nextSpecHR
+  }
+
+  // Keep the existing R0/R1 Global/BW read gating for the performance comparison.
   s0_commonHR := MuxCase(
     0.U.asTypeOf(new CommonHREntry),
-    Seq(
-      r0_valid    -> r0_commonHR,
-      r1_valid    -> r1_commonHR,
-      s3_override -> histQueue(recoverPtr.value),
-      // S2 override replaces the younger S1 block.  Reuse the history that
-      // this S1 block carried when it was predicted in S0, rather than the
-      // S3 update produced in the same cycle.
-      s2_override                  -> s1_commonHR,
-      (s0_fire && s3_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
-      s0_fire                      -> histQueue(predPtr.value)
-    )
+    Seq(r0_valid -> r0_commonHR, r1_valid -> r1_commonHR, s0_fire -> nextSpecHR)
   )
 
   private val diffCommonHR           = debugCommonHR.asUInt =/= commonHR.asUInt
@@ -413,13 +383,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   )
 
   dontTouch(diffCommonHR)
-  dontTouch(writePtr)
-  dontTouch(enqPtr)
-  dontTouch(predPtr)
-  dontTouch(predEnable)
-  dontTouch(sync)
-  dontTouch(hasOverrideHist)
-  dontTouch(recoverInc)
 
   if (EnableCommitGHistDiff) {
     val r1_lessThanPcUInt = r1_lessThanPc.asUInt

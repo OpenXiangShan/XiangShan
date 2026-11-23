@@ -45,6 +45,8 @@ class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   class Slot1 extends SlotBase {
     // whether branch in slot 1 has a static target
     val isStaticTarget: Bool = Bool()
+    // Number of conditional branches before slot 1, within this fetch block.
+    val numNotTakenBefore: UInt = UInt(CfiPositionWidth.W)
   }
 
   class Slot2 extends SlotBase {
