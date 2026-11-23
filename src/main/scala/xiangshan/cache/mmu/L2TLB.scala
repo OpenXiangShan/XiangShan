@@ -832,7 +832,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
           outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
           outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
           outArb(i).in(0).bits.s2.entry.level.map(_ := 0.U(2.W))
-          outArb(i).in(0).bits.s2.entry.ppn := get_4kppn(mergeArb(i).out.bits.s2.entry.ppn, mergeArb(i).out.bits.s2.entry.tag, mergeArb(i).out.bits.s2.entry.level.get, mergeArb(i).out.bits.s2.entry.n.get.asBool)
+          val s2 = mergeArb(i).out.bits.s2
+          outArb(i).in(0).bits.s2.entry.ppn := s2.genPPNS2(s2.entry.tag)
           outArb(i).in(0).bits.s2.entry.n.map(_ := false.B)
         }
       }
@@ -879,24 +880,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   when (mem_resp_done) {
     waiting_resp(mem.d.bits.source) := false.B
     flush_latch(mem.d.bits.source) := false.B
-  }
-
-  def get_4kppn(ppn: UInt, vpn: UInt, level: UInt, n: Bool): UInt = {
-    MuxLookup(level, 0.U)(Seq(
-      3.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(n === 0.U, ppn(ppn.getWidth - 1, 0), Cat(ppn(ppn.getWidth - 1, pteNapotBits), vpn(pteNapotBits - 1, 0)))
-    ))
-  }
-
-  def get_4kppn_up(ppn_up: UInt, vpn_up: UInt, level: UInt, n: Bool): UInt = {
-    MuxLookup(level, 0.U)(Seq(
-      3.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen * 3 - sectortlbwidth), vpn_up(vpnnLen * 3 - 1 - sectortlbwidth, 0)),
-      2.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen * 2 - sectortlbwidth), vpn_up(vpnnLen * 2 - 1 - sectortlbwidth, 0)),
-      1.U -> Cat(ppn_up(ppn_up.getWidth - 1, vpnnLen - sectortlbwidth), vpn_up(vpnnLen - 1 - sectortlbwidth, 0)),
-      0.U -> Mux(n === 0.U, ppn_up(ppn_up.getWidth - 1, 0), Cat(ppn_up(ppn_up.getWidth - 1, pteNapotBits - sectortlbwidth), vpn_up(pteNapotBits - 1 - sectortlbwidth, 0)))
-    ))
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
@@ -988,7 +971,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
     ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid
     ptw_sector_resp.entry.vmid.map(_ := pte.entry(OHToUInt(pte.pteidx)).vmid.getOrElse(0.U))
-    ptw_sector_resp.entry.ppn := get_4kppn_up(pte.entry(OHToUInt(pte.pteidx)).ppn, pte.entry(OHToUInt(pte.pteidx)).tag, pte.entry(OHToUInt(pte.pteidx)).level.getOrElse(0.U(log2Up(Level + 1).W)), pte.entry(OHToUInt(pte.pteidx)).n.getOrElse(0.U).asBool)
+    ptw_sector_resp.entry.ppn := pageNumberFromVpn(pte.entry(OHToUInt(pte.pteidx)).ppn, pte.entry(OHToUInt(pte.pteidx)).tag,
+      pte.entry(OHToUInt(pte.pteidx)).level.get, pte.entry(OHToUInt(pte.pteidx)).n.get.asBool, tagOffset = sectortlbwidth)
     ptw_sector_resp.entry.pbmt := pte.entry(OHToUInt(pte.pteidx)).pbmt
     ptw_sector_resp.entry.n.map(_ := false.B)
     ptw_sector_resp.entry.perm.map(_ := pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
