@@ -180,6 +180,8 @@ package seq_pkg;
     `include "dtlb/0403-0407/memblock_dtlb_0403_0407_vseq.sv"
     `include "dtlb/0306-0307/memblock_dtlb_0306_0307_vseq.sv"
 
+    `include "store_unit/0102_20261104/memblock_storeunit_0102_vseq.sv"
+
 endpackage
 
 import seq_pkg::*;
