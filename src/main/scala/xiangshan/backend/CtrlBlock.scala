@@ -421,7 +421,8 @@ class CtrlBlockImp(
 
   val isEmptyDelay = !(RegNext(VecInit(decode.in.mop.map(_.valid))).asUInt.orR ||
     RegNext(VecInit(rename.io.in.map(_.valid))).asUInt.orR ||
-    RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR) &&
+    RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR ||
+    RegNext(VecInit(rob.in.enq.req.map(_.valid))).asUInt.orR) &&
     RegNext(rob.in.enq.isEmpty)
   io.frontend.backendEmpty := RegNext(isEmptyDelay)
 

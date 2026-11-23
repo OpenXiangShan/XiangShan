@@ -481,7 +481,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheUnit.io.flush           := s2_flush
   uncacheUnit.io.isFirstInstr    := isFirstInstr
   uncacheUnit.io.ifuStall        := !io.toIBuffer.ready
-  uncacheUnit.io.emptyAfter      := io.backendEmpty && io.ibufferEmpty
+  private val ibufferEmptyAligned = io.ibufferEmpty && RegNext(io.ibufferEmpty, false.B) && RegNext(RegNext(io.ibufferEmpty, false.B), false.B)
+  uncacheUnit.io.emptyAfter      := io.backendEmpty && ibufferEmptyAligned
   io.toUncache <> uncacheUnit.io.toUncache
   uncacheUnit.io.fromUncache <> io.fromUncache
 
