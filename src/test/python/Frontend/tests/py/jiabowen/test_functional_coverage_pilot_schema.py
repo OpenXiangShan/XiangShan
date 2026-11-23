@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from env.funcov.py.icache.icache_missunit_funcov import (
+    ICACHE_REFILL_ISOLATION_BINS,
+    ICACHE_REFILL_ISOLATION_POINT,
+)
 from env.funcov.py.ifu import cacheable_pipeline_funcov, compact_funcov
 from env.funcov.py.ifu import instr_uncache_owner_funcov as instr_uncache_sampler
 from env.funcov.py.ifu import mmio_nc_owner_funcov as mmio_nc_owner_sampler
@@ -130,7 +134,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 778, "bin_ids": 778, "mapping_keys": 778, "legacy_ids": 4}
+    assert summary == {"rows": 784, "bin_ids": 784, "mapping_keys": 784, "legacy_ids": 4}
 
 
 def _canonical_ifu_blocks(rows):
@@ -511,7 +515,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 620
+    assert len(active) == 626
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -535,6 +539,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(801, 1132)),
         *(f"BIN-{index}" for index in range(1132, 1140)),
         *(f"BIN-{index}" for index in range(1140, 1187)),
+        *(f"BIN-{index}" for index in range(1187, 1193)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
@@ -938,6 +943,25 @@ def test_icache_missunit_leaves_are_single_bin_and_match_registry():
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+
+
+def test_icache_refill_isolation_point_owns_six_distribution_bins():
+    group = "icache_missunit_refill"
+    root = Path(__file__).resolve().parents[7]
+    docs = root / "src/test/python/Frontend/docs"
+    with (docs / "03_funcov_model/frontend_bt_functional_coverage_pilot.csv").open(
+        encoding="utf-8-sig", newline="",
+    ) as handle:
+        rows = [row for row in csv.DictReader(handle) if row["Coverage_Group"] == group
+                and row["Coverpoint"] == ICACHE_REFILL_ISOLATION_POINT]
+    assert len(rows) == 6
+    assert {row["Bin_Name"] for row in rows} == set(ICACHE_REFILL_ISOLATION_BINS.values())
+    assert len({row["映射测试点路径"] for row in rows}) == 1
+    with (docs / "02_testpoint/Frontend_testpoint_v1.0.csv").open(encoding="utf-8-sig", newline="") as handle:
+        leaves = [row for row in csv.DictReader(handle) if row["coverage"] == (
+            f"covergroup {group}, coverpoint {ICACHE_REFILL_ISOLATION_POINT}"
+        )]
+    assert len(leaves) == 1
 
 
 def test_icache_waylookup_leaves_are_single_bin_and_match_registry():

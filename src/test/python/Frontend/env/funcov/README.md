@@ -30,6 +30,16 @@ The native adapter joins the same Toffee runtime and shared post-drive snapshot;
 the directed testcase's JSON is diagnostic/checker evidence, not a second
 coverage ledger.
 
+`py/icache/icache_missunit_funcov.py` also tracks adjacent TileLink refill
+transactions in `icache_missunit_refill/refill_exception_isolation`. One
+testpoint owns six distribution bins (BIN-1187–1192): corrupt or denied on
+beat 0, beat 1, or both, followed immediately by a clean refill on another
+source/address. Native A/D inputs, MSHR keys and reset/flush controls establish
+the condition in the shared post-drive snapshot. DUT exception isolation and
+SRAM writes remain testcase assertions. A DUT checkpoint failure does not
+invalidate a fully observed input condition: coverage may be HIT while the
+testcase remains FAIL. Such a testpoint is not CLOSED.
+
 The legacy JSON ledger and fallback/audit runtime have been removed. Use
 `src/test/python/Frontend/docs/03_funcov_model/skills.md` for testpoint,
 sampling, report and HIT-evidence rules; use `src/test/python/Frontend/README.md`

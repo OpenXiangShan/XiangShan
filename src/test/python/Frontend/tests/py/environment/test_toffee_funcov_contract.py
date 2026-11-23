@@ -226,8 +226,8 @@ def test_toffee_funcov_registry_model_contains_all_python_recorder_bins(tmp_path
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(keys) == 620
-    assert len(sink.bin_ids) == 620
+    assert len(keys) == 626
+    assert len(sink.bin_ids) == 626
 
 
 def test_toffee_session_coverage_merges_native_groups_without_frontend_metadata(tmp_path) -> None:
@@ -470,7 +470,7 @@ def test_toffee_prefetchpipe_model_contains_all_37_bins() -> None:
     assert len(keys) == 37
 
 
-def test_toffee_missunit_model_contains_all_34_bins() -> None:
+def test_toffee_missunit_model_contains_all_40_bins() -> None:
     class Runtime:
         env = type("Env", (), {"dut": object()})()
 
@@ -481,7 +481,7 @@ def test_toffee_missunit_model_contains_all_34_bins() -> None:
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(keys) == 34
+    assert len(keys) == 40
 
 
 def test_toffee_waylookup_model_contains_all_41_bins() -> None:
@@ -588,7 +588,7 @@ def test_toffee_remaining_ifu_models_contain_all_124_bins() -> None:
 
 
 
-def test_all_620_bins_are_native_installed(tmp_path) -> None:
+def test_all_626_bins_are_native_installed(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-all-native",
@@ -611,7 +611,7 @@ def test_all_620_bins_are_native_installed(tmp_path) -> None:
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(all_bins) == 620
+    assert len(all_bins) == 626
     assert native_bins == all_bins
     assert all_bins == set(sink.bin_ids)
     assert len(runtime.cycle_models) == 13
@@ -638,11 +638,11 @@ def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) ->
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(installed_bins) == 620
+    assert len(installed_bins) == 626
     assert len(sink._native_group_names) == len(sink.cov_groups)
 
 
-def test_direct_runtime_models_partition_all_620_bins(tmp_path) -> None:
+def test_direct_runtime_models_partition_all_626_bins(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-contract",
@@ -656,8 +656,8 @@ def test_direct_runtime_models_partition_all_620_bins(tmp_path) -> None:
     for model in runtime.cycle_models:
         keys.extend(model.hit_counts())
 
-    assert len(keys) == 620
-    assert len(set(keys)) == 620
+    assert len(keys) == 626
+    assert len(set(keys)) == 626
     assert set(keys) == set(sink.hit_counts())
 
 
@@ -926,13 +926,13 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         for item in point["bins"]
         if group["name"] in native_groups
     } == {
-        (group, ICACHE_MISSUNIT_COVERPOINTS[group], bin_name)
+        (group, sink.point_name(group, bin_name), bin_name)
         for group, bin_name in ICACHE_MISSUNIT_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS))
     before = missunit.hit_counts()[
         sample_group,
-        ICACHE_MISSUNIT_COVERPOINTS[sample_group],
+        sink.point_name(sample_group, sample_bin),
         sample_bin,
     ]
     sink._pending_cycle = 44
@@ -941,7 +941,7 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
     assert (
         missunit.hit_counts()[
             sample_group,
-            ICACHE_MISSUNIT_COVERPOINTS[sample_group],
+            sink.point_name(sample_group, sample_bin),
             sample_bin,
         ]
         == before

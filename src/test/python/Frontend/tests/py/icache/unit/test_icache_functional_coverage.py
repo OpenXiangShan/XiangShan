@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from env.funcov.py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
@@ -22,7 +24,14 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
     _SIGNALS as _WAYLOOKUP_SIGNALS,
     _WL as _WAYLOOKUP_PREFIX,
 )
-from env.funcov.py.icache.icache_missunit_funcov import _ICACHE, _MISS, _TOP
+from env.funcov.py.icache.icache_missunit_funcov import (
+    ICACHE_REFILL_ISOLATION_BINS,
+    ICACHE_REFILL_ISOLATION_POINT,
+    _ICACHE,
+    _MISS,
+    _TOP,
+)
+from env.funcov.py.icache.icache_missunit_toffee import ICacheMissunitToffeeCoverage
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     ICACHE_HITMISS_COVERPOINTS,
     _MAIN as _HITMISS_MAIN,
@@ -118,8 +127,8 @@ def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 34
-    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 34
+    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 40
+    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 40
 
 
 def _set_fetch_mshr_allocate_inputs(recorder, *, prefetch=0, flush=0, fencei=0):
@@ -1489,6 +1498,159 @@ def test_missunit_refill_error_bins_require_request_association_controls_and_rel
             "icache_missunit_refill",
             "error_first_beat_no_sram_write",
         )
+
+
+_REFILL_ISOLATION_GROUP = "icache_missunit_refill"
+_REFILL_ISOLATION_A = _TOP + "auto_inner_icache_client_out_a_"
+_REFILL_ISOLATION_D = _TOP + "auto_inner_icache_client_out_d_"
+_REFILL_ISOLATION_FTQ = "Frontend_top.Frontend.inner_ftq."
+
+
+def _setup_refill_isolation():
+    recorder = _Recorder()
+    for name in (
+        "reset", _TOP + "io_fencei",
+        "Frontend_top.Frontend.inner_icache_io_fencei_REG",
+        _REFILL_ISOLATION_FTQ + "backendRedirect_valid", _REFILL_ISOLATION_FTQ + "ifuRedirect_valid",
+        _REFILL_ISOLATION_A + "valid", _REFILL_ISOLATION_A + "ready", _REFILL_ISOLATION_D + "valid", _MISS + "readBeatCnt",
+    ):
+        recorder.set_missunit_signal(name, 0)
+    for source in (0, 1):
+        for field, value in {
+            "valid": 1, "issue": 1, "flush": 0, "fencei": 0,
+            "blkPAddr": 0x300 + source, "vSetIdx": 4 + source,
+        }.items():
+            recorder.set_missunit_signal(_MISS + f"allMshr_{source}." + field, value)
+    return recorder
+
+
+def _sample_refill_isolation(recorder, cycle):
+    sample_icache_missunit_coverage(recorder, recorder.env, cycle)
+
+
+def _request_refill_isolation(recorder, source, cycle):
+    for suffix, value in {"valid": 1, "ready": 1, "bits_source": source,
+                          "bits_address": (0x300 + source) << 6}.items():
+        recorder.set_missunit_signal(_REFILL_ISOLATION_A + suffix, value)
+    _sample_refill_isolation(recorder, cycle)
+    recorder.set_missunit_signal(_REFILL_ISOLATION_A + "valid", 0)
+
+
+def _drive_refill_isolation(recorder, denied, location, *, change=None, gap=None, second_request=True):
+    _request_refill_isolation(recorder, 0, 0)
+    if second_request:
+        _request_refill_isolation(recorder, 1, 1)
+    for index in range(4):
+        cycle = 4 + index + (1 if gap is not None and index >= gap else 0)
+        source, beat = divmod(index, 2)
+        fault = index < 2 and (location == "both" or location == f"beat{beat}")
+        for suffix, value in {
+            "valid": 1, "bits_opcode": 1, "bits_source": source,
+            "bits_corrupt": int(fault), "bits_denied": denied if fault else 0,
+        }.items():
+            recorder.set_missunit_signal(_REFILL_ISOLATION_D + suffix, value)
+        recorder.set_missunit_signal(_MISS + "readBeatCnt", beat)
+        if change is not None:
+            change(recorder, index)
+        _sample_refill_isolation(recorder, cycle)
+    return recorder
+
+
+def _refill_isolation_hits(recorder):
+    return {name for group, point, name in recorder.hits
+            if group == _REFILL_ISOLATION_GROUP and point == ICACHE_REFILL_ISOLATION_POINT}
+
+
+@pytest.mark.parametrize("denied,location", list(ICACHE_REFILL_ISOLATION_BINS))
+@pytest.mark.parametrize("bad_output", [0, 1], ids=["clean-output", "fault-leaks-to-output"])
+def test_missunit_refill_isolation_all_six_bins_depend_on_inputs_even_when_dut_checkpoint_fails(denied, location, bad_output):
+    recorder = _setup_refill_isolation()
+    # Checkpoint outputs must not determine whether the input scenario occurred.
+    for name, value in {
+        _MISS + "corruptReg": bad_output, _MISS + "deniedReg": bad_output,
+        _MISS + "io_metaWrite_req_valid": 1 - bad_output,
+        _ICACHE + "ctrlUnitOpt.io_dataWrite_req_valid": 1 - bad_output,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    _drive_refill_isolation(recorder, denied, location)
+    assert _refill_isolation_hits(recorder) == {ICACHE_REFILL_ISOLATION_BINS[denied, location]}
+    evidence = recorder.hit_evidence[_REFILL_ISOLATION_GROUP, ICACHE_REFILL_ISOLATION_BINS[denied, location]]
+    assert [beat["source"] for beat in evidence["refill_isolation_beats"]] == [0, 0, 1, 1]
+
+
+@pytest.mark.parametrize("gap", [1, 2, 3])
+def test_missunit_refill_isolation_gap_at_any_boundary_does_not_hit(gap):
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 1, "both", gap=gap))
+
+
+@pytest.mark.parametrize("field,value", [
+    (_REFILL_ISOLATION_D + "bits_source", 0),
+    (_REFILL_ISOLATION_D + "bits_corrupt", 1),
+    (_REFILL_ISOLATION_D + "bits_denied", 1),
+    (_REFILL_ISOLATION_D + "bits_opcode", 5),
+    (_REFILL_ISOLATION_D + "bits_opcode", 0),
+    (_MISS + "readBeatCnt", 1),
+    (_MISS + "allMshr_1.blkPAddr", 0x400),
+    (_MISS + "allMshr_1.issue", 0),
+    (_MISS + "allMshr_1.valid", 0),
+    (_MISS + "allMshr_1.flush", 1),
+])
+def test_missunit_refill_isolation_wrong_successor_identity_or_fault_or_beat_does_not_hit(field, value):
+    def change(recorder, index):
+        if index == 2:
+            recorder.set_missunit_signal(field, value)
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 0, "beat0", change=change))
+
+
+@pytest.mark.parametrize("field", [
+    "reset", _TOP + "io_fencei", "Frontend_top.Frontend.inner_icache_io_fencei_REG",
+    _REFILL_ISOLATION_FTQ + "backendRedirect_valid", _REFILL_ISOLATION_FTQ + "ifuRedirect_valid",
+])
+def test_missunit_refill_isolation_reset_or_flush_during_pair_invalidates_history(field):
+    def change(recorder, index):
+        recorder.set_missunit_signal(field, int(index == 2))
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 0, "beat1", change=change))
+
+
+@pytest.mark.parametrize("field", [
+    _REFILL_ISOLATION_D + "bits_corrupt", _REFILL_ISOLATION_D + "bits_denied", _REFILL_ISOLATION_D + "bits_source",
+    _MISS + "readBeatCnt", _MISS + "allMshr_1.blkPAddr",
+    _REFILL_ISOLATION_FTQ + "backendRedirect_valid",
+])
+def test_missunit_refill_isolation_missing_probe_cannot_manufacture_hit(field):
+    def change(recorder, index):
+        if index == 2:
+            delattr(recorder.env.dut, field)
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 0, "both", change=change))
+
+
+def test_missunit_refill_isolation_a_address_must_match_registered_mshr():
+    recorder = _setup_refill_isolation()
+    recorder.set_missunit_signal(_MISS + "allMshr_1.blkPAddr", 0x400)
+    assert not _refill_isolation_hits(_drive_refill_isolation(recorder, 0, "beat0"))
+
+
+def test_missunit_refill_isolation_second_a_handshake_is_required_before_first_response():
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 0, "beat0", second_request=False))
+
+
+def test_missunit_refill_isolation_mixed_error_types_are_not_one_of_the_six_distribution_cases():
+    def change(recorder, index):
+        if index == 1:
+            recorder.set_missunit_signal(_REFILL_ISOLATION_D + "bits_denied", 0)
+    assert not _refill_isolation_hits(_drive_refill_isolation(_setup_refill_isolation(), 1, "both", change=change))
+
+
+def test_missunit_refill_isolation_native_toffee_builds_a_separate_distribution_point():
+    model = ICacheMissunitToffeeCoverage(_setup_refill_isolation())
+    points = {point["name"]: point for group in model.report()
+              if group["name"] == _REFILL_ISOLATION_GROUP for point in group["points"]}
+    assert set(item["name"] for item in points[ICACHE_REFILL_ISOLATION_POINT]["bins"]) == set(
+        ICACHE_REFILL_ISOLATION_BINS.values()
+    )
+    assert not set(ICACHE_REFILL_ISOLATION_BINS.values()) & {
+        item["name"] for item in points["refill_behavior"]["bins"]
+    }
 
 
 def test_missunit_fifo_issue_order_requires_source_to_match_fifo_head():

@@ -10,6 +10,13 @@ _ICACHE = "Frontend_top.Frontend.inner_icache."
 _MISS = _ICACHE + "missUnit."
 _MAIN = _ICACHE + "mainPipe."
 
+ICACHE_REFILL_ISOLATION_BINS = {
+    (denied, beat): f"fault_then_clean_b2b_{kind}_{beat}"
+    for denied, kind in ((0, "corrupt"), (1, "denied"))
+    for beat in ("beat0", "beat1", "both")
+}
+ICACHE_REFILL_ISOLATION_POINT = "refill_exception_isolation"
+
 
 ICACHE_MISSUNIT_COVERPOINTS = {
     "icache_missunit_request": "request_behavior",
@@ -58,6 +65,7 @@ ICACHE_MISSUNIT_SAMPLER_BIN_KEYS = frozenset(
         ("icache_missunit_refill", "source_routes_refill"),
         ("icache_missunit_refill", "error_first_beat_no_sram_write"),
         ("icache_missunit_refill", "error_second_beat_no_sram_write"),
+        *(("icache_missunit_refill", name) for name in ICACHE_REFILL_ISOLATION_BINS.values()),
     }
 )
 
@@ -92,7 +100,10 @@ def _mark(recorder, group: str, name: str, cycle: int, condition: bool, evidence
             name,
             cycle,
             evidence,
-            coverpoint=ICACHE_MISSUNIT_COVERPOINTS[group],
+            coverpoint=(
+                ICACHE_REFILL_ISOLATION_POINT if name in ICACHE_REFILL_ISOLATION_BINS.values()
+                else ICACHE_MISSUNIT_COVERPOINTS[group]
+            ),
         )
 
 
@@ -231,7 +242,104 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "last_redirect_sram_write_checkpoint": None,
         "last_fetch_request_observation": None,
         "last_parallel_request_observation": None,
+        "refill_isolation_requests": {},
+        "refill_isolation_beats": [],
     }
+
+
+def _sample_refill_exception_isolation(recorder, cycle: int, state: dict) -> None:
+    """Observe four adjacent D beats using native inputs in the shared snapshot.
+
+    ICacheMissUnit ties memGrant.ready high. Each valid AccessAckData is a
+    handshake; readBeatCnt identifies the beat being driven at this phase.
+    Neither response error registers nor SRAM write results gate these bins.
+    """
+    def native(path: str) -> Optional[int]:
+        return _read(recorder, (path, path.removeprefix("Frontend_top.Frontend.")))
+
+    controls = (
+        native("reset"), native(_TOP + "io_fencei"),
+        native("Frontend_top.Frontend.inner_icache_io_fencei_REG"),
+        native("Frontend_top.Frontend.inner_ftq.backendRedirect_valid"),
+        native("Frontend_top.Frontend.inner_ftq.ifuRedirect_valid"),
+    )
+    requests = state["refill_isolation_requests"]
+    beats = state["refill_isolation_beats"]
+    if any(value != 0 for value in controls):
+        requests.clear()
+        beats.clear()
+        return
+
+    def issued_key(source) -> Optional[tuple[int, int]]:
+        if source is None or not 0 <= source < 14:
+            return None
+        prefix = _MISS + f"allMshr_{source}."
+        if any(native(prefix + field) != expected for field, expected in (
+            ("valid", 1), ("flush", 0), ("fencei", 0),
+        )):
+            return None
+        paddr, vset = native(prefix + "blkPAddr"), native(prefix + "vSetIdx")
+        return None if paddr is None or vset is None else (paddr, vset)
+
+    a_prefix = _TOP + "auto_inner_icache_client_out_a_"
+    if native(a_prefix + "valid") == native(a_prefix + "ready") == 1:
+        source = native(a_prefix + "bits_source")
+        address = native(a_prefix + "bits_address")
+        key = issued_key(source)
+        if key is not None and address is not None and address == key[0] << 6:
+            requests[source] = {"cycle": int(cycle), "address": address, "key": key}
+        elif source is not None:
+            requests.pop(source, None)
+
+    d_prefix = _TOP + "auto_inner_icache_client_out_d_"
+    source = native(d_prefix + "bits_source")
+    beat = native(_MISS + "readBeatCnt")
+    corrupt, denied = native(d_prefix + "bits_corrupt"), native(d_prefix + "bits_denied")
+    request = requests.get(source)
+    if not (
+        native(d_prefix + "valid") == 1 and native(d_prefix + "bits_opcode") == 1
+        and beat in (0, 1) and corrupt in (0, 1) and denied in (0, 1) and denied <= corrupt
+        and request is not None and issued_key(source) == request["key"]
+        and native(_MISS + f"allMshr_{source}.issue") == 1
+    ):
+        beats.clear()
+        return
+    if beats and (cycle != beats[-1]["cycle"] + 1 or beat != 1 - beats[-1]["beat"]):
+        beats.clear()
+    if not beats and beat != 0:
+        return
+    beats.append({
+        "cycle": int(cycle), "source": source, "beat": beat,
+        "corrupt": corrupt, "denied": denied, "request": dict(request),
+    })
+    if beat == 1:
+        requests.pop(source, None)
+    if len(beats) < 4:
+        return
+    first0, first1, second0, second1 = beats
+    first = first0["request"]
+    second = second0["request"]
+    matched = (
+        first0["source"] == first1["source"] != second0["source"] == second1["source"]
+        and first == first1["request"] and second == second1["request"]
+        and first["address"] != second["address"]
+        and first["cycle"] < first0["cycle"] and second["cycle"] < first0["cycle"]
+        and second0["corrupt"] == second0["denied"] == second1["corrupt"] == second1["denied"] == 0
+    )
+    if matched and (first0["corrupt"] or first1["corrupt"]):
+        location = "both" if first0["corrupt"] and first1["corrupt"] else (
+            "beat0" if first0["corrupt"] else "beat1"
+        )
+        kind = int(bool(first0["denied"] or first1["denied"]))
+        matching_error_type = all(value["denied"] == kind * value["corrupt"] for value in (first0, first1))
+        _mark(
+            recorder, "icache_missunit_refill", ICACHE_REFILL_ISOLATION_BINS[kind, location], cycle,
+            matching_error_type, {
+                "refill_isolation_beats": [dict(value) for value in beats],
+                "condition_only": True,
+            },
+        )
+    del beats[:2]
 
 
 def evaluate_icache_missunit_coverage(
@@ -1173,10 +1281,13 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         }
     state["last_flush"] = signals["flush"]
     state["last_fencei"] = signals["fencei"]
+    _sample_refill_exception_isolation(recorder, cycle, state)
 
 __all__ = (
     "ICACHE_MISSUNIT_COVERPOINTS",
     "ICACHE_MISSUNIT_SAMPLER_BIN_KEYS",
+    "ICACHE_REFILL_ISOLATION_BINS",
+    "ICACHE_REFILL_ISOLATION_POINT",
     "evaluate_icache_missunit_coverage",
     "reset_icache_missunit_coverage_state",
     "sample_icache_missunit_coverage",

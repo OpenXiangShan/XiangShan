@@ -27,6 +27,7 @@ def read_dut_signal(
     *,
     default: int | None = None,
     required: bool = False,
+    wide: bool = False,
 ) -> int | None:
     """Read the first available DUT signal from an ordered alias list."""
     if isinstance(names, str):
@@ -37,7 +38,7 @@ def read_dut_signal(
     if cache is None:
         cache = {}
         setattr(env, "_ruierhan_internal_signal_cache", cache)
-    value = read_first_signal(env.dut, aliases, cache=cache)
+    value = read_first_signal(env.dut, aliases, wide=wide, cache=cache)
     if value is not None:
         return value
     if required:
