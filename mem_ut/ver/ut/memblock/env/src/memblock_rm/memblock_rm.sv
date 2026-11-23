@@ -503,7 +503,9 @@ function bit memblock_rm::observer_stage_permission_fault(
         pte_x = entry.s1_pte_x; pte_u = entry.s1_pte_u;
         pte_a = entry.s1_pte_a; pte_d = entry.s1_pte_d;
         pte_v = entry.s1_pte_v;
-        mxr = tlb_context.s2xlate == 0 ? tlb_context.priv_mxr : tlb_context.priv_vmxr;
+        // 宿主 S1 使用 HS MXR，VS-stage 使用 HS MXR 与 VS MXR 的逻辑或。
+        mxr = tlb_context.s2xlate == 2'd0 ? tlb_context.priv_mxr :
+              (tlb_context.priv_mxr || tlb_context.priv_vmxr);
         sum = tlb_context.s2xlate == 0 ? tlb_context.priv_sum : tlb_context.priv_vsum;
         privilege = tlb_context.priv_dmode;
     end else begin
@@ -511,7 +513,8 @@ function bit memblock_rm::observer_stage_permission_fault(
         pte_r = entry.s2_pte_r; pte_w = entry.s2_pte_w;
         pte_x = entry.s2_pte_x; pte_u = entry.s2_pte_u;
         pte_a = entry.s2_pte_a; pte_d = entry.s2_pte_d;
-        pte_v = 1'b1; mxr = tlb_context.priv_vmxr; sum = 1'b1;
+        // 最终 G-stage 的显式读权限仅使用 HS MXR。
+        pte_v = 1'b1; mxr = tlb_context.priv_mxr; sum = 1'b1;
         privilege = 2'd3;
     end
     operation_allowed = store_access ? (pte_w && pte_a && pte_d) :
