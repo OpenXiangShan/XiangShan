@@ -83,7 +83,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.valid              := valid
   out.dpc.valid               := valid && !in.holdDpc
   // !debugMode trap || debugMode hasExp
-  out.targetPc.valid          := RegNext(valid || hasExceptionInDmode)
+  out.targetPc.valid          := RegNext(valid || hasExceptionInDmode, false.B)
   out.debugMode.valid         := valid
   out.privState.valid         := valid
   out.debugIntrEnable.valid   := valid
