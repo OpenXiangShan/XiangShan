@@ -583,7 +583,7 @@ class DefaultConfig(n: Int = 1) extends Config(
     L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
       replacement = "lru",
       enablePrefetchFeedback = true,
-      enableFdpInsertion = false
+      enableFdpInsertion = true
     ))
   ))
 })
