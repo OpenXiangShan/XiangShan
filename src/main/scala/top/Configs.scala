@@ -319,7 +319,8 @@ case class L2CacheConfig
   nl: Boolean = false,
   cdp: Boolean = true,
   enablePC: Boolean = false, // Enable PC field for L1Param
-  enableFlush: Boolean = false
+  enableFlush: Boolean = false,
+  enableDuelCeptron: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -340,7 +341,7 @@ case class L2CacheConfig
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
           vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
-          pcBitOpt = if (enablePC) Some(p.GPAddrBitsSv48x4) else None, // Enable PC field if needed
+          pcBitOpt = if (enablePC || enableDuelCeptron) Some(p.GPAddrBitsSv48x4) else None,
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),
@@ -357,6 +358,7 @@ case class L2CacheConfig
           (if (cdp) Seq(CDPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
+        enableDuelCeptron = enableDuelCeptron,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -578,6 +580,17 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
+)
+
+class DuelCeptronConfig(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map { tile =>
+      tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map { l2 =>
+        val clients = l2.clientCaches.map(_.copy(pcBitOpt = Some(tile.GPAddrBitsSv48x4)))
+        l2.copy(clientCaches = clients, enableDuelCeptron = true)
+      })
+    }
+  })
 )
 
 class NoRobCompressionConfig(n: Int = 1) extends Config(

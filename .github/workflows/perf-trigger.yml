@@ -29,6 +29,7 @@ on:
         type: choice
         options:
           - DefaultConfig
+          - DuelCeptronConfig
           - BackendV2Config
           - KunminghuV2Config
         default: DefaultConfig
