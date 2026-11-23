@@ -272,7 +272,7 @@ All hooks are in `ifu/Ifu.scala`. Each one is a `TraceRTLChoose` or a `foreach` 
 | `s2CandidateCount` | replaces `s1_instrCount` / `s1_specInstrCount` in the IBuffer enqueue-pointer prediction |
 | `toIBuffer.bits.traceInfo` | the trace records of the packet |
 | `rvcExpander.fsIsOff := false` | expand compressed FP regardless of `mstatus.FS` |
-| `fromIFU.*`, `ifuS1PredInfo` | IFU `s1`/`s2` valid / fire / flush, `wbEnable`, the alignment shift, and per block `startAddr`, `instRange`, `size`, `ftqOffset` (= `takenCfiOffset`) |
+| `fromIFU.*`, `s1PredInfo` | IFU `s1`/`s2` valid / fire / flush, `wbEnable`, the alignment shift, and per block `startAddr`, `instRange`, `size`, `ftqOffset` (= `takenCfiOffset`) |
 | `redirect.fromBackend := fromFtq.redirect` | the FTQ forwards the full `backendRedirect.bits` in trace mode (`ftq/Ftq.scala`), so `traceInfo` arrives |
 | `redirect.fromIFUBPU := wbRedirect.valid` | the IFU's own redirect, for the concede state |
 

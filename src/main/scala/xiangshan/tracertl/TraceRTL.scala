@@ -10,15 +10,15 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ifu.Instruction
 
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
-  val ifuS2Flush      = Bool()
-  val ifuS1Flush      = Bool()
-  val ifuS1Fire       = Bool()
-  val ifuS2Fire       = Bool()
-  val ifuS2Valid      = Bool()
-  val ifuWbEnable     = Bool()
-  val ifuS1Valid      = Bool()
-  val ifuS1AlignShift = UInt(2.W)
-  val ifuS1PredInfo   = Input(new TracePredictInfo())
+  val s2Flush      = Bool()
+  val s1Flush      = Bool()
+  val s1Fire       = Bool()
+  val s2Fire       = Bool()
+  val s2Valid      = Bool()
+  val wbEnable     = Bool()
+  val s1Valid      = Bool()
+  val s1AlignShift = UInt(2.W)
+  val s1PredInfo   = new TracePredictInfo()
 }
 
 /** The S2 IFU packet rebuilt from the trace; replaces the IFU's aligned fetch data. */
@@ -77,42 +77,42 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   // fires. Keep the concede state in that same transaction domain: the next
   // S2 packet must see the state produced by the S3 packet being consumed,
   // not the value that will remain in the register until the rising edge.
-  val visibleConcede2Bytes = Mux(io.fromIFU.ifuS2Fire, nextConcede2Bytes, pendingConcede2Bytes)
+  val visibleConcede2Bytes = Mux(io.fromIFU.s2Fire, nextConcede2Bytes, pendingConcede2Bytes)
   val effectiveConcede2Bytes = visibleConcede2Bytes &&
     traceReader.io.traceInsts.valid &&
-    traceReader.io.traceInsts.bits.head.pcVA === io.fromIFU.ifuS1PredInfo.block(0).startAddr - 2.U &&
+    traceReader.io.traceInsts.bits.head.pcVA === io.fromIFU.s1PredInfo.block(0).startAddr - 2.U &&
     !traceReader.io.traceInsts.bits.head.isRVC
 
-  traceAligner.io.debug_valid   := io.fromIFU.ifuS1Valid
+  traceAligner.io.debug_valid   := io.fromIFU.s1Valid
   traceAligner.io.traceInsts    := traceReader.io.traceInsts
-  traceAligner.io.predictInfo   := io.fromIFU.ifuS1PredInfo
+  traceAligner.io.predictInfo   := io.fromIFU.s1PredInfo
   traceAligner.io.lastHalfValid := effectiveConcede2Bytes
 
   preDecoder.io.compact     := traceAligner.io.result.compact
-  preDecoder.io.predictInfo := io.fromIFU.ifuS1PredInfo
+  preDecoder.io.predictInfo := io.fromIFU.s1PredInfo
 
   val s2Block = !traceReader.io.traceInsts.valid ||
     (traceAligner.io.result.candidateCount === 0.U && !traceAligner.io.result.concede2Bytes)
 
   // Capture the same S2 transaction that sets IFU s3_valid at the rising edge.
-  val s2ToS3 = io.fromIFU.ifuS1Fire && !io.fromIFU.ifuS1Flush
+  val s2ToS3 = io.fromIFU.s1Fire && !io.fromIFU.s1Flush
 
   val s3Decoded                = RegEnable(preDecoder.io.out, s2ToS3)
-  val s3ShiftNum               = RegEnable(io.fromIFU.ifuS1AlignShift, 0.U(2.W), s2ToS3)
-  val s3PredInfo               = RegEnable(io.fromIFU.ifuS1PredInfo, s2ToS3)
+  val s3ShiftNum               = RegEnable(io.fromIFU.s1AlignShift, 0.U(2.W), s2ToS3)
+  val s3PredInfo               = RegEnable(io.fromIFU.s1PredInfo, s2ToS3)
   val s3TraceRange             = RegEnable(traceAligner.io.result.traceRange, s2ToS3)
   val s3TraceForceJump         = RegEnable(traceAligner.io.result.traceForceJump, s2ToS3)
   val s3DetectedConcede2Bytes  = RegEnable(traceAligner.io.result.concede2Bytes, s2ToS3)
   val s3InheritedConcede2Bytes = RegEnable(effectiveConcede2Bytes, s2ToS3)
 
   // s2_fire && !s2_flush |=> wbEnable
-  predChecker.io.wbEnable      := io.fromIFU.ifuWbEnable
+  predChecker.io.wbEnable      := io.fromIFU.wbEnable
   predChecker.io.decoded       := s3Decoded
   predChecker.io.predictInfo   := s3PredInfo
   predChecker.io.traceRange    := s3TraceRange
   predChecker.io.concede2Bytes := s3InheritedConcede2Bytes
 
-  traceDriver.io.fire           := io.fromIFU.ifuS2Fire
+  traceDriver.io.fire           := io.fromIFU.s2Fire
   traceDriver.io.decoded        := s3Decoded
   traceDriver.io.fixedValid     := predChecker.io.out.stage1Out.fixedTwoFetchRange
   traceDriver.io.traceForceJump := s3TraceForceJump
@@ -125,19 +125,19 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   val concedeIsInSecondBlock = s3PredInfo.block(1).valid
   nextConcede2Bytes := s3DetectedConcede2Bytes &&
     (!traceDriver.io.out.endWithCFI || concedeIsInSecondBlock) &&
-    !io.fromIFU.ifuS2Flush &&
-    !io.fromIFU.ifuS1Flush
+    !io.fromIFU.s2Flush &&
+    !io.fromIFU.s1Flush
 
   val preserveConcedeOnInvalidTaken = pendingConcede2Bytes &&
     io.redirect.fromIFUBPU &&
     predChecker.io.out.stage2Out.checkerRedirect.valid &&
     predChecker.io.out.stage2Out.checkerRedirect.bits.invalidTaken
-  val clearPendingConcede = io.fromIFU.ifuS2Flush || io.redirect.fromIFUBPU ||
-    (io.fromIFU.ifuS1Flush && !io.fromIFU.ifuS2Valid)
+  val clearPendingConcede = io.fromIFU.s2Flush || io.redirect.fromIFUBPU ||
+    (io.fromIFU.s1Flush && !io.fromIFU.s2Valid)
 
   when(clearPendingConcede && !preserveConcedeOnInvalidTaken) {
     pendingConcede2Bytes := false.B
-  }.elsewhen(io.fromIFU.ifuS2Fire) {
+  }.elsewhen(io.fromIFU.s2Fire) {
     pendingConcede2Bytes := nextConcede2Bytes
   }
 

@@ -811,15 +811,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** TraceRTL: replays the trace against the IFU pipeline ** */
   traceRTL.foreach { trace =>
     val fromIfu = trace.io.fromIFU
-    fromIfu.ifuS1Valid      := s1_valid
-    fromIfu.ifuS1Fire       := s1_fire
-    fromIfu.ifuS1Flush      := s1_flush
-    fromIfu.ifuS1AlignShift := s1_alignShiftInstrNum
-    fromIfu.ifuS2Valid      := s2_valid
-    fromIfu.ifuS2Fire       := s2_fire
-    fromIfu.ifuS2Flush      := s2_flush
-    fromIfu.ifuWbEnable     := wbEnable
-    fromIfu.ifuS1PredInfo.block.zip(s1_fetchBlock).foreach { case (predBlock, fetchBlock) =>
+    fromIfu.s1Valid      := s1_valid
+    fromIfu.s1Fire       := s1_fire
+    fromIfu.s1Flush      := s1_flush
+    fromIfu.s1AlignShift := s1_alignShiftInstrNum
+    fromIfu.s2Valid      := s2_valid
+    fromIfu.s2Fire       := s2_fire
+    fromIfu.s2Flush      := s2_flush
+    fromIfu.wbEnable     := wbEnable
+    fromIfu.s1PredInfo.block.zip(s1_fetchBlock).foreach { case (predBlock, fetchBlock) =>
       predBlock.valid     := fetchBlock.valid
       predBlock.startAddr := fetchBlock.startVAddr.toUInt
       predBlock.instRange := Fill(FetchBlockInstNum, 1.U(1.W)) >> (~fetchBlock.takenCfiOffset.bits).asUInt
