@@ -351,7 +351,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   }
 }
 
-class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
+class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
+  with HasDCacheParameters {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new CMOReq))
     val req_chanA = DecoupledIO(new TLBundleA(edge.bundle))
@@ -404,18 +405,8 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  // Channel selection based on request address (same as MissEntry)
-  private def selectChannel(addr: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else 0.U(memChannelBits.W)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
-
   when (io.req.fire) {
-    req_channel := selectChannel(io.req.bits.address)
+    req_channel := selectChannel(io.req.bits.address, 0.U)
   }
 
   io.channel_sel := Mux(state === s_sreq, req_channel, 0.U)
@@ -567,15 +558,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // initial keyword
   val isKeyword = RegInit(false.B)
 
-  // Route each MSHR to a fixed L1-L2 channel so A/D/E traffic stays on one path.
-  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else mshrId(memChannelBits - 1, 0)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
   val channel_sel = Mux(req_valid, selectChannel(req.addr, io.id), 0.U)
 
   // Output channel selection
@@ -1911,15 +1893,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     out.bits := ParallelMux(in.map(_.valid) zip in.map(_.bits))
     in.map(_.ready := out.ready)
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
-  }
-
-  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else mshrId(memChannelBits - 1, 0)
-    } else {
-      0.U(memChannelBits.W)
-    }
   }
 
   // Default grant ready for all channels
