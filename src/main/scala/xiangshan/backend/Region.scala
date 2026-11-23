@@ -541,7 +541,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     lrqCreditManager.io.redirect := flushCopyRegVec.last.valid
     val heldLoadCredit = Wire(Vec(LoadPipelineWidth, Bool()))
     val canceledHeldCredit = Wire(Vec(LoadPipelineWidth, Bool()))
-    val lrqCreditBlocked = Wire(Vec(LoadPipelineWidth, Bool()))
     lrqCreditManager.io.heldCount := PopCount(heldLoadCredit)
     lrqCreditManager.io.canceledHeldCount := PopCount(canceledHeldCredit)
     for (i <- toMem.indices) {
@@ -571,7 +570,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           val isPrefetch = LSUOpType.isPrefetch(toMemExuInput.bits.ctrl.fuOpType)
           val isOldest = toMemExuInput.bits.robIdx.isSameSlot(io.robHeadPtr.get)
           val admitted = isPrefetch || isOldest || lrqCreditManager.io.permit(loadIdx)
-          lrqCreditBlocked(loadIdx) := toMemValidAfterCancel && holdAvailable && !admitted
           toMemExuInput.ready := holdAvailable && admitted
           lrqCreditManager.io.accepted(loadIdx) := accepted && !isPrefetch
           toMemValidReg := accepted || toMemValidReg && !toMem(i)(j).fire && !holdCancel
@@ -598,9 +596,26 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         }
       }
     }
-    // A load blocked for multiple cycles contributes once per cycle to the load count.
+    // LRQ credit performance counters.
+    val lastDataPathFlush = RegNextWithEnable(flushCopyRegVec.last)
+    val og0LoadInputs = dataPath.io.fromIntIQ.flatten.filter(_.bits.exuParams.hasLoadFu)
+    val loadHolds = toMem.flatten.filter(_.bits.params.hasLoadFu)
+    val lrqCreditBlocked = VecInit(loadInputs.zip(og0LoadInputs).zip(loadHolds).map {
+      case ((og1Input, og0Input), hold) =>
+        // Match DataPath's request valid before ready-dependent OG1 failure filtering.
+        val og0Flush = og0Input.bits.robIdx.needFlush(Seq(flushCopyRegVec.last, lastDataPathFlush))
+        val og0LdCancel = LoadShouldCancel(og0Input.bits.loadDependency, io.ldCancel)
+        val og1RequestValid = RegNext(og0Input.fire && !og0Flush && !og0LdCancel, false.B)
+        val og1Canceled = og1Input.bits.robIdx.needFlush(flushCopyRegVec.last) ||
+          LoadShouldCancel(og1Input.bits.ctrl.loadDependency, io.ldCancel)
+        val holdAvailable = !hold.valid || hold.fire
+        // With the hold available, ready can only be blocked by credit admission.
+        og1RequestValid && !og1Canceled && holdAvailable && !og1Input.ready
+    })
+    // Repeated blockage of the same load counts once per blocked cycle.
     XSPerfAccumulate("lrq_credit_blocked_loads", PopCount(lrqCreditBlocked))
     XSPerfAccumulate("lrq_credit_blocked_cycles", lrqCreditBlocked.asUInt.orR)
+
     io.loadFpWbM4Wakeup.get.zip(loadM4Candidates).foreach { case (wakeup, candidates) =>
       if (candidates.nonEmpty) {
         wakeup.valid := candidates.map(_._1).foldLeft(false.B)(_ || _)
