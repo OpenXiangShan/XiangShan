@@ -13,6 +13,7 @@ from env.api import (
     api_Frontend_run_until_golden_complete,
 )
 from env.model import GoldenTrace
+from env.runtime.frontend_init import FrontendInitConfig
 
 from .program_map import build_program_map
 from .scenario_contract import scenario_spec_from_dict, write_json_contract
@@ -107,7 +108,11 @@ def _require_translation_coverage_mapping(applied) -> None:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
-def test_random_bin_trace(env):
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+def test_random_bin_trace(env, frontend_init_config):
+    assert frontend_init_config.defer is True
     binary_path = Path(_require_env("TB_BIN_PATH"))
     trace_path = Path(_require_env("TB_TRACE_PATH"))
     scenario_path = Path(_require_env("TB_RANDOM_SCENARIO_SPEC"))
