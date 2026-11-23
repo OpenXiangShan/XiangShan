@@ -1016,7 +1016,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   // When channelSelByAddr is enabled, address space is partitioned across channels
   // using the lower memChannelBits of the block address.
   val clientNodes = Seq.tabulate(numMemChannels) { i =>
-    val visibility = if (channelSelByAddr) {
+    val visibility = if (hasDualChannel && channelSelByAddr) {
       // Partition address space: channel i gets addresses where the lower
       // memChannelBits of the block address equal i.
       val channelMask = ~BigInt(((1 << memChannelBits) - 1) * cfg.blockBytes)
