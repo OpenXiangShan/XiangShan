@@ -13,6 +13,7 @@ import chisel3.util._
 /** Early enqueue decisions: deliberately independent of late cancel/WBQ and downstream ready. */
 private[cache] object MissQueueEnqLogic {
   // The lowest demand port leads; prefetches follow demand when they can merge.
+  // Only mainpipe supplies hardware prefetches; software prefetches use the demand class.
   def mergeLeaders(
     valid: Seq[Bool],
     isPrefetch: Seq[Bool],
@@ -25,8 +26,7 @@ private[cache] object MissQueueEnqLogic {
       val members = valid.indices.map(j => valid(j) && (canMergeInto(i)(j) || (i == j).B))
       val demandMembers = members.zip(isPrefetch).map { case (member, prefetch) => member && !prefetch }
       val demandMask = VecInit(demandMembers).asUInt
-      val memberMask = VecInit(members).asUInt
-      Mux(valid(i), PriorityEncoder(Mux(demandMask.orR, demandMask, memberMask)), i.U(log2Up(n).W))
+      Mux(valid(i) && demandMask.orR, PriorityEncoder(demandMask), i.U(log2Up(n).W))
     }
   }
 

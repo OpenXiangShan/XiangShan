@@ -90,10 +90,13 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // Req source decode
   // Note that req source is NOT cmd type
   // For instance, a req which isFromPrefetch may have R or W cmd
-  def isFromLoad = source === LOAD_SOURCE.U
+  // Software prefetches use load admission/merge rules inside MissQueue.
+  // Keep source/cmd unchanged: the LoadUnit still completes them as hints.
+  def isFromSoftwarePrefetch = source === DCACHE_PREFETCH_SOURCE.U && pf_source === L1_HW_PREFETCH_NULL
+  def isFromLoad = source === LOAD_SOURCE.U || isFromSoftwarePrefetch
   def isFromStore = source === STORE_SOURCE.U
   def isFromAMO = source === AMO_SOURCE.U
-  def isFromPrefetch = source >= DCACHE_PREFETCH_SOURCE.U
+  def isFromPrefetch = source >= DCACHE_PREFETCH_SOURCE.U && !isFromSoftwarePrefetch
   def isPrefetchWrite = source === DCACHE_PREFETCH_SOURCE.U && cmd === MemoryOpConstants.M_PFW
   def isPrefetchRead = source === DCACHE_PREFETCH_SOURCE.U && cmd === MemoryOpConstants.M_PFR
   def hit = req_coh.isValid()
@@ -571,7 +574,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     signals_vec(i) := computeMatchSignals(req, io.queryME(i).req.bits)
   }
 
-  val input_req_is_prefetch = isPrefetch(miss_req_pipe_reg_bits.cmd)
+  val input_req_is_prefetch = isPrefetch(miss_req_pipe_reg_bits.cmd) &&
+    !miss_req_pipe_reg_bits.isFromSoftwarePrefetch
 
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
@@ -1382,9 +1386,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Total count of free entries
   val free_entry_count = ps_stage(num_stages)(cfg.nMissEntries - 1)
 
-  // Same-cycle merge decisions run in parallel with the existing-owner lookups.
-  // Loads may follow a load/store/prefetch; redundant prefetches may be dropped
-  // with the selected owner. Stores and AMOs never become followers.
+  // Same-cycle merge and existing-owner lookups run in parallel; software prefetches use load rules.
+  // Demand requests lead hardware prefetches; requests in the same class follow port order.
+  // Loads may follow load/store leaders; hardware prefetches may follow loads. Stores and AMOs never follow.
   val sameCycleMerge = (0 until reqNum).map { i =>
     (0 until reqNum).map { j =>
       val follower = io.queryMQ(i).req.bits
@@ -1499,7 +1503,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     accepted_alloc(i) && io.queryMQ(i).req.bits.isFromPrefetch))
   val released_prefetch_count = PopCount(entries.map(_.io.prefetch_released))
   prefetch_owner_count := prefetch_owner_count + PopCount(accepted_prefetch_alloc) - released_prefetch_count
-  assert(PopCount(accepted_prefetch_alloc) <= 1.U, "at most one pure prefetch allocation per cycle")
+  assert(PopCount(accepted_prefetch_alloc) <= 1.U, "at most one hardware prefetch allocation per cycle")
 
   // A fabric winner owns a tentative post-arbitration buffer slot. Only an
   // accurately allocated S2 miss commits that slot as a real TL A request.
