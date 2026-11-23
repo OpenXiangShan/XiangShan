@@ -39,6 +39,7 @@ module top_tb;
     `include "../env/fcov/load_unit/memblock_ldu_scalar_fcov_bind.sv"
     `include "../env/fcov/store_unit/memblock_storeunit_scalar_fcov_bind.sv"
     `include "../env/fcov/dtlb/memblock_dtlb_fcov_bind.sv"
+    `include "../env/fcov/store_unit/memblock_storeunit_fcov_bind.sv"
     `include "../tb/tc_if_connect.sv"
     `include "../../../ut/memblock/tb/memblock_connect.sv"
     `MEMBLOCK_CONNECT(env,top_tb.U_MEMBLOCK)

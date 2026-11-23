@@ -13,6 +13,8 @@
 ./fcov/dtlb/memblock_dtlb_storage_fcov.sv
 ./fcov/dtlb/memblock_dtlb_filter_fcov.sv
 ./fcov/dtlb/memblock_dtlb_integration_fcov.sv
+./fcov/store_unit/memblock_storeunit_core_fcov.sv
+./fcov/store_unit/memblock_storeunit_integration_fcov.sv
 memblock_env_pkg.sv
 
 // ./src/memblock_env_cfg.sv

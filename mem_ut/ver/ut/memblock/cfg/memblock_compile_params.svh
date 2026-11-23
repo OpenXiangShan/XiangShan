@@ -15,6 +15,11 @@
 // MEMBLOCK_FCOV_STORE_UNIT_EN：标量 StoreUnit 模型及 bind（含现有 SVA 空壳）。
 // MEMBLOCK_FCOV_DTLB_EN：DTLB 全部模型及 bind，内部不再细分开关。
 // Makefile 在编译前从空模板补齐本地文件；修改后必须重新编译。
+// StoreUnit 覆盖率开关示例：在 user_compile_cfg.local.svh 中定义下列宏启用。
+// `define MEMBLOCK_FCOV_STORE_UNIT_EN
+// 统一控制 store_unit 目录的标量/SVA、分层 core/integration 模型及对应 bind。
+// 默认保持未定义；关闭时删除或注释本地定义，不能用定义为 0 代替关闭。
+// 必须同时使用 fcov=on，并在开关变化后重新编译。
 `include "user_compile_cfg.local.svh"
 
 // V2默认参数：当前worktree生成的MemBlock顶层ROB value为8 bit，
