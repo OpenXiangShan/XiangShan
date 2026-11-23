@@ -350,7 +350,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   /** initialize NewCSR's io_out_ready from wrapper's io */
   csrMod.io.out.ready := io.out.ready
 
-  io.out.bits.res.redirect.get.valid := io.out.valid && isXRetReg
+  io.out.bits.res.redirect.get.valid := io.out.valid && isXRetReg && csrMod.io.xretTargetPc.valid
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
