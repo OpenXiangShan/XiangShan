@@ -89,28 +89,16 @@ class PteHelper() extends ExtModule {
   }
 }
 
-trait HasPteHelperResultConst extends HasTlbConst {
-  def genFullPPN(ptePPN: UInt, level: UInt, vpn: UInt, napot: Bool): UInt = {
-    val napotPPN = Cat(ptePPN(ptePPNLen - 1, pteNapotBits), vpn(pteNapotBits - 1, 0))
-    MuxLookup(level, 0.U(ptePPNLen.W))(Seq(
-      3.U -> Cat(ptePPN(ptePPNLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(ptePPN(ptePPNLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(ptePPN(ptePPNLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(napot, napotPPN, ptePPN)
-    ))
-  }
-}
-
-class PteHelperStageResult(implicit p: Parameters) extends TlbBundle with HasPteHelperResultConst {
+class PteHelperStageResult(implicit p: Parameters) extends TlbBundle {
   val pte = new PteBundle
   val level = UInt(8.W)
 
   def fullPPN(vpn: UInt): UInt = {
-    genFullPPN(pte.getPPN(), level, vpn, pte.isNapot(level))
+    pageNumberFromVpn(pte.getPPN(), vpn, level, pte.isNapot(level))
   }
 }
 
-class PteHelperResult(implicit p: Parameters) extends TlbBundle with HasPteHelperResultConst {
+class PteHelperResult(implicit p: Parameters) extends TlbBundle {
   val pte = new PteBundle
   val level = UInt(8.W)
   val pfType = UInt(8.W)
@@ -124,7 +112,7 @@ class PteHelperResult(implicit p: Parameters) extends TlbBundle with HasPteHelpe
   def hasNoPf: Bool = pfType === 0.U
 
   def finalPPN(vpn: UInt, s2xlate: UInt): UInt = {
-    val singleStagePPN = genFullPPN(pte.getPPN(), level, vpn, pte.isNapot(level))
+    val singleStagePPN = pageNumberFromVpn(pte.getPPN(), vpn, level, pte.isNapot(level))
     val gpaPPN = s1.fullPPN(vpn)
     val hpaPPN = s2.fullPPN(gpaPPN)
     Mux(s2xlate === allStage, hpaPPN, singleStagePPN)
