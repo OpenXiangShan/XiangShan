@@ -382,15 +382,16 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
     val req_need_gpa = hasGpf(idx)
     val req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
+    val req_vpn = get_pn(req_out(idx).vaddr)
 
-    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), req_s2xlate,
+    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(req_vpn, req_s2xlate,
       csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
-    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), req_s2xlate,
+    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && ptw_resp_bits_reg.hit(req_vpn, req_s2xlate,
       csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     val ptw_getGpa = req_need_gpa && hitVec(idx)
-    val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(idx).vaddr) && need_gpa_s2xlate === req_s2xlate
+    val need_gpa_req_match = need_gpa_vpn === req_vpn && need_gpa_s2xlate === req_s2xlate
 
     io.ptw.req(idx).valid := false.B;
     io.tlbreplay(idx) := false.B;
@@ -412,7 +413,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       io.tlbreplay(idx) := true.B
     }
 
-    io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
+    io.ptw.req(idx).bits.vpn := req_vpn
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.getGpa := ptw_getGpa
     io.ptw.req(idx).bits.fromHwPrefetch := req_out(idx).fromHwPrefetch
