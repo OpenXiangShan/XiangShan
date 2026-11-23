@@ -1149,12 +1149,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   }
 
   def genPPNS2(vpn: UInt): UInt = {
-    MuxLookup(entry.level.get, 0.U)(Seq(
-      3.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(entry.n.getOrElse(0.U) === 0.U, entry.ppn(entry.ppn.getWidth - 1, 0), Cat(entry.ppn(entry.ppn.getWidth - 1, pteNapotBits), vpn(pteNapotBits - 1, 0)))
-    ))
+    pageNumberFromVpn(entry.ppn, vpn, entry.level.get, entry.n.getOrElse(0.U) =/= 0.U)
   }
 
 
@@ -1210,12 +1205,8 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
   }
 
   def genPPN(vpn: UInt): UInt = {
-    MuxLookup(entry.level.get, 0.U)(Seq(
-      3.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 3 - sectortlbwidth), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(entry.n.getOrElse(0.U) === 0.U, Cat(entry.ppn(entry.ppn.getWidth - 1, 0), ppn_low(vpn(sectortlbwidth - 1, 0))), Cat(entry.ppn(entry.ppn.getWidth - 1, pteNapotBits - sectortlbwidth), vpn(pteNapotBits - 1, 0))))
-    )
+    val ppn = Cat(entry.ppn, ppn_low(vpn(sectortlbwidth - 1, 0)))
+    pageNumberFromVpn(ppn, vpn, entry.level.get, entry.n.getOrElse(0.U) =/= 0.U)
   }
 
    def genGVPN(vpn: UInt): UInt = {
@@ -1287,15 +1278,10 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 
   def genPPN(): UInt = {
     val idx = OHToUInt(pteidx)
-    val tag = Cat(entry(idx).tag, idx(sectortlbwidth - 1, 0))
-    MuxLookup(entry(idx).level.get, 0.U)(Seq(
-      3.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 3 - sectortlbwidth), tag(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), tag(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), tag(vpnnLen - 1, 0)),
-      0.U -> Mux(entry(idx).n.getOrElse(0.U) === 0.U,
-        Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low),
-        Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, pteNapotBits - sectortlbwidth), tag(pteNapotBits - 1, 0))))
-    )
+    val selected = entry(idx)
+    val tag = Cat(selected.tag, idx(sectortlbwidth - 1, 0))
+    val ppn = Cat(selected.ppn, selected.ppn_low)
+    pageNumberFromVpn(ppn, tag, selected.level.get, selected.n.getOrElse(0.U) =/= 0.U)
   }
 }
 
@@ -1343,18 +1329,8 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     ))
 
     val s1tag = Cat(s1.entry.tag, OHToUInt(s1.pteidx))
-    val s1_vpn = MuxLookup(level, s1tag)(Seq(
-      3.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 3 - sectortlbwidth), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(inner_n === 0.U, s1tag, Cat(s1.entry.tag(sectorvpnLen - 1, pteNapotBits - sectortlbwidth), vpn(pteNapotBits - 1, 0))))
-    )
-    val s2_vpn = MuxLookup(level, s2.entry.tag)(Seq(
-      3.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
-      2.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
-      0.U -> Mux(inner_n === 0.U, s2.entry.tag, Cat(s2.entry.tag(gvpnLen - 1, pteNapotBits), vpn(pteNapotBits - 1, 0))))
-    )
+    val s1_vpn = pageNumberFromVpn(s1tag, vpn, level, inner_n =/= 0.U)
+    val s2_vpn = pageNumberFromVpn(s2.entry.tag, vpn, level, inner_n =/= 0.U)
     Mux(s2xlate === onlyStage2, s2_vpn, s1_vpn)
   }
 

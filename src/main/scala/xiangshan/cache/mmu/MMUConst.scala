@@ -247,6 +247,20 @@ trait HasTlbConst extends HasXSParameter {
     ))
   }
 
+  def pageNumberFromVpn(base: UInt, vpn: UInt, level: UInt, napot: Bool, tagOffset: Int = 0): UInt = {
+    def replaceLowBits(bits: Int): UInt = {
+      val lowBits = bits - tagOffset
+      Cat(base(base.getWidth - 1, lowBits), vpn(lowBits - 1, 0))
+    }
+
+    MuxLookup(level, 0.U)(Seq(
+      3.U -> replaceLowBits(vpnnLen * 3),
+      2.U -> replaceLowBits(vpnnLen * 2),
+      1.U -> replaceLowBits(vpnnLen),
+      0.U -> Mux(napot, replaceLowBits(pteNapotBits), base)
+    ))
+  }
+
   def getVpnn(vpn: UInt, idx: UInt): UInt = {
     MuxLookup(idx, 0.U)(Seq(
       0.U -> vpn(vpnnLen - 1, 0),
