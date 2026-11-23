@@ -64,11 +64,9 @@ class TlbPermBundle(hasV: Boolean = true)(implicit p: Parameters) extends TlbBun
   val w = Bool()
   val r = Bool()
 
-  def apply(item: PtwSectorResp) = {
-    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    this.pf := item.pf
-    this.af := item.af
-    this.v.foreach(_ := item.entry.v)
+  private def setPerm(ptePerm: PtePermBundle, pf: Bool, af: Bool): Unit = {
+    this.pf := pf
+    this.af := af
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -76,22 +74,16 @@ class TlbPermBundle(hasV: Boolean = true)(implicit p: Parameters) extends TlbBun
     this.x := ptePerm.x
     this.w := ptePerm.w
     this.r := ptePerm.r
+  }
 
+  def apply(item: PtwSectorResp): TlbPermBundle = {
+    setPerm(item.entry.perm.get, item.pf, item.af)
+    this.v.foreach(_ := item.entry.v)
     this
   }
 
-  def applyS2(item: HptwResp) = {
-    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    this.pf := item.gpf
-    this.af := item.gaf
-    this.d := ptePerm.d
-    this.a := ptePerm.a
-    this.g := ptePerm.g
-    this.u := ptePerm.u
-    this.x := ptePerm.x
-    this.w := ptePerm.w
-    this.r := ptePerm.r
-
+  def applyS2(item: HptwResp): TlbPermBundle = {
+    setPerm(item.entry.perm.get, item.gpf, item.gaf)
     this
   }
 
