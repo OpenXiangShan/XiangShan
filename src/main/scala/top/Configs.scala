@@ -578,7 +578,15 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
-)
+).alter((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(tile => tile.copy(
+    L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
+      replacement = "lru",
+      enablePrefetchFeedback = false,
+      enableFdpInsertion = false
+    ))
+  ))
+})
 
 class NoRobCompressionConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
