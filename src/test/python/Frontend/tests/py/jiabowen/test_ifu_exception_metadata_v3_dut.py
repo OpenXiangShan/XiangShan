@@ -226,11 +226,11 @@ def _accepted_cross_page_records(records):
 
 
 @pytest.mark.funcov_bins("BIN-954")
-def test_ifu_exception_metadata_cross_page_fault_diagnostic(env):
+def test_ifu_exception_metadata_cross_page_fault_diagnostic(env, frontend_init_config):
     records = _capture_metadata(env)
     cfvec = translation_faults._capture_cfvec_deliveries(env)
     translation_faults.test_cacheable_cross_page_second_page_translation_fault(
-        env, 0, "s1_pf", "page_fault", "instruction_page_fault"
+        env, frontend_init_config, 0, "s1_pf", "page_fault", "instruction_page_fault"
     )
     delivered = _accepted_cross_page_records(records)
     assert delivered, {"reason": "no accepted cross-page exception metadata"}
@@ -253,7 +253,9 @@ def test_ifu_exception_metadata_cross_page_fault_diagnostic(env):
 
 
 @pytest.mark.funcov_bins("BIN-954")
-def test_ifu_exception_metadata_all_components_one_run(env, monkeypatch):
+def test_ifu_exception_metadata_all_components_one_run(
+    env, monkeypatch, frontend_init_config
+):
     # The testpoint explicitly says to construct these components separately.
     # Use real reset/re-entry between them, retaining the same DUT, recorder,
     # waveform and artifact. Never combine independent pytest artifacts.
@@ -266,18 +268,18 @@ def test_ifu_exception_metadata_all_components_one_run(env, monkeypatch):
 
     monkeypatch.setattr(env.monitor, "clear", checked_clear)
     phase_reports = []
-    for phase in (
-        test_ifu_exception_metadata_satp_without_fault_diagnostic,
-        test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic,
-        test_ifu_exception_metadata_cross_page_fault_diagnostic,
-        test_ifu_exception_metadata_backend_fault_diagnostic,
+    for phase, args in (
+        (test_ifu_exception_metadata_satp_without_fault_diagnostic, ()),
+        (test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic, ()),
+        (test_ifu_exception_metadata_cross_page_fault_diagnostic, (frontend_init_config,)),
+        (test_ifu_exception_metadata_backend_fault_diagnostic, ()),
     ):
         assert not env.get_errors()
         env._emit_event("ifu.exception_metadata_phase_start", {
             "phase": phase.__name__, "cycle": int(env.current_cycle),
             "backend_commit_ptr": [env.backend_model.commit_ptr_flag, env.backend_model.commit_ptr_value],
         })
-        phase(env)
+        phase(env, *args)
         assert not env.get_errors()
         phase_reports.append({
             "phase": phase.__name__, "end_cycle": int(env.current_cycle),
