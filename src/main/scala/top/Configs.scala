@@ -582,7 +582,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   case XSTileKey => up(XSTileKey).map(tile => tile.copy(
     L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
       replacement = "lru",
-      enablePrefetchFeedback = false,
+      enablePrefetchFeedback = true,
       enableFdpInsertion = false
     ))
   ))
