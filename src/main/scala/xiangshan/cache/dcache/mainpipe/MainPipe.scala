@@ -211,6 +211,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
     // writeback addr to be replaced
     val replace = new MissQueueBlockIO
+    val store_block = new MissQueueBlockIO
 
     // sms prefetch
     val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
@@ -533,8 +534,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     "BtoT grow permission, but all ways are BtoT\n"
   )
 
-  // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
+  // Store misses enter MissQueue immediately; conflicting hits replay before reaching s3.
   val s2_replace_block = io.replace.block && io.replace.req.valid
+  // A younger store must not bypass an outstanding miss to the same physical line.
+  // Replay the hit so probes and refills can still make progress through MainPipe.
+  val s2_store_hit_block = io.store_block.req.valid && io.store_block.block
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
   val s2_can_go_to_mq_evict_fail = s2_replace_block // refill eviction conflicts with in-flight MSHR (BtoT); replay to MQ for another evict way
@@ -544,11 +548,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     Mux(
       s2_req.miss,
       io.refill_info.valid && !s2_replace_block,
-      (s2_req.isStore || s2_req.isAMO || s2_req.isPrefetch) && s2_hit
+      (s2_req.isStore || s2_req.isAMO || s2_req.isPrefetch) && s2_hit && !s2_store_hit_block
     )
   ) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
-  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay
+  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay || s2_store_hit_block
   val s2_fire = s2_valid && s2_can_go
   val s2_fire_to_s3 = s2_valid && s2_can_go_to_s3
   when (s1_fire) {
@@ -941,7 +945,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     */
   val s2_isStore = RegEnable(s1_isStore, s1_fire)
   val s2_isAMO = RegEnable(s1_isAMO, s1_fire)
-  io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore)
+  io.store_replay_resp.valid := s2_valid &&
+    (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore) || s2_store_hit_block
   io.store_replay_resp.bits.data := DontCare
   io.store_replay_resp.bits.miss := true.B // s2_can_go_to_mq && replay
   io.store_replay_resp.bits.replay := true.B // s2_grow_perm_fail
@@ -1068,6 +1073,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace.req.valid := s2_valid && s2_need_eviction && !s2_refill_tag_eq_way
   io.replace.req.bits.addr := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
   io.replace.req.bits.vaddr := s2_req.vaddr
+
+  io.store_block.req.valid := s2_valid && s2_req.isStore && s2_hit && !s2_req.miss && !s2_req.probe && !s2_req.replace
+  io.store_block.req.bits.addr := get_block_addr(s2_req.addr)
+  io.store_block.req.bits.vaddr := s2_req.vaddr
 
   io.evict_set := addr_to_dcache_set(s2_req.vaddr) // only use set index
 

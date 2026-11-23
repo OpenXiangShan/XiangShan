@@ -1703,6 +1703,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace
+  missQueue.io.store_block <> mainPipe.io.store_block
   val probeArb = Wire(Decoupled(new TLBundleB(edge.bundle)))
   TLArbiter.lowest(edge, probeArb, buses.map(_.b):_*)
   missQueue.io.probe.req.valid := probeArb.valid
