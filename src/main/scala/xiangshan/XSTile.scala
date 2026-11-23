@@ -180,7 +180,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
           val port = observedL2.io.t1p(lane).UpREQ
           oceanus.l2.L2ObservationFifo(a.fire, a.request.Addr,
             oceanus.l2.L2PrefetchObservation.read(port.valid) && oceanus.l2.L2PrefetchObservation.read(port.ready),
-            observedL2.config.upstream.type1(lane).nid)
+            observedL2.config.upstream.type1(lane).nid,
+            oceanus.l2.L2PrefetchObservation.read(memBlock.dcache.module.io.cchi(lane).upREQ.valid) &&
+              !oceanus.l2.L2PrefetchObservation.read(memBlock.dcache.module.io.cchi(lane).upREQ.ready))
         }
         val readPorts = Seq(memBlock.module.io.inner_icache_cchi.upREQ, memBlock.ptw.module.io.cchi.upREQ)
         val readFifos = readPorts.zipWithIndex.map { case (port, lane) =>
@@ -189,7 +191,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
             oceanus.l2.L2PrefetchObservation.read(port.valid) && oceanus.l2.L2PrefetchObservation.read(port.ready),
             port.bits.Addr,
             oceanus.l2.L2PrefetchObservation.read(out.valid) && oceanus.l2.L2PrefetchObservation.read(out.ready),
-            observedL2.config.upstream.type4(lane).nid, if (lane == 0) 2 else 1)
+            observedL2.config.upstream.type4(lane).nid,
+            oceanus.l2.L2PrefetchObservation.read(port.valid) && !oceanus.l2.L2PrefetchObservation.read(port.ready),
+            if (lane == 0) 2 else 1)
         }
         oceanus.l2.L2PrefetchObservation(observedL2, arrivals, dataFifos ++ readFifos)(observedL2.p)
       }
