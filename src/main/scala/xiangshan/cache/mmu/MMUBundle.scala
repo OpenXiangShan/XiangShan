@@ -450,6 +450,7 @@ object Pbmt {
 
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val multiHit = Output(Bool())
+  val resetMultiHit = Input(Bool())
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
@@ -495,6 +496,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
 
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val multiHit = Output(Bool())
+  val resetMultiHit = Input(Bool())
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))

@@ -264,6 +264,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, csr.satp)
+  entries.io.resetMultiHit := (if (q.fetchi) Cat(flush_pipe).orR else redirect.valid)
   if (q.outReplace) { io.replace <> entries.io.replace }
   val pfClear = if (q.fetchi) Cat(flush_pipe).orR else Mux(need_gpa, need_gpa_robidx.needFlush(redirect), redirect.valid && !need_gpa_wire)
   entries.io.pfClear := pfClear

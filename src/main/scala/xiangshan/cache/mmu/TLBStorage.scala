@@ -113,7 +113,7 @@ class TLBFA(
   val redirectPfClearVec = VecInit(entries.map(e => pfClearEnable && io.pfClear && hasPf(e)))
   val hwPrefetchPfVec = VecInit(entries.map(e => hasPf(e) && e.entryFromHwPrefetch))
 
-  for (i <- 0 until ports) {
+  val portMultiHits = (0 until ports).map { i =>
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
@@ -151,13 +151,27 @@ class TLBFA(
       (a: (Bool, Bool), b: (Bool, Bool)) =>
         (a._1 || b._1, a._2 || b._2 || (a._1 && b._1))
     )
+    // After 16 consecutive failed multi-hit lookups, use the legacy merged result until redirect
+    // Before fallback, normal storage hits reset the count; idle and ordinary misses hold it
+    val multiHitCount = RegInit(0.U(5.W))
+    val allowMultiHit = multiHitCount(4)
+    when (io.resetMultiHit) {
+      multiHitCount := 0.U
+    }.elsewhen (resp.valid && !allowMultiHit) {
+      when (resp.bits.hit) {
+        multiHitCount := 0.U
+      }.elsewhen (multiHit && !rejectedHit) {
+        multiHitCount := multiHitCount + 1.U
+      }
+    }
     // Sector tlb may trigger multi-hit, see def "wbhit"
     XSPerfAccumulate(s"port${i}_multi_hit", resp.valid && multiHit)
-    multiHits(i).valid := resp.valid && multiHit
+    multiHits(i).valid := resp.valid && multiHit && !allowMultiHit
     multiHits(i).bits := multiHitVec
 
     resp.valid := RegNext(req.valid)
-    resp.bits.hit := anyHit && !multiHit && !rejectedHit
+    resp.bits.hit := anyHit && (!multiHit || allowMultiHit) && !rejectedHit
+    XSPerfAccumulate(s"port${i}_multi_hit_fallback", resp.valid && multiHit && allowMultiHit && !rejectedHit)
     val reqVpn   = RegNext(vpn)
     val pbmt     = entries.map(_.pbmt)
     val gpbmt    = entries.map(_.g_pbmt)
@@ -185,7 +199,7 @@ class TLBFA(
     }
 
     access.sets := get_set_idx(vpn_reg(vpn_reg.getWidth - 1, sectortlbwidth), nSets) // no use
-    access.touch_ways.valid := resp.valid && resp.bits.hit
+    access.touch_ways.valid := resp.valid && resp.bits.hit && !multiHit
     access.touch_ways.bits := OHToUInt(hitVecReg)
 
     resp.bits.hit.suggestName("hit")
@@ -194,6 +208,8 @@ class TLBFA(
     resp.bits.g_pbmt.suggestName("g_pbmt")
     resp.bits.perm.suggestName("perm")
     resp.bits.g_perm.suggestName("g_perm")
+
+    multiHit -> multiHitVec
   }
 
   when (io.w.valid) {
@@ -207,7 +223,12 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).zipWithIndex.map{case ((e, vi), i) =>
     e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi && !clearMask(i)
   })
-  XSError(io.w.valid && (w_hit_vec.asUInt & ~multiHitMask).orR, s"${parentName} refill, duplicate with existing entries")
+  // Detected conflicts remain exempt when fallback stops invalidating them
+  val multiHitConflicts = VecInit(portMultiHits.zip(io.r.resp).map {
+    case ((multiHit, multiHitVec), resp) => Mux(resp.valid && multiHit, multiHitVec, 0.U(nWays.W))
+  })
+  XSError(io.w.valid && (w_hit_vec.asUInt & ~ParallelOR(multiHitConflicts)).orR,
+    s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
   val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
@@ -434,6 +455,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     SoftTLB = coreParams.softTLB
   )
   io.multiHit := page.multiHit
+  page.resetMultiHit := io.resetMultiHit
 
   for (i <- 0 until ports) {
     page.r_req_apply(
