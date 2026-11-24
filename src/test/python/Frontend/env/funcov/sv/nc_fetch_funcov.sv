@@ -19,7 +19,7 @@ module frontend_nc_fetch_funcov (
   input logic         tl_a_ready,
   input logic [47:0]  tl_a_addr,
   input logic         tl_d_valid,
-  input logic [255:0] tl_d_data,
+  input logic [63:0]  tl_d_data,
   input logic         tl_d_corrupt,
   input logic         tl_d_denied,
   input logic [1:0]   entry_state,
@@ -43,8 +43,8 @@ module frontend_nc_fetch_funcov (
   input logic [1:0]   uncache_branch_type,
   input logic         prev_end_half_rvi,
   input logic [15:0]  prev_half_data,
-  input logic [48:0]  prev_half_pc,
-  input logic [48:0]  uncache_pc,
+  input logic [49:0]  prev_half_pc,
+  input logic [49:0]  uncache_pc,
   input logic         wfi_safe,
   input logic         icache_waylookup_valid,
   input logic [3:0]   icache_waymask_0,
@@ -63,7 +63,7 @@ module frontend_nc_fetch_funcov (
   logic        last_nc_delivery_seen;
   logic        last_nc_is_rvc;
   logic        last_nc_clean;
-  logic [48:0] last_nc_pc;
+  logic [49:0] last_nc_pc;
   logic        prev_backend_can_accept;
   logic [1:0]  prev_uncache_state;
   logic        prev_tl_a_fire;
@@ -359,12 +359,12 @@ module frontend_nc_fetch_funcov (
       }
     NC_rvc_pc_progress_cp:
       coverpoint (last_nc_delivery_seen && last_nc_is_rvc && nc_delivery &&
-                  uncache_pc == last_nc_pc + 49'd1) iff (!reset) {
+                  uncache_pc == last_nc_pc + 50'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     NC_rvi_pc_progress_cp:
       coverpoint (last_nc_delivery_seen && !last_nc_is_rvc && nc_delivery &&
-                  uncache_pc == last_nc_pc + 49'd2) iff (!reset) {
+                  uncache_pc == last_nc_pc + 50'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     NC_cfi_delivery_cp:

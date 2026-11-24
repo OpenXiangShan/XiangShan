@@ -8,7 +8,7 @@ module frontend_mmio_fetch_funcov (
   input logic        s2_pmp_mmio_0,
   input logic [1:0]  s2_pbmt_0,
   input logic [2:0]  s2_exception_0,
-  input logic [48:0] s2_pc_0,
+  input logic [49:0] s2_pc_0,
   input logic        is_first_instr,
   input logic        uncache_input_valid,
   input logic        uncache_input_ready,
@@ -24,7 +24,7 @@ module frontend_mmio_fetch_funcov (
   input logic        tl_a_ready,
   input logic [47:0] tl_a_addr,
   input logic        tl_d_valid,
-  input logic [255:0] tl_d_data,
+  input logic [63:0] tl_d_data,
   input logic        tl_d_corrupt,
   input logic        tl_d_denied,
   input logic [1:0]  entry_state,
@@ -48,8 +48,8 @@ module frontend_mmio_fetch_funcov (
   input logic [1:0]  uncache_branch_type,
   input logic        prev_end_half_rvi,
   input logic [15:0] prev_half_data,
-  input logic [48:0] prev_half_pc,
-  input logic [48:0] uncache_pc,
+  input logic [49:0] prev_half_pc,
+  input logic [49:0] uncache_pc,
   input logic        cfvec_valid,
   input logic        wfi_safe
 );
@@ -65,12 +65,12 @@ module frontend_mmio_fetch_funcov (
 
   logic        last_mmio_delivery_seen;
   logic        last_mmio_is_rvc;
-  logic [48:0] last_mmio_pc;
+  logic [49:0] last_mmio_pc;
   logic        prev_backend_can_accept;
   logic [1:0]  prev_uncache_state;
   logic        stalled_a_seen;
   logic [47:0] stalled_a_addr;
-  logic [48:0] stalled_a_pc;
+  logic [49:0] stalled_a_pc;
   logic        stalled_a_pmp_mmio;
   logic [1:0]  stalled_a_pbmt;
   logic [2:0]  stalled_a_exception;
@@ -78,7 +78,7 @@ module frontend_mmio_fetch_funcov (
   logic        first_page_exception_seen;
   logic        cross_8b_resend_seen;
   logic        page_tail_rvc_pending;
-  logic [48:0] page_tail_rvc_pc;
+  logic [49:0] page_tail_rvc_pc;
   logic        result_reserved_fire_seen;
   logic        prev_tl_a_fire;
   logic        wait_a_flush_seen;
@@ -242,24 +242,24 @@ module frontend_mmio_fetch_funcov (
       }
     MMIO_rvc_pc_2b_progress_cp:
       coverpoint (page_tail_rvc_pending && mmio_delivery &&
-                  uncache_pc == page_tail_rvc_pc + 49'd1) iff (!reset) {
+                  uncache_pc == page_tail_rvc_pc + 50'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvi_pc_4b_progress_cp:
       coverpoint (last_mmio_delivery_seen && !last_mmio_is_rvc && mmio_delivery &&
-                  uncache_pc == last_mmio_pc + 49'd2) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 50'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvc_single_pc_2b_progress_cp:
       coverpoint (last_mmio_delivery_seen && last_mmio_is_rvc && mmio_delivery &&
                   delivered_is_rvc && single_delivery &&
-                  uncache_pc == last_mmio_pc + 49'd1) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 50'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvi_single_pc_4b_progress_cp:
       coverpoint (last_mmio_delivery_seen && !last_mmio_is_rvc && mmio_delivery &&
                   !delivered_is_rvc && single_delivery &&
-                  uncache_pc == last_mmio_pc + 49'd2) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 50'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_branch_delivery_cp:

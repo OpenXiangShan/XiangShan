@@ -24,7 +24,7 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 icache_redirect_flush,
   input logic                 bpu_flush_valid,
   input logic                 ifu_wb_redirect_valid,
-  input logic [49:0]          ifu_wb_redirect_target,
+  input logic [50:0]          ifu_wb_redirect_target,
   input logic                 ifu_wb_redirect_taken,
   input logic                 ifu_wb_redirect_is_rvc,
   input logic                 ibuffer_empty,
