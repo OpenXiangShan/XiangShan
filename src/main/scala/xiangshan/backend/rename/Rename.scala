@@ -325,7 +325,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val latterInstrCount = latterSlotMaskVec.map(PopCount(_))
   val entryPairType = compressUnit.io.out.entryPairType
   val slotIsFormer = formerSlotMaskVec.zipWithIndex.map { case (mask, lane) => mask(lane) }
-  val slotNeedFlushMask = compressUnit.io.out.slotNeedFlushMask
+  val slotNeedFlush = compressUnit.io.out.slotNeedFlush
   val interruptSafe = compressUnit.io.out.interruptSafe
   val slotHeadRvcMask = compressUnit.io.out.slotHeadRvcMask
   val complexSlotHasDest = compressUnit.io.out.complexSlotHasDest
@@ -469,7 +469,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).ftqPtr := io.in(i).bits.ftqPtr
     uops(i).ftqOffset := io.in(i).bits.ftqOffset
     uops(i).entryPairType := entryPairType(i)
-    uops(i).slotNeedFlushMask := slotNeedFlushMask(i)
+    uops(i).slotNeedFlush := slotNeedFlush(i)
     uops(i).interruptSafe := interruptSafe(i)
     uops(i).isRVC := io.in(i).bits.isRVC
     uops(i).slotHeadRvcMask := slotHeadRvcMask(i)

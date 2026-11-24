@@ -78,7 +78,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       val formerSlotMask = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
       val latterSlotMask = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
       val entryPairType = Vec(RenameWidth, CompressType())
-      val slotNeedFlushMask = Vec(RenameWidth, Output(UInt(2.W)))
+      val slotNeedFlush = Vec(RenameWidth, Output(UInt(2.W)))
       val interruptSafe = Vec(RenameWidth, Output(Bool()))
       val slotHeadRvcMask = Vec(RenameWidth, Output(UInt(2.W)))
       val complexSlotHasDest = Vec(RenameWidth, Output(UInt(1.W)))
@@ -117,7 +117,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     io.out.formerSlotMask(i)       := 0.U
     io.out.latterSlotMask(i)       := 0.U
     io.out.entryPairType(i)        := CompressType.NORMAL
-    io.out.slotNeedFlushMask(i)    := 0.U
+    io.out.slotNeedFlush(i)    := 0.U
     io.out.interruptSafe(i)        := true.B
     io.out.slotHeadRvcMask(i)      := 0.U
     io.out.complexSlotHasDest(i)   := 0.U
@@ -336,7 +336,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       io.out.formerSlotMask(i)       := entryFormerMaskByToken(tokenId)
       io.out.latterSlotMask(i)       := entryLatterMaskByToken(tokenId)
       io.out.entryPairType(i)        := entryPairTypeByToken(tokenId)
-      io.out.slotNeedFlushMask(i)    := entrySlotNeedFlushMaskByToken(tokenId)
+      io.out.slotNeedFlush(i)        := entrySlotNeedFlushMaskByToken(tokenId)
       io.out.interruptSafe(i)        := entryInterruptSafeByToken(tokenId)
       io.out.slotHeadRvcMask(i)      := entrySlotHeadRvcMaskByToken(tokenId)
       io.out.complexSlotHasDest(i)   := entryComplexSlotHasDestByToken(tokenId)

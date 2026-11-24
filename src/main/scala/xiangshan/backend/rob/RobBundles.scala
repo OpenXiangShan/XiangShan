@@ -97,7 +97,7 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   // Preserve the former slot's exact trace metadata so a latter-slot squash
   // can rebuild the surviving physical entry without stale metadata.
   val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
-  val slotNeedFlushMask = UInt(2.W)
+  val slotNeedFlush = UInt(2.W)
 
   // Entry-level fields continue to describe the former slot. Rob.scala keeps
   // a second current-API debug copy for exact latter-slot selection.
@@ -147,7 +147,7 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.vls := robEnq.isVectorMemory
     this.rfWen := robEnq.rfWen
     this.interruptSafe := robEnq.interruptSafe
-    this.slotNeedFlushMask := robEnq.slotNeedFlushMask
+    this.slotNeedFlush := robEnq.slotNeedFlush
     // trace
     this.traceBlockInPipe := robEnq.traceBlockInPipe
     this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
@@ -199,7 +199,7 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
   val rfWen = Bool()
-  val slotNeedFlushMask = UInt(2.W)
+  val slotNeedFlush = UInt(2.W)
   // trace
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
   val formerTraceIretire = UInt(IretireWidthEncoded.W)
@@ -233,7 +233,7 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.ftqOffset := robEntry.ftqOffset
     this.commitType := robEntry.commitType
     this.entryHasStore := robEntry.entryHasStore
-    this.slotNeedFlushMask := robEntry.slotNeedFlushMask
+    this.slotNeedFlush := robEntry.slotNeedFlush
     this.traceBlockInPipe := robEntry.traceBlockInPipe
     this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
     this.debug_pc.foreach(_ := robEntry.debug_pc.get)
@@ -250,12 +250,12 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isRVC = Bool()
-  // set 1 if there is 1 exists in exceptionVec
-  val hasException = Bool()
+  // set 1 if there is 1 exists in excpVec
+  val hasExcp = Bool()
   // This signal is valid iff currentValid is true
   // 0: is execute exception, 1: is fetch exception
   val isEnqExcp = Bool()
-  val exceptionVec = ExceptSparseVec(exceptList)
+  val excpVec = ExceptSparseVec(exceptList)
   val satpFlushFirstFetchFault = Bool()
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
@@ -278,10 +278,10 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   val veew = VSew()
   val vlmul = VLmul()
 
-  def has_exception = exceptionVec.orR || flushPipe || replayInst
-  def not_commit = exceptionVec.orR || replayInst
+  def has_excp = excpVec.orR || flushPipe || replayInst
+  def not_commit = excpVec.orR || replayInst
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.orR
+  def can_writeback = excpVec.orR
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

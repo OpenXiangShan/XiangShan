@@ -45,15 +45,15 @@ class RobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XS
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = in.intrBitSetReg && !in.hasNoSpecExec && in.interruptSafe
-  val exceptionEnable = in.deq_w(deqPosition) && in.exception_state.valid && in.exception_state.bits.not_commit && in.exception_state.bits.robIdx.isSameEntry(deqPtrVec(0))
-  val redirectOutValid = in.state === 0.U && in.deq_v(deqPosition) && (intrEnable || exceptionEnable)
+  val excpEnable = in.deq_w(deqPosition) && in.excp_state.valid && in.excp_state.bits.not_commit && in.excp_state.bits.robIdx.isSameEntry(deqPtrVec(0))
+  val redirectOutValid = in.state === 0.U && in.deq_v(deqPosition) && (intrEnable || excpEnable)
 
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U))
   val realCommitLastSlot = WireInit(realCommitLast)
   realCommitLastSlot.isFormer := false.B
-  val commit_exception = in.exception_state.valid && !in.exception_state.bits.robIdx.isAfterSlot(realCommitLastSlot)
+  val commit_excp = in.excp_state.valid && !in.excp_state.bits.robIdx.isAfterSlot(realCommitLastSlot)
   val canCommit = VecInit((0 until CommitWidth).map(i => in.deq_v(i) && in.deq_w(i) || in.hasCommitted(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B) - PopCount(in.hasCommitted)
   // when in.intrBitSetReg or there're possible exceptions in these instructions,
@@ -117,7 +117,7 @@ object RobDeqPtrWrapper {
     val blockCommit = Input(Bool())
 
     // Oldest retained exception.
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
+    val excp_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
 
     // Interrupt qualification.
     val intrBitSetReg = Input(Bool())

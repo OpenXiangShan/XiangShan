@@ -256,7 +256,7 @@ object Bundles {
     val complexSlotHasDest = UInt(1.W)
     val entryHasStore = Bool()
     val noCompressReason = UInt(2.W)
-    val slotNeedFlushMask = UInt(2.W)
+    val slotNeedFlush = UInt(2.W)
     val interruptSafe = Bool()
     val commitType = CommitType()
 
@@ -648,7 +648,7 @@ object Bundles {
     val complexSlotHasDest = UInt(1.W)
     val entryHasStore = Bool()
     val noCompressReason = UInt(2.W)
-    val slotNeedFlushMask = UInt(2.W)
+    val slotNeedFlush = UInt(2.W)
     val interruptSafe = Bool()
     val fusionNum       = UInt(log2Ceil(RenameWidth / 2 + 1).W)
     val selImm          = SelImm()
