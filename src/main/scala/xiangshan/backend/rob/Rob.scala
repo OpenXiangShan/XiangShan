@@ -426,7 +426,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.in.redirect := in.redirect.valid
 
   // TODO:
-  val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
   val realDestSizeSeq = VecInit(deqEntriesBankOrder.zip(hasCommitted).map{case (r, h) => Mux(h, 0.U, r.realDestSize)})
   val walkDestSizeSeq = VecInit(deqEntriesBankOrder.zip(donotNeedWalk).map{case (r, d) => Mux(d, 0.U, r.realDestSize)})
   val commitSizeSumSeq = VecInit((0 until CommitWidth).map(i => realDestSizeSeq.take(i + 1).reduce(_ +& _)))
@@ -1054,9 +1053,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
   }.otherwise{
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
-  }
-  walkDestSizeDeqGroup.zip(walkPtrVecNext).map {
-    case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
   }
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(out.commits.commitValid)
