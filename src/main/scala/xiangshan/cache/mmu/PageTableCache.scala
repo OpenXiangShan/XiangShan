@@ -1016,6 +1016,20 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   val l0Wvpn = refill.req_info_dup(0).vpn
   val l0Wasid = Mux(refill.req_info_dup(0).s2xlate =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)
+  val l0WhashVpn = XORFold(l0Wvpn(vpnLen - 1, vpnLen - PtwL0TagLen), l2tlbParams.hashVpnWidth)
+  val l0WhashVmid = XORFold(io.csr_dup(0).hgatp.vmid, l2tlbParams.hashAsidWidth)
+  // Hash matches conservatively evict old sector copies without reading SRAM tags
+  // Ignore ASID so that mixed global and local sectors cannot leave an overlapping copy
+  val l0RefillClearMask = VecInit((0 until l2tlbParams.l0nSets).map { set =>
+    VecInit((0 until l2tlbParams.l0nWays).map { way =>
+      val sameSet = l0RefillIdx === set.U
+      val sameVpn = l0vpns(set)(way) === l0WhashVpn
+      val sameStage = l0h(set)(way) === refill_h(0)
+      val sameVmid = refill_h(0) === noS2xlate || l0vmids(set)(way) === l0WhashVmid
+      sameSet && sameVpn && sameStage && sameVmid
+    }).asUInt
+  }).asUInt
+  val l0ValidAfterRefill = (l0v & ~l0RefillClearMask) | l0RfvOH
   l0Wdata.gen(
     vpn = l0Wvpn,
     asid = l0Wasid,
@@ -1035,14 +1049,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       waymask = l0VictimWayOH
     )
     ptwl0replace.access(l0RefillIdx, l0VictimWay)
-    l0v := l0v | l0RfvOH
+    l0v := l0ValidAfterRefill
     l0g := l0g & ~l0RfvOH | Mux(Cat(memPtes.map(pte => pte.perm.g && pte.perm.v)).andR &&
       refill.req_info_dup(0).s2xlate =/= onlyStage2, l0RfvOH, 0.U)
     l0h(l0RefillIdx)(l0VictimWay) := refill_h(0)
     if (HasBitmapCheck) {updateL0BitmapReg(l0BitmapReg, Tran2D(~l0RfvOH))}
     l0asids(l0RefillIdx)(l0VictimWay) := XORFold(l0Wasid, l2tlbParams.hashAsidWidth)
-    l0vmids(l0RefillIdx)(l0VictimWay) := XORFold(io.csr_dup(0).hgatp.vmid, l2tlbParams.hashAsidWidth)
-    l0vpns(l0RefillIdx)(l0VictimWay) := XORFold(l0Wvpn(vpnLen - 1, vpnLen - PtwL0TagLen), l2tlbParams.hashVpnWidth)
+    l0vmids(l0RefillIdx)(l0VictimWay) := l0WhashVmid
+    l0vpns(l0RefillIdx)(l0VictimWay) := l0WhashVpn
 
     for (i <- 0 until l2tlbParams.l0nWays) {
       l0RefillPerf(i) := i.U === l0VictimWay
@@ -1050,7 +1064,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   XSDebug(l0Refill, p"[l0 refill] refillIdx:0x${Hexadecimal(l0RefillIdx)} victimWay:${l0VictimWay} victimWayOH:${Binary(l0VictimWayOH)} rfvOH(in UInt):${Cat(l0RefillIdx, l0VictimWay)}\n")
   XSDebug(l0Refill, p"[l0 refill] refilldata:0x${l0Wdata}\n")
-  XSDebug(l0Refill, p"[l0 refill] l0v:${Binary(l0v)} -> ${Binary(l0v | l0RfvOH)}\n")
+  XSDebug(l0Refill, p"[l0 refill] l0v:${Binary(l0v)} -> ${Binary(l0ValidAfterRefill)} " +
+    p"clear:${Binary(l0RefillClearMask)}\n")
   XSDebug(l0Refill, p"[l0 refill] l0g:${Binary(l0g)} -> ${Binary(l0g & ~l0RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, l0RfvOH, 0.U))}\n")
 
 
