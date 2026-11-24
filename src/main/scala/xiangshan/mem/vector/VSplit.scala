@@ -496,7 +496,8 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := issueValid && vecActive && !dataIssued
+  // Partial replay reuses the data already written to SQ.
+  vstd.valid := issueValid && vecActive && !dataIssued && !issueEntry.isVecPartReplay
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.uop.fuType := FuType.vstu.U
