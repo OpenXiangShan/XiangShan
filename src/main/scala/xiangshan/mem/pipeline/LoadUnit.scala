@@ -1614,7 +1614,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
   io.lsq.ldin.bits.missDbUpdated := GatedValidRegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
-  io.lsq.ldin.bits.updateAddrValid := !s3_mis_align && (!s3_frm_mabuf || s3_in.isFinalSplit) || s3_exception
+  io.lsq.ldin.bits.updateAddrValid := !s3_mis_align && (!s3_frm_mabuf || s3_in.isFinalSplit) &&
+    (!s3_in.nc || s3_nc_with_data) || s3_exception
   io.lsq.ldin.bits.hasException := false.B
 
   io.s3_dly_ld_err := false.B // s3_dly_ld_err && s3_valid
