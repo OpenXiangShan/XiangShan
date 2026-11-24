@@ -145,6 +145,53 @@ object macros extends ScalaModule {
   def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:$defaultScalaVersion")
 }
 
+// compile TopDownCounters.scala only, avoid full Chisel elaboration
+object topdownMeta extends ScalaModule {
+  def scalaVersion: T[String] = defaultScalaVersion
+
+  def millSourcePath: Path = pwd
+
+  def sources: T[Seq[PathRef]] = Task {
+    Seq(PathRef(pwd / "src" / "main" / "scala" / "xiangshan" / "TopDownCounters.scala"))
+  }
+
+  def resources: T[Seq[PathRef]] = Task { Seq.empty[PathRef] }
+
+  // stable path under mill out/; not checked in
+  def outMetadataPath: Path = pwd / "out" / "topdown-metadata.json"
+
+  def exportMetadata = Task {
+    val dest = T.dest / "topdown-metadata.json"
+    val classPath = runClasspath().map(_.path).mkString(java.io.File.pathSeparator)
+    os.proc(
+      "java",
+      "-cp",
+      classPath,
+      "xiangshan.ExportTopDownCounters",
+      dest.toString
+    ).call(stdout = os.Inherit, stderr = os.Inherit)
+    os.makeDir.all(outMetadataPath / os.up)
+    os.copy.over(dest, outMetadataPath)
+    PathRef(dest)
+  }
+
+  def checkMetadata = Task {
+    val generated = exportMetadata()
+    os.makeDir.all(outMetadataPath / os.up)
+    os.copy.over(generated.path, outMetadataPath)
+    val py = os.proc(
+      "python3",
+      (pwd / "scripts" / "top-down" / "check_metadata.py").toString,
+      "--metadata",
+      outMetadataPath.toString
+    ).call(cwd = pwd / "scripts" / "top-down", check = false)
+    if (py.exitCode != 0) {
+      sys.error("scripts/top-down/check_metadata.py failed")
+    }
+    generated
+  }
+}
+
 object xiangshan extends ChiselModule {
   def millSourcePath = pwd
 
@@ -251,4 +298,7 @@ object xiangshan extends ChiselModule {
 
     def forkEnv = Map("PATH" -> envPath)
   }
+
+  def exportTopDownMetadata = topdownMeta.exportMetadata
+  def checkTopDownMetadata = topdownMeta.checkMetadata
 }
