@@ -67,8 +67,9 @@ case class DCacheParameters
   numMemChannels: Int = 1,
 
   // Channel selection strategy
-  // true = select by address set低位
+  // true = select by address
   // false = select by MSHR ID
+  // only supported 'true' for now, cause L2 slices splite by address
   channelSelByAddr: Boolean = true,
 
   // ========== MissTrack / SpecMiss ==========
@@ -391,6 +392,20 @@ trait HasDCacheParameters
     }
     source.ready := Mux1H((0 until n).map(i => (channel === i.U) -> outputs(i).ready))
     outputs
+  }
+
+  // to adapt muti-channel memory system, we need to select the channel for each request
+  def selectChannel(addr: UInt, mshrId: UInt): UInt = {
+    if (hasDualChannel) {
+      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
+      else {
+        assert(false.B, "select channel by MSHR ID is not supported for now")
+        mshrId(memChannelBits - 1, 0)
+        // not supported for now, cause L2 slices splite by address
+      }
+    } else {
+      0.U(memChannelBits.W)
+    }
   }
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
@@ -1016,7 +1031,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   // When channelSelByAddr is enabled, address space is partitioned across channels
   // using the lower memChannelBits of the block address.
   val clientNodes = Seq.tabulate(numMemChannels) { i =>
-    val visibility = if (channelSelByAddr) {
+    val visibility = if (hasDualChannel && channelSelByAddr) {
       // Partition address space: channel i gets addresses where the lower
       // memChannelBits of the block address equal i.
       val channelMask = ~BigInt(((1 << memChannelBits) - 1) * cfg.blockBytes)
