@@ -26,7 +26,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
-import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
@@ -55,7 +54,6 @@ import xiangshan.frontend.bpu.BpuRedirectMeta
 import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.icache.ICacheDataHelper
@@ -131,9 +129,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val prefetchQueue = Module(new PrefetchQueue)
 
   // perfQueue stores information for performance monitoring. These queues should not exist in hardware
-  private val perfQueue = Reg(Vec(FtqSize, new PerfMeta))
+  private val perfQueue        = Module(new PerfQueue)
+  private val perfQueueEntries = perfQueue.io.entries
 
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+
+  perfQueue.io.prediction.valid       := io.fromBpu.meta.valid
+  perfQueue.io.prediction.bits.ftqPtr := io.fromBpu.s3FtqPtr
+  perfQueue.io.prediction.bits.meta   := io.fromBpu.perfMeta
+  perfQueue.io.resolve                := io.fromBackend.resolve
+  perfQueue.io.backendRedirect        := backendRedirect
 
   private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
   private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
@@ -220,16 +225,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
   }
 
-  private val s3PerfQueue = WireInit(perfQueue)
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
     metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
     metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
-
-    s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
-    s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
-    s3PerfQueue(s3BpuPtr).mispredict := false.B
   }
 
   // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
@@ -441,7 +441,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
         cachedBranch.bits  := branch.bits
         cachedBranch.valid := branch.valid && mask
     }
-    trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
+    trainCache.bits.perfMeta     := perfQueueEntries(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
     trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
     trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
@@ -450,51 +450,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toBpu.train.valid := trainCache.valid && !flushTrainCache
   io.toBpu.train.bits  := trainCache.bits
-
-  // default next state receives s3 prediction meta
-  perfQueue := s3PerfQueue
-
-  // resolve override next state
-  private val lastPerfMetas = Wire(Vec(backendParams.BrhCnt, new PerfMeta))
-  io.fromBackend.resolve.zipWithIndex.foreach { case (branch, i) =>
-    val ftqIdx = branch.bits.ftqIdx.value
-    val lastPerfMeta = WireInit(MuxCase(
-      s3PerfQueue(ftqIdx),
-      (0 until i).reverse.map { j =>
-        val prevBranch = io.fromBackend.resolve(j)
-        (prevBranch.valid && prevBranch.bits.ftqIdx.value === ftqIdx) -> lastPerfMetas(j)
-      }
-    ))
-    val curPerfMeta = WireInit(lastPerfMeta)
-
-    when(branch.valid) {
-      val newBranchInfo = Wire(new BranchInfo)
-      newBranchInfo.fromResolve(branch.bits)
-
-      val curOH     = UIntToOH(newBranchInfo.cfiPosition, FetchBlockInstNum)
-      val validMask = UIntToMask(newBranchInfo.cfiPosition +& 1.U, FetchBlockInstNum)
-      val beforeKnownMispredict =
-        Mux(
-          lastPerfMeta.mispredict,
-          newBranchInfo.cfiPosition < lastPerfMeta.mispredictBranchInfo.cfiPosition,
-          true.B
-        )
-
-      when(beforeKnownMispredict) {
-        curPerfMeta.isCfi := (lastPerfMeta.isCfi.asUInt | curOH).asBools
-        curPerfMeta.cfiAttr := VecInit(lastPerfMeta.cfiAttr.zipWithIndex.map { case (attr, idx) =>
-          Mux(curOH(idx), newBranchInfo.attribute, attr)
-        })
-        when(branch.bits.mispredict) {
-          curPerfMeta.mispredict           := true.B
-          curPerfMeta.mispredictBranchInfo := newBranchInfo
-          curPerfMeta.isCfi                := ((lastPerfMeta.isCfi.asUInt | curOH) & validMask).asBools
-        }
-      }
-      perfQueue(ftqIdx) := curPerfMeta
-    }
-    lastPerfMetas(i) := curPerfMeta
-  }
 
   // --------------------------------------------------------------------------------
   // Commit and train BPU
@@ -557,8 +512,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     GuardedPcInit(redirect.bits.pc),
     redirect.bits.ftqOffset
   )._1
-  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
-  private val commitPerfMeta   = perfQueue(commitPtr(0).value)
+  private val redirectPerfMeta = perfQueueEntries(backendRedirect.bits.ftqIdx.value).bpuPerf
+  private val commitPerfMeta   = perfQueueEntries(commitPtr(0).value)
 
   XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect",
