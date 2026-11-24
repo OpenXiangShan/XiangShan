@@ -29,7 +29,7 @@ def test_translation_checker_keeps_env_alias() -> None:
     assert env.translation_oracle is env.translation_checker
 
 
-def _gpaddr_oracle(*, s2xlate: int = 3, gpf: int = 1):
+def _gpaddr_oracle(*, s2xlate: int = 3, gpf: int = 1, overrides=()):
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     scenario = TranslationScenario(
         scenario_id="gpaddr-write-contract",
@@ -41,6 +41,7 @@ def _gpaddr_oracle(*, s2xlate: int = 3, gpf: int = 1):
         s2xlate=s2xlate,
         priv_virt=1,
         s2_gpf=gpf,
+        ptw_response_overrides=overrides,
         expected_path="fault" if gpf else "cacheable",
         expected_result="guest_fault" if gpf else "normal",
     )
@@ -169,38 +170,35 @@ def test_non_gpf_scenario_rejects_gpaddr_write() -> None:
     assert env.translation_oracle.errors[-1]["reason"] == "unexpected_gpaddr_write"
 
 
-def test_gpaddr_nonleaf_expectation_comes_from_driven_ptw_response() -> None:
-    env, scenario = _gpaddr_oracle()
-    request = env.translation_oracle.active["expected_ptw_request"]
-    env.translation_oracle.active["expected_ptw_requests"] = [request]
-    env.translation_oracle.observe_ptw_request(10, **{
-        key: request[key] for key in ("vpn", "s2xlate", "get_gpa")
-    })
-    response = env.page_table.build_ptw_resp(request["vpn"], s2xlate=3)
-    response.update(s1_entry_v=0, s1_pf=0, s1_af=0)
-    env.translation_oracle.observe_ptw_response(11, **{
-        key: request[key] for key in ("vpn", "s2xlate", "get_gpa")
-    }, response=response)
-
-    env.translation_oracle.observe_gpaddr_write(20, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=0)
-    assert env.translation_oracle.errors[-1]["reason"] == "gpaddr_write_mismatch"
-    env.translation_oracle.observe_gpaddr_write(21, wen=1, waddr=7, gpaddr=scenario.gpa, nonleaf=1)
-    assert len(env.translation_oracle.active["observed_gpaddr_writes"]) == 1
-
-
-def test_gpaddr_nonleaf_pte_address_comes_from_driven_ptw_response() -> None:
-    env, scenario = _gpaddr_oracle()
+@pytest.mark.parametrize(
+    "table_gpa,level,response_level,valid,expected_pte_gpa",
+    [(0, 2, 0, 0, 0x10), (0x8003F000, 1, 2, 1, 0x8003F008)],
+)
+@pytest.mark.parametrize("bad_response", (None, "ppn", "missing_location"))
+def test_gpaddr_vs_pte_expectation_comes_from_scenario(
+    table_gpa, level, response_level, valid, expected_pte_gpa, bad_response,
+) -> None:
+    vpn = 0x8020_0404 >> 12
+    if bad_response == "missing_location":
+        overrides = ()
+    else:
+        overrides = (TranslationPtwResponseOverride(
+            vpn=vpn, s2xlate=3, patch=(("s2_gpf", 1),),
+            vs_pte_fault=(table_gpa, level),
+        ),)
+    env, scenario = _gpaddr_oracle(overrides=overrides)
     checker = env.translation_oracle
     request = checker.active["expected_ptw_request"]
     checker.active["expected_ptw_requests"] = [request]
     keys = {key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}
     checker.observe_ptw_request(10, **keys)
     response = env.page_table.build_ptw_resp(request["vpn"], s2xlate=3)
-    table_gpa = 0x8003F000
+    response_ppn = (table_gpa >> 12) + int(bad_response == "ppn")
     response.update(
-        s1_entry_level=1,
-        s1_entry_ppn=(table_gpa >> 12) >> 3,
-        s1_entry_v=1,
+        s1_entry_level=response_level,
+        s1_entry_ppn=response_ppn >> 3,
+        s1_entry_v=valid,
+        s1_entry_perm_a=0,
         s1_entry_perm_r=0,
         s1_entry_perm_w=0,
         s1_entry_perm_x=0,
@@ -209,13 +207,24 @@ def test_gpaddr_nonleaf_pte_address_comes_from_driven_ptw_response() -> None:
         s2_gpf=1,
     )
     lane = request["vpn"] & 7
-    response["s1_ppn_low"][lane] = (table_gpa >> 12) & 7
+    response["s1_ppn_low"][lane] = response_ppn & 7
     checker.observe_ptw_response(11, **keys, response=response)
-    expected_pte_gpa = table_gpa + ((request["vpn"] & 0x1FF) * 8)
-    wrong_fetch_gpa = table_gpa | (scenario.va & 0xFFF)
-    checker.observe_gpaddr_write(20, wen=1, waddr=7, gpaddr=wrong_fetch_gpa, nonleaf=1)
-    assert checker.errors[-1]["reason"] == "gpaddr_write_mismatch"
-    checker.observe_gpaddr_write(21, wen=1, waddr=7, gpaddr=expected_pte_gpa, nonleaf=1)
+    if bad_response == "missing_location":
+        assert checker.errors[-1]["reason"] == "missing_vs_pte_fault_location"
+        return
+    expected, = checker.active["expected_gpaddr_writes"]
+    assert (expected["gpaddr"], expected["nonleaf"]) == (expected_pte_gpa, 1)
+    if bad_response:
+        assert checker.errors[-1]["reason"] == "vs_pte_fault_response_mismatch"
+    else:
+        assert not checker.errors
+    original_injected_gpa = (scenario.gpa & ~0xFFF) | (expected_pte_gpa & 0xFFF)
+    for cycle, (gpaddr, nonleaf) in enumerate(
+        ((scenario.gpa, 1), (original_injected_gpa, 1), (expected_pte_gpa, 0)), start=20,
+    ):
+        checker.observe_gpaddr_write(cycle, wen=1, waddr=7, gpaddr=gpaddr, nonleaf=nonleaf)
+        assert checker.errors[-1]["reason"] == "gpaddr_write_mismatch"
+    checker.observe_gpaddr_write(23, wen=1, waddr=7, gpaddr=expected_pte_gpa, nonleaf=1)
     assert checker.active["observed_gpaddr_writes"][-1]["gpaddr"] == expected_pte_gpa
 
 

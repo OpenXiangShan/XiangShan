@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from functools import partial
+
 import pytest
 
 from env.runtime.frontend_init import FrontendInitConfig
@@ -10,7 +12,7 @@ from env.sequences import (
     TranslationPte,
 )
 from tests.py.support.gstage_provenance import (
-    scenario as _scenario,
+    scenario as gstage_scenario,
     run_gstage_provenance,
 )
 from tests.py.zhaoxinran.support.translation import randomize_gstage_entry
@@ -24,11 +26,15 @@ pytestmark = pytest.mark.parametrize(
 )
 
 
+_scenario = partial(gstage_scenario, va=0x8020_0F00, gpa=0x8060_0F00, pa=0x8040_0F00, vsatp_ppn=0)
+
+
 _PROVENANCE_CASES = (
     pytest.param(
         _scenario(
             "translation-gstage-fake-pte-gpf",
-            s1_patch=(("s1_entry_v", 0), ("s1_pf", 0), ("s1_af", 0)),
+            table_gpa=0,
+            fake_pte=True,
             gpf=1,
             gaf=0,
         ),
@@ -38,7 +44,8 @@ _PROVENANCE_CASES = (
     pytest.param(
         _scenario(
             "translation-gstage-fake-pte-gaf",
-            s1_patch=(("s1_entry_v", 0), ("s1_pf", 0), ("s1_af", 0)),
+            table_gpa=0,
+            fake_pte=True,
             gpf=0,
             gaf=1,
         ),
@@ -48,14 +55,8 @@ _PROVENANCE_CASES = (
     pytest.param(
         _scenario(
             "translation-gstage-vs-nonleaf-gpf",
-            s1_patch=(
-                ("s1_entry_v", 1),
-                ("s1_entry_perm_r", 0),
-                ("s1_entry_perm_w", 0),
-                ("s1_entry_perm_x", 0),
-                ("s1_pf", 0),
-                ("s1_af", 0),
-            ),
+            table_gpa=0x8003_F000,
+            fake_pte=False,
             gpf=1,
             gaf=0,
         ),
@@ -65,14 +66,8 @@ _PROVENANCE_CASES = (
     pytest.param(
         _scenario(
             "translation-gstage-vs-nonleaf-gaf",
-            s1_patch=(
-                ("s1_entry_v", 1),
-                ("s1_entry_perm_r", 0),
-                ("s1_entry_perm_w", 0),
-                ("s1_entry_perm_x", 0),
-                ("s1_pf", 0),
-                ("s1_af", 0),
-            ),
+            table_gpa=0x8003_F000,
+            fake_pte=False,
             gpf=0,
             gaf=1,
         ),
@@ -125,10 +120,12 @@ def test_nonleaf_pte_gpf_frontend_gpaddr(env) -> None:
                     ("s1_entry_perm_r", 0),
                     ("s1_entry_perm_w", 0),
                     ("s1_entry_perm_x", 0),
+                    ("s1_entry_perm_a", 0),
                     ("s1_pf", 0),
                     ("s1_af", 0),
                     ("s2_gpf", 1),
                 ),
+                vs_pte_fault=(table_gpa, 0),
             ),
         ),
     )

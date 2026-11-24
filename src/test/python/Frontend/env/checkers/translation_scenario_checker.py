@@ -163,12 +163,18 @@ class TranslationScenarioChecker:
             if str(outcome.get("outcome")) != "instruction_guest_page_fault":
                 continue
             fault_va = int(outcome["va"])
-            guest_base = int(state.scenario.gpa) if s2xlate == 3 else int(state.scenario.va)
+            pte_gpa = outcome.get("vs_pte_gpa")
+            if pte_gpa is None:
+                guest_base = int(state.scenario.gpa) if s2xlate == 3 else int(state.scenario.va)
+                gpaddr = guest_base + fault_va - int(state.scenario.va)
+            else:
+                gpaddr = pte_gpa
             expected_gpaddr_writes.append({
                 "page": int(page),
                 "vpn": self.env.page_table.normalize_ptw_vpn(fault_va >> 12),
-                "gpaddr": guest_base + fault_va - int(state.scenario.va),
-                "nonleaf": None,
+                "gpaddr": gpaddr,
+                "nonleaf": int(pte_gpa is not None),
+                "vs_pte_response_level": outcome.get("vs_pte_response_level"),
             })
         payload_end = int(state.scenario.va) + len(state.scenario.payload)
         selected_page_set = set(selected_pages)
@@ -490,23 +496,40 @@ class TranslationScenarioChecker:
             self.active["responded_ptw_request_keys"].append(response_key)
         if int(actual["vpn"]) not in self.active["responded_ptw_vpns"]:
             self.active["responded_ptw_vpns"].append(int(actual["vpn"]))
-        if not int(get_gpa):
+        if int(s2xlate) == 3 and not int(get_gpa):
+            is_fake_pte = not int(response.get("s1_entry_v", 0))
+            has_rwx = any(int(response.get(f"s1_entry_perm_{perm}", 0)) for perm in "rwx")
+            implicit_gpf = (
+                int(response.get("s2_gpf", 0)) and not int(response.get("s2_gaf", 0))
+                and not int(response.get("s1_pf", 0)) and not int(response.get("s1_af", 0))
+                and (is_fake_pte or not has_rwx)
+            )
             for item in self.active["expected_gpaddr_writes"]:
                 if int(vpn) != int(item["vpn"]):
                     continue
-                is_fake_pte = not int(response.get("s1_entry_v", 0))
-                is_nonleaf = not any(int(response.get(f"s1_entry_perm_{perm}", 0)) for perm in "rwx")
-                item["nonleaf"] = int(
-                    int(s2xlate) == 3 and not int(response.get("s1_pf", 0))
-                    and not int(response.get("s1_af", 0)) and (is_fake_pte or is_nonleaf)
+                expected_level = item["vs_pte_response_level"]
+                if expected_level is None:
+                    if implicit_gpf:
+                        self._error(cycle, "missing_vs_pte_fault_location", actual=actual)
+                    continue
+                ppn_low = response.get("s1_ppn_low", ())
+                lane = int(vpn) & 7
+                table_ppn = (
+                    (int(response["s1_entry_ppn"]) << 3) | int(ppn_low[lane])
+                    if "s1_entry_ppn" in response and lane < len(ppn_low) else None
                 )
-                level = int(response.get("s1_entry_level", 0))
-                if item["nonleaf"] and is_nonleaf and not is_fake_pte and level > 0:
-                    lane = int(vpn) & 7
-                    low = int(response["s1_ppn_low"][lane])
-                    table_ppn = (int(response["s1_entry_ppn"]) << 3) | low
-                    pte_index = (int(vpn) >> (9 * (level - 1))) & 0x1FF
-                    item["gpaddr"] = (table_ppn << 12) + pte_index * 8
+                if (
+                    not implicit_gpf or is_fake_pte != (expected_level == 0)
+                    or int(response.get("s1_entry_level", -1)) != expected_level
+                    or table_ppn != (int(item["gpaddr"]) >> 12)
+                    or any(int(response.get(f"s1_entry_perm_{perm}", 0)) for perm in "rwxadu")
+                    or int(response.get("s1_entry_n", 0)) or int(response.get("s1_entry_pbmt", 0))
+                ):
+                    self._error(
+                        cycle, "vs_pte_fault_response_mismatch", expected=item,
+                        actual={**response_record, "table_ppn": table_ppn,
+                                "level": response.get("s1_entry_level"), "fake_pte": is_fake_pte},
+                    )
 
     def observe_gpaddr_write(self, cycle: int, *, wen: int, waddr: int, gpaddr: int, nonleaf: int) -> None:
         if self.active is None or not int(wen):
@@ -524,7 +547,7 @@ class TranslationScenarioChecker:
             return
         if not any(
             int(item["gpaddr"]) == actual["gpaddr"]
-            and (item["nonleaf"] is None or int(item["nonleaf"]) == actual["nonleaf"])
+            and int(item["nonleaf"]) == actual["nonleaf"]
             for item in expected
         ):
             self._error(cycle, "gpaddr_write_mismatch", expected=expected, actual=actual)

@@ -10,25 +10,37 @@ from env.sequences import (
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
 
-VA = 0x8020_0F00
-GPA = 0x8060_0F00
-PA = 0x8040_0F00
-PAYLOAD = b"\x13\x00\x00\x00" * 512
-
-
 def scenario(
     scenario_id: str,
     *,
-    s1_patch: tuple[tuple[str, int], ...],
+    va: int,
+    gpa: int,
+    pa: int,
+    table_gpa: int,
+    vsatp_ppn: int,
+    fake_pte: bool,
     gpf: int,
     gaf: int,
 ) -> TranslationScenario:
+    table_ppn = table_gpa >> 12
+    s1_patch = (
+        ("s1_entry_v", int(not fake_pte)),
+        ("s1_entry_level", 0 if fake_pte else 1),
+        ("s1_entry_ppn", table_ppn >> 3),
+        ("s1_ppn_low", (table_ppn & 7,) * 8),
+        ("s1_entry_perm_r", 0),
+        ("s1_entry_perm_w", 0),
+        ("s1_entry_perm_x", 0),
+        ("s1_entry_perm_a", 0),
+        ("s1_pf", 0),
+        ("s1_af", 0),
+    )
     return TranslationScenario(
         scenario_id=scenario_id,
-        va=VA,
-        gpa=GPA,
-        pa=PA,
-        payload=PAYLOAD,
+        va=va,
+        gpa=gpa,
+        pa=pa,
+        payload=b"\x13\x00\x00\x00" * 512,
         page_count=2,
         mode="sv39",
         stage2_mode="sv39",
@@ -37,14 +49,16 @@ def scenario(
         s1_pte=TranslationPte(asid=5, vmid=7),
         s2_pte=TranslationPte(vmid=7),
         vsatp_asid=5,
+        vsatp_ppn=vsatp_ppn,
         hgatp_vmid=7,
         expected_path="fault",
         expected_result="guest_fault" if gpf else "access_fault",
         ptw_response_overrides=(
             TranslationPtwResponseOverride(
-                vpn=VA >> 12,
+                vpn=va >> 12,
                 s2xlate=3,
                 patch=(*s1_patch, ("s2_gpf", gpf), ("s2_gaf", gaf)),
+                vs_pte_fault=(table_gpa, 2 if fake_pte else 0) if gpf else None,
             ),
         ),
     )

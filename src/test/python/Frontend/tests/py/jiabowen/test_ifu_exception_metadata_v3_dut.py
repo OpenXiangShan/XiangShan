@@ -23,6 +23,9 @@ pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires real Frontend DUT"
 )
 
+_VS_NONLEAF_GPF_VA = 0x8020_0F00
+_VS_NONLEAF_GPF_TABLE_GPA = 0x8003_F000
+
 
 def _capture_metadata(env):
     records, paths = [], {}
@@ -159,12 +162,14 @@ def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
     records = _capture_metadata(env)
     scenario = gstage.scenario(
         "ifu-bin954-vs-nonleaf-gpf",
-        s1_patch=(("s1_entry_v", 1), ("s1_entry_perm_r", 0),
-                  ("s1_entry_perm_w", 0), ("s1_entry_perm_x", 0),
-                  ("s1_pf", 0), ("s1_af", 0)),
+        va=_VS_NONLEAF_GPF_VA, gpa=0x8060_0F00, pa=0x8040_0F00,
+        table_gpa=_VS_NONLEAF_GPF_TABLE_GPA,
+        vsatp_ppn=0,
+        fake_pte=False,
         gpf=1, gaf=0,
     )
     gstage.run_gstage_provenance(env, scenario, "instruction_guest_page_fault")
+    expected_pte_gpa = _VS_NONLEAF_GPF_TABLE_GPA + ((scenario.va >> 12) & 0x1FF) * 8
     delivered = []
     for record in records:
         if not record["io_toIBuffer_ready"] or not record["gpaddr"]["wen"]:
@@ -186,11 +191,11 @@ def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
     for r in delivered:
         scope = r["effective_gpf_scope"]
         source = scope["gpaddr_source_block"]
-        assert r["gpaddr"]["addr"] == gstage.GPA
-        assert r[f"s2_icacheMeta_{source}_gpAddr_addr"] << 1 == gstage.GPA
+        assert r["gpaddr"]["addr"] == expected_pte_gpa
+        assert r[f"s2_icacheMeta_{source}_gpAddr_addr"] << 1 == expected_pte_gpa
         assert r["gpaddr"]["nonleaf"] == r[f"s2_icacheMeta_{source}_isForVSnonLeafPTE"] == 1
         assert scope["ftq"] == scope["delivered_ftq"]
-        assert scope["start_pc"] == gstage.VA
+        assert scope["start_pc"] == scenario.va
     _save_review(env, records, "vs_nonleaf_gpf")
 
 

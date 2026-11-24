@@ -71,6 +71,8 @@ class TranslationPtwResponseOverride:
     s2xlate: int
     get_gpa: int = 0
     patch: Tuple[Tuple[str, object], ...] = ()
+    # (table base GPA, level of the PTE being read) for an implicit VS access GPF.
+    vs_pte_fault: Optional[Tuple[int, int]] = None
 
     def as_agent_config(self) -> dict:
         return {
@@ -557,6 +559,19 @@ class TranslationScenarioBuilder:
             override_keys.add(key)
             if not override.patch:
                 raise ValueError("PTW response override patch must not be empty")
+            if override.vs_pte_fault is not None:
+                table_gpa, level = override.vs_pte_fault
+                patch = dict(override.patch)
+                if (s2xlate != _S2XLATE_ALL_STAGE or key[1:] != (_S2XLATE_ALL_STAGE, 0)
+                        or not patch.get("s2_gpf") or any(patch.get(bit) for bit in ("s1_pf", "s1_af", "s2_gaf"))):
+                    raise ValueError("vs_pte_fault requires an all-stage guest page fault override")
+                root_level = 3 if stage1_mode == "sv48" else 2
+                if not 0 <= level <= root_level:
+                    raise ValueError("vs_pte_fault level is outside the VS page table")
+                if not 0 <= table_gpa < (1 << self._stage2_gpa_bits(stage2_mode)) or table_gpa % _PAGE_SIZE:
+                    raise ValueError("vs_pte_fault table base must be a page-aligned GPA")
+                if level == root_level and table_gpa != int(scenario.vsatp_ppn) << 12:
+                    raise ValueError("vs_pte_fault root table base must match vsatp.ppn")
         self.env.ptw_agent.validate_response_overrides(
             tuple(override.as_agent_config() for override in scenario.ptw_response_overrides)
         )
@@ -805,6 +820,15 @@ class TranslationScenarioBuilder:
         elif int(patch.get("s2_gpf", 0)):
             fault = "instruction_guest_page_fault"
             fault_name = "guest_fault"
+            if override.vs_pte_fault is not None:
+                table_gpa, level = override.vs_pte_fault
+                pte_index = (int(outcome["va"]) >> (12 + 9 * level)) & 0x1FF
+                root_level = 3 if str(scenario.mode).lower() == "sv48" else 2
+                outcome = {
+                    **outcome,
+                    "vs_pte_gpa": table_gpa + pte_index * 8,
+                    "vs_pte_response_level": 0 if level == root_level else level + 1,
+                }
         else:
             return outcome
         return {
