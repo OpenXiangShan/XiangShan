@@ -198,6 +198,11 @@ INTERESTING_EVENT_TYPES = frozenset(
         "translation.cfvec_exception",
         "translation.speculative_ptw_request",
         "translation.stale_speculative_ptw_response",
+        "translation.golden_replay_bound",
+        "translation.background_ptw_request",
+        "translation.background_ptw_response",
+        "translation.pending_cfvec_exception",
+        "translation.squashed_cfvec_exception",
     }
 )
 

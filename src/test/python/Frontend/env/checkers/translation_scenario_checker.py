@@ -22,6 +22,8 @@ class TranslationScenarioChecker:
         self._ptw_requests: list[dict] = []
         self._icache_cursor = 0
         self._uncache_cursor = 0
+        self._replay_trace = None
+        self._replay_faults: list[dict] = []
 
     def bind_env(self, env) -> None:
         self.env = env
@@ -198,6 +200,8 @@ class TranslationScenarioChecker:
             ]
             target_fetches = expected_fetches if page in selected_page_set else allowed_out_of_scope_fetches
             target_fetches.extend(fetches)
+        self._replay_trace = None
+        self._replay_faults.clear()
         self.active = {
             "scenario_id": str(state.scenario.scenario_id),
             "translation_epoch": int(translation_epoch),
@@ -245,6 +249,80 @@ class TranslationScenarioChecker:
         self._record(getattr(self.env, "current_cycle", 0), "armed")
         return self.get_active()
 
+    def bind_golden_replay(self, trace) -> None:
+        """Scope a successful replay to executed pages/blocks, retaining PTW checks."""
+        if self.active is None or self.active["expected_fault"] is not None:
+            raise ValueError("golden replay requires an armed successful translation scenario")
+        if not trace.entries or any(entry.exception is not None for entry in trace.entries):
+            raise ValueError("golden replay requires a nonempty trace without architectural exceptions")
+        pages = self.active["expected_page_outcomes"]
+        required_fetches = {}
+        required_vpns = set()
+        for entry in trace.entries:
+            for va in range(int(entry.pc), int(entry.pc) + int(entry.size)):
+                matched = next(((page_index, page) for page_index, page in
+                                zip(self.active["selected_pages"], pages)
+                                if bool(page.get("ok")) and (int(page["va"]) >> 12) == (va >> 12)), None)
+                if matched is None:
+                    raise ValueError("golden PC has no successful scenario mapping")
+                page_index, outcome = matched
+                pa = int(outcome["pa"]) + va - int(outcome["va"])
+                path = "icache" if outcome["expected_path"] == "cacheable" else "uncache"
+                fetch_pa = pa & ~(0x3F if path == "icache" else 0x7)
+                required_fetches[(path, fetch_pa)] = {
+                    "page": page_index, "vpn": va >> 12, "path": path, "pa": fetch_pa,
+                }
+                required_vpns.add(self.env.page_table.normalize_ptw_vpn(va >> 12))
+        self.active["required_fetches"] = list(required_fetches.values())
+        known_fetches = {(fetch["path"], int(fetch["pa"])) for fetch in self.active["expected_fetches"]}
+        self.active["expected_fetches"].extend(
+            fetch for key, fetch in required_fetches.items() if key not in known_fetches
+        )
+        self.active["required_ptw_request_keys"] = [
+            key for key in self.active["required_ptw_request_keys"] if key[0] in required_vpns
+        ]
+        self._replay_trace = trace
+        self._record(getattr(self.env, "current_cycle", 0), "golden_replay_bound",
+                     trace_entries=len(trace.entries), required_fetches=len(required_fetches))
+
+    def observe_backend_cfvec(self, entry) -> None:
+        if self._replay_trace is None or not int(entry.exception_bits):
+            return
+        self._replay_faults.append({"entry": entry, "squashed": False})
+        self._record(entry.cycle, "pending_cfvec_exception", pc=int(entry.pc),
+                     ftq_flag=int(entry.ftq_flag), ftq_value=int(entry.ftq_value),
+                     ftq_offset=int(entry.ftq_offset), slot=int(entry.slot))
+
+    def observe_backend_squash(self, cycle: int, entries, *, redirect: dict) -> None:
+        if self._replay_trace is None:
+            return
+        # Only a CFI recovery can excuse a fault. A fault retry or an unrelated
+        # redirect cannot excuse it, and object identity prevents FTQ reuse aliases.
+        if (redirect.get("redirect_class", "control_flow") != "control_flow"
+                or not all(key in redirect for key in ("pc", "ftq_flag", "ftq_value", "ftq_offset"))
+                or int(redirect.get("branch_type", 0)) not in (1, 2, 3)
+                or any(int(redirect.get(key, 0)) for key in
+                       ("backend_iaf", "backend_ipf", "backend_igpf", "satp_flush"))):
+            return
+        for fault in self._replay_faults:
+            entry = fault["entry"]
+            if fault["squashed"] or not any(entry is removed for removed in entries):
+                continue
+            fault["squashed"] = True
+            self._record(cycle, "squashed_cfvec_exception", pc=int(entry.pc),
+                         observed_cycle=int(entry.cycle), ftq_flag=int(entry.ftq_flag),
+                         ftq_value=int(entry.ftq_value), ftq_offset=int(entry.ftq_offset),
+                         redirect=dict(redirect))
+
+    def _replay_background_request(self, actual: dict) -> bool:
+        if self._replay_trace is None:
+            return False
+        expected = self.active["expected_ptw_requests"]
+        return (bool(expected)
+                and all(int(item["vpn"]) != actual["vpn"] for item in expected)
+                and any((int(item["s2xlate"]), int(item["get_gpa"]))
+                        == (actual["s2xlate"], actual["get_gpa"]) for item in expected))
+
     def get_active(self) -> Optional[dict]:
         return None if self.active is None else dict(self.active)
 
@@ -279,6 +357,13 @@ class TranslationScenarioChecker:
             ),
             None,
         )
+        if expected is None and self._replay_background_request(actual):
+            # The top PTW port has no FTQ owner. Keep this traffic explicitly
+            # unattributed; it neither satisfies scenario evidence nor proves a bug.
+            self._ptw_requests.append({**actual, "translation_epoch": int(self.active["translation_epoch"]),
+                                       "replay_background": True})
+            self._record(cycle, "background_ptw_request", actual=actual)
+            return
         if expected is None and self.active["expected_ptw_requests"] and not self.active["request_seen"]:
             self._record(cycle, "pre_target_ptw_request", actual=actual)
             self._ptw_requests.append(
@@ -382,6 +467,9 @@ class TranslationScenarioChecker:
         )
         request_record = None if request_index is None else self._ptw_requests.pop(request_index)
         request_epoch = None if request_record is None else request_record["translation_epoch"]
+        if request_record is not None and request_record.get("replay_background"):
+            self._record(cycle, "background_ptw_response", actual=actual, response=response_record)
+            return
         if request_record is not None and request_record.get("speculative"):
             self._record(cycle, "stale_speculative_ptw_response", actual=actual)
             return
@@ -632,6 +720,10 @@ class TranslationScenarioChecker:
             cross_page=bool(cross_page),
         )
         if expected_fault is None:
+            if self._replay_trace is not None:
+                # Raw cfVec valid is not a retirement or even an enqueue event.
+                # Backend queue instances below must each acquire squash proof.
+                return
             self._error(cycle, "unexpected_cfvec_exception", pc=int(pc), actual_fault=actual_fault)
             return
         va = int(self.active["va"])
@@ -722,6 +814,20 @@ class TranslationScenarioChecker:
         if self.active is None:
             raise AssertionError("translation checker has no armed scenario")
         missing = []
+        if self._replay_trace is not None:
+            result = getattr(self.env, "_last_run_until_golden_result", None)
+            if (result is None or result.completed is not True or result.status != "completed"
+                    or result.cursor != len(self._replay_trace.entries)
+                    or result.total_entries != len(self._replay_trace.entries)
+                    or result.pending_work != 0 or result.monitor_error_count != 0
+                    or self.env.backend_model.golden_trace is not self._replay_trace):
+                missing.append("golden_replay_completion")
+            for fault in self._replay_faults:
+                entry = fault["entry"]
+                if not fault["squashed"]:
+                    self._error(entry.cycle, "unresolved_cfvec_exception", pc=int(entry.pc),
+                                ftq_flag=int(entry.ftq_flag), ftq_value=int(entry.ftq_value),
+                                ftq_offset=int(entry.ftq_offset), exception_bits=int(entry.exception_bits))
         expected_ptw_request_keys = set(self.active["required_ptw_request_keys"])
         if not expected_ptw_request_keys.issubset(self.active["requested_ptw_request_keys"]):
             missing.append("ptw_request")
@@ -733,7 +839,7 @@ class TranslationScenarioChecker:
         else:
             missing_fetches = [
                 int(item["pa"])
-                for item in self.active["expected_fetches"]
+                for item in self.active.get("required_fetches", self.active["expected_fetches"])
                 if int(item["pa"]) not in self.active["observed_fetch_pas"]
             ]
             if missing_fetches:
@@ -790,6 +896,8 @@ class TranslationScenarioChecker:
         self.errors.clear()
         self.records.clear()
         self._ptw_requests.clear()
+        self._replay_trace = None
+        self._replay_faults.clear()
 
 
 __all__ = ["TranslationScenarioChecker"]

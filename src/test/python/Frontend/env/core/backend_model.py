@@ -1247,6 +1247,9 @@ class BackendModel:
         if queue_instr.is_cfi:
             state.pending_queue_resolve_indices.append(int(queue_index))
         self._apply_backend_state()
+        checker = getattr(self.env, "translation_checker", None)
+        if checker is not None:
+            checker.observe_backend_cfvec(queue_instr)
         return int(queue_index)
 
     def _cfvec_queue_mark_matched(self, queue_index: int, entry: TraceEntry) -> None:
@@ -2299,10 +2302,23 @@ class BackendModel:
         ranges.append(f"{pc_range}({range_ftq_flag},{range_ftq_value})")
         return ",".join(ranges)
 
+    def _notify_translation_squash(self, entries, redirect: Optional[dict] = None) -> None:
+        checker = getattr(self.env, "translation_checker", None)
+        if checker is None:
+            return
+        if redirect is None:
+            episode = self._active_wrong_path_episode()
+            if episode is None or not episode["redirect_driven"]:
+                return
+            redirect = episode["redirect_context"]
+        if redirect is not None:
+            checker.observe_backend_squash(self.current_cycle, entries, redirect=redirect)
+
     def _cfvec_queue_flush_wrong_path(
         self,
         *,
         keep_open_ftqs: Optional[set[tuple[int, int]]] = None,
+        redirect: Optional[dict] = None,
     ) -> Optional[dict]:
         state = self._sync_backend_state()
         episode = self._active_wrong_path_episode()
@@ -2322,6 +2338,7 @@ class BackendModel:
         remove_start = max(0, int(origin_index))
         remove_stop = len(state.cfvec_queue)
         removed_entries = list(state.cfvec_queue)[remove_start:remove_stop]
+        self._notify_translation_squash(removed_entries, redirect)
         summary = {
             "removed_count": len(removed_entries),
             "queue_index_start": remove_start if removed_entries else -1,
@@ -2443,6 +2460,7 @@ class BackendModel:
             return
         prior_episode = self._active_wrong_path_episode()
         removed_entries = list(self._cfvec_queue)[remove_start:remove_stop]
+        self._notify_translation_squash(removed_entries)
         removed_ftqs = {
             (int(entry.ftq_flag), int(entry.ftq_value))
             for entry in removed_entries
@@ -4624,7 +4642,7 @@ class BackendModel:
                     int(pre_flush_current_ftq[0]),
                     int(pre_flush_current_ftq[1]),
                 )
-            self._cfvec_queue_flush_wrong_path()
+            self._cfvec_queue_flush_wrong_path(redirect=payload)
             if not flush_itself and bool(payload.get("source_bound", False)):
                 self._cfvec_queue_close_current_ftq_span(int(ftq_flag), int(ftq_value))
                 if (

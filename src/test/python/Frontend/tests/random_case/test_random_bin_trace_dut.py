@@ -83,8 +83,8 @@ def _oracle_health(stats: dict) -> dict:
 
 
 def _arm_strict_translation(env, state):
-    # Use the public strict API. Predictor redirects do not excuse unexpected
-    # PTW identities or cfVec exceptions; assert_translation_scenario stays on.
+    # Keep the public translation checks armed; the loaded golden trace later
+    # scopes fetch requirements and requires exact backend fault squash evidence.
     return env.arm_translation_scenario(
         state, page_indexes=tuple(range(len(state.expected_page_outcomes))), expect_ptw=True,
     )
@@ -229,6 +229,8 @@ def test_random_bin_trace(env):
             max_cycles=0,
             start_index=trace_start_index,
         )
+        if translation_scenario is not None:
+            env.translation_checker.bind_golden_replay(env.backend_model.golden_trace)
         run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
         result = getattr(env, "_last_run_until_golden_result", None)
         assert run_ok is True, (
