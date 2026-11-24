@@ -17,6 +17,7 @@ build --tool_java_runtime_version=remotejdk_21
 build --@rules_python//python/config_settings:bootstrap_impl=script
 
 common --lockfile_mode=off
+common --experimental_isolated_extension_usages
 common --@@protobuf+//bazel/toolchains:prefer_prebuilt_protoc
 common --downloader_config=scripts/openroad-flow/bazel/downloader.cfg
 common --incompatible_default_to_explicit_init_py

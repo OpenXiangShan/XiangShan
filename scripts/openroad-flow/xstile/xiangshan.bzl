@@ -1321,7 +1321,8 @@ _REGFILE_MARGIN_UM = 2.0
 # clock buffers no site at CTS (DPL-0036): a tenth more, 80.2 x 70.5 um.
 XS_REGFILE_OUTLINE_UM = {
     "FtqEntryQueue": {"w_um": 84.2, "h_um": 74.5},
-    "FtqMetaQueueRedirect": {"w_um": 192.5, "h_um": 78.0},
+    "FtqMetaQueueRedirect": {"w_um": 112.2, "h_um": 155.2},
+    "FtqMetaQueueResolve": {"w_um": 173.7, "h_um": 306.4},
 }
 
 # A register file whose legaliser needs to look further than its default
