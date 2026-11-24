@@ -28,7 +28,7 @@ import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.tracertl.TraceInfo
+import xiangshan.tracertl.TracertlInfo
 
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -667,7 +667,7 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val vtype            = VType()
   val oldVType         = VType()
   val rawInst          = UInt(32.W)
-  val traceInfo        = TraceInfo()
+  val tracertlInfo        = TracertlInfo()
   val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())
 }
 

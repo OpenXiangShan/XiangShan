@@ -40,7 +40,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQu
 
   // Exceptions and synthetic force-jumps transfer control after the current
   // trace instruction even when the backend redirect flushes the ROB entry.
-  val redirectTrace = io.redirect.bits.traceInfo.get
+  val redirectTrace = io.redirect.bits.tracertlInfo.get
   val redirectFlushItself = RedirectLevel.flushItself(io.redirect.bits.level) &&
     !redirectTrace.isForceJump &&
     !redirectTrace.hasException

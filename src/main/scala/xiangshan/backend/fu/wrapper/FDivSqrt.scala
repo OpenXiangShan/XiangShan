@@ -17,8 +17,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
   // io alias
   private val opcode = fuOpType(3)
-  private val src0 = TraceRTLChoose(inData.src(0), io.in.bits.ctrl.traceInfo.get.arthiSrc0)
-  private val src1 = TraceRTLChoose(inData.src(1), io.in.bits.ctrl.traceInfo.get.arthiSrc1)
+  private val src0 = TraceRTLChoose(inData.src(0), io.in.bits.ctrl.tracertlInfo.get.arthiSrc0)
+  private val src1 = TraceRTLChoose(inData.src(1), io.in.bits.ctrl.tracertlInfo.get.arthiSrc1)
 
   // modules
   private val fdiv = Module(new FloatDivider)
@@ -71,8 +71,8 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
 
   // io alias
   private val opcode = fuOpType(3)
-  private val src0 = TraceRTLChoose(ex0src0, ex0ctrl.traceInfo.get.arthiSrc0)
-  private val src1 = TraceRTLChoose(ex0src1, ex0ctrl.traceInfo.get.arthiSrc1)
+  private val src0 = TraceRTLChoose(ex0src0, ex0ctrl.tracertlInfo.get.arthiSrc0)
+  private val src1 = TraceRTLChoose(ex0src1, ex0ctrl.tracertlInfo.get.arthiSrc1)
 
   // modules
   private val fdiv = Module(new FloatDivider)

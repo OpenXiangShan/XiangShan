@@ -36,7 +36,7 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
     finalValid.orR,
     ParallelPosteriorityMux(
       finalValid,
-      io.decoded.map(entry => (entry.compact.traceInfo.branchType =/= 0.U) && entry.compact.traceInfo.isTaken)
+      io.decoded.map(entry => (entry.compact.tracertlInfo.branchType =/= 0.U) && entry.compact.tracertlInfo.isTaken)
     ),
     false.B
   )

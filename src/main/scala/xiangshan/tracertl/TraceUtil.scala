@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.DebugOptionsKey
 
 object TraceRTLChoose {
-  // By-name so trace-only operands (e.g. traceInfo.get) are never elaborated in execution mode.
+  // By-name so trace-only operands (e.g. tracertlInfo.get) are never elaborated in execution mode.
   def apply[T <: Data](default: => T, trtl: => T)(implicit p: Parameters): T =
     if (p(DebugOptionsKey).TraceRTLMode) trtl else default
 }
@@ -32,7 +32,7 @@ object TraceRTLDontCareValue {
 }
 
 /** Per-instruction trace payload carried through the pipeline; absent in execution mode. */
-object TraceInfo {
+object TracertlInfo {
   def apply()(implicit p: Parameters): Option[TraceInstrBundle] =
     Option.when(p(DebugOptionsKey).TraceRTLMode)(new TraceInstrBundle)
 }

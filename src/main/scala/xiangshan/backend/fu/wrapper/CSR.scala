@@ -117,7 +117,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.sret := isSret
       in.bits.dret := isDret
       in.bits.redirectFlush := redirectFlush
-      in.bits.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
+      in.bits.tracertlInfo.foreach(_ := io.in.bits.ctrl.tracertlInfo.get)
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
@@ -149,7 +149,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrIn.diffArchEvent.zip(csrMod.io.diffArchEvent).foreach { case (sink, source) =>
     sink := source
   }
-  csrMod.io.fromRob.trap.bits.traceInfo.foreach(_ := csrIn.exception.bits.traceInfo.get)
+  csrMod.io.fromRob.trap.bits.tracertlInfo.foreach(_ := csrIn.exception.bits.tracertlInfo.get)
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -376,7 +376,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.backendIPF := csrMod.io.xretTargetPc.bits.raiseIPF
   redirect.backendIAF := csrMod.io.xretTargetPc.bits.raiseIAF
   redirect.backendIGPF := csrMod.io.xretTargetPc.bits.raiseIGPF
-  redirect.traceInfo.foreach(_ := RegEnable(io.in.bits.ctrl.traceInfo.get, io.in.fire))
+  redirect.tracertlInfo.foreach(_ := RegEnable(io.in.bits.ctrl.tracertlInfo.get, io.in.fire))
   // Only mispred will send redirect to frontend
   redirect.isMisPred := false.B
 

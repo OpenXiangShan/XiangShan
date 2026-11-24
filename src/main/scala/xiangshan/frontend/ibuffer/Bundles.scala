@@ -31,7 +31,7 @@ import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.tracertl.TraceInfo
+import xiangshan.tracertl.TracertlInfo
 import xiangshan.tracertl.TraceInstrBundle
 
 // FIXME: these ptrs have ambiguous names
@@ -60,7 +60,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt   = TriggerAction()
   val isLastInFtqEntry: Bool   = Bool()
 
-  val traceInfo: Option[TraceInstrBundle] = TraceInfo()
+  val tracertlInfo: Option[TraceInstrBundle] = TracertlInfo()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
@@ -75,7 +75,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
     debug_seqNum     := fetch.debug_seqNum(i)
-    traceInfo.foreach(_ := fetch.traceInfo.get(i))
+    tracertlInfo.foreach(_ := fetch.tracertlInfo.get(i))
     this
   }
 
@@ -99,7 +99,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.specvtype          := DontCare // assign outside
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
-    result.traceInfo.foreach(_ := traceInfo.get)
+    result.tracertlInfo.foreach(_ := tracertlInfo.get)
     result
   }
 }
@@ -139,7 +139,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
 
-  val traceInfo: Option[TraceInstrBundle] = TraceInfo()
+  val tracertlInfo: Option[TraceInstrBundle] = TracertlInfo()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
@@ -171,7 +171,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.vtype                                         := vtype
     cf.specvtype                                     := specvtype
     cf.debug_seqNum                                  := debug_seqNum
-    cf.traceInfo.foreach(_ := traceInfo.get)
+    cf.tracertlInfo.foreach(_ := tracertlInfo.get)
     cf
   }
 }

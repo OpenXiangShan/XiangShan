@@ -24,7 +24,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   // TraceRTL has no GPR values: take the target from the trace
   private val jumpTarget = TraceRTLChoose(
     Mux(isJr, src, pc) + SignExt(imm, XLEN),
-    SignExt(io.in.bits.ctrl.traceInfo.get.target, XLEN)
+    SignExt(io.in.bits.ctrl.tracertlInfo.get.target, XLEN)
   )
 
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
@@ -53,7 +53,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.backendIGPF := TraceRTLDontCareValue(io.instrAddrTransType.get.checkGuestPageFault(jumpTarget))
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
   redirect.isRVC := io.in.bits.ctrl.isRVC.get
-  redirect.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
+  redirect.tracertlInfo.foreach(_ := io.in.bits.ctrl.tracertlInfo.get)
   //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready

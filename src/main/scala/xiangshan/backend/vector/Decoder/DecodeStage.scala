@@ -132,7 +132,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
-        ctrl.traceInfo.foreach(_ := inMopBits.traceInfo.get)
+        ctrl.tracertlInfo.foreach(_ := inMopBits.tracertlInfo.get)
         ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
@@ -166,7 +166,7 @@ class DecodeStageImp(
         bits.ftqOffset := mopInfo.ftqOffset
         bits.isLastInFtqEntry := mopInfo.isLastInFtqEntry
         bits.instr := mopInfo.rawInst
-        bits.traceInfo.foreach(_ := mopInfo.traceInfo.get)
+        bits.tracertlInfo.foreach(_ := mopInfo.tracertlInfo.get)
         bits.commitType := uopInfo.commitType
         bits.srcType :=
           Seq(uopInfo.src1Ren, uopInfo.src2Ren, uopInfo.src3Ren)
@@ -221,7 +221,7 @@ class DecodeStageImp(
           x.debug_seqNum.uopIdx := uopInfo.uopIdx
         }
         // TraceRTL raises every traced exception as an illegal instruction
-        bits.traceInfo.foreach { t =>
+        bits.tracertlInfo.foreach { t =>
           bits.exceptionVec := 0.U.asTypeOf(bits.exceptionVec)
           bits.exceptionVec(illegalInstr) := t.hasException
         }

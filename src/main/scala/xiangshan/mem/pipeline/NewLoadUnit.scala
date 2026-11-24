@@ -180,7 +180,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   // 6. loads issued from IQ
   val ldin = io.ldin.bits
-  def ldinTraceVAddr = ldin.toDynInst().traceInfo.get.memoryAddrVA
+  def ldinTraceVAddr = ldin.toDynInst().tracertlInfo.get.memoryAddrVA
   val ldinVAddr = TraceRTLChoose(ldin.src(0) + SignExt(ldin.imm(11, 0), VAddrBits), ldinTraceVAddr(VAddrBits - 1, 0))
   val ldinFullva = TraceRTLChoose(ldin.src(0) + SignExt(ldin.imm(11, 0), XLEN), SignExt(ldinTraceVAddr, XLEN))
   val ldinSize = LSUOpType.size(ldin.fuOpType) // B, H, W, D, excluding of Q
@@ -611,7 +611,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val paddrEffective = tlbHit || noQuery // hit or noQuery
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
   val noQueryPAddr = Mux(io.uncacheBypassResp.valid, io.uncacheBypassResp.bits.paddr, in.paddr.get)
-  def tracePAddr = SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits)
+  def tracePAddr = SignExt(uop.tracertlInfo.get.memoryAddrPA, PAddrBits)
   val paddr = Mux(noQuery, noQueryPAddr, TraceRTLChoose(tlbResp.bits.paddr(0), tracePAddr))
   val paddrDCache = Mux(noQuery, noQueryPAddr, TraceRTLChoose(tlbResp.bits.paddr(1), tracePAddr))
   val gpaddr = TraceRTLChoose(tlbResp.bits.gpaddr(0), tracePAddr)
@@ -1105,7 +1105,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.ftqOffset := uop.ftqOffset
   nukeQueryReq.pc := uop.pc
   nukeQueryReq.debugInfo := uop.perfDebugInfo
-  nukeQueryReq.traceInfo.foreach(_ := uop.traceInfo.get)
+  nukeQueryReq.tracertlInfo.foreach(_ := uop.tracertlInfo.get)
 
   val rarNack = io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
   val rawNack = io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
@@ -1761,7 +1761,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
-  io.rollback.bits.traceInfo.foreach(_ := uop.traceInfo.get)
+  io.rollback.bits.tracertlInfo.foreach(_ := uop.tracertlInfo.get)
   io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid

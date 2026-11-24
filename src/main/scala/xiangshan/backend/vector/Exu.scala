@@ -19,7 +19,7 @@ import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => Ve
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
-import xiangshan.tracertl.TraceInfo
+import xiangshan.tracertl.TracertlInfo
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import xiangshan._
 import yunsuan.vector.Common.{SewOH, VSew, _}
@@ -294,7 +294,7 @@ object Exu {
       sink.oldVType    .foreach(x => x := this.ctrl.oldVType.get)
       sink.vm          .foreach(x => x := this.ctrl.vm.get)
       sink.frm         .foreach(x => x := this.ctrl.frm.get)
-      sink.traceInfo   .foreach(x => x := this.ctrl.traceInfo.get)
+      sink.tracertlInfo   .foreach(x => x := this.ctrl.tracertlInfo.get)
     }
 
     def <#=:(sink: Func.InData): Unit = {
@@ -397,7 +397,7 @@ object Exu {
     val src12Rev  = Bool()
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
-    val traceInfo = if (param.fuConfigs.exists(_.isFdiv)) TraceInfo() else None
+    val tracertlInfo = if (param.fuConfigs.exists(_.isFdiv)) TracertlInfo() else None
 
     val debug     = Option.when(backendParams.debugEn)(new DebugBundle)
 
@@ -429,7 +429,7 @@ object Exu {
       this.src12Rev := deq.src12Rev
       this.vtype.foreach(_ := deq.vtype.get)
       this.oldVType.foreach(_ := deq.oldVType.get)
-      this.traceInfo.foreach(_ := deq.traceInfo.get)
+      this.tracertlInfo.foreach(_ := deq.tracertlInfo.get)
 
       this.debug.foreach(_ := deq.debug.get)
     }

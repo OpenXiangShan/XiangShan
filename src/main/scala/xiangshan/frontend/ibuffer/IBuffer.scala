@@ -559,7 +559,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     io.out.zipWithIndex.foreach { case (out, i) =>
       traceDriveCollector.enable(i) := out.fire && !io.flush
       traceDriveCollector.pc(i)     := out.bits.pc
-      traceDriveCollector.inst(i)   := out.bits.traceInfo.get.inst
+      traceDriveCollector.inst(i)   := out.bits.tracertlInfo.get.inst
     }
   }
 

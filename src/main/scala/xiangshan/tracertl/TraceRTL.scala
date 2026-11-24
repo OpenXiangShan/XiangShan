@@ -30,7 +30,7 @@ class TraceAlignedFetch(implicit p: Parameters) extends TraceBundle {
   val foldPc        = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val pdInfoVec     = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
   val jumpOffsetVec = Vec(IBufferEnqueueWidth, GuardedPc())
-  val traceInfo     = Vec(IBufferEnqueueWidth, new TraceInstrBundle)
+  val tracertlInfo     = Vec(IBufferEnqueueWidth, new TraceInstrBundle)
 }
 
 class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
@@ -50,6 +50,7 @@ class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
 class TraceRTL(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceRTLIO)
 
+  /* under trace helper? */
   // Move the packet to the IBuffer slots the IFU aligned the fetch block to.
   private def shiftToIBuffer[T <: Data](data: Vec[T], shiftNum: UInt): Vec[T] = {
     require(data.length == IBufferEnqueueWidth && shiftNum.getWidth == 2)
@@ -153,9 +154,9 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   private val aligned = io.aligned
   aligned.instrVec.zip(s3DecodedForIFU).foreach { case (instr, decoded) =>
     val entry = decoded.compact
-    val isRvc = entry.traceInfo.isRVC
+    val isRvc = entry.tracertlInfo.isRVC
     instr.valid             := entry.valid
-    instr.data              := entry.traceInfo.inst
+    instr.data              := entry.tracertlInfo.inst
     instr.isRvc             := isRvc
     instr.isPredTaken       := decoded.isPredTaken
     instr.invalidTaken      := false.B
@@ -166,11 +167,11 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
     instr.isPrevEndHalfRvi  := entry.isPrevEndHalfRvi
     instr.isCrossBlockInstr := entry.isCrossBlockInstr
   }
-  aligned.instrPcVec    := VecInit(s3DecodedForIFU.map(d => traceGuardedPc(d.compact.traceInfo.pcVA)))
+  aligned.instrPcVec    := VecInit(s3DecodedForIFU.map(d => traceGuardedPc(d.compact.tracertlInfo.pcVA)))
   aligned.instrValid    := VecInit(s3DecodedForIFU.map(_.compact.valid)).asUInt
   aligned.instrCount    := PopCount(s3DecodedForIFU.map(_.compact.valid))
   aligned.foldPc        := VecInit(aligned.instrPcVec.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)))
   aligned.pdInfoVec     := VecInit(s3DecodedForIFU.map(_.pd))
   aligned.jumpOffsetVec := VecInit(s3DecodedForIFU.map(_.jumpOffset))
-  aligned.traceInfo     := VecInit(s3DecodedForIFU.map(_.compact.traceInfo))
+  aligned.tracertlInfo     := VecInit(s3DecodedForIFU.map(_.compact.tracertlInfo))
 }

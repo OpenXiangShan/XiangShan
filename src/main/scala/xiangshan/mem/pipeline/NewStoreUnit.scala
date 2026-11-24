@@ -84,7 +84,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   // 1. scalar store requests issued from the issue queue
   val stin = io.stin.bits
   val stinUop = stin.toDynInst()
-  def stinTraceVAddr = stinUop.traceInfo.get.memoryAddrVA
+  def stinTraceVAddr = stinUop.tracertlInfo.get.memoryAddrVA
   val stinVAddr = TraceRTLChoose(stin.src(0) + SignExt(stin.imm(11,0), VAddrBits), stinTraceVAddr(VAddrBits - 1, 0))
   val stinFullva = TraceRTLChoose(stin.src(0) + SignExt(stin.imm(11,0), XLEN), SignExt(stinTraceVAddr, XLEN))
   val stinSize = Cat(0.U, LSUOpType.size(stinUop.fuOpType))
@@ -338,7 +338,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isHyper = tlbResp.bits.excp(0).isHyper
   val isForVSnonLeafPTE = tlbResp.bits.isForVSnonLeafPTE
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
-  def tracePAddr = SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits)
+  def tracePAddr = SignExt(uop.tracertlInfo.get.memoryAddrPA, PAddrBits)
   val paddr = TraceRTLChoose(tlbResp.bits.paddr(0), tracePAddr)
   val gpaddr = TraceRTLChoose(tlbResp.bits.gpaddr(0), tracePAddr)
   val fullva = tlbResp.bits.fullva

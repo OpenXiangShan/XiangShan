@@ -16,7 +16,7 @@ class TracePreDecoder(implicit p: Parameters) extends TraceModule with PreDecode
   val io = IO(new TracePreDecoderIO())
 
   for (i <- 0 until IBufferEnqueueWidth) {
-    val inst      = io.compact(i).traceInfo.inst
+    val inst      = io.compact(i).tracertlInfo.inst
     val curIsRVC  = isRVC(inst)
     val jalOffset = getJalOffset(inst, curIsRVC)
     val brOffset  = getBrOffset(inst, curIsRVC)

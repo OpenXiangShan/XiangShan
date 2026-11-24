@@ -20,7 +20,7 @@ import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.CSRs
-import xiangshan.tracertl.{TraceInfo, TraceRTLChoose}
+import xiangshan.tracertl.{TracertlInfo, TraceRTLChoose}
 
 import scala.collection.immutable.SeqMap
 
@@ -86,7 +86,7 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val sret = Input(Bool())
   val dret = Input(Bool())
   val redirectFlush = Input(Bool())
-  val traceInfo = TraceInfo()
+  val tracertlInfo = TracertlInfo()
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
@@ -152,7 +152,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
         val isFormer = Bool()
-        val traceInfo = TraceInfo()
+        val tracertlInfo = TracertlInfo()
       })
       val commit = Input(new RobCommitCSR)
       val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Bool())
@@ -1249,11 +1249,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     val traceTrapUpdate = RegNext(io.fromRob.trap.valid, false.B)
     io.trapTargetPc.valid := traceTrapUpdate
     io.trapTargetPc.bits := DataHoldBypass(
-      RegEnable(traceTargetPc(io.fromRob.trap.bits.traceInfo.get.target), io.fromRob.trap.valid),
+      RegEnable(traceTargetPc(io.fromRob.trap.bits.tracertlInfo.get.target), io.fromRob.trap.valid),
       traceTrapUpdate
     )
     io.xretTargetPc.bits := DataHoldBypass(
-      Mux(ceReEntryDmode, targetCeReEntryDmode, traceTargetPc(io.in.bits.traceInfo.get.target)),
+      Mux(ceReEntryDmode, targetCeReEntryDmode, traceTargetPc(io.in.bits.tracertlInfo.get.target)),
       xretTargetUpdate
     )
   }

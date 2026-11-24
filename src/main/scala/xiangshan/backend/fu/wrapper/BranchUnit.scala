@@ -39,7 +39,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.predTaken := io.in.bits.ctrl.predictInfo.get.predTaken
 
   // TraceRTL has no GPR values: resolve the branch with the traced outcome
-  val taken = TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.get.isTaken)
+  val taken = TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.tracertlInfo.get.isTaken)
   val mispredict = TraceRTLChoose(dataModule.io.mispredict, dataModule.io.predTaken =/= taken)
 
   val pcExtend = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, VAddrBits + 2)
@@ -74,7 +74,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.backendIPF := false.B
       redirect.bits.backendIGPF := false.B
       redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
-      redirect.bits.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
+      redirect.bits.tracertlInfo.foreach(_ := io.in.bits.ctrl.tracertlInfo.get)
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get

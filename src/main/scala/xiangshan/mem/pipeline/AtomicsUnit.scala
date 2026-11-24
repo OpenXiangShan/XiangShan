@@ -149,7 +149,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   when (state === s_invalid) {
     when (io.in.fire) {
       uop := io.in.bits.toDynInst()
-      rs1 := TraceRTLChoose(io.in.bits.src(0), SignExt(io.in.bits.toDynInst().traceInfo.get.memoryAddrVA, XLEN))
+      rs1 := TraceRTLChoose(io.in.bits.src(0), SignExt(io.in.bits.toDynInst().tracertlInfo.get.memoryAddrVA, XLEN))
       state := s_tlb_and_flush_sbuffer_req
       have_sent_first_tlb_req := false.B
     }
@@ -255,8 +255,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     have_sent_first_tlb_req := true.B
 
     when (io.dtlb.resp.fire && have_sent_first_tlb_req) {
-      paddr   := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits))
-      gpaddr  := TraceRTLChoose(io.dtlb.resp.bits.gpaddr(0), SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits))
+      paddr   := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), SignExt(uop.tracertlInfo.get.memoryAddrPA, PAddrBits))
+      gpaddr  := TraceRTLChoose(io.dtlb.resp.bits.gpaddr(0), SignExt(uop.tracertlInfo.get.memoryAddrPA, PAddrBits))
       vaddr   := TraceRTLChoose(io.dtlb.resp.bits.fullva, vaddr)
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling

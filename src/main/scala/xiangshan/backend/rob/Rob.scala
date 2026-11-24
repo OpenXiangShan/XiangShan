@@ -506,7 +506,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         slotUopBuf(enqIndex)(subIndex).commitType := enqUop.commitType
         slotUopBuf(enqIndex)(subIndex).fuType := enqUop.fuType
         slotUopBuf(enqIndex)(subIndex).fuOpType := enqUop.fuOpType
-        slotUopBuf(enqIndex)(subIndex).traceInfo.foreach(_ := enqUop.traceInfo.get)
+        slotUopBuf(enqIndex)(subIndex).tracertlInfo.foreach(_ := enqUop.tracertlInfo.get)
         debug_microOp(enqIndex)(subIndex) := enqUop
         debug_microOp(enqIndex)(subIndex).debug.foreach { debug =>
           debug.perfDebugInfo.dispatchTime := timer
@@ -826,7 +826,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
-  out.flushOut.bits.traceInfo.foreach(_ := deqExceptionUop.traceInfo.get)
+  out.flushOut.bits.tracertlInfo.foreach(_ := deqExceptionUop.tracertlInfo.get)
   XSPerfAccumulate("flush_num", out.flushOut.valid)
   XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
@@ -854,7 +854,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.isHls := RegEnable(exceptionUop.isHls, exceptionHappen)
   out.exception.bits.vls := RegEnable(exceptionUop.isVectorMemory, exceptionHappen)
   out.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
-  out.exception.bits.traceInfo.foreach(_ := RegEnable(exceptionUop.traceInfo.get, exceptionHappen))
+  out.exception.bits.tracertlInfo.foreach(_ := RegEnable(exceptionUop.tracertlInfo.get, exceptionHappen))
 
   // A latter exception flushes itself but preserves its older former slot.
   // Hold only the difftest observation until that slot really retires after walk.
@@ -2009,7 +2009,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val uop = commitDebugUop(2 * i)
       traceCollector.enable(i)  := out.commits.isCommit && out.commits.commitValid(0) && out.commits.commitValid(i)
       traceCollector.pc(i)      := SignExt(debugMeta(uop).pc, XLEN)
-      traceCollector.inst(i)    := uop.traceInfo.get.inst
+      traceCollector.inst(i)    := uop.tracertlInfo.get.inst
       traceCollector.instNum(i) := instrSizeCommit(i)
     }
   }

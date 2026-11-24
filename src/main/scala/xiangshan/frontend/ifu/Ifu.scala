@@ -558,7 +558,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
     ftqPtr := Mux(s2_blockSel(i) || s2_isCrossBlockInstr(i), s2_fetchBlock(1).ftqIdx, s2_fetchBlock(0).ftqIdx)
   }
-  io.toIBuffer.bits.traceInfo.foreach(_ := traceRTL.get.io.aligned.traceInfo)
+  io.toIBuffer.bits.tracertlInfo.foreach(_ := traceRTL.get.io.aligned.tracertlInfo)
 
   /* in s2, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s1,
    * when s1 fire (s1_valid && s2_ready), use s1_specInstrCount,

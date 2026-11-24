@@ -32,7 +32,7 @@ TraceRTL has four parts. Arrows show who calls whom during a simulation cycle.
      TracePreDecoder                                      src/test/csrc/tracertl/
      TracePredictChecker                                    tracertl.{h,cpp}   DPI + emu API
      TraceDriver                                            TraceReader        trace lists, checks
- hooks across the core (traceInfo carried along)            TraceICache        VA→PA map, page table
+ hooks across the core (tracertlInfo carried along)            TraceICache        VA→PA map, page table
    IBuffer ─── TraceDriveCollectorHelper ──DPI──▶           trace_fastsim, dedupers, decompress …
    Rob ─────── TraceCollectorHelper ───────DPI──▶
    TLB ─────── TraceFakeMMU (TraceATSHelper) ──DPI──▶
@@ -43,7 +43,7 @@ TraceRTL has four parts. Arrows show who calls whom during a simulation cycle.
 | Part | Where | Role |
 | --- | --- | --- |
 | Trace frontend | `src/main/scala/xiangshan/tracertl/` | builds IFU packets from the trace |
-| Hooks | about 40 files across `frontend/`, `backend/`, `mem/`, `cache/mmu/` | carry `traceInfo` and use the traced values |
+| Hooks | about 40 files across `frontend/`, `backend/`, `mem/`, `cache/mmu/` | carry `tracertlInfo` and use the traced values |
 | DPI boundary | `tracertl/TraceHelper.scala` | ExtModules with an inline SV DPI-C body (Verilator) and a C++ body (GSIM) |
 | Runtime | `TraceRTL/src/test/csrc/tracertl/` | loads the trace, serves reads and rewinds, translates addresses, checks the DUT |
 | Harness | `TraceRTL/src/test/csrc/xiangshan/main.cpp` | replaces difftest's `emu/main.cpp` |
@@ -54,7 +54,7 @@ The trace frontend files:
 | File | Content |
 | --- | --- |
 | `TraceParameters.scala` | `TraceRTLParameters` (`TraceRTLParamKey`) |
-| `TraceUtil.scala` | the gating helpers `TraceRTLChoose`, `TraceRTLDontCareValue`, `TraceInfo` |
+| `TraceUtil.scala` | the gating helpers `TraceRTLChoose`, `TraceRTLDontCareValue`, `TracertlInfo` |
 | `TraceBundle.scala` | the trace record `TraceInstrBundle` and the intermediate bundles |
 | `TraceRTL.scala` | the top module inside the IFU; wires the five stages below |
 | `TraceReader.scala` | trace buffer, refill, rewind |
@@ -81,13 +81,13 @@ be patched. Both GSIM and Verilator must keep working.
    `p(DebugOptionsKey).TraceRTLMode`.
 2. **Gate every hook** with one of three idioms:
    - `TraceRTLChoose(default, trace)`: an elaboration-time choice. Both arguments are
-     by-name, so a trace-only operand such as `traceInfo.get` is never elaborated in
+     by-name, so a trace-only operand such as `tracertlInfo.get` is never elaborated in
      exec mode.
    - `TraceRTLDontCareValue(x)`: `x` in exec mode and 0 in trace mode. It is used to
      silence exception and fault sources.
-   - `TraceInfo()`: returns `Option[TraceInstrBundle]`, which is `None` in exec mode.
-     Every bundle that carries the trace record declares `val traceInfo = TraceInfo()`
-     and assigns it with `traceInfo.foreach(_ := …)`.
+   - `TracertlInfo()`: returns `Option[TraceInstrBundle]`, which is `None` in exec mode.
+     Every bundle that carries the trace record declares `val tracertlInfo = TracertlInfo()`
+     and assigns it with `tracertlInfo.foreach(_ := …)`.
 3. **Use `if (env.TraceRTLMode) { … }`** for blocks that only exist in trace mode,
    such as instantiating DPI helpers or overriding a register's reset value.
 
@@ -161,7 +161,7 @@ and its S3 is IFU `s2`. The IFU stage names are used below.
 3. **Consume.** `deqPtr` advances by `TraceDriver`'s `recv.instNum`.
 4. **Rewind on a backend redirect.**
    - The buffer is cleared.
-   - `TraceRedirectHelper` calls `trace_redirect` with the redirect's `traceInfo.InstID`,
+   - `TraceRedirectHelper` calls `trace_redirect` with the redirect's `tracertlInfo.InstID`,
      or with `InstID + 1` if the redirect does not flush the instruction itself, or
      if the instruction is a trap or a force jump. A trap transfers control *after*
      the trapping record, even though the ROB flushes it.
@@ -199,7 +199,7 @@ instruction depends only on the previous one.
    marked and left out of the packet; this sets `concede2Bytes` (§4.5).
 6. **Compact.** One-hot slot positions are merged into `traceRange`, the occupied
    halfwords. Valid instructions are packed into `compact` entries carrying
-   `traceInfo`, `instrEndOffset`, `selectBlock`, `isPrevEndHalfRvi` and
+   `tracertlInfo`, `instrEndOffset`, `selectBlock`, `isPrevEndHalfRvi` and
    `isCrossBlockInstr`.
 7. **Force jump.** If the head instruction is a force jump, it is always valid on its
    own (`traceForceJump`).
@@ -270,10 +270,10 @@ All hooks are in `ifu/Ifu.scala`. Each one is a `TraceRTLChoose` or a `foreach` 
 | `s2AlignedReg(...)` | the `s2` packet fields (`instrVec`, `instrPcVec`, `instrValid`, `instrCount`, `foldPc`, `pdInfoVec`, `jumpOffsetVec`) come from `traceRTL.io.aligned` |
 | `traceS2Stall = io.block && s2_valid` | hold `s2_ready` and `toIBuffer.valid` while nothing matches |
 | `s2CandidateCount` | replaces `s1_instrCount` / `s1_specInstrCount` in the IBuffer enqueue-pointer prediction |
-| `toIBuffer.bits.traceInfo` | the trace records of the packet |
+| `toIBuffer.bits.tracertlInfo` | the trace records of the packet |
 | `rvcExpander.fsIsOff := false` | expand compressed FP regardless of `mstatus.FS` |
 | `fromIFU.*`, `s1PredInfo` | IFU `s1`/`s2` valid / fire / flush, `wbEnable`, the alignment shift, and per block `startAddr`, `instRange`, `size`, `ftqOffset` (= `takenCfiOffset`) |
-| `redirect.fromBackend := fromFtq.redirect` | the FTQ forwards the full `backendRedirect.bits` in trace mode (`ftq/Ftq.scala`), so `traceInfo` arrives |
+| `redirect.fromBackend := fromFtq.redirect` | the FTQ forwards the full `backendRedirect.bits` in trace mode (`ftq/Ftq.scala`), so `tracertlInfo` arrives |
 | `redirect.fromIFUBPU := wbRedirect.valid` | the IFU's own redirect, for the concede state |
 
 `shiftToIBuffer` shifts the packet by the IFU's IBuffer alignment shift (0..3), as the
@@ -290,19 +290,19 @@ Suppose the BPU predicts a `beq` not taken, but the trace says taken.
 3. The IFU moves on to the predicted fall-through blocks. Their start PC does not
    match the trace head (the branch target), so `candidateCount = 0`. `s2Block`
    holds the IFU: **no wrong-path instruction is delivered**.
-4. The BranchUnit resolves the `beq` with `traceInfo.isTaken` and mispredicts. The
-   redirect carries the `beq`'s `traceInfo`.
+4. The BranchUnit resolves the `beq` with `tracertlInfo.isTaken` and mispredicts. The
+   redirect carries the `beq`'s `tracertlInfo`.
 5. The FTQ forwards it to the IFU. `TraceReader` clears its buffer and calls
    `trace_redirect(InstID + 1)`, since a branch redirect does not flush itself. The
    runtime re-serves from the target. The IBuffer is flushed too (§5).
 6. The frontend refetches at the target, and the trace matches again.
 
-## 5. Carrying `traceInfo` through the core
+## 5. Carrying `tracertlInfo` through the core
 
 **Problem.** The backend needs the trace record of each instruction, and every
 redirect must name the instruction it came from.
 
-**Method.** A `traceInfo = TraceInfo()` field is added along the instruction path:
+**Method.** A `tracertlInfo = TracertlInfo()` field is added along the instruction path:
 
 - `FetchToIBuffer` → `IBufEntry` / `IBufOutEntry` → `CtrlFlow` → decode in/out →
   `DynInst`;
@@ -311,7 +311,7 @@ redirect must name the instruction it came from.
 
 Every redirect producer fills it:
 
-| Producer | Source of `traceInfo` |
+| Producer | Source of `tracertlInfo` |
 | --- | --- |
 | BranchUnit, JumpUnit, CSR | the uop |
 | ROB `flushOut` (exceptions, interrupts, flush pipe) | the excepting uop |
@@ -331,8 +331,8 @@ Two hooks keep the frontend and the runtime in sync on a backend redirect:
 
 | Unit | Change |
 | --- | --- |
-| `BranchUnit` | `taken = traceInfo.isTaken`; `mispredict = predTaken =/= taken` |
-| `JumpUnit` | `jumpTarget = traceInfo.target`; IAF / IPF / IGPF checks silenced |
+| `BranchUnit` | `taken = tracertlInfo.isTaken`; `mispredict = predTaken =/= taken` |
+| `JumpUnit` | `jumpTarget = tracertlInfo.target`; IAF / IPF / IGPF checks silenced |
 | `CtrlBlock` | IAF / IPF / IGPF of the redirect to the frontend silenced |
 
 ### 6.2 Exceptions only from the trace
@@ -348,11 +348,11 @@ never trapped, and miss the traps it did take.
    - CSR permission: `EX_II` / `EX_VI` are forced false and `xret` is always legal
      (`CSRPermitModule`).
 2. **Raise the traced ones.** `DecodeStage` sets
-   `exceptionVec(illegalInstr) := traceInfo.hasException`. The ROB then takes the
+   `exceptionVec(illegalInstr) := tracertlInfo.hasException`. The ROB then takes the
    exception when the instruction reaches the head, at the normal point in the
    pipeline.
 3. **Trap to the traced target.** `NewCSR` takes `trapTargetPc` from the trapping
-   uop's `traceInfo.target`, and `xretTargetPc` from the xret's `traceInfo.target`.
+   uop's `tracertlInfo.target`, and `xretTargetPc` from the xret's `tracertlInfo.target`.
 4. **Neutralise CSR state that would block execution.**
    - `mstatus` / `vsstatus` FS and VS reset to Clean (`MachineLevel.scala`,
      `VirtualSupervisorLevel.scala`), and their Off asserts are relaxed.
@@ -363,13 +363,13 @@ never trapped, and miss the traps it did take.
 ### 6.3 Data-dependent latency
 
 `DivUnit` and the `FDivSqrt` wrappers take their operands from
-`traceInfo.arthiSrc0/1`. This keeps the early-exit latency of the real operands.
+`tracertlInfo.arthiSrc0/1`. This keeps the early-exit latency of the real operands.
 
 ### 6.4 Memory and address translation
 
 | Unit | Change |
 | --- | --- |
-| `NewLoadUnit` | S0 vaddr = `memoryAddrVA`; S1 paddr / gpaddr = `memoryAddrPA`; exceptions silenced; rollback carries `traceInfo` |
+| `NewLoadUnit` | S0 vaddr = `memoryAddrVA`; S1 paddr / gpaddr = `memoryAddrPA`; exceptions silenced; rollback carries `tracertlInfo` |
 | `NewStoreUnit` | same address replacement |
 | `AtomicsUnit` | rs1 = traced VA, paddr = traced PA; skips the DCache (straight to `s_cache_resp_latch` with zero data); exceptions silenced |
 | `TLB` | a `TraceFakeMMU` per port replaces the paddr, only when translation is enabled (bare mode keeps vaddr as paddr); faults zeroed |

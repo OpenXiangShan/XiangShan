@@ -39,7 +39,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
 
   private val width       = IBufferEnqueueWidth
   private val pds         = VecInit(io.decoded.map(_.pd))
-  private val pcs         = VecInit(io.decoded.map(_.compact.traceInfo.pcVA))
+  private val pcs         = VecInit(io.decoded.map(_.compact.tracertlInfo.pcVA))
   private val instrValid  = VecInit(io.decoded.map(_.compact.valid))
   private val endOffsets  = VecInit(io.decoded.map(_.compact.instrEndOffset))
   private val selectBlock = VecInit(io.decoded.map(_.compact.selectBlock))
@@ -104,7 +104,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   io.out.stage1Out.fixedTwoFetchTaken := fixedTwoFetchTaken.asUInt
 
   private val jumpTargets = VecInit.tabulate(width)(i =>
-    if (trtl.TraceOverrideTarget) traceGuardedPc(io.decoded(i).compact.traceInfo.target)
+    if (trtl.TraceOverrideTarget) traceGuardedPc(io.decoded(i).compact.tracertlInfo.target)
     else traceGuardedPc(pcs(i) + io.decoded(i).jumpOffset.toUInt)
   )
   private val seqTargets = VecInit.tabulate(width)(i =>

@@ -325,7 +325,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val ftqPtr:         Vec[FtqPtr]     = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdown:        TopdownBundle   = new TopdownBundle
 
-  val traceInfo: Option[Vec[TraceInstrBundle]] =
+  val tracertlInfo: Option[Vec[TraceInstrBundle]] =
     Option.when(env.TraceRTLMode)(Vec(IBufferEnqueueWidth, new TraceInstrBundle))
 }
 
