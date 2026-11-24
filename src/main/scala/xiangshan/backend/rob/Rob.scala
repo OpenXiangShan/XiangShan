@@ -490,7 +490,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val hasWFI = RegInit(false.B)
   val wfiSafe = out.wfi.safeFromMem && out.wfi.safeFromFrontend
   out.wfi.wfiReq := hasWFI
-  out.cpu_wfi := hasWFI && wfiSafe
+  out.cpuWfi := hasWFI && wfiSafe
   // WFI Timeout: 2^20 = 1M cycles
   val wfiCycles = RegInit(0.U(20.W))
   if (wfiResume) {
@@ -2664,7 +2664,7 @@ object Rob {
     val lsq = new RobLsqIO
 
     // WFI status.
-    val cpu_wfi = Output(Bool())
+    val cpuWfi = Output(Bool())
 
     // WFI requests and quiescence acknowledgments.
     val wfi = new RobWfiIO

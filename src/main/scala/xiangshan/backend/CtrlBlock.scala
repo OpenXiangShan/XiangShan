@@ -854,7 +854,7 @@ class CtrlBlockImp(
   rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
   rob.in.commitStuckCheckEnable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
-  io.toTop.cpuWfi := DelayN(rob.out.cpu_wfi, 5)
+  io.toTop.cpuWfi := DelayN(rob.out.cpuWfi, 5)
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.out.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.out.exception
