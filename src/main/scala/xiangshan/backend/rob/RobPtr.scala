@@ -84,6 +84,13 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     ptr
   }
 
+  def asLatter: RobPtr = {
+    val ptr = Wire(new RobPtr(entries))
+    ptr := this
+    ptr.isFormer := false.B
+    ptr
+  }
+
   def needFlush(redirect: Valid[Redirect]): Bool = {
     val flushItself = redirect.bits.flushItself() && isSameSlot(redirect.bits.robIdx)
     redirect.valid && (flushItself || isAfterSlot(redirect.bits.robIdx))
