@@ -26,7 +26,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.dataview._
 import chisel3.util._
-import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
+import xscache.coupledL2.{IsKeywordKey, LoadOffsetKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
 import difftest._
 import freechips.rocketchip.tilelink._
 import xscache.common.{AliasKey, DirtyKey, PrefetchKey}
@@ -321,6 +321,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // pass pc to l2
     acquire.user.lift(PCKey).foreach(_ := req.pc) 
+    acquire.user.lift(LoadOffsetKey).foreach(_ := req.vaddr(blockOffBits - 1, 0))
 
     // miss req pipe reg pass keyword to L2, is priority
     // acquire.echo.lift(IsKeywordKey).foreach(_ := isKeyword())
@@ -1013,6 +1014,7 @@ for(i <- 0 until reqNum) {
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // pass pc to l2
   io.mem_acquire.bits.user.lift(PCKey).foreach(_ := req.pc)
+  io.mem_acquire.bits.user.lift(LoadOffsetKey).foreach(_ := req.vaddr(blockOffBits - 1, 0))
   // pass keyword to L2
   // io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := isKeyword)
   io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := false.B)

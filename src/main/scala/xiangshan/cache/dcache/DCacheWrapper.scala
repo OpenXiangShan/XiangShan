@@ -19,7 +19,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import xscache.coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, PCField, VaddrField}
+import xscache.coupledL2.{IsKeywordKey, IsKeywordField, LoadOffsetField, MemBackTypeMMField, MemPageTypeNCField, PCField, VaddrField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
@@ -1006,7 +1006,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     MemBackTypeMMField(),
     MemPageTypeNCField()
   //  IsKeywordField()
-  ) ++ l2ClientPcBitsOpt.map(PCField(_)).toSeq ++ cacheParams.aliasBitsOpt.map(AliasField)
+  ) ++ l2ClientPcBitsOpt.map(PCField(_)).toSeq ++ cacheParams.aliasBitsOpt.map(AliasField) ++
+    Option.when(p(XSCoreParamsKey).L2CacheParamsOpt.exists(_.enableDuelCeptron))(LoadOffsetField(blockOffBits))
   val echoFields: Seq[BundleFieldBase] = Seq(
     IsKeywordField()
   )

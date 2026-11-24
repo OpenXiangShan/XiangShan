@@ -15,7 +15,7 @@ import freechips.rocketchip.util.BundleField
 import org.chipsalliance.cde.config.Parameters
 import utility.{MemReqSource, ReqSourceKey}
 import xscache.common.{AliasKey, PrefetchKey}
-import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
+import xscache.coupledL2.{IsKeywordKey, LoadOffsetKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
 import xiangshan.cache.SpecMissFabricIO
 
 /**
@@ -147,6 +147,7 @@ class CustomL1L2Fabric(
             candidate.bits.user.lift(AliasKey).foreach(_ := request.bits.alias)
             candidate.bits.user.lift(VaddrKey).foreach(_ := request.bits.vaddr >> log2Ceil(specBlockBytes))
             candidate.bits.user.lift(PCKey).foreach(_ := request.bits.pc)
+            candidate.bits.user.lift(LoadOffsetKey).foreach(_ := request.bits.vaddr(log2Ceil(specBlockBytes) - 1, 0))
             candidate.bits.user.lift(PrefetchKey).foreach(_ := request.bits.prefetch)
             candidate.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
             candidate.bits.user.lift(MemBackTypeMM).foreach(_ := true.B)
