@@ -1,4 +1,8 @@
-module frontend_atp_funcov (
+module frontend_atp_funcov #(
+  parameter int BOUNDARY_PC_BITS = 51,
+  parameter int BOUNDARY_PADDR_BITS = 48,
+  parameter int BOUNDARY_FTQ_BITS = 6
+) (
   input logic          clock,
   input logic          reset,
   input logic          io_tlbCsr_priv_virt,
@@ -67,8 +71,337 @@ module frontend_atp_funcov (
   input logic [1471:0] pma_addr,
   input logic [1535:0] pma_mask,
   input logic          pmp_checker_0_x,
-  input logic          pmp_checker_1_x
+  input logic          pmp_checker_1_x,
+  input logic boundary_flush,
+  input logic boundary_context_changed,
+  input logic boundary_request_fire,
+  input logic [63:0] boundary_request_fullva,
+  input logic [BOUNDARY_FTQ_BITS:0] boundary_request_ftq,
+  input logic [2:0] boundary_request_backend_exception,
+  input logic boundary_virt,
+  input logic [1:0] boundary_imode,
+  input logic [3:0] boundary_satp_mode,
+  input logic [3:0] boundary_vsatp_mode,
+  input logic [3:0] boundary_hgatp_mode,
+  input logic boundary_translation_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] boundary_translation_pc,
+  input logic [BOUNDARY_FTQ_BITS:0] boundary_translation_ftq,
+  input logic boundary_s1_execute_allowed,
+  input logic boundary_s2_execute_allowed,
+  input logic boundary_pmp_execute_allowed,
+  input logic boundary_ifu_s1_fire,
+  input logic boundary_ifu_s1_flush,
+  input logic [1:0] boundary_ifu_block_valid,
+  input logic [1:0][BOUNDARY_PC_BITS-1:0] boundary_ifu_block_pc,
+  input logic [1:0][BOUNDARY_FTQ_BITS:0] boundary_ifu_block_ftq,
+  input logic [1:0][5:0] boundary_ifu_block_size,
+  input logic [1:0][511:0] boundary_ifu_block_data,
+  input logic boundary_half_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] boundary_half_pc,
+  input logic [15:0] boundary_half_data,
+  input logic boundary_previous_half_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] boundary_previous_half_pc,
+  input logic [15:0] boundary_previous_half_data,
+  input logic boundary_to_ibuffer_valid,
+  input logic boundary_to_ibuffer_ready,
+  input logic boundary_ifu_s2_flush,
+  input logic [BOUNDARY_PC_BITS-1:0] boundary_ifu_s2_pc,
+  input logic [BOUNDARY_FTQ_BITS:0] boundary_ifu_s2_ftq
 );
+
+  logic atp_nonvirtual_sv39_legal_boundary;
+  logic atp_nonvirtual_sv48_legal_boundary;
+  logic atp_virtual_sv39_legal_boundary;
+  logic atp_virtual_sv48_legal_boundary;
+  logic atp_nonvirtual_sv39_noncanonical;
+  logic atp_nonvirtual_sv48_noncanonical;
+  logic atp_virtual_sv39_noncanonical;
+  logic atp_virtual_sv48_noncanonical;
+  logic atp_sv39x4_legal_high_gpa;
+  logic atp_sv48x4_legal_high_gpa;
+  logic atp_sv39x4_overflow_gpa;
+  logic atp_sv48x4_overflow_gpa;
+  logic atp_bare_legal_boundary;
+  logic atp_bare_address_overflow;
+  logic atp_high_gpa_backpressure_recovery;
+  logic atp_sv39_cross_boundary_rvi;
+  logic atp_sv48_cross_boundary_rvi;
+  logic atp_sv39x4_cross_boundary_rvi;
+  logic atp_sv48x4_cross_boundary_rvi;
+
+  // Request-owned Condition sampling for canonical/GPA boundaries. Checkpoint
+  // correctness stays in checkers; response fault and GPA values do not gate hits.
+  generate
+    begin : address_boundary
+      localparam logic [63:0] SV39_EDGE = 64'h0000_0040_0000_0000;
+      localparam logic [63:0] SV48_EDGE = 64'h0000_8000_0000_0000;
+      localparam logic [63:0] GPA39_EDGE = 64'h0000_0200_0000_0000;
+      localparam logic [63:0] GPA48_EDGE = 64'h0004_0000_0000_0000;
+      localparam logic [63:0] PA_EDGE = 64'b1 << BOUNDARY_PADDR_BITS;
+      localparam int TAGS = 1 << (BOUNDARY_FTQ_BITS + 1);
+
+      typedef enum logic [2:0] {
+        NONE, NV39, NV48, VS39, VS48, G39, G48, BARE
+      } address_kind;
+      typedef struct packed {
+        logic valid;
+        logic [63:0] fullva;
+        address_kind kind;
+        logic stage1;
+        logic stage2;
+        logic [14:0] context_key;
+        logic permissions;
+      } request_record;
+      request_record requests [TAGS];
+
+      wire supervisor_or_user = boundary_imode == 2'd0 || boundary_imode == 2'd1;
+      wire guest_mode_valid = boundary_hgatp_mode == 4'd0 || boundary_hgatp_mode == 4'd8 || boundary_hgatp_mode == 4'd9;
+      // fullva is sign extended from GuardedPc even for unsigned G-stage addresses.
+      wire [63:0] request_pc = {{(64-BOUNDARY_PC_BITS){1'b0}}, boundary_request_fullva[BOUNDARY_PC_BITS-1:0]};
+      wire observe_request = boundary_request_fire && boundary_request_backend_exception == 3'd0;
+      wire nonvirtual_sv39 = !boundary_virt && supervisor_or_user && boundary_satp_mode == 4'd8;
+      wire nonvirtual_sv48 = !boundary_virt && supervisor_or_user && boundary_satp_mode == 4'd9;
+      wire virtual_sv39 = boundary_virt && supervisor_or_user && boundary_vsatp_mode == 4'd8 && guest_mode_valid;
+      wire virtual_sv48 = boundary_virt && supervisor_or_user && boundary_vsatp_mode == 4'd9 && guest_mode_valid;
+      wire only_stage2 = boundary_virt && supervisor_or_user && boundary_vsatp_mode == 4'd0;
+      wire bare = !boundary_virt && boundary_satp_mode == 4'd0;
+      wire legal39_boundary = boundary_request_fullva == SV39_EDGE - 2 || boundary_request_fullva == -SV39_EDGE;
+      wire legal48_boundary = boundary_request_fullva == SV48_EDGE - 2 || boundary_request_fullva == -SV48_EDGE;
+      wire illegal39_boundary = boundary_request_fullva == SV39_EDGE || boundary_request_fullva == -SV39_EDGE - 2;
+      wire illegal48_boundary = boundary_request_fullva == SV48_EDGE || boundary_request_fullva == -SV48_EDGE - 2;
+      wire [14:0] context_key = {boundary_virt, boundary_imode, boundary_satp_mode, boundary_vsatp_mode, boundary_hgatp_mode};
+      address_kind request_kind;
+
+      always_comb begin
+        request_kind = NONE;
+        if (nonvirtual_sv39 && legal39_boundary) request_kind = NV39;
+        if (nonvirtual_sv48 && legal48_boundary) request_kind = NV48;
+        if (virtual_sv39 && legal39_boundary) request_kind = VS39;
+        if (virtual_sv48 && legal48_boundary) request_kind = VS48;
+        if (only_stage2 && boundary_hgatp_mode == 4'd8 && request_pc >= GPA39_EDGE / 2 &&
+            request_pc < GPA39_EDGE) request_kind = G39;
+        if (only_stage2 && boundary_hgatp_mode == 4'd9 && request_pc >= GPA48_EDGE / 2 &&
+            request_pc < GPA48_EDGE) request_kind = G48;
+        if (bare && request_pc == PA_EDGE - 2) request_kind = BARE;
+      end
+
+      function automatic logic same_request(input request_record entry,
+          input logic [BOUNDARY_PC_BITS-1:0] pc);
+        return entry.valid && entry.fullva[BOUNDARY_PC_BITS-1:0] == pc;
+      endfunction
+
+      function automatic logic [63:0] rvi_limit(input address_kind kind);
+        case (kind)
+          NV39: return SV39_EDGE;
+          NV48: return SV48_EDGE;
+          G39: return GPA39_EDGE;
+          G48: return GPA48_EDGE;
+          default: return 0;
+        endcase
+      endfunction
+
+      function automatic logic range_inside(input request_record entry,
+          input logic [5:0] size, input logic [511:0] data);
+        logic [63:0] start_pc, last_pc, limit;
+        logic [15:0] first_halfword;
+        start_pc = entry.fullva;
+        if (entry.kind inside {G39, G48, BARE})
+          start_pc = {{(64-BOUNDARY_PC_BITS){1'b0}}, entry.fullva[BOUNDARY_PC_BITS-1:0]};
+        last_pc = start_pc + (64'(size) << 1) - 1;
+        first_halfword = data[16*int'(start_pc[5:1]) +: 16];
+        case (entry.kind)
+          NV39, VS39: limit = SV39_EDGE;
+          NV48, VS48: limit = SV48_EDGE;
+          G39: limit = GPA39_EDGE;
+          G48: limit = GPA48_EDGE;
+          BARE: limit = PA_EDGE;
+          default: return 1'b0;
+        endcase
+        if (size == 0 || size > 32) return 1'b0;
+        // At the last halfword, C.NOP is an independently known legal RVC witness.
+        if (start_pc == limit - 2) return size == 1 && first_halfword == 16'h0001;
+        if (entry.kind inside {NV39, VS39})
+          return last_pc[63:39] == {25{last_pc[38]}};
+        if (entry.kind inside {NV48, VS48})
+          return last_pc[63:48] == {16{last_pc[47]}};
+        return last_pc < limit;
+      endfunction
+
+      logic saved_half_valid;
+      address_kind saved_half_kind;
+      logic [BOUNDARY_PC_BITS-1:0] saved_half_pc;
+      logic [15:0] saved_half_data;
+      logic [14:0] saved_half_context;
+      logic [63:0] saved_half_next_pc;
+      logic next_saved_half_valid;
+      address_kind next_saved_half_kind;
+      logic [63:0] next_saved_half_next_pc;
+      logic [14:0] next_saved_half_context;
+
+      typedef enum logic [1:0] {IDLE, HOLDING, WAIT_FLUSH, WAIT_RECOVERY} hold_state;
+      hold_state state;
+      logic [1:0] stall_cycles;
+      logic [BOUNDARY_FTQ_BITS:0] held_ftq;
+      logic [BOUNDARY_PC_BITS-1:0] held_pc;
+      wire held_transaction = boundary_to_ibuffer_valid && boundary_ifu_s2_ftq == held_ftq && boundary_ifu_s2_pc == held_pc;
+      wire high_gpa_s2 = boundary_to_ibuffer_valid &&
+        same_request(requests[boundary_ifu_s2_ftq], boundary_ifu_s2_pc) &&
+        requests[boundary_ifu_s2_ftq].stage2 && !requests[boundary_ifu_s2_ftq].stage1 &&
+        requests[boundary_ifu_s2_ftq].context_key[13:12] inside {2'd0, 2'd1} &&
+        requests[boundary_ifu_s2_ftq].context_key[3:0] == 4'd9 &&
+        requests[boundary_ifu_s2_ftq].fullva[BOUNDARY_PC_BITS-1:0] == BOUNDARY_PC_BITS'(GPA48_EDGE + 64'h20);
+
+      always_comb begin
+        atp_nonvirtual_sv39_legal_boundary = 1'b0;
+        atp_nonvirtual_sv48_legal_boundary = 1'b0;
+        atp_virtual_sv39_legal_boundary = 1'b0;
+        atp_virtual_sv48_legal_boundary = 1'b0;
+        atp_nonvirtual_sv39_noncanonical = 1'b0;
+        atp_nonvirtual_sv48_noncanonical = 1'b0;
+        atp_virtual_sv39_noncanonical = 1'b0;
+        atp_virtual_sv48_noncanonical = 1'b0;
+        atp_sv39x4_legal_high_gpa = 1'b0;
+        atp_sv48x4_legal_high_gpa = 1'b0;
+        atp_sv39x4_overflow_gpa = 1'b0;
+        atp_sv48x4_overflow_gpa = 1'b0;
+        atp_bare_legal_boundary = 1'b0;
+        atp_bare_address_overflow = 1'b0;
+        atp_high_gpa_backpressure_recovery = 1'b0;
+        atp_sv39_cross_boundary_rvi = 1'b0;
+        atp_sv48_cross_boundary_rvi = 1'b0;
+        atp_sv39x4_cross_boundary_rvi = 1'b0;
+        atp_sv48x4_cross_boundary_rvi = 1'b0;
+        next_saved_half_valid = 1'b0;
+        next_saved_half_kind = NONE;
+        next_saved_half_next_pc = '0;
+        next_saved_half_context = '0;
+        if (!reset && !boundary_flush && !boundary_context_changed) begin
+          if (observe_request) begin
+            atp_nonvirtual_sv39_noncanonical = nonvirtual_sv39 && illegal39_boundary;
+            atp_nonvirtual_sv48_noncanonical = nonvirtual_sv48 && illegal48_boundary;
+            atp_virtual_sv39_noncanonical = virtual_sv39 && illegal39_boundary;
+            atp_virtual_sv48_noncanonical = virtual_sv48 && illegal48_boundary;
+            atp_sv39x4_overflow_gpa = only_stage2 && boundary_hgatp_mode == 4'd8 &&
+              (request_pc == GPA39_EDGE || request_pc == GPA39_EDGE + 64'h20);
+            atp_sv48x4_overflow_gpa = only_stage2 && boundary_hgatp_mode == 4'd9 &&
+              (request_pc == GPA48_EDGE || request_pc == GPA48_EDGE + 64'h20);
+            atp_bare_address_overflow = bare && BOUNDARY_PADDR_BITS < BOUNDARY_PC_BITS &&
+              (request_pc == PA_EDGE || request_pc == PA_EDGE + 64'h20);
+            atp_high_gpa_backpressure_recovery = state == WAIT_RECOVERY && only_stage2 && boundary_hgatp_mode == 4'd9 &&
+              request_pc < GPA48_EDGE && request_pc[11:0] != 12'h020 &&
+              request_pc[BOUNDARY_PC_BITS-1:12] != held_pc[BOUNDARY_PC_BITS-1:12];
+          end
+          if (boundary_ifu_s1_fire && !boundary_ifu_s1_flush) begin
+            for (int b = 0; b < 2; b++) begin
+              if (boundary_ifu_block_valid[b] &&
+                  same_request(requests[boundary_ifu_block_ftq[b]], boundary_ifu_block_pc[b])) begin
+                if (requests[boundary_ifu_block_ftq[b]].permissions &&
+                    range_inside(requests[boundary_ifu_block_ftq[b]], boundary_ifu_block_size[b], boundary_ifu_block_data[b])) begin
+                  case (requests[boundary_ifu_block_ftq[b]].kind)
+                    NV39: atp_nonvirtual_sv39_legal_boundary = 1'b1;
+                    NV48: atp_nonvirtual_sv48_legal_boundary = 1'b1;
+                    VS39: atp_virtual_sv39_legal_boundary = 1'b1;
+                    VS48: atp_virtual_sv48_legal_boundary = 1'b1;
+                    G39: atp_sv39x4_legal_high_gpa = 1'b1;
+                    G48: atp_sv48x4_legal_high_gpa = 1'b1;
+                    BARE: atp_bare_legal_boundary = 1'b1;
+                    default: ;
+                  endcase
+                end
+                if (saved_half_valid && boundary_previous_half_valid && b == 0 &&
+                    boundary_previous_half_pc == saved_half_pc && boundary_previous_half_data == saved_half_data &&
+                    requests[boundary_ifu_block_ftq[b]].context_key == saved_half_context &&
+                    requests[boundary_ifu_block_ftq[b]].fullva[BOUNDARY_PC_BITS-1:0] == BOUNDARY_PC_BITS'(saved_half_next_pc)) begin
+                  case (saved_half_kind)
+                    NV39: atp_sv39_cross_boundary_rvi = 1'b1;
+                    NV48: atp_sv48_cross_boundary_rvi = 1'b1;
+                    G39: atp_sv39x4_cross_boundary_rvi = 1'b1;
+                    G48: atp_sv48x4_cross_boundary_rvi = 1'b1;
+                    default: ;
+                  endcase
+                end
+                if (boundary_half_valid && requests[boundary_ifu_block_ftq[b]].permissions &&
+                    boundary_half_data[1:0] == 2'b11 && boundary_half_data[4:2] != 3'b111) begin
+                  if (rvi_limit(requests[boundary_ifu_block_ftq[b]].kind) != 0 &&
+                      boundary_half_pc == BOUNDARY_PC_BITS'(rvi_limit(requests[boundary_ifu_block_ftq[b]].kind) - 2) &&
+                      boundary_ifu_block_pc[b] == boundary_half_pc) begin
+                    next_saved_half_valid = 1'b1;
+                    next_saved_half_kind = requests[boundary_ifu_block_ftq[b]].kind;
+                    next_saved_half_next_pc = rvi_limit(requests[boundary_ifu_block_ftq[b]].kind);
+                    next_saved_half_context = requests[boundary_ifu_block_ftq[b]].context_key;
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+
+      always_ff @(posedge clock) begin
+        if (reset || boundary_flush || boundary_context_changed) begin
+          for (int i = 0; i < TAGS; i++) requests[i] <= '0;
+          saved_half_valid <= 1'b0;
+        end else begin
+          if (boundary_translation_valid && same_request(requests[boundary_translation_ftq], boundary_translation_pc))
+            requests[boundary_translation_ftq].permissions <= boundary_pmp_execute_allowed &&
+              (!requests[boundary_translation_ftq].stage1 || boundary_s1_execute_allowed) &&
+              (!requests[boundary_translation_ftq].stage2 || boundary_s2_execute_allowed);
+          if (boundary_request_fire) begin
+            requests[boundary_request_ftq].valid <= boundary_request_backend_exception == 0;
+            requests[boundary_request_ftq].fullva <= boundary_request_fullva;
+            requests[boundary_request_ftq].kind <= request_kind;
+            requests[boundary_request_ftq].stage1 <= boundary_virt ? boundary_vsatp_mode != 0 : boundary_satp_mode != 0;
+            requests[boundary_request_ftq].stage2 <= boundary_virt && boundary_hgatp_mode != 0;
+            requests[boundary_request_ftq].context_key <= context_key;
+            requests[boundary_request_ftq].permissions <= 1'b0;
+          end
+          if (boundary_ifu_s1_flush) saved_half_valid <= 1'b0;
+          else if (boundary_ifu_s1_fire) begin
+            saved_half_valid <= next_saved_half_valid;
+            saved_half_kind <= next_saved_half_kind;
+            saved_half_pc <= boundary_half_pc;
+            saved_half_data <= boundary_half_data;
+            saved_half_context <= next_saved_half_context;
+            saved_half_next_pc <= next_saved_half_next_pc;
+          end
+        end
+
+        if (reset || boundary_context_changed) begin
+          state <= IDLE;
+          stall_cycles <= 0;
+          held_ftq <= '0;
+          held_pc <= '0;
+        end else if (boundary_flush) begin
+          state <= state == WAIT_FLUSH ? WAIT_RECOVERY : IDLE;
+          stall_cycles <= 0;
+        end else if (boundary_ifu_s2_flush) begin
+          state <= IDLE;
+          stall_cycles <= 0;
+        end else begin
+          case (state)
+            IDLE: if (high_gpa_s2 && !boundary_to_ibuffer_ready) begin
+              state <= HOLDING;
+              held_ftq <= boundary_ifu_s2_ftq;
+              held_pc <= boundary_ifu_s2_pc;
+              stall_cycles <= 1;
+            end
+            HOLDING: begin
+              if (!held_transaction) begin
+                state <= IDLE;
+                stall_cycles <= 0;
+              end else if (!boundary_to_ibuffer_ready) begin
+                if (stall_cycles < 2) stall_cycles <= stall_cycles + 1'b1;
+              end else begin
+                state <= stall_cycles == 2 ? WAIT_FLUSH : IDLE;
+              end
+            end
+            WAIT_RECOVERY: if (atp_high_gpa_backpressure_recovery) state <= IDLE;
+            default: ;
+          endcase
+        end
+      end
+    end
+  endgenerate
 
   localparam logic [1:0] NO_STAGE    = 2'b00;
   localparam logic [1:0] ONLY_STAGE1 = 2'b01;
@@ -1158,6 +1491,63 @@ module frontend_atp_funcov (
     }
     ATP_reserved_pbmt_encoding_cp: coverpoint (atp_reserved_pbmt_encoding) iff (!reset) {
       bins reserved_encoding = {1'b1};
+    }
+    ATP_nonvirtual_sv39_legal_boundary_cp: coverpoint (atp_nonvirtual_sv39_legal_boundary) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_nonvirtual_sv48_legal_boundary_cp: coverpoint (atp_nonvirtual_sv48_legal_boundary) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_virtual_sv39_legal_boundary_cp: coverpoint (atp_virtual_sv39_legal_boundary) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_virtual_sv48_legal_boundary_cp: coverpoint (atp_virtual_sv48_legal_boundary) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_nonvirtual_sv39_noncanonical_cp: coverpoint (atp_nonvirtual_sv39_noncanonical) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_nonvirtual_sv48_noncanonical_cp: coverpoint (atp_nonvirtual_sv48_noncanonical) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_virtual_sv39_noncanonical_cp: coverpoint (atp_virtual_sv39_noncanonical) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_virtual_sv48_noncanonical_cp: coverpoint (atp_virtual_sv48_noncanonical) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv39x4_legal_high_gpa_cp: coverpoint (atp_sv39x4_legal_high_gpa) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv48x4_legal_high_gpa_cp: coverpoint (atp_sv48x4_legal_high_gpa) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv39x4_overflow_gpa_cp: coverpoint (atp_sv39x4_overflow_gpa) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv48x4_overflow_gpa_cp: coverpoint (atp_sv48x4_overflow_gpa) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_bare_legal_boundary_cp: coverpoint (atp_bare_legal_boundary) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_bare_address_overflow_cp: coverpoint (atp_bare_address_overflow) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_high_gpa_backpressure_recovery_cp: coverpoint (atp_high_gpa_backpressure_recovery) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv39_cross_boundary_rvi_cp: coverpoint (atp_sv39_cross_boundary_rvi) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv48_cross_boundary_rvi_cp: coverpoint (atp_sv48_cross_boundary_rvi) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv39x4_cross_boundary_rvi_cp: coverpoint (atp_sv39x4_cross_boundary_rvi) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sv48x4_cross_boundary_rvi_cp: coverpoint (atp_sv48x4_cross_boundary_rvi) iff (!reset) {
+      bins observed = {1'b1};
     }
   endgroup
 

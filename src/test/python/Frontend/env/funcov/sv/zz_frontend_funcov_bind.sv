@@ -1,4 +1,8 @@
-module frontend_funcov_hub (
+module frontend_funcov_hub #(
+  parameter int BOUNDARY_PC_BITS = 51,
+  parameter int BOUNDARY_PADDR_BITS = 48,
+  parameter int BOUNDARY_FTQ_BITS = 6
+) (
   input logic clock,
   input logic reset,
   input logic        atp_io_tlbCsr_priv_virt,
@@ -317,10 +321,49 @@ module frontend_funcov_hub (
   input logic [7:0][9:0]      rfr_cfvec_foldpc,
   input logic [7:0]           rfr_cfvec_iaf,
   input logic [7:0]           rfr_cfvec_ipf,
-  input logic [7:0]           rfr_cfvec_igpf
+  input logic [7:0]           rfr_cfvec_igpf,
+  input logic atpb_flush,
+  input logic atpb_context_changed,
+  input logic atpb_request_fire,
+  input logic [63:0] atpb_request_fullva,
+  input logic [BOUNDARY_FTQ_BITS:0] atpb_request_ftq,
+  input logic [2:0] atpb_request_backend_exception,
+  input logic atpb_virt,
+  input logic [1:0] atpb_imode,
+  input logic [3:0] atpb_satp_mode,
+  input logic [3:0] atpb_vsatp_mode,
+  input logic [3:0] atpb_hgatp_mode,
+  input logic atpb_translation_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] atpb_translation_pc,
+  input logic [BOUNDARY_FTQ_BITS:0] atpb_translation_ftq,
+  input logic atpb_s1_execute_allowed,
+  input logic atpb_s2_execute_allowed,
+  input logic atpb_pmp_execute_allowed,
+  input logic atpb_ifu_s1_fire,
+  input logic atpb_ifu_s1_flush,
+  input logic [1:0] atpb_ifu_block_valid,
+  input logic [1:0][BOUNDARY_PC_BITS-1:0] atpb_ifu_block_pc,
+  input logic [1:0][BOUNDARY_FTQ_BITS:0] atpb_ifu_block_ftq,
+  input logic [1:0][5:0] atpb_ifu_block_size,
+  input logic [1:0][511:0] atpb_ifu_block_data,
+  input logic atpb_half_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] atpb_half_pc,
+  input logic [15:0] atpb_half_data,
+  input logic atpb_previous_half_valid,
+  input logic [BOUNDARY_PC_BITS-1:0] atpb_previous_half_pc,
+  input logic [15:0] atpb_previous_half_data,
+  input logic atpb_to_ibuffer_valid,
+  input logic atpb_to_ibuffer_ready,
+  input logic atpb_ifu_s2_flush,
+  input logic [BOUNDARY_PC_BITS-1:0] atpb_ifu_s2_pc,
+  input logic [BOUNDARY_FTQ_BITS:0] atpb_ifu_s2_ftq
 );
 
-  frontend_atp_funcov u_atp (
+  frontend_atp_funcov #(
+    .BOUNDARY_PC_BITS(BOUNDARY_PC_BITS),
+    .BOUNDARY_PADDR_BITS(BOUNDARY_PADDR_BITS),
+    .BOUNDARY_FTQ_BITS(BOUNDARY_FTQ_BITS)
+  ) u_atp (
     .clock(clock),
     .reset(reset),
     .io_tlbCsr_priv_virt(atpr_io_tlbCsr_priv_virt),
@@ -389,7 +432,42 @@ module frontend_funcov_hub (
     .pma_addr(atpr_pma_addr),
     .pma_mask(atpr_pma_mask),
     .pmp_checker_0_x(atpr_pmp_checker_0_x),
-    .pmp_checker_1_x(atpr_pmp_checker_1_x)
+    .pmp_checker_1_x(atpr_pmp_checker_1_x),
+    .boundary_flush(atpb_flush),
+    .boundary_context_changed(atpb_context_changed),
+    .boundary_request_fire(atpb_request_fire),
+    .boundary_request_fullva(atpb_request_fullva),
+    .boundary_request_ftq(atpb_request_ftq),
+    .boundary_request_backend_exception(atpb_request_backend_exception),
+    .boundary_virt(atpb_virt),
+    .boundary_imode(atpb_imode),
+    .boundary_satp_mode(atpb_satp_mode),
+    .boundary_vsatp_mode(atpb_vsatp_mode),
+    .boundary_hgatp_mode(atpb_hgatp_mode),
+    .boundary_translation_valid(atpb_translation_valid),
+    .boundary_translation_pc(atpb_translation_pc),
+    .boundary_translation_ftq(atpb_translation_ftq),
+    .boundary_s1_execute_allowed(atpb_s1_execute_allowed),
+    .boundary_s2_execute_allowed(atpb_s2_execute_allowed),
+    .boundary_pmp_execute_allowed(atpb_pmp_execute_allowed),
+    .boundary_ifu_s1_fire(atpb_ifu_s1_fire),
+    .boundary_ifu_s1_flush(atpb_ifu_s1_flush),
+    .boundary_ifu_block_valid(atpb_ifu_block_valid),
+    .boundary_ifu_block_pc(atpb_ifu_block_pc),
+    .boundary_ifu_block_ftq(atpb_ifu_block_ftq),
+    .boundary_ifu_block_size(atpb_ifu_block_size),
+    .boundary_ifu_block_data(atpb_ifu_block_data),
+    .boundary_half_valid(atpb_half_valid),
+    .boundary_half_pc(atpb_half_pc),
+    .boundary_half_data(atpb_half_data),
+    .boundary_previous_half_valid(atpb_previous_half_valid),
+    .boundary_previous_half_pc(atpb_previous_half_pc),
+    .boundary_previous_half_data(atpb_previous_half_data),
+    .boundary_to_ibuffer_valid(atpb_to_ibuffer_valid),
+    .boundary_to_ibuffer_ready(atpb_to_ibuffer_ready),
+    .boundary_ifu_s2_flush(atpb_ifu_s2_flush),
+    .boundary_ifu_s2_pc(atpb_ifu_s2_pc),
+    .boundary_ifu_s2_ftq(atpb_ifu_s2_ftq)
   );
 
   frontend_ibuffer_funcov u_ibuf (
@@ -724,9 +802,65 @@ module frontend_funcov_hub (
   );
 endmodule
 
-bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
+bind Frontend frontend_funcov_hub #(
+  .BOUNDARY_PC_BITS($bits(_inner_icache_io_itlb_req_bits_vaddr) + 1),
+  .BOUNDARY_PADDR_BITS($bits(_inner_itlb_io_requestor_0_resp_bits_paddr_0)),
+  .BOUNDARY_FTQ_BITS($bits(io_backend_fromFtq_ftqIdx))
+) u_frontend_funcov_hub (
   .clock(clock),
   .reset(reset),
+  .atpb_flush(inner_needFlush),
+  .atpb_context_changed(inner_itlb._csr_delay_io_out_satp_changed ||
+    inner_itlb._csr_delay_io_out_vsatp_changed ||
+    inner_itlb._csr_delay_io_out_hgatp_changed ||
+    inner_itlb._csr_delay_io_out_priv_virtChanged || inner_itlb._sfence_delay_io_out_valid ||
+    _resetGen_o_reset),
+  .atpb_request_fire(inner_icache.prefetcher.s0_fire),
+  .atpb_request_fullva(inner_icache.prefetcher.io_itlb_req_bits_fullva),
+  .atpb_request_ftq({inner_icache.prefetcher.io_fromFtq_bits_req_0_ftqIdx_flag,
+    inner_icache.prefetcher.io_fromFtq_bits_req_0_ftqIdx_value}),
+  .atpb_request_backend_exception(inner_icache.prefetcher.io_fromFtq_bits_req_0_backendException_value),
+  .atpb_virt(inner_itlb._csr_delay_io_out_priv_virt),
+  .atpb_imode(inner_itlb._csr_delay_io_out_priv_imode),
+  .atpb_satp_mode(inner_itlb._csr_delay_io_out_satp_mode),
+  .atpb_vsatp_mode(inner_itlb._csr_delay_io_out_vsatp_mode),
+  .atpb_hgatp_mode(inner_itlb._csr_delay_io_out_hgatp_mode),
+  .atpb_translation_valid(inner_icache.prefetcher.s1_valid &&
+    !inner_icache.prefetcher.s1_flush && inner_itlb.req_out_v_0 &&
+    (!inner_itlb.accessInfo_0_translateEnable || !inner_itlb.readResult_0_miss)),
+  .atpb_translation_pc({inner_icache.prefetcher.s1_req_0_startVAddr_addr, 1'b0}),
+  .atpb_translation_ftq({inner_icache.prefetcher.s1_req_0_ftqIdx_flag,
+    inner_icache.prefetcher.s1_req_0_ftqIdx_value}),
+  .atpb_s1_execute_allowed(inner_itlb.check.io_in_perm_v &&
+    !inner_itlb.check.io_in_perm_pf && !inner_itlb.check.io_in_perm_af &&
+    inner_itlb.check.io_in_perm_x && inner_itlb.check.io_in_perm_a &&
+    (!inner_itlb.check.io_in_perm_w || inner_itlb.check.io_in_perm_r) &&
+    ((inner_itlb.check.io_in_info_mode == 2'd0 && inner_itlb.check.io_in_perm_u) ||
+     (inner_itlb.check.io_in_info_mode == 2'd1 && !inner_itlb.check.io_in_perm_u))),
+  .atpb_s2_execute_allowed(!inner_itlb.check.io_in_gPerm_pf && !inner_itlb.check.io_in_gPerm_af &&
+    inner_itlb.check.io_in_gPerm_x && inner_itlb.check.io_in_gPerm_a &&
+    (!inner_itlb.check.io_in_gPerm_w || inner_itlb.check.io_in_gPerm_r)),
+  .atpb_pmp_execute_allowed(!inner_icache.prefetcher.io_pmp_resp_instr),
+  .atpb_ifu_s1_fire(inner_ifu.s1_fire),
+  .atpb_ifu_s1_flush(inner_ifu.s1_flush),
+  .atpb_ifu_block_valid({inner_ifu.s1_fetchBlock_1_valid, inner_ifu.s1_fetchBlock_0_valid}),
+  .atpb_ifu_block_pc({{inner_ifu.s1_fetchBlock_1_startVAddr_addr, 1'b0},
+    {inner_ifu.s1_fetchBlock_0_startVAddr_addr, 1'b0}}),
+  .atpb_ifu_block_ftq({{inner_ifu.s1_fetchBlock_1_ftqIdx_flag, inner_ifu.s1_fetchBlock_1_ftqIdx_value},
+    {inner_ifu.s1_fetchBlock_0_ftqIdx_flag, inner_ifu.s1_fetchBlock_0_ftqIdx_value}}),
+  .atpb_ifu_block_size({inner_ifu.s1_fetchBlock_1_size, inner_ifu.s1_fetchBlock_0_size}),
+  .atpb_ifu_block_data({inner_ifu.s1_secondICacheData, inner_ifu.s1_firstICacheData}),
+  .atpb_half_valid(inner_ifu.s1_totalEndIsHalfRvi),
+  .atpb_half_pc({inner_ifu.s1_totalEndHalfRvi_bits_pc_addr, 1'b0}),
+  .atpb_half_data(inner_ifu.s1_totalEndHalfRvi_bits_data),
+  .atpb_previous_half_valid(inner_ifu.s1_prevEndHalfRviInfo_valid),
+  .atpb_previous_half_pc({inner_ifu.s1_prevEndHalfRviInfo_bits_pc_addr, 1'b0}),
+  .atpb_previous_half_data(inner_ifu.s1_prevEndHalfRviInfo_bits_data),
+  .atpb_to_ibuffer_valid(inner_ifu.io_toIBuffer_valid),
+  .atpb_to_ibuffer_ready(inner_ifu.io_toIBuffer_ready),
+  .atpb_ifu_s2_flush(inner_ifu.s2_flush),
+  .atpb_ifu_s2_pc({inner_ifu.s2_fetchBlock_0_startVAddr_addr, 1'b0}),
+  .atpb_ifu_s2_ftq({inner_ifu.s2_fetchBlock_0_ftqIdx_flag, inner_ifu.s2_fetchBlock_0_ftqIdx_value}),
   .atp_io_tlbCsr_priv_virt(io_tlbCsr_priv_virt),
   .atp_io_tlbCsr_satp_mode(io_tlbCsr_satp_mode),
   .atp_io_tlbCsr_vsatp_mode(io_tlbCsr_vsatp_mode),

@@ -4,6 +4,18 @@ This directory implements the formal Frontend functional-coverage path:
 `FrontendFuncovSampleHub` + Toffee. It does not define a second coverage
 methodology or a parallel coverage registry.
 
+## SV coverpoint authoring rules
+
+- Every coverpoint must observe a meaningful scenario from the testpoint table;
+  do not add placeholder points merely to match a target count.
+- Write a readable predicate directly, or reference a condition with an explicit
+  semantic name consistent with the existing module style.
+- Do not hide coverpoint meaning behind numbered scenario bits such as
+  `boundary_scenario[0]`, anonymous event codes, or generic hit flags. Renaming
+  a flag alone does not establish that its predicate matches the testpoint.
+- Keep necessary transaction history, but express its completed scenario through
+  a meaningful condition name rather than exporting a numbered hit vector.
+
 ## Implementation map
 
 - `recorder.py`: `FrontendFuncovSampleHub` loads the canonical registry,
@@ -19,6 +31,18 @@ methodology or a parallel coverage registry.
   domain.
 - `sv/`: SystemVerilog observation/bind sources used by simulator-specific
   coverage flows; they do not create a second canonical registry.
+
+`sv/address_translation_permission_funcov.sv` extends the existing
+`frontend_atp_funcov_cg` with 19 address-boundary points. Its `boundary_*`
+inputs pass through the existing hub/bind in `zz_frontend_funcov_bind.sv`.
+Sampling uses the ITLB's delayed CSR context and request PC plus full FTQ
+pointer; legal paths also observe PTE/PMP permissions. The last legal
+halfword uses C.NOP as a known legal RVC witness. Saved-half and backpressure
+scenarios retain transaction identity across cycles and cancel on flush or
+context invalidation. Fault classification and GPA correctness remain checker
+requirements, not coverage admission conditions. SV observations are not
+canonical Toffee HIT evidence; the new leaves retain their canonical Toffee
+`UNMAPPED` status.
 
 `py/icache/icache_data_ecc_ibuffer_funcov.py` observes the four Data-bank
 injection leaves as request-owned input scenarios. Their four point mappings
