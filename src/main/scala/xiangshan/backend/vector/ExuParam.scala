@@ -74,7 +74,6 @@ class ExuParam(
 
   val needRedirect: Boolean = fuConfigs.exists(_.hasRedirect)
   val needIsRVC: Boolean = fuConfigs.exists(_.hasIsRVC)
-  val needRasAction: Boolean = fuConfigs.exists(_.hasRasAction)
   val needFlushPipe: Boolean = fuConfigs.exists(_.flushPipe)
   val needReplay: Boolean = fuConfigs.exists(_.replayInst)
   val needTrigger: Boolean = fuConfigs.exists(_.trigger)

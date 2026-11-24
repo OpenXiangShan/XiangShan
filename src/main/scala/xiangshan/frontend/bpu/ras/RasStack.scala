@@ -37,11 +37,10 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
 
     class RasCommitIO extends Bundle {
-      val valid:     Bool      = Input(Bool())
-      val pushValid: Bool      = Input(Bool())
-      val popValid:  Bool      = Input(Bool())
-      val pushAddr:  GuardedPc = Input(GuardedPc())
-      val metaTosw:  RasPtr    = Input(new RasPtr)
+      val valid:     Bool   = Input(Bool())
+      val pushValid: Bool   = Input(Bool())
+      val popValid:  Bool   = Input(Bool())
+      val metaTosw:  RasPtr = Input(new RasPtr)
       // for debug purpose only
       val metaSsp: UInt = Input(UInt(log2Up(CommitStackSize).W))
     }
@@ -372,7 +371,6 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
 
     // XSError(io.commit.metaSsp =/= nsp, "nsp mismatch with expected ssp")
-    // XSError(io.commit.pushAddr =/= commitPushAddr, "addr from commit mismatch with addr from spec")
   }
 
   when(io.commit.pushValid) {

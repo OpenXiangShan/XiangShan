@@ -262,7 +262,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   )
   val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
-  val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
     robDeqGroup(i).connectCommitEntry(robBanksRdataThisLineUpdate(i), needUpdateCommitW(i))
@@ -309,10 +308,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
   val commitInstrCntByEntry = instrSizeCommit.toSeq
-  for (i <- 0 until CommitWidth) {
-    commitInfo(i).ftqOffset := 0.U
-    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
-  }
 
   // Per-slot copy of the full enqueue uop for debug and difftest.
   val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
@@ -1061,7 +1056,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
     val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
-    out.commits.info(i) := commitInfo(i)
+    out.commits.info(i) := rawInfo(i)
+    out.commits.info(i).ftqOffset := 0.U
+    out.commits.info(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
     out.commits.robIdx(i) := deqPtrVec(i)
     val deqDebugInst = debug_microOp(deqPtrVec(i).value).head
     deqDebugInst.debug.foreach { debug =>
