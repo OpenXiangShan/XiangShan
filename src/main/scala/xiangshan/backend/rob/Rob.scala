@@ -531,56 +531,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     hasWFI := false.B
   }
   /**
-   * Vector flush tracking
-   */
-  val vs_idle :: vs_waitVinstr :: vs_waitFlush :: Nil = Enum(3)
-  val vsetvlState = RegInit(vs_idle)
-
-  val firstVInstrFtqPtr = RegInit(0.U.asTypeOf(new FtqPtr))
-  val firstVInstrFtqOffset = RegInit(0.U.asTypeOf(UInt(FetchBlockInstOffsetWidth.W)))
-  val firstVInstrRobIdx = RegInit(RobPtr(false.B, 0.U))
-
-  val enq0 = in.enq.req(0)
-  val enq0IsVset = enq0.bits.isVset && enq0.bits.lastUop && enqFirstUopFireVec(0)
-  val enq0IsVsetFlush = enq0IsVset && enq0.bits.flushPipe
-  val enqIsVInstrVec = in.enq.req.zip(enqFirstUopFireVec).map { case (req, fire) =>
-    FuType.isVArith(req.bits.fuType) && fire
-  }
-  // for vs_idle
-  val firstVInstrIdle = PriorityMux(enqIsVInstrVec.zip(in.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(in.enq.req(0).cloneType)))
-  // for vs_waitVinstr
-  val enqIsVInstrOrVset = (enqIsVInstrVec(0) || enq0IsVset) +: enqIsVInstrVec.drop(1)
-  val firstVInstrWait = PriorityMux(enqIsVInstrOrVset, in.enq.req)
-  when(vsetvlState === vs_idle) {
-    firstVInstrFtqPtr := firstVInstrIdle.bits.ftqPtr
-    firstVInstrFtqOffset := firstVInstrIdle.bits.ftqOffset
-    firstVInstrRobIdx := firstVInstrIdle.bits.robIdx
-  }.elsewhen(vsetvlState === vs_waitVinstr) {
-    when(Cat(enqIsVInstrOrVset).orR) {
-      firstVInstrFtqPtr := firstVInstrWait.bits.ftqPtr
-      firstVInstrFtqOffset := firstVInstrWait.bits.ftqOffset
-      firstVInstrRobIdx := firstVInstrWait.bits.robIdx
-    }
-  }
-
-  val hasVInstrAfterI = Cat(enqIsVInstrVec(0)).orR
-  when(vsetvlState === vs_idle && !in.redirect.valid) {
-    when(enq0IsVsetFlush) {
-      vsetvlState := Mux(hasVInstrAfterI, vs_waitFlush, vs_waitVinstr)
-    }
-  }.elsewhen(vsetvlState === vs_waitVinstr) {
-    when(in.redirect.valid) {
-      vsetvlState := vs_idle
-    }.elsewhen(Cat(enqIsVInstrOrVset).orR) {
-      vsetvlState := vs_waitFlush
-    }
-  }.elsewhen(vsetvlState === vs_waitFlush) {
-    when(in.redirect.valid) {
-      vsetvlState := vs_idle
-    }
-  }
-
-  /**
    * Trap: Interrupt and Exceptions
    */
 
@@ -651,9 +601,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // vsetvl instruction need another one cycle to write to vtype gen
   val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushed && exceptionDataRead.bits.isVset
   val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
-  //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
-  val needModifyFtqIdxOffset = false.B
-  out.isVsetFlushPipe := isVsetFlushPipe
   out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || isVsetFlushPipeReg
   // out.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
@@ -664,47 +611,36 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val flushIsFormer = intrEnable || deqPtrEntry.slotNeedFlushMask(0)
   val flushBaseIsRVC = Mux(flushIsFormer, deqPtrEntry.slotHeadRvcMask(0), Mux(deqPtrEntry.predTaken, deqPtrEntry.slotHeadRvcMask(1), deqPtrEntry.slotHeadRvcMask(0)))
   out.flushOut.bits.isRVC := flushBaseIsRVC
-  out.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
-  out.flushOut.bits.robIdx.isFormer := Mux(needModifyFtqIdxOffset, true.B, flushIsFormer)
-  out.flushOut.bits.ftqIdx :=
-    Mux(needModifyFtqIdxOffset,
-      firstVInstrFtqPtr,
-      Mux(flushIsFormer,
-        deqPtrEntry.ftqIdx,
-        Mux(deqPtrEntry.predTaken,
-          deqPtrEntry.ftqIdx + 1.U,
-          deqPtrEntry.ftqIdx
-        )
-      )
+  out.flushOut.bits.robIdx := deqPtr
+  out.flushOut.bits.robIdx.isFormer := flushIsFormer
+  out.flushOut.bits.ftqIdx := Mux(
+    flushIsFormer,
+    deqPtrEntry.ftqIdx,
+    Mux(deqPtrEntry.predTaken, deqPtrEntry.ftqIdx + 1.U, deqPtrEntry.ftqIdx)
+  )
+  out.flushOut.bits.ftqOffset := Mux(
+    flushIsFormer,
+    deqPtrEntry.ftqOffset,
+    Mux(
+      deqPtrEntry.predTaken,
+      Mux(deqPtrEntry.slotHeadRvcMask(1), 0.U.asTypeOf(deqPtrEntry.ftqOffset), 1.U.asTypeOf(deqPtrEntry.ftqOffset)),
+      deqPtrEntry.ftqOffset
     )
-  out.flushOut.bits.ftqOffset :=
-    Mux(needModifyFtqIdxOffset,
-      firstVInstrFtqOffset,
-      Mux(flushIsFormer,
-        deqPtrEntry.ftqOffset,
-        Mux(deqPtrEntry.predTaken,
-          Mux(deqPtrEntry.slotHeadRvcMask(1),
-            0.U.asTypeOf(deqPtrEntry.ftqOffset),
-            1.U.asTypeOf(deqPtrEntry.ftqOffset)
-          ),
-          deqPtrEntry.ftqOffset
-        )
-      )
-    )
+  )
   out.flushPcInfo.formerLen := Mux(
-    needModifyFtqIdxOffset || flushIsFormer || deqPtrEntry.predTaken,
+    flushIsFormer || deqPtrEntry.predTaken,
     0.U.asTypeOf(out.flushPcInfo.formerLen),
     formerLenCommit(0)
   )
-  out.flushPcInfo.flushIsRVC := Mux(
-    needModifyFtqIdxOffset,
-    out.flushOut.bits.isRVC,
-    Mux(flushIsFormer, deqPtrEntry.slotHeadRvcMask(0), deqPtrEntry.slotHeadRvcMask(1))
-  )
+  out.flushPcInfo.flushIsRVC := Mux(flushIsFormer, deqPtrEntry.slotHeadRvcMask(0), deqPtrEntry.slotHeadRvcMask(1))
   // TODO: it could use the former instr's ftqIdx and ftqOffset to calculate the latter instr's PC
   // rather than calculate the latter instr's ftqIdx and ftqOffset which could be wrong!!!
 
-  out.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
+  out.flushOut.bits.level := Mux(
+    deqHasReplayInst || intrEnable || deqHasException,
+    RedirectLevel.flush,
+    RedirectLevel.flushAfter
+  ) // TODO use this to implement "exception next"
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
 
@@ -2653,9 +2589,6 @@ object Rob {
 
     // Vector exception recovery.
     val toVecExcpMod = Output(new RobToVecExcpModIO)
-
-    // Vset flush status.
-    val isVsetFlushPipe = Output(Bool())
 
     // Decode vector configuration.
     val toDecode = new RobToDecodeIO
