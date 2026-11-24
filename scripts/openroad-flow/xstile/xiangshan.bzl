@@ -10,6 +10,7 @@ name from their abstracts.
 """
 
 load("@bazel-orfs//:openroad.bzl", "orfs_flow", "orfs_headroom", "orfs_run")
+load("@bazel-orfs//tools/carve:parent_macro.bzl", "parent_macro_flow")
 
 # Read by anneal_in_flow.tcl, not by ORFS: bypass the variables.yaml
 # validator, and scoped to the floorplan so a knob edit re-runs the
@@ -33,7 +34,7 @@ XS_ICG_USER_SOURCES = {
 }
 XS_USER_STAGES = {v: ["floorplan"] for v in XS_USER_ARGUMENTS + XS_USER_SOURCES} | {
     v: ["synth"]
-    for v in list(XS_ICG_USER_ARGUMENTS) + list(XS_ICG_USER_SOURCES) + ["XS_FOLD_MODULES"]
+    for v in list(XS_ICG_USER_ARGUMENTS) + list(XS_ICG_USER_SOURCES) + ["XS_FOLD_MODULES", "CARVE_EVERT_LOCAL"]
 } | {
     # global_place_args.tcl's, set only when the switch is on (_gpl_switches)
     v: ["place"]
@@ -61,7 +62,7 @@ XS_EXTRACTED = {
         "absorbed": ["SqForwardPipe"],
         "modules": ["LoadQueueRAR", "LoadQueueReplay", "PhysicalStoreQueue", "TLBFA_1", "VirtualStoreQueue"],
     },
-    "parent": {
+    "Backend": {
         "absorbed": ["RobEntryCell"],
         "modules": ["Rob"],
     },
@@ -139,6 +140,40 @@ XS_PARENT = {
 # Block name -> its flow's arguments and sources. A block reads whichever
 # annealer knobs its own settings name.
 XS_BLOCKS = {
+    "Backend": {
+        "arguments": {
+            "AUTO_MEMORIES": "1",
+            "ENABLE_DPO": "0",
+            "GPL_KEEP_OVERFLOW": "0",
+            "IO_PLACER_H": "M2 M4",
+            "IO_PLACER_V": "M3 M5",
+            "RTLMP_MIN_CHANNEL_SIZE": "20 20",
+            "MAX_ROUTING_LAYER": "M9",
+            "MIN_ROUTING_LAYER": "M2",
+            "OPENROAD_HIERARCHICAL": "1",
+            "PLACE_DENSITY": "0.70",
+            "PLACE_PINS_ARGS": "-annealing",
+            "ROUTING_LAYER_ADJUSTMENT": "0.1",
+            "SKIP_ANTENNA_REPAIR": "1",
+            "SKIP_EXTRACT_FA": "1",
+            "SKIP_LAST_GASP": "1",
+            "SKIP_REPORT_METRICS": "1",
+            "TNS_END_PERCENT": "1",
+        },
+        "user_arguments": {},
+        "user_sources": {
+            "XS_GPL_CLUSTERS_FILE": ["//scripts/openroad-flow/xstile:gpl_clusters_backend.json"],
+        },
+        "sources": {
+            "MACRO_PLACEMENT_TCL": ["//scripts/openroad-flow/xstile:Backend_macros.tcl"],
+            "PDN_TCL": ["@orfs//flow:platforms/asap7/openRoad/pdn/BLOCK_grid_strategy.tcl"],
+            "PRE_GLOBAL_PLACE_TCL": ["//scripts/openroad-flow/xstile:global_place_args.tcl"],
+            "PRE_DETAIL_PLACE_TCL": ["//scripts/openroad-flow/xstile:legalize_out_of_blocks.tcl"],
+            "PRE_CTS_TCL": ["//scripts/openroad-flow/xstile:legalize_out_of_blocks.tcl"],
+            "PRE_GLOBAL_ROUTE_TCL": ["//scripts/openroad-flow/xstile:legalize_out_of_blocks.tcl"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+        },
+    },
     "Bpu": {
         "arguments": {
             "AUTO_MEMORIES": "1",
@@ -1124,7 +1159,8 @@ XS_BLOCK_DEFAULT = dict(XS_BLOCKS["Bpu"], arguments = {k: v for k, v in XS_BLOCK
 # path crosses the die twice; at 0.8 its period is 1,696 ps against 1,815,
 # at 0.9 2,217 (over-packed). Place stage, dirty lane.
 XS_PLACE_DENSITY = {
-    "MemBlock": "0.8",
+    "Backend": "0.70",
+    "MemBlock": "0.75",
 }
 
 # The annealer's channel between facing macros, per block where the default
@@ -1135,6 +1171,7 @@ XS_PLACE_DENSITY = {
 # (place stage, dirty lane).
 XS_ANNEAL_CHANNEL_UM = {
     "CoupledL2": "12.0",
+    "L2Top": "12.0",
 }
 
 # Outline knobs a planned flow replaces with DIE_AREA/CORE_AREA, and the
@@ -1323,6 +1360,9 @@ XS_REGFILE_OUTLINE_UM = {
     "FtqEntryQueue": {"w_um": 84.2, "h_um": 74.5},
     "FtqMetaQueueRedirect": {"w_um": 112.2, "h_um": 155.2},
     "FtqMetaQueueResolve": {"w_um": 173.7, "h_um": 306.4},
+    "IntRegFile": {"w_um": 379.6, "h_um": 248.62},
+    "RenameBufferFile": {"w_um": 219.73, "h_um": 385.78},
+    "RobEntryFile": {"w_um": 232.366, "h_um": 385.78},
 }
 
 # A register file whose legaliser needs to look further than its default
@@ -1362,11 +1402,13 @@ XS_VT = "RVT LVT SLVT"
 # 1,066. An offset is the shift wanted at global route; set again from
 # the measured arrivals after a global route that misses it, and after a
 # floorplan, pin-order or clock-tree change.
-XS_CTS_LATENCY_OFFSETS = {
-    "core/backend/inner_vecRegion": 60,
-    "core/frontend": -80,
-    "core/backend/inner_fpRegion": 30,
-    "core/memBlock": -30,
+XS_CTS_LATENCY_OFFSETS = {}
+
+_ABOVE_BLOCKS = ["Backend", "CtrlBlock", "Frontend", "L2Top", "MemBlock", "XSCore", "IntRegFile", "RobEntryFile", "RenameBufferFile"]
+
+XS_BLOCK_DPL_ARGS = {
+    "Backend": "-use_diamond_legalizer -max_displacement {200 200}",
+    "Rob": "-use_diamond_legalizer -max_displacement {200 600}",
 }
 
 # Two switches on the parent's timing-driven global placement (3_3), each
@@ -1426,6 +1468,8 @@ def _planned_block(cfg, entry, plan_dir, block, blocks):
     arguments["SYNTH_HIERARCHICAL"] = "0"
     if block in XS_PLACE_DENSITY:
         arguments["PLACE_DENSITY"] = XS_PLACE_DENSITY[block]
+    if block in XS_BLOCK_DPL_ARGS:
+        arguments["DETAIL_PLACEMENT_ARGS"] = XS_BLOCK_DPL_ARGS[block]
     arguments["OPENROAD_HIERARCHICAL"] = "1"
     arguments["ASAP7_USE_VT"] = XS_VT
     sources = dict(cfg["sources"])
@@ -1530,13 +1574,22 @@ def xiangshan_flow(name, plan, blocks = XS_BLOCKS, parent = XS_PARENT, tags = ["
             }
         verilog, arguments, sources, user_arguments = _extracted(block, arguments, sources, cfg["user_arguments"] | XS_ICG_USER_ARGUMENTS)
         user_sources = cfg["user_sources"] | XS_ICG_USER_SOURCES
+        # hold stays with CTS's repair, as the parent's; cap grt setup
+        # iterations on L2Top and Backend so boundary / tail endpoints do
+        # not grind past 1,600 iterations (ref_b82ca292_xiangshan.bzl)
+        grt_stage_args = {"HOLD_SLACK_MARGIN": "-1000"}
+        if block in ("Backend", "L2Top"):
+            grt_stage_args = grt_stage_args | {
+                "DETAIL_PLACEMENT_ARGS": "-use_diamond_legalizer -max_displacement {200 200}",
+                "REPAIR_TIMING_MAX_ITERATIONS": "1600",
+                "REPAIR_TIMING_PATH_GROUP": "reg2reg",
+            }
         orfs_flow(
             name = block,
             abstract_stage = "grt",
             arguments = arguments,
             macros = regfiles,
-            # hold stays with CTS's repair, as the parent's
-            stage_arguments = {"grt": {"HOLD_SLACK_MARGIN": "-1000"}},
+            stage_arguments = {"grt": grt_stage_args},
             pdk = "@orfs//flow:asap7",
             sources = sources,
             tags = tags,
@@ -1595,7 +1648,8 @@ def xiangshan_flow(name, plan, blocks = XS_BLOCKS, parent = XS_PARENT, tags = ["
     arguments["PLACE_PINS_ARGS"] = "-annealing"
 
     # each hard block's clock where its crossings want it
-    arguments["CTS_LATENCY_OFFSETS"] = " ".join(["%s %s" % (i, o) for i, o in XS_CTS_LATENCY_OFFSETS.items()])
+    if XS_CTS_LATENCY_OFFSETS:
+        arguments["CTS_LATENCY_OFFSETS"] = " ".join(["%s %s" % (i, o) for i, o in XS_CTS_LATENCY_OFFSETS.items()])
 
     # Zero iterations with congestion allowed: the route reports what it
     # would have to route and stops, which is the number this baseline
@@ -1609,18 +1663,31 @@ def xiangshan_flow(name, plan, blocks = XS_BLOCKS, parent = XS_PARENT, tags = ["
     # map; carried ORFS patch 0085 has the detail and retires with the
     # bug. A five-second reproducer is in test/planned_parent.
     arguments["SKIP_PIN_ACCESS"] = "1"
+    inside_blocks = {}
+    for b in macros:
+        for k in (plan["macros"][b].get("SYNTH_KEEP_MODULES", "") + " " +
+                  blocks.get(b, XS_BLOCK_DEFAULT)["arguments"].get("SYNTH_KEEP_MODULES", "")).split(" "):
+            if k:
+                inside_blocks[k] = True
+    regfile_mods = {m: True for m in xs_regfile_modules(parent, blocks)}
     if "SYNTH_KEEP_MODULES" in plan["parent"]:
         # what the blocks swallowed no longer exists in the parent
-        arguments["SYNTH_KEEP_MODULES"] = plan["parent"]["SYNTH_KEEP_MODULES"]
+        arguments["SYNTH_KEEP_MODULES"] = " ".join([
+            k
+            for k in plan["parent"]["SYNTH_KEEP_MODULES"].split(" ")
+            if k and k not in macros and k not in inside_blocks and k not in regfile_mods
+        ])
+    arguments["SYNTH_HIERARCHICAL"] = "1" if arguments.get("SYNTH_KEEP_MODULES") else "0"
     sources = dict(parent["sources"])
 
     # the memories of what the parent still holds; a hardened block's
     # are the block's own
     parent_keep = " ".join([k for k in arguments.get("SYNTH_KEEP_MODULES", "").split(" ") if k and k not in macros])
+    parent_macro_keep = " ".join([k for k in parent_keep.split(" ") if k and k not in _ABOVE_BLOCKS and k not in inside_blocks])
 
     # the parent's register files are macros of their own (_regfile_macro)
     outlines = {n["module"]: n for n in plan["parent"].get("netlists", [])}
-    parent_modules = _regfiles(parent["sources"], parent_keep, blocks)
+    parent_modules = _regfiles(parent["sources"], parent_macro_keep, blocks)
     if variant:
         for m in parent_modules:
             module = m.split(":")[-1].removesuffix(".regfile")
@@ -1680,8 +1747,101 @@ def xiangshan_flow(name, plan, blocks = XS_BLOCKS, parent = XS_PARENT, tags = ["
             _pin_plan(name, "grt", [m.split(":")[-1].removesuffix(".regfile") for m in parent_modules], tags, _PIN_PLAN_STAGES[_PIN_PLAN_NEXT[variant]][0], variant)
         return
 
-    _pin_plans(name, [m.split(":")[-1].removesuffix(".regfile") for m in parent_modules], tags)
+    if parent_modules:
+        _pin_plans(name, [m.split(":")[-1].removesuffix(".regfile") for m in parent_modules], tags)
     _kpi(name, "grt", arguments, sources, tags)
+
+    parent_arguments = {k: v for k, v in arguments.items() if k not in ["SYNTH_KEEP_MODULES", "SYNTH_NUM_PARTITIONS", "CTS_LATENCY_OFFSETS"]} | {
+        "DETAIL_PLACEMENT_ARGS": "-use_diamond_legalizer -max_displacement {450 450}",
+        "DONT_BUFFER_PORTS": "1",
+        "GPL_ROUTABILITY_DRIVEN": "0",
+        "GPL_TIMING_DRIVEN": "0",
+        "MAX_ROUTING_LAYER": "M7",
+        "PLACE_DENSITY": "0.6",
+        "SKIP_PIN_ACCESS": "1",
+        "SYNTH_HIERARCHICAL": "1" if parent_macro_keep else "0",
+        "SYNTH_KEEP_MODULES": parent_macro_keep,
+    }
+    parent_sources = {k: v for k, v in sources.items() if k not in ["IO_CONSTRAINTS", "MACRO_PLACEMENT_TCL", "SYNTH_CANONICALIZE_TCL", "PRE_GLOBAL_PLACE_TCL"]}
+    parent_user_sources = XS_ICG_USER_SOURCES | {
+        "CARVE_EVERT_LOCAL": [
+            "//tools/carve:evert.tcl",
+            "//tools/carve:evert.ys",
+        ],
+    }
+
+    pm_regfile_lefs = []
+    pm_regfile_libs = []
+    for m in sorted(made.keys()):
+        native.filegroup(
+            name = "%s_pm_lef" % m,
+            srcs = [":%s_generate_abstract" % m],
+            output_group = "%s.lef" % m,
+            tags = tags,
+        )
+        native.filegroup(
+            name = "%s_pm_lib" % m,
+            srcs = [":%s_generate_abstract" % m],
+            output_group = "%s_typ.lib" % m,
+            tags = tags,
+        )
+        pm_regfile_lefs.append(":%s_pm_lef" % m)
+        pm_regfile_libs.append(":%s_pm_lib" % m)
+
+    parent_macro_flow(
+        name = name,
+        arguments = parent_arguments,
+        blocks = {b: {"abstract": _abstract(b, None), "grt": ":%s_grt" % b} for b in macros},
+        budget_ps = "2000",
+        crossing_data_min_ps = "1500",
+        macros = parent_regfiles,
+        pdk = "@orfs//flow:asap7",
+        place_macros = ":%s/place_macros.tcl" % plan_dir,
+        plan = plan,
+        plan_pins = {b: ":%s/%s_pins.tcl" % (plan_dir, b) for b in macros},
+        sources = parent_sources,
+        stage_arguments = {"grt": {
+            "HOLD_SLACK_MARGIN": "-1000",
+            "REPAIR_TIMING_MAX_ITERATIONS": "1600",
+            "REPAIR_TIMING_PATH_GROUP": "reg2reg",
+            "SKIP_INCREMENTAL_REPAIR": "0",
+        }},
+        tags = tags,
+        top = name,
+        top_arguments = {
+            "ASAP7_USE_VT": XS_VT,
+            "MAX_ROUTING_LAYER": "M9",
+            "MIN_ROUTING_LAYER": "M2",
+        },
+        top_level_arguments = {
+            "SKIP_PIN_ACCESS": "1",
+        },
+        top_level_user_arguments = {
+            "TOP_DPL_ARGS": "-max_displacement {450 450}",
+        },
+        top_sources = {
+            "ADDITIONAL_LEFS": [
+                ":%s_parent/%s.lef" % (name, name),
+                ":%s_parent/memories.lef" % name,
+            ] + pm_regfile_lefs,
+            "ADDITIONAL_LIBS": [
+                ":%s_parent/memories.lib" % name,
+            ] + pm_regfile_libs,
+            "PDN_TCL": sources["PDN_TCL"],
+            "SDC_FILE": ["//scripts/openroad-flow/xstile:constraints.sdc"],
+        },
+        unfirm_user_arguments = {
+            "TOP_CLOCK_PERIOD": "473",
+            "TOP_UNFIRM_DEEP": "0",
+        },
+        user_arguments = XS_ICG_USER_ARGUMENTS,
+        user_sources = parent_user_sources,
+        user_stages = _user_stages(XS_ICG_USER_ARGUMENTS, parent_user_sources),
+        variant = "parent",
+        verilog_files = XS_VERILOG,
+    )
+
+    _kpi(name, "grt", parent_arguments, parent_sources, tags, variant = "parent")
 
     # how much of the period repair left, and in which move: wire, VT,
     # skew, retiming; the floors no repair beats (repair-headroom skill)

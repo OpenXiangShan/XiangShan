@@ -1,0 +1,7 @@
+exports_files(
+    [
+        "evert.tcl",
+        "evert.ys",
+    ],
+    visibility = ["//visibility:public"],
+)
