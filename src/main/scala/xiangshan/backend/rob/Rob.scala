@@ -473,15 +473,27 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Dispatch serialization and WFI
    */
-  // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
-  // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
-  // TODO: How about a lot of fence instr and XSTrap instr
+  // Allow enqueue again once the ROB is empty.
   when(isEmpty) {
     hasBlockBackward := false.B
   }
-  // When any instruction commits, hasNoSpecExec should be set to false.B
+  // Clear waitForward when any instruction commits or walks.
   when(out.commits.hasWalkInstr || out.commits.hasCommitInstr) {
     hasWaitForward := false.B
+  }
+
+  val enqUopsWithFire = enqFireVec.zip(in.enq.req.map(_.bits))
+  val enqHasBlockBackward = VecInit(enqUopsWithFire.map { case (fire, uop) =>
+    fire && uop.blockBackward
+  }).asUInt.orR
+  val enqHasWaitForward = VecInit(enqUopsWithFire.map { case (fire, uop) =>
+    fire && uop.waitForward
+  }).asUInt.orR
+  when(enqHasBlockBackward) {
+    hasBlockBackward := true.B
+  }
+  when(enqHasWaitForward) {
+    hasWaitForward := true.B
   }
 
   // The wait-for-interrupt (WFI) instruction waits in the ROB until an interrupt might need servicing.
@@ -505,23 +517,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     hasWFI := false.B
   }
 
-  for (i <- 0 until RenameWidth) {
-    when(enqFireVec(i)) {
-      val enqUop = in.enq.req(i).bits
-      when(enqUop.waitForward) {
-        hasWaitForward := true.B
-      }
-      val enqHasException = enqUop.exceptionVec.orR
-      when(enqUop.isWFI && !enqHasException) {
-        hasWFI := true.B
-      }
-    }
-  }
-
-  for (i <- 0 until RenameWidth) {
-    when(enqFireVec(i) && in.enq.req(i).bits.blockBackward) {
-      hasBlockBackward := true.B
-    }
+  val enqHasWFI = VecInit(enqUopsWithFire.map { case (fire, uop) =>
+    fire && uop.isWFI && !uop.exceptionVec.orR
+  }).asUInt.orR
+  when(enqHasWFI) {
+    hasWFI := true.B
   }
 
   val dispatchNum = Mux(in.enq.canAccept, PopCount(in.enq.req.map(req => req.valid && req.bits.firstUop)), 0.U)
