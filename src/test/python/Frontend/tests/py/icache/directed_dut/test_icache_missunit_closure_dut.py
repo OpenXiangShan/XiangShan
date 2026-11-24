@@ -353,7 +353,7 @@ def _build_mshr_pressure_until(
         label="initial unissued fetch MSHR",
     )
 
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     for attempt in range(int(max_attempts)):
         sample = _snapshot(env)
         if predicate(sample):
@@ -453,7 +453,7 @@ def _wait_initial_refill(env) -> None:
 def _cleanup_missunit(env) -> None:
     _clear_soft_prefetch(env)
     env.icache_agent.set_a_ready(None)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     env.backend_model.set_can_accept(1)
     fencei = getattr(env.clock_reset, "io_fencei", None)
     if fencei is not None:
@@ -492,7 +492,7 @@ def test_icache_missunit_request_and_concurrent_dut(env) -> None:
         ),
     )
     _wait_initial_refill(env)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     for attempt in range(64):
         if env.functional_coverage.key_hit(
             "icache_missunit_request", "same_key_fetch_prefetch_merge"
@@ -541,7 +541,7 @@ def test_icache_missunit_distinct_parallel_allocate_dut(env) -> None:
         ),
     )
     _wait_initial_refill(env)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
 
     # The 16-KiB address delta changes pTag while preserving MissUnit's 8-bit
     # vSet.  Use the same minimal same-cycle launch that closes the same-key
@@ -679,7 +679,7 @@ def test_icache_missunit_acquire_priority_dut(env) -> None:
         max_cycles=1024,
         label="two unissued fetch MSHRs",
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     _drive_soft_prefetch(env, [_BASE + 0x8000])
     _wait_mshr_state(
         env,
@@ -728,7 +728,7 @@ def test_icache_missunit_dedup_dut(env) -> None:
     _set_predictors(env, False)
     _wait_initial_refill(env)
     env.icache_agent.set_a_ready(0)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
 
     demand_target = _BASE + 0x40
     _wait_mshr_state(
@@ -858,7 +858,7 @@ def test_icache_missunit_redirect_unissued_prefetch_dut(env) -> None:
     )
     _wait_initial_refill(env)
     env.icache_agent.set_a_ready(0)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
 
     _wait_mshr_state(
         env,
@@ -952,7 +952,7 @@ def test_icache_missunit_redirect_flush_dut(env) -> None:
         max_cycles=1024,
         label="issued fetch MSHR",
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     _drive_aligned_soft_prefetch(env, _BASE + 0x1_8000)
     _wait_mshr_state(
         env,

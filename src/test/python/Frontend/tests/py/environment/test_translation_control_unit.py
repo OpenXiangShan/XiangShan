@@ -64,9 +64,9 @@ def test_write_distributed_csr_completes_transaction_and_logs_event() -> None:
 
     assert record == {"cycle": 0, "addr": 0x3A0, "data": 0x1F, "settle_cycles": 2}
     assert env.current_cycle == 3
-    assert env.dut.io_csrCtrl_distribute_csr_w_valid.value == 0
-    assert env.dut.io_csrCtrl_distribute_csr_w_bits_addr.value == 0x3A0
-    assert env.dut.io_csrCtrl_distribute_csr_w_bits_data.value == 0x1F
+    assert env.dut.io_csrCtrl_distributeCsr_w_valid.value == 0
+    assert env.dut.io_csrCtrl_distributeCsr_w_bits_addr.value == 0x3A0
+    assert env.dut.io_csrCtrl_distributeCsr_w_bits_data.value == 0x1F
     assert events[-1]["type"] == "control.distributed_csr_write"
 
 
@@ -138,7 +138,7 @@ def test_update_translation_context_updates_values_and_pulses_affected_groups() 
     assert env.dut.io_tlbCsr_priv_imode.value == 1
     assert env.dut.io_tlbCsr_priv_virt.value == 1
     assert env.dut.io_tlbCsr_satp_changed.value == 0
-    assert env.dut.io_tlbCsr_priv_virt_changed.value == 0
+    assert env.dut.io_tlbCsr_priv_virtChanged.value == 0
     assert events[-1]["type"] == "control.translation_context"
 
 

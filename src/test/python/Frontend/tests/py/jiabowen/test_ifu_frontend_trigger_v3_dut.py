@@ -124,7 +124,7 @@ def _save_pc_trigger_checker(env):
 
 def _set_enable_mask(env, mask: int) -> None:
     for slot in range(4):
-        _write(env, f"io_csrCtrl_frontend_trigger_tEnableVec_{slot}", (int(mask) >> slot) & 1)
+        _write(env, f"io_csrCtrl_frontendTrigger_tEnableVec_{slot}", (int(mask) >> slot) & 1)
     env.step(2)
 
 
@@ -156,14 +156,14 @@ def _configure_trigger(
     # explicitly requesting 0/1 still fails on the missing current-DUT pin.
     if timing is not None:
         values["timing"] = timing
-    _write(env, "io_csrCtrl_frontend_trigger_debugMode", debug_mode)
-    _write(env, "io_csrCtrl_frontend_trigger_triggerCanRaiseBpExp", can_raise_bp)
-    _write(env, "io_csrCtrl_frontend_trigger_tUpdate_bits_addr", slot)
+    _write(env, "io_csrCtrl_frontendTrigger_debugMode", debug_mode)
+    _write(env, "io_csrCtrl_frontendTrigger_triggerCanRaiseBpExp", can_raise_bp)
+    _write(env, "io_csrCtrl_frontendTrigger_tUpdate_bits_addr", slot)
     for field, value in values.items():
-        _write(env, f"io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_{field}", value)
-    _write(env, "io_csrCtrl_frontend_trigger_tUpdate_valid", 1)
+        _write(env, f"io_csrCtrl_frontendTrigger_tUpdate_bits_tdata_{field}", value)
+    _write(env, "io_csrCtrl_frontendTrigger_tUpdate_valid", 1)
     env.step(2)
-    _write(env, "io_csrCtrl_frontend_trigger_tUpdate_valid", 0)
+    _write(env, "io_csrCtrl_frontendTrigger_tUpdate_valid", 0)
     env.step(2)
     after = [[read(f"tdataVec_{i}_{f}", True) for f in fields] for i in range(4)]
     assert after[slot] == [values[f] for f in fields]

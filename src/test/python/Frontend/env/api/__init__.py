@@ -955,7 +955,7 @@ def api_Frontend_set_bp_ctrl_enable(
     ittage_enable=1,
     max_cycles=0,
 ) -> dict:
-    """Set io_csrCtrl_bp_ctrl_*Enable bits."""
+    """Set io_csrCtrl_bpCtrl_*Enable bits."""
     configure_env_logging()
     bp_cfg = normalize_bp_ctrl_config(
         ubtb_enable=ubtb_enable,

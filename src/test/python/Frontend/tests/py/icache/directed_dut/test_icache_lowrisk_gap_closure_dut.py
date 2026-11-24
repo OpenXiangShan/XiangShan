@@ -1633,7 +1633,7 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
             ),
         ),
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     for _ in range(32):
         _drive_soft_prefetch(env, [target])
         if env.functional_coverage.key_hit("icache_miss_path", "fetch_refill_prefetch_hit"):
@@ -1709,7 +1709,7 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     # trained predictions revisit each block without another redirect, giving
     # the sampler an uninterrupted fetch-refill -> MSHR-release -> SRAM-hit
     # sequence for the same line.
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 0
     loop_base = base + 0x1_8000
     run_initialization_steps(
         env,

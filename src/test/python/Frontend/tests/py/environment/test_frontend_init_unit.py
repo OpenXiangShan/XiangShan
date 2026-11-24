@@ -226,9 +226,9 @@ def test_monitor_clearing_and_predictor_controls_are_explicit_recorded_steps():
     assert env.get_errors() == []
     assert env.functional_coverage == {"existing_hit": True}
     assert env.monitor.expected_pc == 0x80001000
-    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable.value == 0
-    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_abtbEnable.value == 0
-    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_mbtbEnable.value == 1
+    assert env.csr_ctrl_if.io_csrCtrl_bpCtrl_ubtbEnable.value == 0
+    assert env.csr_ctrl_if.io_csrCtrl_bpCtrl_abtbEnable.value == 0
+    assert env.csr_ctrl_if.io_csrCtrl_bpCtrl_mbtbEnable.value == 1
     assert [step.operation for step in result.steps] == [
         "ClearMonitor",
         "SetExpectedPc",

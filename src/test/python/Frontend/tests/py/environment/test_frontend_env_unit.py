@@ -51,9 +51,9 @@ def test_bare_mode_initialize_keeps_fetch_in_machine_mode() -> None:
     assert dut.io_tlbCsr_priv_virt.value == 0
     assert dut.io_tlbCsr_priv_imode.value == 3
     assert dut.io_tlbCsr_satp_mode.value == 0
-    assert dut.io_csrCtrl_bp_ctrl_rasEnable.value == 1
+    assert dut.io_csrCtrl_bpCtrl_rasEnable.value == 1
     env.set_bp_ctrl_enable(ras_enable=0)
-    assert dut.io_csrCtrl_bp_ctrl_rasEnable.value == 0
+    assert dut.io_csrCtrl_bpCtrl_rasEnable.value == 0
 
 
 def test_sv39_config_initialize_uses_sv39_csr_defaults() -> None:

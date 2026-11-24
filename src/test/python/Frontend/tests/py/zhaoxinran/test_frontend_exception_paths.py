@@ -85,7 +85,7 @@ def _capture_backend_cfvec_cycles(
 
 
 def _configure_frontend_execute_trigger(env, pc: int) -> None:
-    prefix = "io_csrCtrl_frontend_trigger_"
+    prefix = "io_csrCtrl_frontendTrigger_"
     values = {
         f"{prefix}tUpdate_bits_addr": 0,
         f"{prefix}tUpdate_bits_tdata_matchType": 0,
@@ -342,7 +342,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
     _configure_frontend_execute_trigger(env, pc)
     env.step(2)
     _require_dut_signal(
-        env, "io_csrCtrl_frontend_trigger_tUpdate_valid"
+        env, "io_csrCtrl_frontendTrigger_tUpdate_valid"
     ).value = 0
 
     def target_triggered() -> bool:

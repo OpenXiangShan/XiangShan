@@ -495,7 +495,7 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     finally:
         random.setstate(random_state)
 
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 0
     fencei = getattr(env.clock_reset, "io_fencei", None)
     assert fencei is not None, {"missing_signal": "io_fencei"}
     try:
@@ -523,7 +523,7 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
             max_cycles=1,
         )
     finally:
-        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+        env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
     assert not env.monitor.get_errors()
 
 

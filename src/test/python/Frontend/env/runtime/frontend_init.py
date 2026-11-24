@@ -264,7 +264,7 @@ class ConfigureTrigger:
             raise ValueError("trigger settle_cycles must be non-negative")
         signals = []
         for name, value in self.values.items():
-            if not str(name).startswith("io_csrCtrl_frontend_trigger_"):
+            if not str(name).startswith("io_csrCtrl_frontendTrigger_"):
                 raise ValueError(f"not a FrontendTrigger input: {name}")
             signal = getattr(env.dut, str(name), None)
             if signal is None:

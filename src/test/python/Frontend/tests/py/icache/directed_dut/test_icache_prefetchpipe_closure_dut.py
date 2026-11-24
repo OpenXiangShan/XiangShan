@@ -381,7 +381,7 @@ def prefetchpipe_env(env):
         yield env
     finally:
         _clear_soft_prefetch(env)
-        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+        env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = 1
         env.backend_model.set_can_accept(1)
         _restore_predictors(env)
 

@@ -581,7 +581,7 @@ class SetIcachePrefetch:
     enabled: bool
 
     def run(self, env) -> None:
-        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = int(self.enabled)
+        env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value = int(self.enabled)
 
 
 @dataclass(frozen=True)

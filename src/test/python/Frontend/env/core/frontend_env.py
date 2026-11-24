@@ -765,13 +765,13 @@ class FrontendEnv:
         if ras_enable is not None:
             self.bp_ctrl_ras_enable = 1 if int(ras_enable) else 0
 
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable, self.bp_ctrl_ubtb_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_abtbEnable, self.bp_ctrl_abtb_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_mbtbEnable, self.bp_ctrl_mbtb_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_tageEnable, self.bp_ctrl_tage_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_scEnable, self.bp_ctrl_sc_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ittageEnable, self.bp_ctrl_ittage_enable)
-        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_rasEnable, self.bp_ctrl_ras_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_ubtbEnable, self.bp_ctrl_ubtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_abtbEnable, self.bp_ctrl_abtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_mbtbEnable, self.bp_ctrl_mbtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_tageEnable, self.bp_ctrl_tage_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_scEnable, self.bp_ctrl_sc_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_ittageEnable, self.bp_ctrl_ittage_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bpCtrl_rasEnable, self.bp_ctrl_ras_enable)
 
         cfg = {
             "ubtb_enable": int(self.bp_ctrl_ubtb_enable),
@@ -834,7 +834,7 @@ class FrontendEnv:
             "satp": self.tlb_csr_if.io_tlbCsr_satp_changed,
             "vsatp": self.tlb_csr_if.io_tlbCsr_vsatp_changed,
             "hgatp": self.tlb_csr_if.io_tlbCsr_hgatp_changed,
-            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virt_changed,
+            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virtChanged,
         }
         for name, signal in signals.items():
             if changed[name]:
@@ -852,7 +852,7 @@ class FrontendEnv:
             "satp": self.tlb_csr_if.io_tlbCsr_satp_changed,
             "vsatp": self.tlb_csr_if.io_tlbCsr_vsatp_changed,
             "hgatp": self.tlb_csr_if.io_tlbCsr_hgatp_changed,
-            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virt_changed,
+            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virtChanged,
         }
         for name, signal in signals.items():
             if bool(prepared.get(name, False)):
@@ -870,14 +870,14 @@ class FrontendEnv:
         if int(settle_cycles) < 0:
             raise ValueError("settle_cycles must be non-negative")
 
-        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_bits_addr, csr_addr)
-        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_bits_data, csr_data)
-        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_valid, 1)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distributeCsr_w_bits_addr, csr_addr)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distributeCsr_w_bits_data, csr_data)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distributeCsr_w_valid, 1)
         start_cycle = int(self.current_cycle)
         end_cycle = self.step(1)
         if end_cycle is not None:
             self.current_cycle = max(int(self.current_cycle), int(end_cycle))
-        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_valid, 0)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distributeCsr_w_valid, 0)
         if int(settle_cycles):
             end_cycle = self.step(int(settle_cycles))
             if end_cycle is not None:

@@ -86,7 +86,7 @@ class UbtbReferenceChecker:
                 self.model.forget(pc)
             self.last_write[tag] = int(cycle)
 
-        if not int(env.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable.value):
+        if not int(env.csr_ctrl_if.io_csrCtrl_bpCtrl_ubtbEnable.value):
             return
         if not require_sig(dut, _BPU + "s1_valid"):
             return

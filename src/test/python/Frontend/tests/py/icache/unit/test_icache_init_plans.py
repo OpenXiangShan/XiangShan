@@ -93,7 +93,7 @@ def test_plans_prepare_program_and_agent_before_all_reset_edges(
                 int(active.dut.reset.value),
                 active.memory.read_u16(base),
                 active.icache_agent.miss_latency,
-                int(active.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value),
+                int(active.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value),
             )
         )
     )
@@ -223,5 +223,5 @@ def test_mixed_sources_startup_loads_both_images_and_stops_backend():
     assert result.program_bytes == 1280
     assert env.backend_model.can_accept == 0
     assert env.bp_ctrl_mbtb_enable == env.bp_ctrl_ubtb_enable == 0
-    assert env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value == 1
+    assert env.csr_ctrl_if.io_csrCtrl_pfCtrl_l1I_pf_enable.value == 1
     assert env.monitor.expected_pc == 0x80000000

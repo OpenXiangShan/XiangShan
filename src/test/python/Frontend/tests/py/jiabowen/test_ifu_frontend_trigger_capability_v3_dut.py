@@ -43,7 +43,7 @@ def test_frontend_trigger_exported_config_and_pc_compare_canary(env):
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
-    assert getattr(env.dut, "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing", None) is None
+    assert getattr(env.dut, "io_csrCtrl_frontendTrigger_tUpdate_bits_tdata_timing", None) is None
     for slot in range(4):
         assert all(recorder._try_read_dut_signal(env.dut, prefix + f"tdataVec_{slot}_timing") is None
                    for prefix in _FRONTEND_TRIGGER_PREFIXES)
@@ -59,14 +59,14 @@ def test_frontend_trigger_exported_config_and_pc_compare_canary(env):
                   for slot in range(4)]
         threshold = _BASE + 0x100 if name in {"equal", "greater_equal", "less"} else _BASE
         config = dict(matchType=mode, select=select, action=1, chain=0, tdata2=threshold)
-        _write(env, "io_csrCtrl_frontend_trigger_debugMode", debug)
-        _write(env, "io_csrCtrl_frontend_trigger_triggerCanRaiseBpExp", 1)
-        _write(env, "io_csrCtrl_frontend_trigger_tUpdate_bits_addr", 0)
+        _write(env, "io_csrCtrl_frontendTrigger_debugMode", debug)
+        _write(env, "io_csrCtrl_frontendTrigger_triggerCanRaiseBpExp", 1)
+        _write(env, "io_csrCtrl_frontendTrigger_tUpdate_bits_addr", 0)
         for field, value in config.items():
-            _write(env, "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_" + field, value)
-        _write(env, "io_csrCtrl_frontend_trigger_tUpdate_valid", 1)
+            _write(env, "io_csrCtrl_frontendTrigger_tUpdate_bits_tdata_" + field, value)
+        _write(env, "io_csrCtrl_frontendTrigger_tUpdate_valid", 1)
         env.step(2)
-        _write(env, "io_csrCtrl_frontend_trigger_tUpdate_valid", 0)
+        _write(env, "io_csrCtrl_frontendTrigger_tUpdate_valid", 0)
         env.step(2)
         after = [[read(f"tdataVec_{slot}_{field}", trigger=True) for field in _FIELDS]
                  for slot in range(4)]
