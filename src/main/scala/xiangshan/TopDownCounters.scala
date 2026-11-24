@@ -51,15 +51,16 @@ object TopDownCounters extends TopDownEnumeration {
     object Retiring extends L2("Retiring")
   }
   object Frontend extends L1("Frontend") {
+    object OtherRedirect  extends L2("OtherRedirect") // memory violation replay, exception etc.
     object FetchLatency   extends L2("FetchLatency")
     object FetchBandwidth extends L2("FetchBandwidth")
-    object Ftq            extends L2("Ftq")
+    object SpecialStall   extends L2("SpecialStall")
+    object Other          extends L2("Other")
   }
   object BadSpec extends L1("BadSpec") {
-    object BpuMissBubble extends L2("BpuMissBubble")
-    object RedirectStall extends L2("RedirectStall")
-    object ReplayStall   extends L2("ReplayStall")
-    object FlushedInst   extends L2("FlushedInst")
+    object BpuMissBubble  extends L2("BpuMissBubble")
+    object OverrideBubble extends L2("OverrideBubble")
+    object RedirectStall  extends L2("RedirectStall") // used in backend, TODO: attribute to a predictor and remove this
   }
   object Core extends L1("Core") {
     object IssueCancel    extends L2("IssueCancel")
@@ -96,29 +97,38 @@ object TopDownCounters extends TopDownEnumeration {
   }
 
   val NoStall = Value("NoStall", Base.Retiring)
-  // frontend
-  val OverrideBubble = Value("OverrideBubble", Frontend.Ftq)
-  val FtqUpdateBubble = Value("FtqUpdateBubble", BadSpec.BpuMissBubble)
-  // val ControlRedirectBubble = Value("ControlRedirectBubble")
-  val TAGEMissBubble = Value("TAGEMissBubble", BadSpec.BpuMissBubble)
-  val SCMissBubble = Value("SCMissBubble", BadSpec.BpuMissBubble)
+
+  /* *** frontend *** */
+  // bpu miss (attribute to a S3 predictor on Ifu/Backend redirect)
+  val BTBMissBubble    = Value("BTBMissBubble",    BadSpec.BpuMissBubble)
+  val TAGEMissBubble   = Value("TAGEMissBubble",   BadSpec.BpuMissBubble)
+  val SCMissBubble     = Value("SCMissBubble",     BadSpec.BpuMissBubble)
   val ITTAGEMissBubble = Value("ITTAGEMissBubble", BadSpec.BpuMissBubble)
-  val RASMissBubble = Value("RASMissBubble", BadSpec.BpuMissBubble)
-  val MemVioRedirectBubble = Value("MemVioRedirectBubble", BadSpec.RedirectStall)
-  val OtherRedirectBubble = Value("OtherRedirectBubble", Misc.Other)
-  val FtqFullStall = Value("FtqFullStall", Frontend.Ftq)
-
-  val ICacheMissBubble = Value("ICacheMissBubble", Frontend.FetchLatency)
-  val ICacheStructualConflict = Value("ICacheStructualConflict", Frontend.FetchBandwidth)
-  val ITLBMissBubble = Value("ITLBMissBubble", Frontend.FetchLatency)
-  val BTBMissBubble = Value("BTBMissBubble", BadSpec.BpuMissBubble)
-  val FetchFragBubble = Value("FetchFragBubble", Frontend.FetchBandwidth)
+  val RASMissBubble    = Value("RASMissBubble",    BadSpec.BpuMissBubble)
+  // bpu override, TODO: attribute to a S1 predictor
+  val OverrideBubble = Value("OverrideBubble", BadSpec.OverrideBubble)
+  // when the bpu update is blocked (due to SRAM r/w conflict) too long, block (pre)fetch & force bpu update
+  val FtqUpdateBubble = Value("FtqUpdateBubble", Frontend.FetchLatency)
+  // frontend stall due to Ftq full (no commit)
+  val FtqFullStall = Value("FtqFullStall", Frontend.SpecialStall)
+  // redirect due to memory violation replay, exception etc.
+  val MemVioRedirectBubble = Value("MemVioRedirectBubble", Frontend.OtherRedirect)
+  val OtherRedirectBubble  = Value("OtherRedirectBubble",  Frontend.OtherRedirect)
+  // ICache/Itlb miss, or fetching in mmio / pbmt.NC / pbmt.IO area
+  val ICacheMissBubble   = Value("ICacheMissBubble",   Frontend.FetchLatency)
+  val ITLBMissBubble     = Value("ITLBMissBubble",     Frontend.FetchLatency)
   val UncacheFetchBubble = Value("UncacheFetchBubble", Frontend.FetchLatency)
-  val IBufStructualConflict = Value("IBufStructualConflict", Frontend.FetchBandwidth)
-  val VTypeResumeStall = Value("VTypeResumeStall", Core.Other)
-  val FrontendOtherCoreStall = Value("FrontendOtherCoreStall", Core.Other)
+  // ICache cannot be read due to a refill
+  val ICacheStructualConflict = Value("ICacheStructualConflict", Frontend.FetchLatency)
+  // no enough inst can be dequeued from IBuf
+  val FetchFragBubble       = Value("FetchFragBubble",       Frontend.FetchBandwidth) // no enqueuing
+  val IBufStructualConflict = Value("IBufStructualConflict", Frontend.FetchBandwidth) // enqueuing, but cannot use due to structural reason
+  // IBuf stall due to vtype resume
+  val VTypeResumeStall = Value("VTypeResumeStall", Frontend.SpecialStall)
+  // unknown reason
+  val FrontendOtherCoreStall = Value("FrontendOtherCoreStall", Frontend.Other)
 
-  // backend
+  /* *** backend *** */
   // long inst stall at rob head
   val IssueCancelStallOg0 = Value("IssueCancelStallOg0", Core.IssueCancel)
   val IssueCancelStallOg1 = Value("IssueCancelStallOg1", Core.IssueCancel)
@@ -180,18 +190,17 @@ object TopDownCounters extends TopDownEnumeration {
   val AtomicStall = Value("AtomicStall", Misc.Atomic) // atomic, load reserved, store conditional
 
   // xs replay (different to gem5)
-  val LoadVioReplayStall = Value("LoadVioReplayStall", BadSpec.ReplayStall)
+  val LoadVioReplayStall = Value("LoadVioReplayStall", Frontend.OtherRedirect) // TODO: should this be Frontend.?
   val LoadMSHRReplayStall = Value("LoadMSHRReplayStall", Load.Replay)
 
   // bad speculation
-  val ControlRedirectStall = Value("ControlRedirectStall", BadSpec.RedirectStall)
-  val MemVioRedirectStall = Value("MemVioRedirectStall", BadSpec.RedirectStall)
-  val OtherRedirectStall = Value("OtherRedirectStall", BadSpec.RedirectStall)
+  val ControlRedirectStall = Value("ControlRedirectStall", BadSpec.RedirectStall) // TODO: attribute to a predictor
+  val MemVioRedirectStall = Value("MemVioRedirectStall", Frontend.OtherRedirect) // TODO: should this be Frontend.?
+  val OtherRedirectStall = Value("OtherRedirectStall", Frontend.OtherRedirect) // TODO: should this be Frontend.?
   val ControlRecoveryStall = Value("ControlRecoveryStall", Core.RabWalk)
   val MemVioRecoveryStall = Value("MemVioRecoveryStall", Core.RabWalk)
   val OtherRecoveryStall = Value("OtherRecoveryStall", Core.RabWalk)
 
-  val FlushedInsts = Value("FlushedInsts", BadSpec.FlushedInst) // control flushed, memvio flushed, others
   val SpecialInsts = Value("SpecialInsts", Privileged.Special)
 
   val BackendOtherCoreStall = Value("BackendOtherCoreStall", Core.Other)
