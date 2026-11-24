@@ -384,13 +384,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val state = RegInit(s_idle)
   val stateNext = Wire(chiselTypeOf(state))
 
+  val normalState = state === s_idle
+  val walkState = state === s_walk
+
   stateNext := Mux(
     // when redirect is valid or was valid in the previous cycle, switch to s_walk
     in.redirect.valid || RegNext(in.redirect.valid),
     s_walk,
     Mux(
       // when walking is finished and both rab and vtypeBuffer indicate walk end, switch to s_idle
-      state === s_walk && walkFinished &&
+      walkState && walkFinished &&
         rab.in.status.walkEnd && vtypeBuffer.in.status.walkEnd,
       s_idle,
       state
@@ -564,26 +567,36 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.in.fromRob.vecLoadExcp.bits.isStrided := RegEnable(excpState.bits.isStrided, excpState.valid)
   rab.in.fromRob.vecLoadExcp.bits.isVlm := RegEnable(excpState.bits.isVlm, excpState.valid)
 
-  val deqNeedFlush = (commitHeadEntry.slotNeedFlush(0) && formerNotFlushed || commitHeadEntry.slotNeedFlush(1) && CompressType.isNotNORMAL(commitHeadEntry.entryPairType) && latterNotFlushed) && commitHeadEntry.commit_v && commitHeadEntry.commit_w
-  val deqHitExcpGenState = excpState.valid && excpState.bits.robIdx.isSameSlot(deqExcpRobIdx)
-  val deqNeedFlushAndHitExcpGenState = deqNeedFlush && deqHitExcpGenState
-  val excpGenStateIsExcp = excpState.bits.excpVec.orR
+  // Why delay one cycle?
   val commit_w_delay = RegNext(commitHeadEntry.commit_w)
+  val deqNeedFlush = (
+    commitHeadEntry.slotNeedFlush(0) && formerNotFlushed ||
+    commitHeadEntry.slotNeedFlush(1) &&
+      CompressType.isNotNORMAL(commitHeadEntry.entryPairType) &&
+      latterNotFlushed
+  ) && commitHeadEntry.commit_v && commitHeadEntry.commit_w
+  val deqNeedFlushAndHitExcpGenState = deqNeedFlush && excpState.valid && excpState.bits.robIdx.isSameSlot(deqExcpRobIdx)
 
+  val excpGenStateIsExcp = excpState.bits.excpVec.orR
   val deqHasExcp = deqNeedFlushAndHitExcpGenState && excpGenStateIsExcp && commit_w_delay
   val deqHasFlushPipe = deqNeedFlushAndHitExcpGenState && excpState.bits.flushPipe && !deqHasExcp && commit_w_delay
   val deqHasReplayInst = deqNeedFlushAndHitExcpGenState && excpState.bits.replayInst
+
+  /**
+   * VLS exception
+   */
+
+  // delay 2 cycle wait excpGen out
+  // vls exception can be committed only when RAB commit all its reg pairs
+  deqVlsCanCommit := RegNext(commit_w_delay) && rab.in.status.commitEnd
   val deqIsVlsExcp = deqHasExcp && excpUopInfo.isVectorMemory && !excpState.bits.isEnqExcp
   val deqIsVlsFlushPipe = deqHasFlushPipe && excpUopInfo.isVectorMemory
   val deqCanExcp = deqHasExcp && (!deqIsVlsExcp || deqVlsCanCommit)
   val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
-  // delay 2 cycle wait excpGen out
-  // vls exception can be committed only when RAB commit all its reg pairs
-  deqVlsCanCommit := RegNext(RegNext(commitHeadEntry.commit_w)) && rab.in.status.commitEnd
 
   // lock at assertion of deqVlsExcpNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
-  val handleVlsExcp = deqIsVlsExcp && deqVlsCanCommit && !deqVlsExcpLock && state === s_idle
+  val handleVlsExcp = deqIsVlsExcp && deqVlsCanCommit && !deqVlsExcpLock && normalState
   when(handleVlsExcp) {
     deqVlsExcpLock := true.B
   }.elsewhen(deqPtrVec.head =/= deqPtrVecNext.head) {
@@ -598,17 +611,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqVlsExcpNeedCommit := true.B
   }
 
+  /**
+   * Flush pipe
+   */
+
   val isFlushPipe = commitHeadEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
 
   // vsetvl instruction need another one cycle to write to vtype gen
   val isVsetFlushPipe = commitHeadEntry.commit_w && deqHasFlushed && excpState.bits.isVset
   val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
   out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || isVsetFlushPipeReg
+
   // out.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(out.flushOut.valid)
-
-  out.flushOut.valid := (state === s_idle) && commitHeadValid && (intrEnable || deqCanExcp || deqCanFlushPipe) && !lastCycleFlush
+  out.flushOut.valid := normalState && commitHeadValid && (intrEnable || deqCanExcp || deqCanFlushPipe) && !lastCycleFlush
   out.flushOut.bits := DontCare
   val flushIsFormer = intrEnable || commitHeadEntry.slotNeedFlush(0)
   val flushBaseIsRVC = Mux(flushIsFormer, commitHeadEntry.slotHeadRvcMask(0), Mux(commitHeadEntry.predTaken, commitHeadEntry.slotHeadRvcMask(1), commitHeadEntry.slotHeadRvcMask(0)))
@@ -646,7 +663,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && excpState.bits.satpFlush
 
-  val excpHappen = (state === s_idle) && commitHeadValid && (intrEnable || deqCanExcp) && !lastCycleFlush
+  val excpHappen = normalState && commitHeadValid && (intrEnable || deqCanExcp) && !lastCycleFlush
   val excpIsFormer = deqExcpIsFormer
   out.exception.valid := RegNext(excpHappen)
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
@@ -681,13 +698,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
   }.elsewhen(RegNext(in.redirect.valid)){
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(state === s_walk){
+  }.elsewhen(walkState){
     shouldWalkVec := VecInit(walkingPtrVec.map(_.isNotAfterSlot(lastWalkPtr)).zip(donotNeedWalk).map(x => x._1 && !x._2))
   }.otherwise(
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
   )
-  rab.in.fromRob.walkEnd := state === s_walk && walkFinished
-  vtypeBuffer.in.fromRob.walkEnd := state === s_walk && walkFinished
+  rab.in.fromRob.walkEnd := walkState && walkFinished
+  vtypeBuffer.in.fromRob.walkEnd := walkState && walkFinished
 
   require(RenameWidth <= CommitWidth)
 
@@ -822,8 +839,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
     (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
 
-  out.commits.isWalk := state === s_walk
-  out.commits.isCommit := state === s_idle && !blockCommit
+  out.commits.isWalk := walkState
+  out.commits.isCommit := normalState && !blockCommit
 
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
   val commit_vDeqGroup = VecInit(deqEntriesBankOrder.map(_.commit_v))
@@ -850,8 +867,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     out.commits.walkValid(i) := shouldWalkVec(i)
     XSError(
-      state === s_walk &&
-      out.commits.isWalk && state === s_walk && shouldWalkVec(i) &&
+      walkState &&
+      out.commits.isWalk && walkState && shouldWalkVec(i) &&
       !walk_v(i),
       s"The walking entry($i) should be valid\n")
   }
@@ -970,11 +987,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank.addEntries(i.U).asFormer))
   walkPtrVecNext := Mux(in.redirect.valid,
     Mux(in.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
-    Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
+    Mux(walkState && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
   )
   walkPtrTrueNext := Mux(in.redirect.valid,
     Mux(in.snpt.useSnpt, snapshots(in.snpt.snptSelect)(0), deqPtrVecNext(0)),
-    Mux((state === s_walk) && !walkFinished, walkPtrNext, walkPtrTrue)
+    Mux(walkState && !walkFinished, walkPtrNext, walkPtrTrue)
   )
   walkPtrVec := walkPtrVecNext
   walkPtrTrue := walkPtrTrueNext
@@ -1016,7 +1033,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
 
   deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0).addEntries(i.U).asFormer }
-  val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
+  val commitReadAddr = Mux(normalState, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
   val redirectValidReg = RegNext(in.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
@@ -1702,7 +1719,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_commitInstrBranch  ", ifCommitReg(PopCount(RegEnable(commitBranchVec, isCommit)))),
     ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegEnable(commitStoreVec, isCommit)))),
     ("rob_walkInstr          ", Mux(out.commits.isWalk, PopCount(out.commits.walkValid), 0.U)),
-    ("rob_walkCycle          ", (state === s_walk)),
+    ("rob_walkCycle          ", (walkState)),
     ("rob_1_4_valid          ", numValidEntries <= (RobSize / 4).U),
     ("rob_2_4_valid          ", numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U),
     ("rob_3_4_valid          ", numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U),
@@ -1755,7 +1772,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
       debug_exuData(deqPtrVec(i).value)(0)
     )
-    XSInfo(state === s_walk && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
+    XSInfo(walkState && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
       debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
       out.commits.info(i).rfWen,
       out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
@@ -1790,10 +1807,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("flush_pipe_num", out.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", out.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  XSPerfAccumulate("s_idle_to_idle", state === s_idle && stateNext === s_idle)
-  XSPerfAccumulate("s_idle_to_walk", state === s_idle && stateNext === s_walk)
-  XSPerfAccumulate("s_walk_to_idle", state === s_walk && stateNext === s_idle)
-  XSPerfAccumulate("s_walk_to_walk", state === s_walk && stateNext === s_walk)
+  XSPerfAccumulate("s_idle_to_idle", normalState && stateNext === s_idle)
+  XSPerfAccumulate("s_idle_to_walk", normalState && stateNext === s_walk)
+  XSPerfAccumulate("s_walk_to_idle", walkState && stateNext === s_idle)
+  XSPerfAccumulate("s_walk_to_walk", walkState && stateNext === s_walk)
 
   XSPerfAccumulate("branch_jump", brhJump)
   XSPerfAccumulate("br_mis_pred", misPred)
@@ -1815,16 +1832,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("commitInstrStore", ifCommit(PopCount(commitStoreValid)))
   XSPerfAccumulate("writeback", PopCount((0 until RobSize).map(i => robEntries(i).valid && robEntries(i).isWritebacked)))
   XSPerfAccumulate("walkInstr", Mux(out.commits.isWalk, PopCount(out.commits.walkValid), 0.U))
-  XSPerfAccumulate("walkCycleTotal", state === s_walk)
-  XSPerfAccumulate("waitRabWalkEnd", state === s_walk && walkFinished && !rab.in.status.walkEnd)
+  XSPerfAccumulate("walkCycleTotal", walkState)
+  XSPerfAccumulate("waitRabWalkEnd", walkState && walkFinished && !rab.in.status.walkEnd)
   private val walkCycle = RegInit(0.U(8.W))
   private val waitRabWalkCycle = RegInit(0.U(8.W))
-  walkCycle := Mux(in.redirect.valid, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
-  waitRabWalkCycle := Mux(state === s_walk && walkFinished, 0.U, Mux(state === s_walk, walkCycle + 1.U, 0.U))
+  walkCycle := Mux(in.redirect.valid, 0.U, Mux(walkState, walkCycle + 1.U, 0.U))
+  waitRabWalkCycle := Mux(walkState && walkFinished, 0.U, Mux(walkState, walkCycle + 1.U, 0.U))
 
-  XSPerfHistogram("walkRobCycleHist", walkCycle, state === s_walk && walkFinished, 0, 32)
-  XSPerfHistogram("walkRabExtraCycleHist", waitRabWalkCycle, state === s_walk && walkFinished && rab.in.status.walkEnd, 0, 32)
-  XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && stateNext === s_idle, 0, 32)
+  XSPerfHistogram("walkRobCycleHist", walkCycle, walkState && walkFinished, 0, 32)
+  XSPerfHistogram("walkRabExtraCycleHist", waitRabWalkCycle, walkState && walkFinished && rab.in.status.walkEnd, 0, 32)
+  XSPerfHistogram("walkTotalCycleHist", walkCycle, walkState && stateNext === s_idle, 0, 32)
 
   private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
   private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
@@ -2217,7 +2234,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
   val tip_state = WireInit(0.U(4.W))
   when(!isEmpty) {  // One or more inst in ROB
-    when(state === s_walk || in.redirect.valid) {
+    when(walkState || in.redirect.valid) {
       tip_state := tip_walk
     }.elsewhen(out.commits.isCommit && PopCount(out.commits.commitValid) =/= 0.U) {
       tip_state := tip_computing
