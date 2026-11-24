@@ -112,18 +112,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   maskModule.io := DontCare
   val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
-  // freeliset: store valid entries index.
-  // +---+---+--------------+-----+-----+
-  // | 0 | 1 |      ......  | n-2 | n-1 |
-  // +---+---+--------------+-----+-----+
-  val freeList = Module(new FreeList(
+  val freeList = Module(new BitMapFreeList(
     size = LoadQueueRAWSize,
-    allocWidth = LoadPipelineWidth,
-    freeWidth = 4,
-    enablePreAlloc = true,
-    moduleName = "LoadQueueRAW freelist"
-  ))
-  freeList.io := DontCare
+    allocWidth = LoadPipelineWidth
+  )).suggestName("LoadQueueRAWFreelist")
+  freeList.io.freeBitmap := ~allocated.asUInt
 
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
@@ -136,15 +129,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRAWSize).W)))
+  freeList.io.allocateCount := PopCount(acceptedVec)
 
   // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
     maskModule.io.wen(w) := false.B
-    freeList.io.doAllocate(w) := false.B
-
-    freeList.io.allocateReq(w) := true.B
 
     //  Allocate ready
     val offset = PopCount(needEnqueue.take(w))
@@ -155,8 +146,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     enqIndexVec(w) := enqIndex
     when (needEnqueue(w) && enq.ready) {
       acceptedVec(w) := true.B
-
-      freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
       allocated(enqIndex) := true.B
@@ -186,11 +175,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   //  LoadQueueRAW deallocate
-  val freeMaskVec = Wire(Vec(LoadQueueRAWSize, Bool()))
-
-  // init
-  freeMaskVec.map(e => e := false.B)
-
   // when the stores that "older than" current load address were ready.
   // current load will be released.
   for (i <- 0 until LoadQueueRAWSize) {
@@ -199,7 +183,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     when (allocated(i) && (deqNotBlock || needCancel)) {
       allocated(i) := false.B
-      freeMaskVec(i) := true.B
     }
   }
 
@@ -218,18 +201,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     when (allocated(revokeLastIndex) && revokeLastCycle) {
       allocated(revokeLastIndex) := false.B
-      freeMaskVec(revokeLastIndex) := true.B
       willRevoke(revokeLastIndex) := true.B
     }
     when (allocated(revokeLastLastIndex) && revokeLastLastCycle) {
       allocated(revokeLastLastIndex) := false.B
-      freeMaskVec(revokeLastLastIndex) := true.B
       willRevoke(revokeLastLastIndex) := true.B
     }
   }
-  freeList.io.free := freeMaskVec.asUInt
 
-  io.lqFull := freeList.io.empty
+  io.lqFull := !freeList.io.canAllocate.head
 
   /**
     * Store-Load Memory violation detection
@@ -397,7 +377,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
-  val validCount = freeList.io.validCount
+  val validCount = PopCount(allocated)
   val allowEnqueue = validCount <= (LoadQueueRAWSize - LoadPipelineWidth).U
   val rollbaclValid = io.rollback.map(_.valid).reduce(_ || _).asUInt
   val storeDelay = allRedirect.zipWithIndex.map{case (redirect, i) =>

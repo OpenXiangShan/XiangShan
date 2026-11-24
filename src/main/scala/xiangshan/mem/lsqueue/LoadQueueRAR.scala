@@ -114,18 +114,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
 
-  // freeliset: store valid entries index.
-  // +---+---+--------------+-----+-----+
-  // | 0 | 1 |      ......  | n-2 | n-1 |
-  // +---+---+--------------+-----+-----+
-  val freeList = Module(new FreeList(
+  val freeList = Module(new BitMapFreeList(
     size = LoadQueueRARSize,
-    allocWidth = LoadPipelineWidth,
-    freeWidth = 4,
-    enablePreAlloc = false,
-    moduleName = "LoadQueueRAR freelist"
-  ))
-  freeList.io := DontCare
+    allocWidth = LoadPipelineWidth
+  )).suggestName("LoadQueueRARFreelist")
+  freeList.io.freeBitmap := ~allocated.asUInt
 
   // Real-allocation: load_s2
   // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
@@ -149,13 +142,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
+  freeList.io.allocateCount := PopCount(acceptedVec)
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
-    freeList.io.doAllocate(w) := false.B
-
-    freeList.io.allocateReq(w) := true.B
 
     //  Allocate ready
     val offset = PopCount(needEnqueue.take(w))
@@ -167,7 +158,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     when (needEnqueue(w) && canAccept) {
       acceptedVec(w) := true.B
 
-      freeList.io.doAllocate(w) := true.B
       //  Allocate new entry
       allocated(enqIndex) := true.B
 
@@ -196,11 +186,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   //  LoadQueueRAR deallocate
-  val freeMaskVec = Wire(Vec(LoadQueueRARSize, Bool()))
-
-  // init
-  freeMaskVec.map(e => e := false.B)
-
   // when the loads that "older than" current load were writebacked,
   // current load will be released.
   for (i <- 0 until LoadQueueRARSize) {
@@ -209,7 +194,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     when (allocated(i) && (deqNotBlock || needFlush)) {
       allocated(i) := false.B
-      freeMaskVec(i) := true.B
     }
   }
 
@@ -227,15 +211,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     when (allocated(revokeLastIndex) && revokeLastCycle) {
       allocated(revokeLastIndex) := false.B
-      freeMaskVec(revokeLastIndex) := true.B
     }
     when (allocated(revokeLastLastIndex) && revokeLastLastCycle) {
       allocated(revokeLastLastIndex) := false.B
-      freeMaskVec(revokeLastLastIndex) := true.B
     }
   }
-
-  freeList.io.free := freeMaskVec.asUInt
 
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
@@ -282,14 +262,14 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // for the tail. Do not wake C_RAR replays when the queue only has a few
   // slots left; otherwise the head can consume the last slots and the paired
   // tail immediately nacks, causing the same replay to spin.
-  val freeEntryCount = LoadQueueRARSize.U - freeList.io.validCount
+  val freeEntryCount = LoadQueueRARSize.U - PopCount(allocated)
   val hasEnoughReplayEntries = freeEntryCount >= (2 * LoadPipelineWidth).U
   io.lqFull := !hasEnoughReplayEntries
-  io.validCount := freeList.io.validCount
+  io.validCount := PopCount(allocated)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
-  val validCount = freeList.io.validCount
+  val validCount = PopCount(allocated)
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
   val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.nuke))
 

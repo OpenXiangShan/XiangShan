@@ -40,6 +40,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     val redirect = Flipped(Valid(new Redirect))
     // redirect flush
     val flush = Output(Bool())
+    val allocated = Output(Bool())
     // mmio commit
     val rob = Flipped(new RobLsqIO)
     // mmio select
@@ -171,6 +172,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   /* control */
   io.flush := flush
+  io.allocated := req_valid
   io.rob.mmioBusy := DontCare // will be assign later!
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
   io.slaveId.valid := slaveAccept
@@ -305,14 +307,12 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    ******************************************************************/
   val entries = Seq.tabulate(LoadUncacheBufferSize)(i => Module(new UncacheEntry(i)))
 
-  val freeList = Module(new FreeList(
+  val allocated = VecInit(entries.map(_.io.allocated))
+  val freeList = Module(new BitMapFreeList(
     size = LoadUncacheBufferSize,
-    allocWidth = LoadPipelineWidth,
-    freeWidth = 4,
-    enablePreAlloc = true,
-    moduleName = "LoadQueueUncache freelist"
-  ))
-  freeList.io := DontCare
+    allocWidth = LoadPipelineWidth
+  )).suggestName("LoadQueueUncacheFreelist")
+  freeList.io.freeBitmap := ~allocated.asUInt
 
   // set default IO
   entries.foreach {
@@ -368,14 +368,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val s2_enqValidVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val s2_enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
 
-  for (w <- 0 until LoadPipelineWidth) {
-    freeList.io.allocateReq(w) := true.B
-  }
-
-  // freeList real-allocate
-  for (w <- 0 until LoadPipelineWidth) {
-    freeList.io.doAllocate(w) := s2_enqValidVec(w)
-  }
+  freeList.io.allocateCount := PopCount(s2_enqValidVec)
 
   for (w <- 0 until LoadPipelineWidth) {
     val offset = PopCount(s2_enqueue.take(w))
@@ -557,26 +550,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   }
 
   /******************************************************************
-   * Deallocate
-   ******************************************************************/
-  // UncacheBuffer deallocate
-  val freeMaskVec = Wire(Vec(LoadUncacheBufferSize, Bool()))
-
-  // init
-  freeMaskVec.map(e => e := false.B)
-
-  // dealloc logic
-  entries.zipWithIndex.foreach {
-    case (e, i) =>
-      when ((e.io.mmioSelect && e.io.mmioOut.fire) || e.io.ncOut.fire || e.io.flush) {
-        freeMaskVec(i) := true.B
-      }
-  }
-
-  freeList.io.free := freeMaskVec.asUInt
-
-
-  /******************************************************************
    * Uncache rollback detection
    *
    * When uncache loads enqueue, it searches uncache loads, They can not enqueue and need re-execution.
@@ -635,8 +608,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   /******************************************************************
    * Perf Counter
    ******************************************************************/
-  val validCount = freeList.io.validCount
-  val allowEnqueue = !freeList.io.empty
+  val validCount = PopCount(allocated)
+  val allowEnqueue = freeList.io.canAllocate.head
   QueuePerf(LoadUncacheBufferSize, validCount, !allowEnqueue)
 
   XSPerfAccumulate("mmio_uncache_req", io.uncache.req.fire && !io.uncache.req.bits.nc)
