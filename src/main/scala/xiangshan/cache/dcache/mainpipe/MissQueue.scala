@@ -567,7 +567,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val miss_req_pipe_reg_bits = io.miss_req_pipe_reg.req
 
-  val signals_vec = WireInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MatchSignals))))
+  val signals_vec = Wire(Vec(reqNum, new MatchSignals))
   val signals_pipe_prefetch = computeMatchSignals(miss_req_pipe_reg_bits, io.queryME(0).req.bits)
 
   for(i <- 0 until reqNum) {
@@ -928,10 +928,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     assert(RegNext(PopCount(Seq(io.primary_ready, io.queryME(i).secondary_ready, io.queryME(i).secondary_reject)) <= 1.U || !io.queryME(i).req.valid))
   }
 
-  val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
+  val refill_data_splited = VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
     val data = refill_and_store_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
-  })))
+  }))
   // when granted data is all ready, wakeup lq's miss load
   val refill_to_ldq_en = !w_grantlast && io.mem_grant.fire
   io.refill_to_ldq.valid := GatedValidRegNext(refill_to_ldq_en)
@@ -1234,7 +1234,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     (new MissReqPipeRegBundle(edge)).Lit(_.alloc -> false.B, _.merge -> false.B, _.cancel -> false.B)
   ))
   val active_pipe_regs = parallel_pipe_regs
-  val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(memChannelBits.W))))
+  val parallel_regs_channel = Wire(Vec(reqNum, UInt(memChannelBits.W)))
 
   val acquire_from_pipereg_vec = Wire(Vec(reqNum, chiselTypeOf(io.mem_acquire(0))))
   val acquire_owned_by_fabric = RegInit(VecInit(Seq.fill(reqNum)(false.B)))
@@ -1275,26 +1275,26 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.probe.block
   }
 
-  val can_merge_vec = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
+  val can_merge_vec = Wire(Vec(reqNum, Bool()))
   val match_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val mainpipeMatchPipeIdx = WireInit(0.U(log2Up(reqNum).W))
   val can_merge_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val can_merge_from_pipe_mshr = Wire(Vec(reqNum, UInt(log2Up(cfg.nMissEntries).W)))
   val can_merge_store_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
-  val can_allocate_vec = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
+  val can_allocate_vec = Wire(Vec(reqNum, Bool()))
 
   // Only same-cycle leaders execute an allocation or an existing-owner merge.
-  val allocValid = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
-  val mergeValid = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
-  val targetMshr = WireInit(VecInit(Seq.fill(reqNum)(0.U(log2Up(cfg.nMissEntries).W))))
-  val targetAcceptsLoad = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
+  val allocValid = Wire(Vec(reqNum, Bool()))
+  val mergeValid = Wire(Vec(reqNum, Bool()))
+  val targetMshr = Wire(Vec(reqNum, UInt(log2Up(cfg.nMissEntries).W)))
+  val targetAcceptsLoad = Wire(Vec(reqNum, Bool()))
   val query_valid = VecInit(io.queryMQ.map(_.req.valid))
   for (i <- 0 until reqNum) {
     assertAddressMetadata(io.queryMQ(i).req.bits, query_valid(i))
     assertAddressMetadata(active_pipe_regs(i).req, active_pipe_regs(i).reg_valid())
   }
-  val spec_candidate_fire = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
-  val spec_candidate_id = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(log2Up(cfg.nMissEntries).W))))
+  val spec_candidate_fire = Wire(Vec(LoadPipelineWidth, Bool()))
+  val spec_candidate_id = Wire(Vec(LoadPipelineWidth, UInt(log2Up(cfg.nMissEntries).W)))
   val spec_grant_register = Module(new SpecMissGrantRegister(LoadPipelineWidth))
   for (w <- 0 until LoadPipelineWidth) {
     spec_grant_register.io.capture(w).valid := spec_candidate_fire(w)
@@ -1341,7 +1341,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Kogge-Stone parallel prefix sum
   // ps_stage[s][e] = prefix sum after stage s, for entry e
   val num_stages = log2Up(cfg.nMissEntries)
-  val ps_stage = VecInit(Seq.fill(num_stages + 1)(WireInit(VecInit(Seq.fill(cfg.nMissEntries)(0.U(log2Up(cfg.nMissEntries + 1).W))))))
+  val ps_stage = Wire(Vec(num_stages + 1, Vec(cfg.nMissEntries, UInt(log2Up(cfg.nMissEntries + 1).W))))
 
   // Stage 0: initial values
   for (e <- 0 until cfg.nMissEntries) {
@@ -1361,7 +1361,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // Extract "count before" (shift right by 1)
-  val free_count_before = WireInit(VecInit(Seq.fill(cfg.nMissEntries)(0.U(log2Up(cfg.nMissEntries + 1).W))))
+  val free_count_before = Wire(Vec(cfg.nMissEntries, UInt(log2Up(cfg.nMissEntries + 1).W)))
   for (e <- 0 until cfg.nMissEntries) {
     if (e == 0) {
       free_count_before(0) := 0.U
@@ -1372,7 +1372,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // Build the free entry list using one-hot encoding
   val nAllocationRanks = math.min(reqNum, cfg.nMissEntries)
-  val free_entry_onehot = WireInit(VecInit(Seq.fill(nAllocationRanks)(VecInit(Seq.fill(cfg.nMissEntries)(false.B)))))
+  val free_entry_onehot = Wire(Vec(nAllocationRanks, Vec(cfg.nMissEntries, Bool())))
   for (i <- 0 until nAllocationRanks) {
     for (e <- 0 until cfg.nMissEntries) {
       free_entry_onehot(i)(e) := initial_free(e) && free_count_before(e) === i.U
@@ -1492,7 +1492,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // For each queryMQ request that was granted, connect to MissEntry or PipeReg
-  val query_fire = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
+  val query_fire = Wire(Vec(reqNum, Bool()))
   for (i <- 0 until reqNum) {
     query_fire(i) := query_valid(i) && io.queryMQ(i).ready
   }
