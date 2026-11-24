@@ -163,6 +163,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.uop := DontCare
   prefetch.vaddr := io.prefetchReq.bits.vaddr
   prefetch.fullva := io.prefetchReq.bits.vaddr
+  prefetch.triggerVa := io.prefetchReq.bits.vaddr
   prefetch.size := DontCare
   prefetch.mask := 0.U
   prefetch.paddr.get := io.prefetchReq.bits.paddr
@@ -202,6 +203,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.uop := ldin.toDynInst()
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
+  scalarIssue.bits.triggerVa := ldinFullva
   scalarIssue.bits.size := ldinSize
   scalarIssue.bits.mask := Mux(LSUOpType.isPrefetch(ldin.fuOpType), 0.U, genVWmask128(ldinVAddr, ldinSize))
   scalarIssue.bits.DontCarePAddr()
@@ -613,6 +615,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val paddrDCache = Mux(noQuery, noQueryPAddr, tlbResp.bits.paddr(1))
   val gpaddr = tlbResp.bits.gpaddr(0)
   val fullva = tlbResp.bits.fullva
+  val triggerVa = Mux(noQuery, in.triggerVa, tlbResp.bits.triggerVa)
 
   val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
   val af = tlbHit && tlbResp.bits.excp.head.af.ld
@@ -631,12 +634,12 @@ class LoadUnitS1(param: ExeUnitParams)(
   loadTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
-  loadTrigger.io.fromLoadStore.vaddr := vaddr
+  loadTrigger.io.fromLoadStore.triggerVa := triggerVa(VAddrBits - 1, 0)
   loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector() && VlduType.isUnitStride(fuOpType)
   loadTrigger.io.fromLoadStore.mask := mask
   loadTrigger.io.isPrf.get := accessType.isPrefetch()
 
-  val triggerAction = loadTrigger.io.toLoadStore.triggerAction
+  val triggerAction = Mux(isUnalignTail, TriggerAction.None, loadTrigger.io.toLoadStore.triggerAction)
   val bp = TriggerAction.isBreakpoint(triggerAction)
   val vecVaddrOffset = Mux(
     bp,
@@ -652,12 +655,13 @@ class LoadUnitS1(param: ExeUnitParams)(
   /**
     * Unalign tail inject to s0
     */
-  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get
+  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get && !bp
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := LoadEntrance.unalignTail.U
   unalignTail.vaddr := ((vaddr >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.fullva := ((in.fullva >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
+  unalignTail.triggerVa := triggerVa
   unalignTail.size := MemorySize.QB.U
   unalignTail.mask := genVWmask128(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
   unalignTail.align.get := false.B
@@ -710,6 +714,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   )
   // update tlb response
   stageInfo.fullva := tlbResp.bits.fullva
+  stageInfo.triggerVa := triggerVa
   stageInfo.paddr.get := paddr
   stageInfo.tlbAccessResult.get := Mux(
     noQuery,

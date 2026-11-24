@@ -162,6 +162,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   for (i <- 0 until Width) {
     resp(i).bits.fullva := RegEnable(preCheck(i).effectiveVa, req(i).valid)
+    resp(i).bits.triggerVa := RegEnable(preCheck(i).effectiveVa, req(i).valid)
   }
 
   val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu || (if (HasMptCheck) (ptw.resp.fire && BareMode.get) else false.B)

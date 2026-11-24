@@ -78,6 +78,7 @@ class LoadPipeBundle(
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val fullva = UInt(XLEN.W)
+  val triggerVa = UInt(XLEN.W)
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val paddr = Option.when(param.hasAddrTrans || param.hasPAddr)(UInt(PAddrBits.W))
@@ -268,6 +269,7 @@ class StorePipeBundle(
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val fullva = UInt(XLEN.W)
+  val triggerVa = UInt(XLEN.W)
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val isFirstIssue = Bool()

@@ -226,7 +226,7 @@ class BaseTriggerIO(implicit p: Parameters) extends XSBundle{
   val fromCsrTrigger = Input(new CsrTriggerBundle)
 
   val fromLoadStore = Input(new Bundle {
-    val vaddr = UInt(VAddrBits.W)
+    val triggerVa = UInt(VAddrBits.W)
     val isVectorUnitStride = Bool()
     val mask = UInt((VLEN/8).W)
   })
@@ -250,7 +250,7 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
   val tEnableVec    = io.fromCsrTrigger.tEnableVec
   val triggerCanRaiseBpExp = io.fromCsrTrigger.triggerCanRaiseBpExp
   val debugMode = io.fromCsrTrigger.debugMode
-  val vaddr = io.fromLoadStore.vaddr
+  val vaddr = io.fromLoadStore.triggerVa
 
   val triggerTimingVec = VecInit(tdataVec.map(_.timing))
   val triggerChainVec = VecInit(tdataVec.map(_.chain))

@@ -94,6 +94,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.uop := stinUop
   scalarIssue.bits.vaddr := stinVAddr
   scalarIssue.bits.fullva := stinFullva
+  scalarIssue.bits.triggerVa := stinFullva
   scalarIssue.bits.size := stinSize
   scalarIssue.bits.mask := Mux(
     LSUOpType.isCboAll(stinUop.fuOpType),
@@ -114,6 +115,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   prefetchReq.bits.accessType.isCboNoZero := false.B
   prefetchReq.bits.vaddr := io.prefetchReq.bits.vaddr
   prefetchReq.bits.fullva := io.prefetchReq.bits.vaddr
+  prefetchReq.bits.triggerVa := io.prefetchReq.bits.vaddr
   prefetchReq.bits.DontCareUnalign()
   prefetchReq.bits.DontCareStoreSet()
   prefetchReq.bits.uop := 0.U.asTypeOf(new DynInst())
@@ -339,6 +341,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val paddr = tlbResp.bits.paddr(0)
   val gpaddr = tlbResp.bits.gpaddr(0)
   val fullva = tlbResp.bits.fullva
+  val triggerVa = tlbResp.bits.triggerVa
   val tlbException = tlbResp.bits.excp.head
   // The reason for considering the ld case is because of CboNoZero
   // pf: page fault, af: access fault, gpf: guest page fault
@@ -358,21 +361,22 @@ class StoreUnitS1(param: ExeUnitParams)(
   storeTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
-  storeTrigger.io.fromLoadStore.vaddr := vaddr
+  storeTrigger.io.fromLoadStore.triggerVa := triggerVa(VAddrBits - 1, 0)
   storeTrigger.io.fromLoadStore.mask := mask
   storeTrigger.io.fromLoadStore.isVectorUnitStride := isVectorUnitStride
   storeTrigger.io.isCbo.get := isCbo
 
-  val triggerAction = storeTrigger.io.toLoadStore.triggerAction
+  val triggerAction = Mux(isUnalignTail, TriggerAction.None, storeTrigger.io.toLoadStore.triggerAction)
   val isBreakPoint = TriggerAction.isBreakpoint(triggerAction)
 
   // Unalign tail inject to s0
-  val unalignTailInjectValid = fire && isUnalignHead
+  val unalignTailInjectValid = fire && isUnalignHead && !isBreakPoint
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := StoreEntrance.unalignTail.U
   unalignTail.vaddr := ((vaddr >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.fullva := ((fullva >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
+  unalignTail.triggerVa := triggerVa
   unalignTail.size := size
   unalignTail.mask := genVWmask(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
   unalignTail.align.get := false.B
@@ -475,6 +479,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.gpaddr.get := gpaddr
   // pointer-masked address from the TLB, reported in tval on a store fault
   stageInfo.fullva := fullva
+  stageInfo.triggerVa := triggerVa
   stageInfo.needRSReplay.get := needRSReplay
   stageInfo.hasException.get := hasException || isBreakPoint
   stageInfo.uop.trigger := triggerAction
