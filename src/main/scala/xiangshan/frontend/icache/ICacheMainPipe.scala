@@ -189,6 +189,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
           s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr.unGuard,
           "ICache MainPipe: wayLookupEntry startVAddr mismatch"
         )
+        assert(s0_req(i).endPosition >= getAlignedInstOffset(s0_req(i).startVAddr), "position misMatch")
       }
     }
   }
