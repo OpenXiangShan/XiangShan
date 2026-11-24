@@ -10,7 +10,7 @@ name from their abstracts.
 """
 
 load("@bazel-orfs//:openroad.bzl", "orfs_flow", "orfs_headroom", "orfs_run")
-load("@bazel-orfs//tools/carve:parent_macro.bzl", "parent_macro_flow")
+load("//tools/carve:parent_macro.bzl", "parent_macro_flow")
 
 # Read by anneal_in_flow.tcl, not by ORFS: bypass the variables.yaml
 # validator, and scoped to the floorplan so a knob edit re-runs the

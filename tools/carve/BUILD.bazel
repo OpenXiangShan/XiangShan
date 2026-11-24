@@ -2,6 +2,9 @@ exports_files(
     [
         "evert.tcl",
         "evert.ys",
+        "parent_macro.bzl",
+        "top_level_fast_dpl.tcl",
+        "unfirm.tcl",
     ],
     visibility = ["//visibility:public"],
 )

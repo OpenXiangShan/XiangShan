@@ -15,6 +15,7 @@ exports_files([
     "anneal_in_flow.tcl",
     "constraints.sdc",
     "fold_entries.tcl",
+    "full_dissolve_probe.tcl",
     "global_place_args.tcl",
     "gpl_clusters.json",
     "gpl_clusters_backend.json",
@@ -92,8 +93,8 @@ orfs_schedule(
         ],
     },
     parent = {"XSTile_parent_pm": [
-        ":XSTile_parent_pm_firm_top",
-        ":XSTile_parent_pm_firm_crossings",
+        ":XSTile_parent_pm_top",
+        ":XSTile_parent_pm_crossings",
     ]},
     tags = ["manual"],
 )
@@ -121,6 +122,26 @@ orfs_run(
     script = ":probe_backend_macros.tcl",
     tags = ["manual"],
     user_arguments = {"PROBE_OUT": "$(location Backend_macro_insts.txt)"},
+)
+
+orfs_run(
+    name = "XSTile_parent_pm_full_dissolve_probe",
+    src = ":XSTile_parent_pm_floorplan",
+    out_dir = "XSTile_parent_pm/full_dissolve",
+    arguments = {
+        "GPL_KEEP_OVERFLOW": "0",
+        "PLACE_DENSITY": "0.65",
+        "SKIP_PIN_ACCESS": "1",
+    },
+    cmd = "run",
+    script = ":full_dissolve_probe.tcl",
+    tags = [
+        "manual",
+        "no-remote-exec",
+    ],
+    user_sources = {
+        "LEGALIZE_OUT_OF_BLOCKS_TCL": [":legalize_out_of_blocks.tcl"],
+    },
 )
 
 [
