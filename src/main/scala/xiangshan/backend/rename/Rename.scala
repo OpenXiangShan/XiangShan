@@ -862,7 +862,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     */
   for (i <- 0 until RabCommitWidth) {
     val commitValid = io.rabCommits.isCommit && io.rabCommits.commitValid(i)
-    val walkValid = io.rabCommits.isWalk && io.rabCommits.walkValid(i)
 
     // I. RAT Update
     // When redirect happens (mis-prediction), don't update the rename table
