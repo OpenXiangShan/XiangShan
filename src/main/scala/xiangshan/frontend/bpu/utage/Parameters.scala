@@ -68,13 +68,13 @@ trait HasMicroTageParameters extends HasBpuParameters {
   // The PHR’s history generation incorporates the target address; during a branch,
   // this target address matches the starting address of the next predicted basic block.
   // Fine-grained adjustments may be beneficial during folding.
-  def PCTagConcatBitsForShortHistory:    Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 0, 3, 10)
+  def PCTagConcatBitsForShortHistory:    Seq[Int] = Seq(15, 13, 11, 9, 8, 7, 5, 3, 1)
   def PCTagConcatBitsForMediumHistory:   Seq[Int] = Seq(17, 15, 13, 11, 10, 9, 7, 5, 3)
   def PCTagConcatBitsForLongHistory:     Seq[Int] = Seq(11, 10, 9, 7, 5, 3)
   def PCTagConcatBitsForVeryLongHistory: Seq[Int] = Seq(11, 7, 5, 3)
 
   // Adjust the utilized PC bits according to the Tag length.
-  def PCTagXorBitsForShortHistory:    Seq[Int] = Seq(14, 12, 4, 2, 1)
+  def PCTagXorBitsForShortHistory:    Seq[Int] = Seq(14, 12, 10, 8, 6, 4)
   def PCTagXorBitsForMediumHistory:   Seq[Int] = Seq(15, 13, 10, 9, 7, 5, 3, 0)
   def PCTagXorBitsForLongHistory:     Seq[Int] = Seq(14, 13, 12, 10, 8, 6, 4, 3)
   def PCTagXorBitsForVeryLongHistory: Seq[Int] = Seq(15, 13, 11, 9, 7, 6, 5, 2)
