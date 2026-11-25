@@ -2029,8 +2029,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
       ))
 
-      val robHeadCancelSource = debug.topdownCancelSource.get
-
       val cancelTimeVec = debug.topdownCancelTimeVec.get
       val cancelTimeFixVec = debug.topdownCancelTimeFixVec.get
       val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
