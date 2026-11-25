@@ -82,7 +82,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       val interruptSafe = Vec(RenameWidth, Output(Bool()))
       val slotHeadRvcMask = Vec(RenameWidth, Output(UInt(2.W)))
       val complexSlotHasDest = Vec(RenameWidth, Output(UInt(1.W)))
-      val entryHasStore = Vec(RenameWidth, Output(Bool()))
       val noCompressReason = Vec(RenameWidth, NoCompressReason())
     }
   })
@@ -121,7 +120,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     io.out.interruptSafe(i)        := true.B
     io.out.slotHeadRvcMask(i)      := 0.U
     io.out.complexSlotHasDest(i)   := 0.U
-    io.out.entryHasStore(i)        := false.B
     io.out.noCompressReason(i)     := NoCompressReason.compressed
   }
 
@@ -232,7 +230,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
 
   val unsafeMaskBits = Cat(io.in.zip(allowInterruptsVec).map { case (in, allow) => in.valid && !allow }.reverse)
   val actualMaskBits = Cat(actualValidVec.reverse)
-  val storeMaskBits = Cat(io.in.map(in => in.valid && FuType.isStore(in.bits.fuType)).reverse)
   val flushMaskBits = Cat(io.in.zip(slotNeedsFlushVec).map { case (in, flush) => in.valid && flush }.reverse)
   val rvcMaskBits = Cat(io.in.map(in => in.valid && in.bits.isRVC).reverse)
 
@@ -244,7 +241,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val entrySlotNeedFlushMaskByToken = Wire(Vec(RenameWidth, UInt(2.W)))
   val entryInterruptSafeByToken = Wire(Vec(RenameWidth, Bool()))
   val entrySlotHeadRvcMaskByToken = Wire(Vec(RenameWidth, UInt(2.W)))
-  val entryHasStoreByToken = Wire(Vec(RenameWidth, Bool()))
   val entryComplexSlotHasDestByToken = Wire(Vec(RenameWidth, UInt(1.W)))
   val entryNoCompressReasonByToken = Wire(Vec(RenameWidth, NoCompressReason()))
 
@@ -304,7 +300,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       (latterFirstMask & rvcMaskBits).orR,
       (formerFirstMask & rvcMaskBits).orR
     )
-    entryHasStoreByToken(t) := (entryMaskByToken(t) & storeMaskBits).orR
     entryComplexSlotHasDestByToken(t) := Mux(
       formerIsComplex,
       formerComplexHasDest,
@@ -340,7 +335,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       io.out.interruptSafe(i)        := entryInterruptSafeByToken(tokenId)
       io.out.slotHeadRvcMask(i)      := entrySlotHeadRvcMaskByToken(tokenId)
       io.out.complexSlotHasDest(i)   := entryComplexSlotHasDestByToken(tokenId)
-      io.out.entryHasStore(i)        := entryHasStoreByToken(tokenId)
       io.out.noCompressReason(i)     := entryNoCompressReasonByToken(tokenId)
     }
   }

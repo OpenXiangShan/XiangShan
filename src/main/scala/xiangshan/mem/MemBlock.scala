@@ -184,9 +184,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-    val lcommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
-    val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
   }
@@ -1062,9 +1059,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // Lsq
   io.mem_to_ooo.lsqio.mmioBusy   := lsq.io.rob.mmioBusy
-  lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
-  lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 

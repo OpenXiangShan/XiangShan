@@ -882,24 +882,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.csr.vxsat    := RegNext(writebackFlagTracker.out.commitSetMask(fflagsWidth), false.B)
 
   /**
-   * LSQ retirement and pending slot
+   * LSQ pending slot
    */
-  val ldCommitVec = VecInit((0 until CommitWidth).flatMap { i =>
-    (0 until 2).map { j =>
-      val slotValid = out.commits.commitValid(i) && (j == 0).B ||
-        out.commits.commitValid(i) && !CompressType.isNORMAL(out.commits.info(i).entryPairType)
-      slotValid && slotUopBuf(deqPtrVec(i).value)(j).commitType === CommitType.LOAD
-    }
-  })
-  // TODO: Check if meet the require that only set scommit when commit scala store uop
-//  val stCommitVec = VecInit((0 until CommitWidth).map(i => out.commits.commitValid(i) && out.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
-  val newStCommit = VecInit((0 until CommitWidth).map(i => out.commits.commitValid(i) && out.commits.info(i).entryHasStore && !robEntries(deqPtrVec(i).value).vls)).asUInt.orR
-  out.lsq.lcommit := RegNext(Mux(out.commits.isCommit, PopCount(ldCommitVec), 0.U))
-//  out.lsq.scommit := RegNext(Mux(out.commits.isCommit, PopCount(stCommitVec), 0.U))
-//  out.lsq.scommit := RegNext(Mux(out.commits.isCommit && newStCommit, 1.U, 0.U))
-
-  out.lsq.commit := RegNext(out.commits.isCommit && out.commits.commitValid(0))
-
   val pendingEntry = robEntries(deqPtr.value)
 
   val pendingBackPtr = Wire(new RobPtr)
@@ -947,13 +931,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.lsq.pendingPtr := Mux(resetsPendingSlot, deqPtr.asFormer, pendingPtrReg)
 
   out.lsq.pendingPtrNext := RegNext(deqPtrVecNext.head)
-  out.lsq.scommit := RegNext(
-    Mux(out.commits.isCommit && newStCommit ||
-      CompressType.isCC(pendingEntry.entryPairType) &&
-      pendingEntry.entryHasStore &&
-      pendingEntry.formerNumWb === 0.U &&
-      pendingEntry.latterNumWb =/= 0.U, 1.U, 0.U))
-
 
   /**
    * Pointer updates and capacity
@@ -2805,15 +2782,6 @@ object Rob {
   }
 
   class RobLsqIO(implicit p: Parameters) extends XSBundle {
-    // Load retirement count (up to two slots per entry).
-    val lcommit = Output(UInt(log2Up(2 * CommitWidth + 1).W))
-
-    // Store release count.
-    val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
-
-    // Head entry retirement.
-    val commit = Output(Bool())
-
     // Ordered replay boundary.
     val pendingPtr = Output(new RobPtr)
     val pendingPtrNext = Output(new RobPtr)

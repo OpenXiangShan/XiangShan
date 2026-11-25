@@ -81,7 +81,6 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val latterNumWb = UInt(LatterNumWbWidth.W)
   val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
   val complexSlotHasDest = UInt(1.W)
-  val entryHasStore = Bool()
 
   val vls = Bool()
   val interruptSafe = Bool()
@@ -136,7 +135,6 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.noCompressReason := robEnq.noCompressReason
 
     this.complexSlotHasDest := robEnq.complexSlotHasDest
-    this.entryHasStore := robEnq.entryHasStore
 
     this.commitType := robEnq.commitType
     this.ftqIdx := robEnq.ftqPtr
@@ -194,7 +192,6 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
   val isVls = Bool()
   val vls = Bool()
   val commitType = CommitType()
-  val entryHasStore = Bool()
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
@@ -232,7 +229,6 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.ftqIdx := robEntry.ftqIdx
     this.ftqOffset := robEntry.ftqOffset
     this.commitType := robEntry.commitType
-    this.entryHasStore := robEntry.entryHasStore
     this.slotNeedFlush := robEntry.slotNeedFlush
     this.traceBlockInPipe := robEntry.traceBlockInPipe
     this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire

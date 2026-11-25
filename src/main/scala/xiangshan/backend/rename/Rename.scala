@@ -329,7 +329,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val interruptSafe = compressUnit.io.out.interruptSafe
   val slotHeadRvcMask = compressUnit.io.out.slotHeadRvcMask
   val complexSlotHasDest = compressUnit.io.out.complexSlotHasDest
-  val entryHasStore = compressUnit.io.out.entryHasStore
   val noCompressReason = compressUnit.io.out.noCompressReason
 
   // speculatively assign the instruction with an robIdx
@@ -474,7 +473,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).isRVC := io.in(i).bits.isRVC
     uops(i).slotHeadRvcMask := slotHeadRvcMask(i)
     uops(i).complexSlotHasDest := complexSlotHasDest(i)
-    uops(i).entryHasStore := entryHasStore(i)
     uops(i).noCompressReason := noCompressReason(i)
     // alloc a new phy reg
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
