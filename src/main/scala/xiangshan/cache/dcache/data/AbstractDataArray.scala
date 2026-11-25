@@ -22,7 +22,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
-import xiangshan.L1CacheErrorInfo
+import device.reri.RERIErrorInfo
 
 import scala.math.max
 
@@ -46,7 +46,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
     val resp = Output(Vec(3, Vec(blockRows, Bits(encRowBits.W))))
     val nacks = Output(Vec(3, Bool()))
-    val errors = Output(Vec(3, ValidIO(new L1CacheErrorInfo)))
+    val errors = Output(Vec(3, Valid(new RERIErrorInfo)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until 3).map(f))

@@ -21,7 +21,6 @@ import chisel3._
 import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import system.HasSoCParameter
@@ -45,17 +44,17 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val memory_port = None
   val tl_uncache = l2top.inner.mmio_port
   val sep_tl_opt = l2top.inner.sep_tl_port_opt
-  val beu_int_source = l2top.inner.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.inner.clint_int_node
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
   val nmi_int_node = l2top.inner.nmi_int_node
+  val extern_interrupt_source = l2top.inner.reri_extern_interrupt_source
   memBlock.clint_int_sink := IntBuffer() := clint_int_node
   memBlock.plic_int_sink :*= IntBuffer() :*= plic_int_node
   memBlock.debug_int_sink := IntBuffer() := debug_int_node
   memBlock.nmi_int_sink   := IntBuffer() := nmi_int_node
-  memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
+  memBlock.reri_nmi_int_sink := l2top.inner.reri_nmi_int_source_buffer
 
   // =========== Components' Connection ============
   // L1D clients connect directly to the custom L1-to-L2 fabric. Its channel queues are
@@ -176,9 +175,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.traceCoreInterface.fromCore <> core.module.io.traceCoreInterface
     io.traceCoreInterface <> l2top.module.io.traceCoreInterface.toTile
 
-    l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
-    l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
-    l2top.module.io.beu_errors.uncache <> core.module.io.beu_errors.uncache
+    l2top.module.io.reri_errors.icache <> core.module.io.reri_errors.icache
+    l2top.module.io.reri_errors.dcache <> core.module.io.reri_errors.dcache
+    l2top.module.io.reri_errors.uncache <> core.module.io.reri_errors.uncache
 
     l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
@@ -195,7 +194,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
       core.module.io.l2_fdbk_pf_ctrl := l2top.module.io.l2_fdbk_pf_ctrl
 
-      l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      l2top.module.io.reri_errors.l2 <> 0.U.asTypeOf(l2top.module.io.reri_errors.l2)
       core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
@@ -209,7 +208,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
 
-      l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      l2top.module.io.reri_errors.l2 <> 0.U.asTypeOf(l2top.module.io.reri_errors.l2)
       core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
