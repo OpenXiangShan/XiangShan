@@ -715,6 +715,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val isOnlyStage2 = stageResp.bits.req_info.s2xlate === onlyStage2
   val stage1Hit = (resp_res.l0.hit || resp_res.sp.hit) && isAllStage
   val idx = stageResp.bits.req_info.vpn(2, 0)
+  // L0 contains only ordinary pages; select NAPOT metadata with the same priority as the PPN.
+  val leafNapot = Mux(!resp_res.l0.hit && resp_res.sp.hit, resp_res.sp.n, 0.U)
   val stage1Pf = !Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
@@ -758,7 +760,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
   io.resp.bits.toHptw.resp.entry.ppn := Mux(resp_res.l0.hit, resp_res.l0.ppn(idx), resp_res.sp.ppn)(ppnLen - 1, 0)
   io.resp.bits.toHptw.resp.entry.pbmt := Mux(resp_res.l0.hit, resp_res.l0.pbmt(idx), resp_res.sp.pbmt)
-  io.resp.bits.toHptw.resp.entry.n.map(_ := Mux(resp_res.sp.hit, resp_res.sp.n, 0.U))
+  io.resp.bits.toHptw.resp.entry.n.map(_ := leafNapot)
   io.resp.bits.toHptw.resp.entry.perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(idx), resp_res.sp.perm))
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
@@ -822,7 +824,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       Mux(resp_res.sp.hit, resp_res.sp.pbmt,
         Mux(resp_res.l1.hit, resp_res.l1.pbmt,
           resp_res.l2.pbmt)))
-    io.resp.bits.stage1.entry(i).n.map(_ := Mux(resp_res.sp.hit, resp_res.sp.n, 0.U))
+    io.resp.bits.stage1.entry(i).n.map(_ := leafNapot)
     io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(i),  Mux(resp_res.sp.hit, resp_res.sp.perm, 0.U.asTypeOf(new PtePermBundle))))
     io.resp.bits.stage1.entry(i).pf := !io.resp.bits.stage1.entry(i).v
     io.resp.bits.stage1.entry(i).af := false.B
@@ -832,7 +834,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.stage1.not_super := Mux(resp_res.l0.hit, true.B, false.B)
   io.resp.bits.stage1.not_merge := false.B
   io.resp.valid := stageResp.valid
-  XSError(stageResp.valid && resp_res.l0.hit && resp_res.sp.hit, "normal page and super page both hit")
+  XSError(stageResp.valid && resp_res.l0.hit && resp_res.sp.hit && !resp_res.sp.n.asBool,
+    "normal page and super page both hit")
 
   // refill Perf
   val l3RefillPerf = if (EnableSv48) Some(Wire(Vec(l2tlbParams.l3Size, Bool()))) else None
