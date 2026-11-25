@@ -588,6 +588,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // delay 2 cycle wait excpGen out
   // vls exception can be committed only when RAB commit all its reg pairs
+  // TODO: when vector is ready, check whether vls excp is needed
   deqVlsCanCommit := RegNext(commit_w_delay) && rab.in.status.commitEnd
   val deqIsVlsExcp = deqHasExcp && excpUopInfo.isVectorMemory && !excpState.bits.isEnqExcp
   val deqIsVlsFlushPipe = deqHasFlushPipe && excpUopInfo.isVectorMemory
@@ -612,15 +613,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   /**
-   * Flush pipe
+   * Flush Out
+   * Report flush to CtrlBlock for redirect handling
+   * Flush out will return to rob cycles later.
    */
-
-
-  // vsetvl instruction need another one cycle to write to vtype gen
-  val isVsetFlushPipe = commitHeadEntry.commit_w && deqHasFlushed && excpState.bits.isVset
-  val isVsetFlushPipeReg = RegNext(isVsetFlushPipe)
-  out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || isVsetFlushPipeReg
-
   // out.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(out.flushOut.valid)
@@ -664,6 +660,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && excpState.bits.satpFlush
 
+  /**
+   * Exception report to csr
+   * Collect exception information like gpaddr, pc, exception Num and other details.
+   */
   val excpHappen = normalState && commitHeadValid && (intrEnable || deqCanExcp) && !lastCycleFlush
   val excpIsFormer = deqExcpIsFormer
   out.exception.valid := RegNext(excpHappen)
@@ -689,6 +689,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.readGPAMemAddr.bits.ftqPtr := excpState.bits.ftqPtr
   out.readGPAMemAddr.bits.ftqOffset := excpState.bits.ftqOffset
   out.readGPAMemAddr.bits.isRVC := excpState.bits.isRVC
+
+  /**
+   * When vset flushpipe, report to decode to resume vtype.
+   */
+  // vsetvl instruction need another one cycle to write to vtype gen
+  // TODO: check whether it still works when vector is ready
+  val isVsetFlushPipe = commitHeadEntry.commit_w && deqHasFlushed && excpState.bits.isVset
+  out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || RegNext(isVsetFlushPipe)
 
   /**
    * CSR flag tracking
@@ -778,6 +786,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     vecExcpInfo.bits.isVlm := excpState.bits.isVlm
     vecExcpInfo.bits.vstart := excpState.bits.vstart
   }
+
+  out.toVecExcpMod.logicPhyRegMap := rab.out.toVecExcpMod.logicPhyRegMap
+  out.toVecExcpMod.excpInfo := vecExcpInfo
 
   val resetVstart = dirtyVs && !in.vstartIsZero
   out.csr.vstart.valid := RegNext(Mux(excpHappen && deqHasExcp, excpState.bits.vstartEn, resetVstart))
@@ -1221,9 +1232,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     excpGen.in.enq(i).bits.ftqPtr := in.enq.req(i).bits.ftqPtr
     excpGen.in.enq(i).bits.ftqOffset := in.enq.req(i).bits.ftqOffset
     excpGen.in.enq(i).bits.isRVC := in.enq.req(i).bits.isRVC
-    excpGen.in.enq(i).bits.excpVec := in.enq.req(i).bits.exceptionVec
+    excpGen.in.enq(i).bits.excpVec := in.enq.req(i).bits.exceptionVec // TODO: can we merge all the flush input
     excpGen.in.enq(i).bits.satpFlushFirstFetchFault := in.enq.req(i).bits.satpFlushFirstFetchFault
-    excpGen.in.enq(i).bits.hasExcp := in.enq.req(i).bits.hasException
+    excpGen.in.enq(i).bits.hasExcp := in.enq.req(i).bits.hasException // FIXME: hasExcp is the same with enqExcp?
     excpGen.in.enq(i).bits.isEnqExcp := in.enq.req(i).bits.hasException
     excpGen.in.enq(i).bits.isFetchMalAddr := in.enq.req(i).bits.isFetchMalAddr
     excpGen.in.enq(i).bits.flushPipe := in.enq.req(i).bits.flushPipe
@@ -1288,8 +1299,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   out.robFull := !allowEnqueue
 
-  out.toVecExcpMod.logicPhyRegMap := rab.out.toVecExcpMod.logicPhyRegMap
-  out.toVecExcpMod.excpInfo := vecExcpInfo
 
   /**
    * Assertion
