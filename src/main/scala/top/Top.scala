@@ -216,7 +216,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       if (enableCHI) {
         imsicXbar :=
           AXI4Buffer() :=
-          AXI4UserYanker() :=
+          AXI4UserYanker(Some(1)) :=
           TLToAXI4() :=
           TLFragmenter(4, 8, holdFirstDeny = true) :=
           TLWidthWidget(8) :=

@@ -467,7 +467,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4Buffer() :=
-    AXI4UserYanker() :=
+    AXI4UserYanker(Some(16)) :=
     // AXI4Deinterleaver(8) :=
     axi4peripheral_node
 
