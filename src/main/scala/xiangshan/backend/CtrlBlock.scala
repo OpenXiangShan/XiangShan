@@ -759,7 +759,6 @@ class CtrlBlockImp(
   enqRob.canAccept := rob.in.enq.canAccept
   enqRob.canAcceptForDispatch := rob.in.enq.canAcceptForDispatch
   enqRob.isEmpty := rob.in.enq.isEmpty
-  enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
     sink.valid := RegNext(source.valid && !rob.in.redirect.valid) && !s1_s3_redirect.valid
     sink.bits := RegEnable(source.bits, source.valid)
@@ -767,7 +766,6 @@ class CtrlBlockImp(
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
   dispatch.io.enqRob.canAcceptForDispatch := enqRob.canAcceptForDispatch
   dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
-  rob.in.enq.needAlloc := enqRob.needAlloc
   rob.in.enq.req := enqRob.req
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt

@@ -853,8 +853,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   // input for ROB, LSQ
   for (i <- 0 until RenameWidth) {
-    // needAlloc no use, need deleted
-    io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
     io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
   }

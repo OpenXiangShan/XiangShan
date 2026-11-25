@@ -289,7 +289,6 @@ object Bundles {
     val oldVType = VType()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = NumWB() // rob need this
     val latency = Latency()
     val formerNumWb = UInt(FormerNumWbWidth.W) // rob need this
     val latterNumWb = UInt(LatterNumWbWidth.W) // rob need this
@@ -338,7 +337,6 @@ object Bundles {
   }
 
   class EnqRobUop(implicit p: Parameters) extends RenameOutUop {
-    val stdwriteNeed      = Bool()
     val isXSTrap          = Bool()
     val replayInst        = Bool()
 
@@ -353,7 +351,6 @@ object Bundles {
       this.hasException := this.exceptionVec.orR
       this.formerNumWb  := source.formerNumWb
       this.latterNumWb  := source.latterNumWb
-      this.stdwriteNeed := FuType.isStore(source.fuType)
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
     }
@@ -628,7 +625,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
-    val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
@@ -664,7 +660,6 @@ object Bundles {
     val isVset          = Bool()
     val firstUop        = Bool()
     val lastUop         = Bool()
-    val numWB           = NumWB() // rob need this
     val latency         = Latency()
     val formerNumWb     = UInt(FormerNumWbWidth.W) // rob need this
     val latterNumWb     = UInt(LatterNumWbWidth.W) // rob need this
@@ -736,8 +731,6 @@ object Bundles {
         case (t, s) => SrcType.isNotReg(t) || SrcState.isReady(s)
       })
     }
-
-    def needEnqRab: Bool = rfWen || fpWen || vecWen || v0Wen
 
     def connectRenameOutUop(source: RenameOutUop): Unit = {
       this := 0.U.asTypeOf(this)

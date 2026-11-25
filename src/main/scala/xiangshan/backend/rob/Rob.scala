@@ -1094,10 +1094,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // if the first uop of an instruction is valid , write writebackedCounter
   val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
-  val enqHasExcpSeq = in.enq.req.map(_.bits.hasException)
-  val enqRobIdxSeq = in.enq.req.map(req => req.bits.robIdx.value)
-  val enqWBNumVec = VecInit(in.enq.req.map(req => req.bits.numWB))
-  private val enqWriteStdVec = VecInit(in.enq.req.map(req => req.bits.stdwriteNeed))
   val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
   val enqLatterNumWbVec = VecInit(in.enq.req.map(req => req.bits.latterNumWb))
 
@@ -2833,9 +2829,6 @@ object Rob {
 
     // ROB occupancy.
     val isEmpty = Output(Bool())
-
-    // Entry allocation intent.
-    val needAlloc = Vec(RenameWidth, Input(Bool()))
 
     // Enqueue uops.
     val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
