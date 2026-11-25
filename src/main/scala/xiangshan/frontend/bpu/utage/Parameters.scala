@@ -24,10 +24,9 @@ case class MicroTageParameters(
     // TODO: The length of the Tag and its alias status will need to be adjusted later. The same applies to the number of items.
     TableInfos: Seq[MicroTageInfo] = Seq(
       new MicroTageInfo(512, 8, 5, 8),
-      new MicroTageInfo(512, 16, 8, 8) // 3Taken maybe better than 2Taken
-      // new MicroTageInfo(512, 12, 8, 8),
-      // new MicroTageInfo(512, 16, 8, 8), // follow Tage.
-      // new MicroTageInfo(512, 24, 8, 8)
+      new MicroTageInfo(512, 16, 8, 8), // 3Taken maybe better than 2Taken
+      new MicroTageInfo(512, 24, 8, 8),
+      new MicroTageInfo(512, 32, 8, 8) // walk beyond tage's longest history (31)
     ),
     TakenCtrWidth:       Int = 3,
     LowTickWidth:        Int = 7,
