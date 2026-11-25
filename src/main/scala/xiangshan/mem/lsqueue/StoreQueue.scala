@@ -1213,12 +1213,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val ncStall = if(i == 0) nc(rdataPtrExt(0).value) else (nc(rdataPtrExt(i).value) || nc(rdataPtrExt(i-1).value))
+    val previousVecLastFlow = if (i == 0) false.B else
+      isVec(rdataPtrExt(i-1).value) && vecLastFlow(rdataPtrExt(i-1).value)
     val exceptionValid = if(i == 0) hasException(rdataPtrExt(0).value) else {
-      hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value) && uop(rdataPtrExt(i).value).robIdx === uop(rdataPtrExt(i-1).value).robIdx)
+      hasException(rdataPtrExt(i).value) || (isVec(ptr) && isVec(rdataPtrExt(i-1).value) && !previousVecLastFlow &&
+        hasException(rdataPtrExt(i-1).value) && uop(rdataPtrExt(i).value).robIdx === uop(rdataPtrExt(i-1).value).robIdx)
     }
     val vecNotAllMask = dataModule.io.rdata(i).mask.orR
     // Vector instructions that prevent triggered exceptions from being written to the 'databuffer'.
-    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
+    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx && !previousVecLastFlow
 
     val misalignToDataBufferValid = allocated(rdataPtrExt(0).value) && committed(rdataPtrExt(0).value) &&
                                     (!isVec(rdataPtrExt(0).value) && (allvalid(rdataPtrExt(0).value) || hasException(rdataPtrExt(0).value)) ||
@@ -1383,18 +1386,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // If the last flow with an exception is the LastFlow of this instruction, the flag is not set.
   // compare robidx to select the last flow
   require(EnsbufferWidth == 2, "The vector store exception handle process only support EnsbufferWidth == 2 yet.")
-  val robidxEQ = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire &&
-    uop(dataBuffer.io.enq(0).bits.sqPtr.value).robIdx === uop(dataBuffer.io.enq(1).bits.sqPtr.value).robIdx
-  val robidxNE = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire && (
-    uop(dataBuffer.io.enq(0).bits.sqPtr.value).robIdx =/= uop(dataBuffer.io.enq(1).bits.sqPtr.value).robIdx
-  )
+  val sameVecInst = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire &&
+    uop(dataBuffer.io.enq(0).bits.sqPtr.value).robIdx === uop(dataBuffer.io.enq(1).bits.sqPtr.value).robIdx &&
+    (!vecCommitHasExceptionLastFlow(0) || !dataBuffer.io.enq(0).bits.sqNeedDeq)
+  val differentVecInst = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire && !sameVecInst
   val onlyCommit0 = dataBuffer.io.enq(0).fire && !dataBuffer.io.enq(1).fire
 
   val vecCommitLastFlow =
-    // robidx equal => check if 1 is last flow
-    robidxEQ && vecCommitHasExceptionLastFlow(1) ||
-    // robidx not equal => 0 must be the last flow, just check if 1 is last flow when 1 has exception
-    robidxNE && (vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1) || !vecCommitHasExceptionValid(1)) ||
+    sameVecInst && vecCommitHasExceptionLastFlow(1) ||
+    differentVecInst && (vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1) || !vecCommitHasExceptionValid(1)) ||
     onlyCommit0 && vecCommitHasExceptionLastFlow(0)
 
 
@@ -1406,7 +1406,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }.reduce(_ || _)
 
   // When a LastFlow with an exception instruction is commited, clear the flag.
-  when(!vecExceptionFlag.valid && vecCommitHasExceptionValidOR && !vecCommitLastFlow) {
+  when((!vecExceptionFlag.valid || vecExceptionFlagCancel) && vecCommitHasExceptionValidOR && !vecCommitLastFlow) {
     vecExceptionFlag.valid  := true.B
     vecExceptionFlag.bits   := vecCommitHasExceptionSelectUop
   }.elsewhen(vecExceptionFlag.valid && vecExceptionFlagCancel) {
@@ -1417,7 +1417,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // A dumb defensive code. The flag should not be placed for a long period of time.
   // A relatively large timeout period, not have any special meaning.
   // If an assert appears and you confirm that it is not a Bug: Increase the timeout or remove the assert.
-  TimeOutAssert(vecExceptionFlag.valid, 3000, "vecExceptionFlag timeout, Plase check for bugs or add timeouts.")
+  TimeOutAssert(vecExceptionFlag.valid && !vecExceptionFlagCancel, 3000, "vecExceptionFlag timeout, Plase check for bugs or add timeouts.")
 
   /* difftest */
   // Initialize when unenabled difftest.
