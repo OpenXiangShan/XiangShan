@@ -41,28 +41,38 @@ import xiangshan.XSModule
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
  * @param nameSuffix Suffix of name, used for clearer logging
+ * @param hasPendingLookup Enable a set lookup of dirty entries in an untagged, single-port buffer
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:              T,
+    numEntries:       Int = 1,
+    numPorts:         Int = 1,
+    numWays:          Int = 1,
+    hasCnt:           Boolean = false,
+    hasWayMask:       Boolean = false,
+    hasFlush:         Boolean = false,
+    hasPendingLookup: Boolean = false,
+    nameSuffix:       String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
   require(numPorts <= numEntries)
+  require(!hasPendingLookup || (numPorts == 1 && gen.tag.isEmpty))
+
+  class PendingLookupIO extends Bundle {
+    val setIdx: UInt       = Input(UInt(gen.setIdx.getWidth.W))
+    val resp:   ValidIO[T] = Valid(gen)
+  }
+
   class WriteBufferIO extends Bundle {
     val write: Vec[ValidIO[T]]     = Vec(numPorts, Flipped(Valid(gen)))
     val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
     val full:  Vec[Bool]           = Output(Vec(numPorts, Bool()))
     // A full miss overwrites a pending dirty entry.
-    val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
-    val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
-    val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+    val overwrite:     Vec[Bool]               = Output(Vec(numPorts, Bool()))
+    val takenMask:     Option[Vec[Bool]]       = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:         Option[Bool]            = Option.when(hasFlush)(Input(Bool()))
+    val pendingLookup: Option[PendingLookupIO] = Option.when(hasPendingLookup)(new PendingLookupIO)
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -90,6 +100,14 @@ class WriteBuffer[T <: WriteReqBundle](
   private val nextDirty       = WireInit(dirty)
   private val nextEntries     = WireInit(entries)
   private val nextShadowValid = WireInit(shadowValid)
+
+  io.pendingLookup.foreach { lookup =>
+    val hits = entries.head.zip(dirty.head).map { case (entry, isDirty) =>
+      isDirty && entry.setIdx === lookup.setIdx
+    }
+    lookup.resp.valid := !flush && hits.reduce(_ || _)
+    lookup.resp.bits  := Mux1H(hits, entries.head)
+  }
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))
