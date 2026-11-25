@@ -1,6 +1,6 @@
 {
-  "commit": "25f75524",
-  "date": "2026-10-16",
+  "commit": "d7f591de",
+  "date": "2026-11-24",
   "units": {
     "CoupledL2": {
       "source": "measured",
@@ -131,20 +131,20 @@
       "source": "measured",
       "stages": {
         "cts": {
-          "minutes": 24.2,
-          "peak_gb": 39.5
+          "minutes": 18.5,
+          "peak_gb": 41.2
         },
         "floorplan": {
-          "minutes": 11.1,
-          "peak_gb": 10.5
+          "minutes": 9.5,
+          "peak_gb": 24.3
         },
         "grt": {
-          "minutes": 62.1,
-          "peak_gb": 53.1
+          "minutes": 81.0,
+          "peak_gb": 54.6
         },
         "place": {
-          "minutes": 162.6,
-          "peak_gb": 30.7
+          "minutes": 196.0,
+          "peak_gb": 31.1
         },
         "synth": {
           "minutes": 0.5,

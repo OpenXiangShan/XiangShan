@@ -35,18 +35,13 @@ foreach t $ends {
   if { [info exists hist($b)] } { incr hist($b) } else { set hist($b) 1 }
 }
 set bins [lsort -integer [array names hist]]
-if { [llength $bins] > 0 } {
-  set counts {}
-  for { set b [lindex $bins 0] } { $b <= [lindex $bins end] } { incr b } {
-    lappend counts [expr { [info exists hist($b)] ? $hist($b) : 0 }]
-  }
-  lappend out [format "reg2reg endpoints bin %d ps from %d ps: %s" $bin \
-    [expr { [lindex $bins 0] * $bin }] [join $counts " "]]
-  lappend out [format "reg2reg min period %.0f ps" [expr { $p - $r2r }]]
-} else {
-  lappend out "reg2reg endpoints: 0"
-  lappend out "reg2reg min period 0 ps"
+set counts {}
+for { set b [lindex $bins 0] } { $b <= [lindex $bins end] } { incr b } {
+  lappend counts [expr { [info exists hist($b)] ? $hist($b) : 0 }]
 }
+lappend out [format "reg2reg endpoints bin %d ps from %d ps: %s" $bin \
+  [expr { [lindex $bins 0] * $bin }] [join $counts " "]]
+lappend out [format "reg2reg min period %.0f ps" [expr { $p - $r2r }]]
 set f [open $::env(KPI_OUT) w]
 puts $f [join $out "\n"]
 close $f

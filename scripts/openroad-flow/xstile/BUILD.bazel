@@ -1,9 +1,9 @@
-# XSTile on ASAP7: the implied 4-macro zero-glue floorplan & dissolve flow.
+# XSTile on ASAP7: the planned hierarchical flow (README.md).
 #
 # The flows are manual and run by hand; `bazelisk build //...` builds only
 # the small tests beside them.
 
-load("@bazel-orfs//:openroad.bzl", "odb_debug", "orfs_run", "orfs_schedule")
+load("@bazel-orfs//:openroad.bzl", "odb_debug", "orfs_schedule")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":plan/plan.bzl", "PLAN")
 load(":xiangshan.bzl", "xiangshan_flow")
@@ -11,15 +11,8 @@ load(":xiangshan.bzl", "xiangshan_flow")
 package(default_visibility = ["//:__subpackages__"])
 
 exports_files([
-    "Backend_macros.tcl",
-    "anneal_in_flow.tcl",
     "constraints.sdc",
     "fold_entries.tcl",
-    "full_dissolve_probe.tcl",
-    "global_place_args.tcl",
-    "gpl_clusters.json",
-    "gpl_clusters_backend.json",
-    "kpi_run.tcl",
     "legalize_out_of_blocks.tcl",
     "plan/plan.bzl",
     "plan/plan.json",
@@ -27,14 +20,25 @@ exports_files([
     "xs_icg_map.v",
 ] + glob(["*.regfile"]))
 
+# The planned parent: the blocks the macro selection tables named, each a
+# real flow at the outline plan_floorplan.py drew with its pins on one
+# side, the parent at the planned die. plan/ is generated (bazel-orfs's
+# .claude/skills/macro-selection/SKILL.md, step 3) and copied here as
+# bazel-orfs ran it; regenerate it, never edit it. Its input,
+# plan/plan.json, needs pin_partners.txt from probe_pin_partners.tcl on
+# XSTile_synth_odb_debug, which is not checked in (README.md, "Things to
+# fix").
 xiangshan_flow(
     name = "XSTile",
     plan = PLAN,
 )
 
-# All 4 real blocks MUST pass gpl_driven.sh (timing- and routability-driven GPL).
-# XSTile_parent holds only the 7 IntBuffer flip-flops with DONT_BUFFER_PORTS=1.
-GPL_DRIVEN_PARTS = sorted(PLAN["macros"].keys())
+# A period counts only when global placement ran timing- and
+# routability-driven, and neither pass says so in the exit status when it
+# does not run. A part whose global placement log shows no timing-driven
+# iteration (GPL-0100) or no routability-mode iteration (GPL-1017) fails
+# here, in the wave that placed it (gpl_driven.sh).
+GPL_DRIVEN_PARTS = sorted(PLAN["macros"].keys()) + ["XSTile"]
 
 [
     filegroup(
@@ -76,6 +80,14 @@ sh_test(
     ],
 )
 
+# The blocks and the parent, scheduled to the memory there is (bazel-orfs's
+# docs/schedule.md): each block through grt with its abstract, its KPI and
+# its placement-driver gate, in waves that fit free memory, then the
+# parent alone. resources.json beside this file is the record it plans
+# from and refreshes.
+#
+#   bazelisk run //scripts/openroad-flow/xstile:build -- --plan-only
+#   bazelisk run //scripts/openroad-flow/xstile:build
 orfs_schedule(
     name = "build",
     macros = {
@@ -85,65 +97,18 @@ orfs_schedule(
             ":%s_gpl_driven" % block,
         ]
         for block in sorted(PLAN["macros"].keys())
-    } | {
-        "XSTile_parent": [
-            ":XSTile_parent_grt",
-            ":XSTile_parent_abstract",
-            ":XSTile_parent_kpi",
-        ],
     },
-    parent = {"XSTile_parent_pm": [
-        ":XSTile_parent_pm_top",
-        ":XSTile_parent_pm_crossings",
+    parent = {"XSTile": [
+        ":XSTile_kpi",
+        ":XSTile_gpl_driven",
     ]},
     tags = ["manual"],
 )
 
-# Compact helper summaries (< 64 KiB) for inspecting Backend's 5 regfile LEF
-# outlines and synthesized instance paths without reading large build outputs.
-genrule(
-    name = "regfile_sizes",
-    srcs = [
-        ":FpRegFile_generate_abstract",
-        ":IntRegFile_generate_abstract",
-        ":RenameBufferFile_generate_abstract",
-        ":RobEntryFile_generate_abstract",
-        ":VfRegFile_generate_abstract",
-    ],
-    outs = ["regfile_sizes.txt"],
-    cmd = "for f in $(SRCS); do case \"$$f\" in *.lef) grep -E '^(MACRO |  SIZE )' \"$$f\";; esac; done > $@",
-    tags = ["manual"],
-)
-
-orfs_run(
-    name = "Backend_macro_insts",
-    src = ":Backend_synth",
-    outs = ["Backend_macro_insts.txt"],
-    script = ":probe_backend_macros.tcl",
-    tags = ["manual"],
-    user_arguments = {"PROBE_OUT": "$(location Backend_macro_insts.txt)"},
-)
-
-orfs_run(
-    name = "XSTile_parent_pm_full_dissolve_probe",
-    src = ":XSTile_parent_pm_floorplan",
-    out_dir = "XSTile_parent_pm/full_dissolve",
-    arguments = {
-        "GPL_KEEP_OVERFLOW": "0",
-        "PLACE_DENSITY": "0.65",
-        "SKIP_PIN_ACCESS": "1",
-    },
-    cmd = "run",
-    script = ":full_dissolve_probe.tcl",
-    tags = [
-        "manual",
-        "no-remote-exec",
-    ],
-    user_sources = {
-        "LEGALIZE_OUT_OF_BLOCKS_TCL": [":legalize_out_of_blocks.tcl"],
-    },
-)
-
+# Checkpoints to ask questions of in a persistent OpenROAD session (the
+# odb-debug skill), and the web viewer:
+#
+#   bazelisk run //scripts/openroad-flow/xstile:XSTile_grt_odb_debug
 [
     odb_debug(
         name = "XSTile_%s_odb_debug" % stage,
@@ -172,6 +137,10 @@ orfs_run(
     ]
 ]
 
+# Constants on the ports of the modules this plan keeps (blocks, kept
+# modules, generated register files): what firtool left and yosys cannot
+# fold across a kept boundary. The discovery step of the surgery
+# (surgery/): its result is how manifest.json's rounds were written.
 genrule(
     name = "XSTile_boundary_constants",
     srcs = [

@@ -20,10 +20,11 @@ proc plan_check_size { what inst w h } {
 # A parent built as a macro (//tools/carve) has holes where the blocks
 # go, at the top level: PLAN_BLOCKS_ELSEWHERE skips them here.
 set plan_blocks {
-  L2Top 41.040 205.200 902.880 820.800
-  Backend 984.960 41.040 1436.400 984.960
-  MemBlock 41.040 1067.040 1272.240 738.720
-  Frontend 1354.320 1067.040 1067.040 738.720
+  FltRegionModule 31.392 226.800 547.459 547.459
+  VecRegionModule 589.680 32.400 713.404 713.404
+  CoupledL2 1313.856 86.400 722.567 722.567
+  Frontend 194.832 1708.560 827.456 827.456
+  MemBlock 1033.056 1777.680 840.049 840.049
 }
 if { [info exists ::env(PLAN_BLOCKS_ELSEWHERE)] } { set plan_blocks {} }
 foreach {master x y w h} $plan_blocks {
@@ -57,8 +58,8 @@ set dbu [[ord::get_db_tech] getDbUnitsPerMicron]
 set core [$block getCoreArea]
 set bands 0
 foreach {lo hi} {
-  41.040 1026.000
-  1067.040 1805.760
+  32.400 745.804
+  1777.680 2617.729
 } {
   set bl [odb::dbBlockage_create $block [$core xMin] [expr { int($lo * $dbu) }] [$core xMax] [expr { int($hi * $dbu) }]]
   $bl setSoft
@@ -71,7 +72,9 @@ puts "place_macros.tcl: $bands soft placement blockage(s) over the blocks' bands
 # macro is the instance itself, or generate_ram's RAM, ram, inside the
 # wrapper that takes the module's place.
 foreach {inst x y w h} {
-
+  core/backend/inner_ctrlBlock/rob/robEntryFile 1609.817 942.110 232.366 385.780
+  core/backend/inner_intRegion/intDataPath/intRegFile 129.200 1144.690 379.600 248.620
+  core/backend/inner_ctrlBlock/rob/rab/renameBuffer 854.135 1271.728 219.730 385.780
 } {
   set names [list $inst $inst/ram $inst.ram]
   foreach name $names {
