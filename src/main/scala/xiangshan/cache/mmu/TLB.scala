@@ -156,7 +156,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     }
     info
   }
-  val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, accessInfo(i).mode))
+  val pmpMode = (0 until Width).map(i => Mux(req_out(i).fromHwPrefetch, mode_tmp, accessInfo(i).mode))
   val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
   val canGetGpa = (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
@@ -172,6 +172,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, csr.satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
+  val pfClear = if (q.fetchi) Cat(flush_pipe).orR else Mux(need_gpa, need_gpa_robidx.needFlush(redirect), redirect.valid && !need_gpa_wire)
+  entries.io.pfClear := pfClear
   entries.io.w_apply(refill, ptw.resp.bits)
   for (i <- 0 until Width) {
     entries.io.r.req(i).valid := io.requestor(i).req.valid
@@ -219,13 +221,13 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val isOnlys2xlate = accessInfo(i).s2xlate === onlyStage2
     val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(i).vaddr) && need_gpa_s2xlate === accessInfo(i).s2xlate
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
-    val isPrefetch = req_out(i).isPrefetch
+    val fromHwPrefetch = req_out(i).fromHwPrefetch
     val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
     val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
     when (
       (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect)) ||
-      (isitlb && flush_pipe(i)) || need_clear_need_gpa || need_gpa_count_full
+      (isitlb && flush_pipe(i)) || need_clear_need_gpa || need_gpa_count_full || entries.io.multiHit
     ) {
       need_gpa := false.B
       need_gpa_state_clear_vec(i) := true.B
@@ -235,7 +237,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     }.elsewhen (
       req_out_v(i) && !bypass.hit && !(resp_gpa_refill && need_gpa_req_match) &&
         !isOnlys2xlate && hasGpf(i) && need_gpa === false.B &&
-        !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect
+        !io.requestor(i).req_kill && !fromHwPrefetch && !currentRedirect && !lastCycleRedirect
     ) {
       when(canGetGpa(i)) {
         maybe_need_gpa_not_allow_refill := true.B
@@ -272,7 +274,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     result.hit := storage.hit || bypass.hit
     result.miss := (!result.hit && enable) || hasGpf(i) && !bypass.hit &&
       !(resp_gpa_refill && need_gpa_req_match) && !isOnlys2xlate &&
-      !isPrefetch && !lastCycleRedirect ||
+      !fromHwPrefetch && !lastCycleRedirect ||
       (if (HasMptCheck) mptOnlyEnable.get && !result.hit else false.B) // for mpt only either hit or miss
     result.hit.suggestName(s"hit_read_${i}")
     result.miss.suggestName(s"miss_read_${i}")
@@ -415,6 +417,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.getGpa := ptw_getGpa
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
+    io.ptw.req(idx).bits.fromHwPrefetch := req_out(idx).fromHwPrefetch
   }
 
   // Bypass the PTW response when the corresponding TLB entry is still being refilled
@@ -657,6 +660,7 @@ class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbMod
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (premode < ModeM)
   io.resp.query.vpn := get_pn(req.vaddr)
   io.resp.query.s2xlate := getS2xlate(virt_in || req.hyperinst, csr.vsatp.mode, csr.hgatp.mode)
+  io.resp.query.fromHwPrefetch := req.fromHwPrefetch
   io.resp.preFault := 0.U.asTypeOf(new TlbPreFault)
   val pmm = WireInit(0.U(2.W))
 
