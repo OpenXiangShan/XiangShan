@@ -128,7 +128,6 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
 
   def isWritebacked: Bool = !formerNumWb.orR && !latterNumWb.orR
-  def isUopWritebacked: Bool = isWritebacked
 
   def connectEnq(robEnq: EnqRobUop): Unit = {
     this.entryPairType := robEnq.entryPairType
@@ -179,7 +178,6 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
-  val walk_v = Bool()
   val commit_v = Bool()
   val commit_w = Bool()
   val entryPairType = CompressType()
@@ -213,7 +211,6 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     robEntry: RobEntryBundle,
     commitW: Bool
   ): Unit = {
-    this.walk_v := robEntry.valid
     this.commit_v := robEntry.valid
     this.commit_w := commitW
     this.entryPairType := robEntry.entryPairType

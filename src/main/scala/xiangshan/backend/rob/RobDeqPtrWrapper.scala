@@ -51,9 +51,6 @@ class RobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XS
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U))
-  val realCommitLastSlot = WireInit(realCommitLast)
-  realCommitLastSlot.isFormer := false.B
-  val commit_excp = in.excp_state.valid && !in.excp_state.bits.robIdx.isAfterSlot(realCommitLastSlot)
   val canCommit = VecInit((0 until CommitWidth).map(i => in.deq_v(i) && in.deq_w(i) || in.hasCommitted(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B) - PopCount(in.hasCommitted)
   // when in.intrBitSetReg or there're possible exceptions in these instructions,
@@ -79,8 +76,6 @@ class RobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XS
 
   out.nextPtrVec := deqPtrVecNext
   out.ptrVec      := deqPtrVec
-  out.commitCnt := commitCnt
-  out.commitEn := in.state === 0.U && !redirectOutValid && !in.blockCommit
 
   XSInfo(in.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
 
@@ -105,7 +100,6 @@ object RobDeqPtrWrapper {
 
     // Commit window progress.
     val hasCommitted = Vec(CommitWidth, Input(Bool()))
-    val allCommitted = Input(Bool())
 
     // Serialization state.
     val hasNoSpecExec = Input(Bool())
@@ -125,14 +119,8 @@ object RobDeqPtrWrapper {
   }
 
   class Out(implicit p: Parameters, params: BackendParams) extends XSBundle {
-    // Retirement count.
-    val commitCnt = Output(UInt(log2Up(CommitWidth+1).W))
-
     // Retirement prefix selection.
     val canCommitPriorityCond = Output(Vec(CommitWidth+1,Bool()))
-
-    // Retirement enable.
-    val commitEn = Output(Bool())
 
     // Dequeue pointer state.
     val ptrVec = Vec(CommitWidth, Output(new RobPtr))

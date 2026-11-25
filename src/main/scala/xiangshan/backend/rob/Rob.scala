@@ -113,12 +113,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // When their value is the same but have different flag, rob is full.
   val isEmpty = enqPtr.isSameEntry(deqPtr)
 
-  // 2 * CommitWidth consecutive entry pointers starting at the ROB head.
-  val deqPtrGroup = Wire(Vec(2 * CommitWidth, new RobPtr))
   // Width of an entry offset within a commit row.
   val commitOffsetWidth = log2Ceil(CommitWidth)
-  // Former slot of the last entry in the current commit row.
-  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(commitOffsetWidth, 1.U)).asFormer
 
   // Walk: read one row at a time. walkPtr points to the first entry in the current row.
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
@@ -944,7 +940,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.in.interruptSafe := deqEntriesBankOrder(deqPtr.value(commitOffsetWidth - 1, 0)).interruptSafe
   deqPtrGenModule.in.blockCommit := blockCommit
   deqPtrGenModule.in.hasCommitted := hasCommitted
-  deqPtrGenModule.in.allCommitted := allCommitted
   deqPtrVec := deqPtrGenModule.out.ptrVec
   deqPtrVecNext := deqPtrGenModule.out.nextPtrVec
 
@@ -992,7 +987,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
   allowEnqueueForDispatch := numValidEntries + dispatchNum <= (RobSize - 2 * RenameWidth).U
 
-  val redirectWalkDistance = distanceBetween(in.redirect.bits.robIdx, deqPtrVecNext(0))
   when(in.redirect.valid) {
     // TODO: lastWalkPtr points the last valid entry
     lastWalkPtr := Mux(
@@ -1006,9 +1000,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * ROB entry state updates
    */
-
-  deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0).addEntries(i.U).asFormer }
-  val commitReadAddr = Mux(normalState, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
   val redirectValidReg = RegNext(in.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
@@ -1339,7 +1330,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   commitStuckCounter.in.stuck := commitStuck
   commitStuckCounter.in.runtimeEnable := in.commitStuckCheckEnable
   commitStuckCounter.in.overflowEnabled := commitStuckOverflowEnabled
-  val commitStuckCycle = commitStuckCounter.out.count
   // check if stuck > 2^maxCommitStuckCycle
   val commitStuckOverflow = commitStuckCounter.out.overflow
   val criticalErrors = Seq(
@@ -1815,7 +1805,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfHistogram("walkTotalCycleHist", walkCycle, walkState && stateNext === s_idle, 0, 32)
 
   private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
-  private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
   private val deqHeadInfo = debug_microOp(deqPtr.value).head
   private val deqHeadInfoFuType = deqHeadInfo.fuType
   val deqUopCommitType = deqHeadInfo.commitType
