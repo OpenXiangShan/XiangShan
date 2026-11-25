@@ -63,6 +63,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   private val LduCnt = params.LduCnt
   private val StaCnt = params.StaCnt
+  require(RenameWidth <= CommitWidth)
 
   val in = IO(new In(params))
   val out = IO(new Out(params))
@@ -611,7 +612,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * Flush pipe
    */
 
-  val isFlushPipe = commitHeadEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
 
   // vsetvl instruction need another one cycle to write to vtype gen
   val isVsetFlushPipe = commitHeadEntry.commit_w && deqHasFlushed && excpState.bits.isVset
@@ -656,6 +656,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     RedirectLevel.flush,
     RedirectLevel.flushAfter
   ) // TODO use this to implement "exception next"
+
+  val isFlushPipe = commitHeadEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && excpState.bits.satpFlush
 
@@ -700,7 +702,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.in.fromRob.walkEnd := walkState && walkFinished
   vtypeBuffer.in.fromRob.walkEnd := walkState && walkFinished
 
-  require(RenameWidth <= CommitWidth)
 
   /**
    * CSR flag tracking
