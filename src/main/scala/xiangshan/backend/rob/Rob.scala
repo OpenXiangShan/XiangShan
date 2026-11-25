@@ -668,9 +668,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.valid := RegNext(excpHappen)
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
   out.exception.bits.isForVSnonLeafPTE := out.readGPAMemData.isForVSnonLeafPTE
-  out.exception.bits.commitType := RegEnable(excpUopInfo.commitType, excpHappen)
   out.exception.bits.isFormer := RegEnable(excpIsFormer, excpHappen)
-  out.exception.bits.isStore := RegEnable(FuType.isStore(excpUopInfo.fuType), excpHappen)
   out.exception.bits.exceptionVec extendFrom RegEnable(excpState.bits.excpVec, excpHappen)
   out.exception.bits.satpFlushFirstFetchFault := RegEnable(excpState.bits.satpFlushFirstFetchFault && deqHasExcp, excpHappen)
   out.exception.bits.isFetchMalAddr := RegEnable(excpState.bits.isFetchMalAddr && deqHasExcp, excpHappen)

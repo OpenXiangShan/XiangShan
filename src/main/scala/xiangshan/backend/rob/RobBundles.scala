@@ -278,13 +278,6 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   def not_commit = excpVec.orR || replayInst
 }
 
-class RobFlushInfo(implicit p: Parameters) extends XSBundle {
-  val ftqIdx = new FtqPtr
-  val robIdx = new RobPtr
-  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-  val replayInst = Bool()
-}
-
 class RobFlushPcInfo(implicit p: Parameters) extends XSBundle {
   val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
   val flushIsRVC = Bool()

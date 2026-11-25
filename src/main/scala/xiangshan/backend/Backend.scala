@@ -605,7 +605,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
-  io.mem.isStoreException := ctrlBlock.io.robio.exception.bits.isStore
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
 
   val issueSta = io.mem.intIssue.flatten.filter(_.bits.params.hasStoreAddrFu)
@@ -806,7 +805,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val tlbCsr = Output(new TlbCsrBundle)
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
-  val isStoreException = Output(Bool())
   val isVlsException = Output(Bool())
 
   val wfi = new WfiReqBundle

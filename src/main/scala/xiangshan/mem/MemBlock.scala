@@ -188,7 +188,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
     val pendingPtrNext = Input(new RobPtr)
   }
 
-  val isStoreException = Input(Bool())
   val isVlsException = Input(Bool())
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
