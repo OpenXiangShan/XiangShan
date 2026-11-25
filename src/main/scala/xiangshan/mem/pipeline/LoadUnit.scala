@@ -355,9 +355,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s0_mmio_select := s0_src_select_vec(mmio_idx) && !s0_kill
   s0_nc_select := s0_src_select_vec(nc_idx) && !s0_kill
-  //judgment: is NC with data or not.
-  //If true, it's from `io.lsq.nc_ldin` or `io.fast_rep_in`
-  val s0_nc_with_data = s0_sel_src.isnc && !s0_kill
+  val s0_nc_with_data = s0_nc_select
   s0_misalign_select := s0_src_select_vec(mab_idx) && !s0_kill
 
    // if is hardware prefetch or fast replay, don't send valid to tlb
@@ -405,7 +403,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
 
   // query DCache
-  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
+  io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_sel_src.isnc
   io.dcache.req.bits.cmd          := Mux(s0_sel_src.prf_rd,
                                       MemoryOpConstants.M_PFR,
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
@@ -457,6 +455,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr         := src.vaddr
     out.paddr         := src.paddr
+    out.isnc          := src.nc
     out.mask          := src.mask
     out.uop           := src.uop
     out.try_l2l       := false.B
@@ -1572,9 +1571,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_fpWen        = RegEnable(Mux(s2_valid, s2_out.uop.fpWen, s2_mmio_req.bits.uop.fpWen), s2_valid || s2_mmio_req.valid)
   val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
   val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
+  val s3_uses_dcache = !(s3_in.nc || s3_in.mmio || s3_nc_with_data)
   val s3_hw_err   =
       if (EnableAccurateLoadError) {
-        io.dcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable) && s3_troublem
+        io.dcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable) && s3_troublem && s3_uses_dcache
       } else {
         WireInit(false.B)
       }
@@ -1646,7 +1646,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
   s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err ||
                                                  io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
-  when (s3_nc_with_data) {
+  when (!s3_uses_dcache) {
     s3_out.bits.uop.exceptionVec := s3_in.uop.exceptionVec
   }
   val s3_writeback_exception = s3_out.valid && s3_vecActive &&
@@ -1714,7 +1714,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // feedback slow
   val s3_late_writeback_error = s3_safe_writeback && s3_vecActive && !s3_in.isPrefetch &&
-    !s3_nc_with_data && !s3_mis_align && (s3_hw_err || io.dcache.resp.bits.tl_error_delayed.asUInt.orR)
+    s3_uses_dcache && !s3_mis_align && (s3_hw_err || io.dcache.resp.bits.tl_error_delayed.asUInt.orR)
   s3_fast_rep := RegNext(s2_fast_rep) && !s3_late_writeback_error
 
   val s3_fb_no_waiting = !s3_in.isLoadReplay &&
