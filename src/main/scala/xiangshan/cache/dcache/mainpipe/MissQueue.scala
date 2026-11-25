@@ -234,7 +234,6 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   val merge         = Bool()
   // this request is about to allocate a new mshr
   val alloc         = Bool()
-  val cancel        = Bool()
   val mshr_id       = UInt(log2Up(cfg.nMissEntries).W)
 
   def reg_valid(): Bool = {
@@ -243,10 +242,6 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
 
   def matched(signals: MatchSignals): Bool = {
     signals.block_match && reg_valid()
-  }
-
-  def prefetch_late_en(signals: MatchSignals, new_req: MissReqWoStoreData, new_req_valid: Bool): Bool = {
-    new_req_valid && alloc && signals.block_match && req.isFromPrefetch && !new_req.isFromPrefetch
   }
 
   def reject_req(signals: MatchSignals): Bool = {
@@ -530,9 +525,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val hit_prefetch = Vec(reqNum, Output(Bool()))
       val hit_pf_source = UInt(L1PfSourceBits.W)
     }
-    // Quota counts owners created by prefetch until they are released.
+    // Demand hits clear the prefetch flag and return this entry's quota.
     val prefetch_occupied = Output(Bool())
-    val prefetch_released = Output(Bool())
     val matched = Output(Bool())
     val l1Miss = Output(Bool())
 
@@ -568,7 +562,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val miss_req_pipe_reg_bits = io.miss_req_pipe_reg.req
 
   val signals_vec = Wire(Vec(reqNum, new MatchSignals))
-  val signals_pipe_prefetch = computeMatchSignals(miss_req_pipe_reg_bits, io.queryME(0).req.bits)
 
   for(i <- 0 until reqNum) {
     signals_vec(i) := computeMatchSignals(req, io.queryME(i).req.bits)
@@ -669,8 +662,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // for perf use
   val secondary_fired = RegInit(false.B)
 
-  io.prefetch_occupied := req_valid && req_primary_fire.isFromPrefetch
-  io.prefetch_released := io.prefetch_occupied && release_entry
+  io.prefetch_occupied := req_valid && prefetch
   io.perf_pending_prefetch := req_valid && prefetch && !secondary_fired
   io.perf_pending_normal   := req_valid && (!prefetch || secondary_fired)
 
@@ -682,7 +674,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req_valid := false.B
   }
 
-  when (io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel) {
+  when (io.miss_req_pipe_reg.alloc) {
     assert(RegNext(primary_fire), p"after 1 cycle of primary_fire, entry will be allocated:${io.id}")
     req_valid := true.B
 
@@ -725,7 +717,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     error := false.B
     denied := false.B
     corrupt := false.B
-    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(signals_pipe_prefetch, io.queryME(0).req.bits, io.queryME(0).req.valid)
+    prefetch := input_req_is_prefetch
     access := false.B
     secondary_fired := false.B
 
@@ -735,9 +727,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Wire to hold updated data that has merged grant data (on grant.fire)
   val refill_and_store_data_update = Wire(Vec(blockRows, UInt(rowBits.W)))
   // All the logic of refill_and_store_data. There is a corner case to note: store-merge and grant.fire may happen at the same cycle.
-  when (io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) {
+  when (io.miss_req_pipe_reg.alloc && miss_req_pipe_reg_bits.isFromStore) {
     refill_and_store_data := VecInit(miss_req_pipe_reg_bits.store_data.grouped(rowBits))
-  }.elsewhen (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) {
+  }.elsewhen (io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore) {
     for (i <- 0 until blockRows) {
       val store_mask_temp = miss_req_pipe_reg_bits.store_mask.grouped(rowBytes)(i).asBools
       val store_data_temp = (miss_req_pipe_reg_bits.store_data.grouped(8).grouped(rowBytes).toSeq)(i)
@@ -748,7 +740,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     refill_and_store_data := refill_and_store_data_update
   }
 
-  when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
+  when (io.miss_req_pipe_reg.merge) {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), p"after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged:${io.id}")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
@@ -768,6 +760,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       hasStore := true.B
       full_overwrite := full_overwrite || miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
+    }
+
+    // Only an accepted demand merge converts a prefetch entry and returns its quota.
+    when (prefetch) {
+      prefetch := false.B
+      req.pf_source := L1_HW_PREFETCH_CLEAR
     }
 
     should_refill_data := should_refill_data_reg || miss_req_pipe_reg_bits.isFromLoad
@@ -900,13 +898,13 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
   io.primary_ready := !req_valid && !GatedValidRegNext(primary_fire)
 
-  io.load_merge_ready := req_valid && !io.miss_req_pipe_reg.cancel && load_merge_window
+  io.load_merge_ready := req_valid && load_merge_window
 
   // Generate vectorized secondary_ready and secondary_reject for parallel enqueue
   // Each queryMQ request gets independent judgment
   for (i <- 0 until reqNum) {
     val _signals = computeMatchSignals(req, io.queryME(i).req.bits)
-    io.secondary_ready(i) := should_merge(_signals, io.queryME(i).req.bits) && !io.miss_req_pipe_reg.cancel && req_valid
+    io.secondary_ready(i) := should_merge(_signals, io.queryME(i).req.bits) && req_valid
     io.secondary_reject(i) := should_reject(_signals, io.queryME(i).req.bits)
   }
 
@@ -946,7 +944,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // if the entry has a pending merge req, wait for it
   // Note: now, only wait for store, because store may acquire T
   io.mem_acquire.valid := !s_acquire &&
-    !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) &&
+    !(io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore) &&
     !io.wfi.wfiReq
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
@@ -1091,11 +1089,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.prefetch_info.hit_prefetch := hit_prefetch_vec
   io.prefetch_info.hit_pf_source := req.pf_source
 
-  when(io.prefetch_info.hit_prefetch.asUInt.orR) {
-    prefetch := false.B
-    req.pf_source := L1_HW_PREFETCH_CLEAR
-  }
-
   io.l1Miss := req_valid
   // refill latency monitor
   val start_counting = GatedValidRegNext(io.mem_acquire.fire) || (GatedValidRegNextN(primary_fire, 2) && s_acquire)
@@ -1119,7 +1112,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerfAccumulate("prefetch_req_primary", Cat((0 until reqNum).map(i=> primary_fire_vec(i) && io.queryME(i).req.bits.source === DCACHE_PREFETCH_SOURCE.U)).orR)
   XSPerfAccumulate("prefetch_req_merged", Cat((0 until reqNum).map(i=> secondary_fire_vec(i) && io.queryME(i).req.bits.source === DCACHE_PREFETCH_SOURCE.U)).orR)
-  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(GatedValidRegNextN(primary_fire, 2) && !release_entry, release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
@@ -1231,7 +1223,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // Parallel pipeline registers for queryMQ path (reqNum ports)
   val parallel_pipe_regs = RegInit(VecInit.fill(reqNum)(
-    (new MissReqPipeRegBundle(edge)).Lit(_.alloc -> false.B, _.merge -> false.B, _.cancel -> false.B)
+    (new MissReqPipeRegBundle(edge)).Lit(_.alloc -> false.B, _.merge -> false.B)
   ))
   val active_pipe_regs = parallel_pipe_regs
   val parallel_regs_channel = Wire(Vec(reqNum, UInt(memChannelBits.W)))
@@ -1247,14 +1239,15 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val nMaxPrefetchEntry = Constantin.createRecord(
     s"nMaxPrefetchEntry${p(XSCoreParamsKey).HartId}", initValue = cfg.nMissEntries - 2)
-  val pending_prefetch_alloc = active_pipe_regs.map(preg =>
-    preg.alloc && !preg.cancel && preg.req.isFromPrefetch)
-  // Increment on S0 admission, decrement on owner release: pipe-reg allocations are included.
-  val prefetch_owner_count = RegInit(0.U(log2Ceil(cfg.nMissEntries + 1).W))
-  val observed_prefetch_owners = PopCount(entries.map(_.io.prefetch_occupied)) +& PopCount(pending_prefetch_alloc)
-  assert(prefetch_owner_count === observed_prefetch_owners, "prefetch quota must track entries and allocating pipe regs")
-  val prefetch_quota_available = prefetch_owner_count < nMaxPrefetchEntry
-  assert(prefetch_owner_count <= cfg.nMissEntries.U, "prefetch owner count exceeds MSHR capacity")
+  // Only MainPipe (port 0) can allocate hardware prefetches. Count its pending
+  // allocation until it moves into an entry; demand hits return quota by clearing prefetch.
+  val pending_prefetch_alloc = active_pipe_regs.head.alloc && active_pipe_regs.head.req.isFromPrefetch
+  val prefetch_count = PopCount(entries.map(_.io.prefetch_occupied) :+ pending_prefetch_alloc)
+  val prefetch_quota_available = prefetch_count < nMaxPrefetchEntry
+  assert(prefetch_count <= cfg.nMissEntries.U, "prefetch count exceeds MSHR capacity")
+  active_pipe_regs.tail.foreach { preg =>
+    assert(!(preg.alloc && preg.req.isFromPrefetch), "only MainPipe may allocate hardware prefetch entries")
+  }
 
   // secondary_ready_vec(i)(e) = entry e can merge request i
   val secondary_ready_vec = (0 until reqNum).map { i =>
@@ -1417,7 +1410,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val signals_j = computeMatchSignals(active_pipe_regs(j).req, io.queryMQ(i).req.bits)
 
       // merge from pipe_reg
-      when (active_pipe_regs(j).merge_req(signals_j) && !active_pipe_regs(j).cancel &&
+      when (active_pipe_regs(j).merge_req(signals_j) &&
             !(io.queryMQ(i).req.bits.isFromStore && acquire_owned_by_fabric(j))) {
         can_merge_from_pipe(i) := true.B
         can_merge_from_pipe_mshr(i) := active_pipe_regs(j).mshr_id
@@ -1425,12 +1418,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       // A store merging into an allocating pipe reg must be included before
       // sending Acquire, otherwise the entry cmd and Grant param can diverge.
-      when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && active_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
+      when(active_pipe_regs(j).alloc && active_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
         can_merge_store_from_pipe(j) := true.B
       }
 
       // do not alloc when (addr_match & alias_match)
-      when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && signals_j.block_match) {
+      when(active_pipe_regs(j).alloc && signals_j.block_match) {
         match_from_pipe(i) := true.B
         // Only request 0 consumes this index for prefetch late-source stats.
         if (i == 0) { mainpipeMatchPipeIdx := j.U }
@@ -1496,14 +1489,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for (i <- 0 until reqNum) {
     query_fire(i) := query_valid(i) && io.queryMQ(i).ready
   }
-
-  val accepted_alloc = VecInit((0 until reqNum).map(i =>
-    query_fire(i) && allocValid(i)))
-  val accepted_prefetch_alloc = VecInit((0 until reqNum).map(i =>
-    accepted_alloc(i) && io.queryMQ(i).req.bits.isFromPrefetch))
-  val released_prefetch_count = PopCount(entries.map(_.io.prefetch_released))
-  prefetch_owner_count := prefetch_owner_count + PopCount(accepted_prefetch_alloc) - released_prefetch_count
-  assert(PopCount(accepted_prefetch_alloc) <= 1.U, "at most one hardware prefetch allocation per cycle")
 
   // A fabric winner owns a tentative post-arbitration buffer slot. Only an
   // accurately allocated S2 miss commits that slot as a real TL A request.
@@ -1598,7 +1583,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
                                       !io.wbq_block_miss_req(i)
 
       parallel_pipe_regs(i).mshr_id := targetMshr(i)
-      parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
       acquire_owned_by_fabric(i) := (if (i > 0 && i <= LoadPipelineWidth) {
         io.spec_fabric.committed(i - 1)
       } else {
@@ -1609,7 +1593,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       // the handoff must be empty; otherwise stale alloc/merge intents leak forward.
       parallel_pipe_regs(i).alloc := false.B
       parallel_pipe_regs(i).merge := false.B
-      parallel_pipe_regs(i).cancel := false.B
       acquire_owned_by_fabric(i) := false.B
     }
   }
@@ -1617,7 +1600,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Observe the allocation on the same cycle that the MissEntry becomes valid.
   for (i <- 0 until reqNum) {
     val preg = active_pipe_regs(i)
-    io.misstrack_alloc(i).valid := RegNext(preg.alloc && !preg.cancel, false.B)
+    io.misstrack_alloc(i).valid := RegNext(preg.alloc, false.B)
     io.misstrack_alloc(i).bits.vaddr := RegNext(preg.req.vaddr)
     io.misstrack_alloc(i).bits.paddr := RegNext(preg.req.addr)
     io.misstrack_alloc(i).bits.mshr_id := RegNext(preg.mshr_id)
@@ -1937,15 +1920,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // compute all miss_req hit prefetch_req or not
   val prefetch_hit_in_reg_vec = Wire(Vec(reqNum, Bool()))
   val prefetch_hit_in_mshr_vec = Wire(Vec(reqNum, Bool()))
+  val prefetch_pipe_reg = parallel_pipe_regs.head
   for(i <- 0 until reqNum) {
-    val signals_ = (0 until reqNum).map(j => computeMatchSignals(parallel_pipe_regs(j).req, io.queryMQ(i).req.bits))
-    val hit_in_reg = (0 until reqNum).map(j => parallel_pipe_regs(j).prefetch_late_en(signals_(j), io.queryMQ(i).req.bits.toMissReqWoStoreData(), io.queryMQ(i).req.valid))
-    
-    prefetch_hit_in_reg_vec(i) := hit_in_reg.asUInt.orR
+    val prefetch_pipe_match = computeMatchSignals(prefetch_pipe_reg.req, io.queryMQ(i).req.bits)
+    val hit_in_reg = io.queryMQ(i).req.valid && prefetch_pipe_reg.alloc && prefetch_pipe_match.block_match &&
+                     prefetch_pipe_reg.req.isFromPrefetch && !io.queryMQ(i).req.bits.isFromPrefetch
+    prefetch_hit_in_reg_vec(i) := hit_in_reg
     prefetch_hit_in_mshr_vec(i) := io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.isFromPrefetch && Cat(entries.map(_.io.prefetch_info.hit_prefetch(i))).orR
     io.prefetch_stat.hit_pf_in_mshr_source(i) := ParallelMux(
-      hit_in_reg ++ entries.map(_.io.prefetch_info.hit_prefetch(i)),
-      parallel_pipe_regs.map(_.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+      Seq(hit_in_reg) ++ entries.map(_.io.prefetch_info.hit_prefetch(i)),
+      Seq(prefetch_pipe_reg.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
     )
   }
   io.prefetch_stat.hit_pf_in_mshr := prefetch_hit_in_reg_vec.asUInt | prefetch_hit_in_mshr_vec.asUInt
