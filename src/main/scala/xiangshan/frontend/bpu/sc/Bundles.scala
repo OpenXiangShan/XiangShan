@@ -78,6 +78,12 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val useScPred:       Vec[Bool] = Vec(NumBtbResultEntries, Bool())
   val sumAboveThres:   Vec[Bool] = Vec(NumBtbResultEntries, Bool())
 
+  val debug_commonHRValid: Option[Bool]      = Option.when(!env.FPGAPlatform)(Bool())
+  val debug_scEligible:    Option[Vec[Bool]] = Option.when(!env.FPGAPlatform)(Vec(NumBtbResultEntries, Bool()))
+  val debug_fallbackTaken: Option[Vec[Bool]] = Option.when(!env.FPGAPlatform)(Vec(NumBtbResultEntries, Bool()))
+  val debug_withoutHistoryTableTaken: Option[Vec[Vec[Bool]]] =
+    Option.when(!env.FPGAPlatform)(Vec(NumGlobalTables + NumBWTables, Vec(NumBtbResultEntries, Bool())))
+
   // for debug
   val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))
   val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumBtbResultEntries, Bool()))

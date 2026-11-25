@@ -167,8 +167,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   train := io.fromFtq.train.bits
 
   private val fastTrain = Wire(Valid(new FastTrain))
-  fastTrain.valid                  := s3_valid
-  fastTrain.bits.startPc           := s3_startPc.get.unGuard
+  fastTrain.valid        := s3_valid
+  fastTrain.bits.startPc := s3_startPc.get.unGuard
   fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
   fastTrain.bits.numNotTakenBefore := commonHR.io.s3NumNotTakenBefore
   fastTrain.bits.abtbMeta          := s3_abtbMeta
@@ -239,8 +239,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
 
-  sc.io.mbtbResult          := mbtb.io.result
-  sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
+  sc.io.mbtbResult        := mbtb.io.result
+  sc.io.providerTakenCtrs := tage.io.toSc.providerTakenCtrVec
+  sc.io.debug_trainValid.foreach(_ := io.fromFtq.train.valid)
+  sc.io.debug_fallbackTaken.foreach { fallbackTaken =>
+    // Match S3's conditional direction when SC is not used.
+    fallbackTaken := VecInit(tage.io.prediction.takenVec.zip(mbtb.io.result).map { case (tageTaken, entry) =>
+      Mux(tageTaken.valid, tageTaken.bits, entry.bits.taken)
+    })
+  }
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
   sc.io.imli                := commonHR.io.s0_imli
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
@@ -626,31 +633,33 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     s1_prediction.taken && s1_prediction.attribute.isConditional &&
       (s1_cfiPc.addr(CompareAddrLowWidth - 1, 0) > s1_prediction.target.addr(CompareAddrLowWidth - 1, 0))
 
-  commonHR.io.stageCtrl                   := stageCtrl
-  commonHR.io.s0_startPc.get              := s0_startPc.get.unGuard
-  commonHR.io.s1_imliTaken                := s1_imliTaken
-  commonHR.io.s1Update.startPc            := s1_startPc.get.unGuard
-  commonHR.io.s1Update.prediction         := s1_prediction
-  commonHR.io.s1Update.condHitMask        := VecInit(abtb.io.result.entries.map(p => p.valid && p.bits.attribute.isConditional))
-  commonHR.io.s1Update.positions          := s1_abtbPosition
+  commonHR.io.stageCtrl           := stageCtrl
+  commonHR.io.s0_startPc.get      := s0_startPc.get.unGuard
+  commonHR.io.s1_imliTaken        := s1_imliTaken
+  commonHR.io.s1Update.startPc    := s1_startPc.get.unGuard
+  commonHR.io.s1Update.prediction := s1_prediction
+  commonHR.io.s1Update.condHitMask := VecInit(abtb.io.result.entries.map(p =>
+    p.valid && p.bits.attribute.isConditional
+  ))
+  commonHR.io.s1Update.positions                   := s1_abtbPosition
   commonHR.io.s1Update.ubtbNumNotTakenBefore.valid := !s1_abtbValid && ubtb.io.prediction.valid
   commonHR.io.s1Update.ubtbNumNotTakenBefore.bits  := ubtb.io.numNotTakenBefore
-  commonHR.io.s2Update.isOverride         := s2_override
-  commonHR.io.s2Update.startPc            := s2_startPc.get.unGuard
-  commonHR.io.s2Update.prediction         := s2_prediction
-  commonHR.io.s2Update.condHitMask        := s2_isCondVec
-  commonHR.io.s2Update.positions          := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
-  commonHR.io.s2Update.targets            := VecInit(mbtb.io.result.map(_.bits.target.unGuard))
-  commonHR.io.s3Update.isOverride         := s3_override
-  commonHR.io.s3Update.startPc            := s3_startPc.get.unGuard
-  commonHR.io.s3Update.prediction         := s3_prediction
-  commonHR.io.s3Update.firstTakenBranchOH := s3_firstTakenBranchOH
-  commonHR.io.redirect.valid              := redirect.valid
-  commonHR.io.redirect.cfiPc              := redirect.bits.cfiPc.unGuard
-  commonHR.io.redirect.target             := redirect.bits.target.unGuard
-  commonHR.io.redirect.taken              := redirect.bits.taken
-  commonHR.io.redirect.attribute          := redirect.bits.attribute
-  commonHR.io.redirect.meta               := redirect.bits.meta.commonHRMeta
+  commonHR.io.s2Update.isOverride                  := s2_override
+  commonHR.io.s2Update.startPc                     := s2_startPc.get.unGuard
+  commonHR.io.s2Update.prediction                  := s2_prediction
+  commonHR.io.s2Update.condHitMask                 := s2_isCondVec
+  commonHR.io.s2Update.positions                   := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
+  commonHR.io.s2Update.targets                     := VecInit(mbtb.io.result.map(_.bits.target.unGuard))
+  commonHR.io.s3Update.isOverride                  := s3_override
+  commonHR.io.s3Update.startPc                     := s3_startPc.get.unGuard
+  commonHR.io.s3Update.prediction                  := s3_prediction
+  commonHR.io.s3Update.firstTakenBranchOH          := s3_firstTakenBranchOH
+  commonHR.io.redirect.valid                       := redirect.valid
+  commonHR.io.redirect.cfiPc                       := redirect.bits.cfiPc.unGuard
+  commonHR.io.redirect.target                      := redirect.bits.target.unGuard
+  commonHR.io.redirect.taken                       := redirect.bits.taken
+  commonHR.io.redirect.attribute                   := redirect.bits.attribute
+  commonHR.io.redirect.meta                        := redirect.bits.meta.commonHRMeta
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)
@@ -961,7 +970,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     io.fromFtq.train.valid,
     Seq(
       ("total", io.fromFtq.train.ready),
-      ("stall", !io.fromFtq.train.ready)
+      ("stall", !io.fromFtq.train.ready),
+      ("stall_tage", !tage.io.trainReady),
+      ("stall_sc", !sc.io.trainReady),
+      ("stall_tage_only", !tage.io.trainReady && sc.io.trainReady),
+      ("stall_sc_only", tage.io.trainReady && !sc.io.trainReady)
     )
   )
   XSPerfSeqAccumulate(
