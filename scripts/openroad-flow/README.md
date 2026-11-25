@@ -38,11 +38,17 @@ and structural patches to the RTL carried for synthesis runtime
 ([below](#xiangshan-through-this-flow)). What it offers is something
 anyone can reproduce, open and ask questions of.
 
-**Why Bazel.** Bazel is a convenient way to express and install every
-dependency of the flow -- JDK, Scala, Chisel, firtool, espresso, yosys,
-OpenROAD, ORFS and the PDK -- with one tool, and it is what OpenROAD and
-bazel-orfs use. mill remains XiangShan's build; this directory does not
-replace or change it.
+**Why Bazel, and why at the repository root.** Bazel expresses and installs
+every dependency of the flow -- JDK, Scala, Chisel, firtool, espresso, yosys,
+OpenROAD, ORFS and the PDK -- with one tool (`bazelisk`), and it is what
+OpenROAD and bazel-orfs use. `MODULE.bazel` and `BUILD.bazel` live at the
+repository root rather than in an isolated subfolder or detached third-party
+directory so `bazelisk run //:ppa` works directly from the top folder and any
+subfolder (`src/main/scala/`, `XSCache/`, `yunsuan/`, `utility/`) where
+contributors iterate on RTL (invited in [#7011][i7011], addressing the fast
+per-branch synthesis feedback requested in [#6855][i6855]). `--symlink_prefix=.bazel/`
+keeps `bazel-*` symlinks out of the root; mill and Makefile remain
+XiangShan's build without change.
 
 The flow's rules, its scheduler, its debugging tools and most of what is
 known about running it live in bazel-orfs, which this repository depends on
@@ -62,7 +68,8 @@ combinational area, inferred SRAM bits, clock gates, max fanout, combinational
 ```sh
 bazelisk run //:ppa -- --stage=fir        # Static CIRCT MLIR (.fir) FO4 & structure (~9 s cold parse, <1 s cached)
 bazelisk run //:ppa                       # Yosys + ABC speed synthesis + OpenSTA across 18 representative modules
-bazelisk run //:ppa -- --stage=place      # Or floorplan, place, cts, grt
+bazelisk run //scripts/openroad-flow/ppa:DecodeStage_synth gui_synth  # Open 1_synth.odb in browser GUI -> Timing -> Slack Histogram
+bazelisk run //:ppa -- --stage=place      # Or floorplan, place (PLACE_DENSITY=0.60), cts, grt
 bazelisk run //:plot_stages               # Runtime vs. global-route accuracy across fir -> grt
 ```
 
@@ -137,13 +144,13 @@ Five top-level physical partitioning and constraint strategies were built and
 measured through global route (`5_1_grt`) at `bazel-orfs` [`d7f591de`][pin] to
 pick the active configuration in `scripts/openroad-flow/xstile/`:
 
-| Strategy | Die (`mm^2`) | SDC (`ps`) | Block ceiling (`ps`) | Abstract `XSTile` (`ps`) | Flat / crossing `XSTile` (`ps`) | Zero-wire (`ps`) | Endpoints `> 2,000 ps` (flat / crossing) | Peak top GB | Verdict |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| **1. 5-block + sea-of-gates hub (`473 ps` SDC)** | 5.67 | 473 | **1,066** (`MemBlock`) | **1,822** | **1,845** (`542.0 MHz`) | **1,436** | **0** (of 381,980) | 54.6 | **Selected default** |
-| **2. Implied 4-macro zero-glue (`firm` stitch)** | **4.44** | 473 | 1,676 (`Backend`) | — | 2,301 (`434.6 MHz`) | — | 1,258 (100 % `MemBlock <-> Backend`) | 66.6 | `-35 %` die vs. 6.81 mm^2, `0` internal `> 2,000 ps`, unbuffered seam limits |
-| **3. 5-block + sea-of-gates hub (`1,800 ps` SDC)** | 5.67 | 1,800 | 1,858 (`Frontend`) | 2,377 | 2,334 (`428.4 MHz`) | 1,481 | 11,204 (of 389,729) | 54.6 | `+489 ps` slower flat than `473 ps` SDC |
-| **4. Implied 4-macro + `unfirm` seam dissolve** | 4.44 | 473 | 1,676 (`Backend`) | — | 3,645 (`274.3 MHz`) | — | 9,615 (`+8,357` vs. `firm`) | 69.0 | Lost post-GRT block setup repair (`+1,344 ps` worse) |
-| **5. Implied 4-macro + full stdcell dissolve** | 4.44 | 473 | — | — | `> 2,529` *(virtual GPL)* | — | — | 69.0 | **Over 90 min, stopped** at GPL iter 440 (`6.68 M`-pin virtual buffering) |
+| Strategy | Die (`mm^2`) | SDC (`ps`) | Placement density (`PLACE_DENSITY`) | Block ceiling (`ps`) | Abstract `XSTile` (`ps`) | Flat / crossing `XSTile` (`ps`) | Zero-wire (`ps`) | Endpoints `> 2,000 ps` (flat / crossing) | Peak top GB | Verdict |
+|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|
+| **1. 5-block + sea-of-gates hub (`473 ps` SDC)** | 5.48 | 473 | `0.30` parent, `0.80` `MemBlock`, `0.60` blocks | **1,066** (`MemBlock`) | **1,822** | **1,845** (`542.0 MHz`) | **1,436** | **0** (of 381,980) | 54.6 | **Selected default** |
+| **2. Implied 4-macro zero-glue (`firm` stitch)** | **4.44** | 473 | `0.75` `MemBlock`, `0.70` `Backend`, `0.60` `Frontend`/`L2Top` | 1,676 (`Backend`) | — | 2,301 (`434.6 MHz`) | — | 1,258 (100 % `MemBlock <-> Backend`) | 66.6 | `-19 %` die vs. 5.48 mm^2, `0` internal `> 2,000 ps`, unbuffered seam limits |
+| **3. 5-block + sea-of-gates hub (`1,800 ps` SDC)** | 5.48 | 1,800 | `0.30` parent, `0.80` `MemBlock`, `0.60` blocks | 1,858 (`Frontend`) | 2,377 | 2,334 (`428.4 MHz`) | 1,481 | 11,204 (of 389,729) | 54.6 | `+489 ps` slower flat than `473 ps` SDC |
+| **4. Implied 4-macro + `unfirm` seam dissolve** | 4.44 | 473 | `23,037` crossing cells unfirmed (`0.28 %` of tile) | 1,676 (`Backend`) | — | 3,645 (`274.3 MHz`) | — | 9,615 (`+8,357` vs. `firm`) | 69.0 | Lost post-GRT block setup repair (`+1,344 ps` worse) |
+| **5. Implied 4-macro + full stdcell dissolve** | 4.44 | 473 | `0.65` flat (`7.81 M` movable stdcells) | — | — | `> 2,529` *(virtual GPL)* | — | — | 69.0 | **Over 90 min, stopped** at GPL iter 440 (`6.68 M`-pin virtual buffering) |
 
 ### Key findings from the strategy comparison
 
@@ -421,7 +428,10 @@ SDC) to `0 ps` across every flow, alongside flat stitched OpenSTA
 | `CoupledL2` | **864** | 864 | 1,559 | 1,559 |
 
 `0` endpoints over `2,000 ps` (`0` over `1,900 ps`) at `473 ps` SDC. About
-7.9 M standard cells, 735 k flops, 338 macros, a die of about 2.1 x 2.7 mm.
+7.9 M standard cells, 735 k flops, 338 macros, a `2,067.7 x 2,648.5 um`
+(`5.48 mm^2`) die (`PLACE_DENSITY = 0.30` in the `XSTile` parent channel hub,
+`0.80` in `MemBlock`, and `0.60` in `Frontend`, `CoupledL2`,
+`VecRegionModule`, `FltRegionModule` and the 9 register files).
 The full series, from 6,200 ps: bazel-orfs's [design README][design] and
 [`kpi.json`][kpi].
 
@@ -578,3 +588,5 @@ projects'.
 [rules]: https://github.com/The-OpenROAD-Project/bazel-orfs/blob/d7f591def545607b6188679233d223229de9b9eb/docs/agent-rules.md
 [agent]: https://github.com/The-OpenROAD-Project/bazel-orfs/blob/d7f591def545607b6188679233d223229de9b9eb/tools/agent/README.md
 [cmj]: https://github.com/The-OpenROAD-Project/bazel-orfs/blob/d7f591def545607b6188679233d223229de9b9eb/test/coremark_joule/README.md
+[i7011]: https://github.com/OpenXiangShan/XiangShan/issues/7011
+[i6855]: https://github.com/OpenXiangShan/XiangShan/issues/6855
