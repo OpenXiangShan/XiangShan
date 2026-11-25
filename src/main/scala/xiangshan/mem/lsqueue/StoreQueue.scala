@@ -1208,6 +1208,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.maControl.toStoreMisalignBuffer.sqPtr := rdataPtrExt(0)
   io.maControl.toStoreMisalignBuffer.doDeq := isCross4KPage && isCross4KPageCanDeq && dataBuffer.io.enq(0).fire
   io.maControl.toStoreMisalignBuffer.uop := uop(rdataPtrExt(0).value)
+  io.maControl.toStoreMisalignBuffer.cmtPtr := cmtPtrExt(0)
   for (i <- 0 until EnsbufferWidth) {
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
