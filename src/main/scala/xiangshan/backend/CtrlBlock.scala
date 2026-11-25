@@ -839,14 +839,11 @@ class CtrlBlockImp(
   // rob to int block
   rob.in.csr.intrBitSet := io.robio.csr.intrBitSet
   rob.in.csr.trapTarget := io.robio.csr.trapTarget
-  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
   io.robio.csr.fflags := rob.out.csr.fflags
   io.robio.csr.vxsat := rob.out.csr.vxsat
   io.robio.csr.vstart := rob.out.csr.vstart
   io.robio.csr.dirtyFs := rob.out.csr.dirtyFs
   io.robio.csr.dirtyVs := rob.out.csr.dirtyVs
-  io.robio.csr.perfinfo := rob.out.csr.perfinfo
   // When wfi is disabled, it will not block ROB commit.
   rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
   rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
