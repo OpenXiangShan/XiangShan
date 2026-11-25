@@ -113,7 +113,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   freeList.io := DontCare
 
   //  LoadQueueRAW enqueue
-  val canEnqueue = io.query.map(_.req.valid)
+  val canEnqueue = io.query.map(query => query.req.valid && !query.req.bits.isFrmMisAlignBuf)
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => {
