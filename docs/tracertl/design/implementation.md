@@ -55,7 +55,7 @@ The trace frontend files:
 | --- | --- |
 | `TraceParameters.scala` | `TraceRTLParameters` (`TraceRTLParamKey`) |
 | `TraceUtil.scala` | the gating helpers `TraceRTLChoose`, `TraceRTLDontCareValue`, `TracertlInfo` |
-| `TraceBundle.scala` | the trace record `TraceInstrBundle` and the intermediate bundles |
+| `TraceBundle.scala` | the trace record `TracertlInstrBundle` and the intermediate bundles |
 | `TraceRTL.scala` | the top module inside the IFU; wires the five stages below |
 | `TraceReader.scala` | trace buffer, refill, rewind |
 | `TraceAlignParallel.scala` | maps trace instructions onto the predicted fetch blocks |
@@ -85,7 +85,7 @@ be patched. Both GSIM and Verilator must keep working.
      exec mode.
    - `TraceRTLDontCareValue(x)`: `x` in exec mode and 0 in trace mode. It is used to
      silence exception and fault sources.
-   - `TracertlInfo()`: returns `Option[TraceInstrBundle]`, which is `None` in exec mode.
+   - `TracertlInfo()`: returns `Option[TracertlInstrBundle]`, which is `None` in exec mode.
      Every bundle that carries the trace record declares `val tracertlInfo = TracertlInfo()`
      and assigns it with `tracertlInfo.foreach(_ := …)`.
 3. **Use `if (env.TraceRTLMode) { … }`** for blocks that only exist in trace mode,
@@ -106,7 +106,7 @@ The parameters in `TraceRTLParameters` are:
 
 The same record exists on both sides of the DPI boundary:
 
-- Scala: `TraceInstrBundle` in `TraceBundle.scala`;
+- Scala: `TracertlInstrBundle` in `TraceBundle.scala`;
 - C++: `TraceInstruction`, the file format, and `Instruction`, the in-memory form,
   in `trace_format.h`.
 

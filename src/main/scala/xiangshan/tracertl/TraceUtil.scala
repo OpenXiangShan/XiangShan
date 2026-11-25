@@ -33,6 +33,6 @@ object TraceRTLDontCareValue {
 
 /** Per-instruction trace payload carried through the pipeline; absent in execution mode. */
 object TracertlInfo {
-  def apply()(implicit p: Parameters): Option[TraceInstrBundle] =
-    Option.when(p(DebugOptionsKey).TraceRTLMode)(new TraceInstrBundle)
+  def apply()(implicit p: Parameters): Option[TracertlInstrBundle] =
+    Option.when(p(DebugOptionsKey).TraceRTLMode)(new TracertlInstrBundle)
 }

@@ -32,7 +32,7 @@ import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.tracertl.TracertlInfo
-import xiangshan.tracertl.TraceInstrBundle
+import xiangshan.tracertl.TracertlInstrBundle
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes
@@ -60,7 +60,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt   = TriggerAction()
   val isLastInFtqEntry: Bool   = Bool()
 
-  val tracertlInfo: Option[TraceInstrBundle] = TracertlInfo()
+  val tracertlInfo: Option[TracertlInstrBundle] = TracertlInfo()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
@@ -139,7 +139,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
 
-  val tracertlInfo: Option[TraceInstrBundle] = TracertlInfo()
+  val tracertlInfo: Option[TracertlInstrBundle] = TracertlInfo()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 

@@ -30,7 +30,7 @@ class TraceAlignedFetch(implicit p: Parameters) extends TraceBundle {
   val foldPc        = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val pdInfoVec     = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
   val jumpOffsetVec = Vec(IBufferEnqueueWidth, GuardedPc())
-  val tracertlInfo     = Vec(IBufferEnqueueWidth, new TraceInstrBundle)
+  val tracertlInfo     = Vec(IBufferEnqueueWidth, new TracertlInstrBundle)
 }
 
 class TraceRTLIO(implicit p: Parameters) extends TraceBundle {

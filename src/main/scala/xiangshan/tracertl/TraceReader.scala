@@ -13,7 +13,7 @@ import xiangshan.RedirectLevel
 class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   val recv       = Flipped(Valid(new TraceRecvInfo()))
   val redirect   = Flipped(Valid(new Redirect()))
-  val traceInsts = Output(Valid(Vec(trtl.TracePredictWidth, new TraceInstrBundle())))
+  val traceInsts = Output(Valid(Vec(trtl.TracePredictWidth, new TracertlInstrBundle())))
 }
 
 class TraceBufferPtr(size: Int) extends CircularQueuePtr[TraceBufferPtr](size)
@@ -21,7 +21,7 @@ class TraceBufferPtr(size: Int) extends CircularQueuePtr[TraceBufferPtr](size)
 class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQueuePtrHelper {
   val io = IO(new TraceReaderIO())
 
-  val traceBuffer = RegInit(0.U.asTypeOf(Vec(trtl.TraceBufferSize, new TraceInstrBundle())))
+  val traceBuffer = RegInit(0.U.asTypeOf(Vec(trtl.TraceBufferSize, new TracertlInstrBundle())))
   val enqPtr      = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
   val deqPtr      = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
 
@@ -73,7 +73,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQu
   when(redirectValid) {
     enqPtr := 0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize))
     deqPtr := 0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize))
-    traceBuffer.foreach(_ := 0.U.asTypeOf(new TraceInstrBundle()))
+    traceBuffer.foreach(_ := 0.U.asTypeOf(new TracertlInstrBundle()))
   }
 
   // When S3 consumes the current packet, let S2 observe the following packet

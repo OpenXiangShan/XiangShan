@@ -7,7 +7,7 @@ import utility.XSError
 
 class TraceAlignParallelIO(implicit p: Parameters) extends TraceBundle {
   val debug_valid   = Input(Bool())
-  val traceInsts    = Input(Valid(Vec(trtl.TracePredictWidth, new TraceInstrBundle())))
+  val traceInsts    = Input(Valid(Vec(trtl.TracePredictWidth, new TracertlInstrBundle())))
   val predictInfo   = Input(new TracePredictInfo)
   val lastHalfValid = Input(Bool())
   val result        = Output(new TraceAlignResult)
@@ -138,8 +138,8 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
 
   private val positionHotMerge = positionHotVec.reduce(_ | _)
   private val traceRangeMerge  = traceRangeVec.reduce(_ | _)
-  private val zeroTraceInst    = 0.U.asTypeOf(new TraceInstrBundle())
-  private val cutInsts         = Wire(Vec(width, Valid(new TraceInstrBundle)))
+  private val zeroTraceInst    = 0.U.asTypeOf(new TracertlInstrBundle())
+  private val cutInsts         = Wire(Vec(width, Valid(new TracertlInstrBundle)))
   private val slotEndOffset    = Wire(Vec(width, UInt(offsetWidth.W)))
   private val slotBlockSel     = Wire(Vec(width, Bool()))
   private val slotInheritedRvi = Wire(Vec(width, Bool()))

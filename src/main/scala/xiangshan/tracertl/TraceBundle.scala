@@ -37,7 +37,7 @@ class TraceModule(implicit p: Parameters) extends FrontendModule {
   def tracePrunedAddr(addr: UInt): PrunedAddr = PrunedAddrInit(addr(VAddrBits - 1, 0))
 }
 
-class TraceInstrBundle(implicit p: Parameters) extends Bundle {
+class TracertlInstrBundle(implicit p: Parameters) extends Bundle {
   def trtl = p(TraceRTLParamKey)
 
   val pcVA = UInt(trtl.TraceVAddrWidth.W)
@@ -83,7 +83,7 @@ class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
 /** One instruction after removing holes from the position-indexed representation. */
 class TraceCompactEntry(implicit p: Parameters) extends TraceBundle {
   val valid             = Bool()
-  val tracertlInfo         = new TraceInstrBundle
+  val tracertlInfo         = new TracertlInstrBundle
   val instrEndOffset    = UInt(FetchBlockInstOffsetWidth.W)
   val selectBlock       = Bool()
   val isPrevEndHalfRvi  = Bool()
