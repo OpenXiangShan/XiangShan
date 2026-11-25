@@ -162,19 +162,11 @@ class CtrlBlockImp(
     delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
     delayed
   }).toSeq
-  private val delayedWriteBack = Wire(chiselTypeOf(io.fromWB.wbData))
-  delayedWriteBack.zipWithIndex.map{ case (x,i) =>
-    x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
-    x.bits := delayedNotFlushedWriteBack(i).bits
-  }
-  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
-  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
-    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B)
-  }
 
   val needPerfCounterExuName = Seq("ALU", "BJU", "LDU", "FEX", "STA", "STD")
+  private val delayedWriteBackValid = io.fromWB.wbData.map(wb => GatedValidRegNext(wb.valid))
   needPerfCounterExuName.map { name =>
-    val exuWBValid = params.allExuParams.zip(delayedWriteBack).filter(_._1.name.contains(name)).map(_._2).map(_.valid)
+    val exuWBValid = params.allExuParams.zip(delayedWriteBackValid).filter(_._1.name.contains(name)).map(_._2)
     val exuNum = exuWBValid.size
     for (i <- 0 to exuNum) {
       XSPerfAccumulate(s"${name}_SameWBNum_$i", PopCount(exuWBValid) === i.U)
@@ -829,8 +821,6 @@ class CtrlBlockImp(
   rob.in.hartId := io.fromTop.hartId
   rob.in.redirect := s1_s3_redirect
   rob.in.writeback := delayedNotFlushedWriteBack
-  rob.in.exuWriteback := delayedWriteBack
-  rob.in.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.out.readGPAMemData := gpaMem.io.exceptionReadData
   rob.in.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 

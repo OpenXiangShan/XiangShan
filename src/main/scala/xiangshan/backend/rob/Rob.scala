@@ -338,12 +338,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Writeback (from execution units)
    */
-  val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = in.exuWriteback
   val excpWBs = in.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = in.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
-  val branchWBs = in.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
-  // val csrWBs = in.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
-  // val ldWBs = in.exuWriteback.filter(x => x.bits.params.hasLoadFu).toSeq
+  val branchWBs = in.writeback.filter(_.bits.params.hasBrhFu).toSeq
+  private val writebackNeedFlush = excpWBs.map { wb =>
+    val bits = wb.bits
+    bits.exceptionVec.orR || bits.flushPipe.getOrElse(false.B) || bits.replay.getOrElse(false.B)
+  }
 
   // The entry-level trace block describes the youngest instruction in the
   // surviving compressed entry, while debug/difftest keep both slots exact.
@@ -1089,7 +1090,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer))
     val latterWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && !writeback.bits.robIdx.isFormer))
     val slotNeedFlush = robEntries(i).slotNeedFlush
-    val canWbExcpNeedFlushSeq = excpWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+    val canWbExcpNeedFlushSeq = excpWBs.zip(writebackNeedFlush).map { case (writeback, needFlushWb) =>
       writeback.valid && needFlushWb && writeback.bits.robIdx.value === i.U
     }
     val canWbFormerExcpNeedFlushSeq = canWbExcpNeedFlushSeq.zip(excpWBs).map {
@@ -1165,7 +1166,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       writeback.valid && writeback.bits.robIdx.value === rdataUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer
     ))
     val slotNeedFlush = deqBankRdata(i).slotNeedFlush
-    val canWbExcpNeedFlushSeq = excpWBs.zip(in.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+    val canWbExcpNeedFlushSeq = excpWBs.zip(writebackNeedFlush).map { case (writeback, needFlushWb) =>
       writeback.valid && needFlushWb && (writeback.bits.robIdx.value === rdataUpdateRobIdx(i))
     }
     val canWbFormerExcpNeedFlushSeq = canWbExcpNeedFlushSeq.zip(excpWBs).map {
@@ -1270,7 +1271,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   require(excpWBs.length == excpGen.in.wb.length,
     f"excpWBs.length: ${excpWBs.length}, " +
       f"excpGen.in.wb.length: ${excpGen.in.wb.length}")
-  for (((wb, exc_wb), i) <- excpWBs.zip(excpGen.in.wb).zipWithIndex) {
+  for ((wb, exc_wb) <- excpWBs.zip(excpGen.in.wb)) {
     exc_wb.valid       := wb.valid
     exc_wb.bits.robIdx := wb.bits.robIdx
     // only enq inst use ftqPtr to read gpa
@@ -1279,7 +1280,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.isRVC           := false.B
     exc_wb.bits.excpVec         := wb.bits.exceptionVec
     exc_wb.bits.satpFlushFirstFetchFault := false.B
-    exc_wb.bits.hasExcp         := wb.bits.exceptionVec.orR // Todo: use in.writebackNeedFlush(i) instead
+    exc_wb.bits.hasExcp         := wb.bits.exceptionVec.orR
     exc_wb.bits.isEnqExcp       := false.B
     exc_wb.bits.isFetchMalAddr  := false.B
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
@@ -1343,7 +1344,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Debug and difftest metadata
    */
-  private val numExuWbPorts = in.exuWriteback.length
+  private val numExuWbPorts = in.writeback.length
   println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, commitwidth: $CommitWidth")
 
   println(s"ExceptionGen:")
@@ -1441,7 +1442,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // Writeback metadata.
-  for (wb <- exuWBs) {
+  for (wb <- in.writeback) {
     val wbIdx = wb.bits.robIdx.value
     val subIdx = slotIndex(wb.bits.robIdx)
     when(wb.valid) {
@@ -1625,7 +1626,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Performance counters for HPM (after silicon)
    */
-  val isBrhOrJmpWBs = in.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
+  val isBrhOrJmpWBs = in.writeback.filter(x => x.bits.params.hasBrhFu || x.bits.params.hasJmpFu).toSeq
   val misPred = in.redirect.valid && in.redirect.bits.isMisPred
   val brhJump = PopCount(isBrhOrJmpWBs.map(wb => wb.valid))
 
@@ -2089,7 +2090,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   if (backendParams.debugEn) {
     PerfCCT.tick(clock, reset)
-    in.exuWriteback.zipWithIndex.foreach { case (wb, i) =>
+    in.writeback.foreach { wb =>
       PerfCCT.updateInstPos(
         seq = wb.bits.debug_seqNum.get,
         pos = PerfCCT.InstPos.AtWriteVal.id.U,
@@ -2120,7 +2121,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       debug_lsInfo(in.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(in.debug_ls.debugLsInfo(i))
     }
 
-    for (wb <- exuWBs) {
+    for (wb <- in.writeback) {
       when(wb.valid) {
         val debug_instData = Wire(new InstInfoEntry)
         val idx = wb.bits.robIdx.value
@@ -2309,7 +2310,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         }
       }
     }
-    for (wb <- exuWBs) {
+    for (wb <- in.writeback) {
       when(wb.valid) {
         dt_exuDebug(wb.bits.robIdx.value)(slotIndex(wb.bits.robIdx)) := wb.bits.debug
       }
@@ -2473,14 +2474,8 @@ object Rob {
     // Enqueue requests and admission responses.
     val enq = new RobEnqIO
 
-    // Execution results without redirect filtering.
-    val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
-
     // ROB writeback reports with redirect filtering.
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
-
-    // Writeback exception summaries.
-    val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
 
     // Accepted redirect.
     val redirect = Input(Valid(new Redirect))
