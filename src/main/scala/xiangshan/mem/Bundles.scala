@@ -289,6 +289,7 @@ object Bundles {
     val toStoreMisalignBuffer = Input(new XSBundle {
       val sqPtr = new SqPtr
       val doDeq = Bool()
+      val cmtPtr = new SqPtr
 
       val uop = new DynInst()
     })

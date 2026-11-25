@@ -638,7 +638,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val reqCommitted = isBefore(req.uop.sqIdx, io.sqControl.toStoreMisalignBuffer.cmtPtr)
+  val flush = req_valid && !reqCommitted && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush || s2_needRevoke) {
     bufferState := s_idle
