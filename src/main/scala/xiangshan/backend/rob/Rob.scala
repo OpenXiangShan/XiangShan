@@ -664,6 +664,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val excpHappen = normalState && commitHeadValid && (intrEnable || deqCanExcp) && !lastCycleFlush
   val excpIsFormer = deqExcpIsFormer
   out.exception.valid := RegNext(excpHappen)
+  // CtrlBlock reconstructs the exception PC from the FTQ.
+  out.exception.bits.pc := DontCare
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
   out.exception.bits.isForVSnonLeafPTE := out.readGPAMemData.isForVSnonLeafPTE
   out.exception.bits.isFormer := RegEnable(excpIsFormer, excpHappen)
@@ -1473,10 +1475,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val excpDebug = debugMeta(Mux(excpIsFormer,
     debug_microOp(deqPtr.value)(0), debug_microOp(deqPtr.value)(1)))
-  // TODO: pc is unused.
-  out.exception.bits.pc := RegEnable(excpDebug.pc, excpHappen)
-  // instr is only used for difftest? need check
-  out.exception.bits.instr := RegEnable(excpDebug.instr, excpHappen)
+  out.exception.bits.instr.foreach(_ := RegEnable(excpDebug.instr, excpHappen))
 
   /**
    * Trace extension
@@ -1710,7 +1709,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSDebug(deqHasExcp && TriggerAction.isDmode(excpState.bits.trigger), "Debug Mode: Deq has trigger entry debug Mode\n")
 
   XSDebug(out.flushOut.valid,
-    p"generate redirect: pc 0x${Hexadecimal(out.exception.bits.pc)} intr $intrEnable " +
+    p"generate redirect: intr $intrEnable " +
       p"excp $deqHasExcp flushPipe $isFlushPipe " +
       p"Trap_target 0x${Hexadecimal(in.csr.trapTarget.pc)} exceptionVec ${Binary(excpState.bits.excpVec.asUInt)}\n")
 

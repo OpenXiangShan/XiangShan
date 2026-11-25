@@ -1728,7 +1728,7 @@ object Bundles {
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
     val pc = UInt((VAddrData().dataWidth + 1).W)
-    val instr = UInt(32.W)
+    val instr = Option.when(env.EnableDifftest || (env.AlwaysBasicDiff && env.FullBasicDiff))(UInt(32.W))
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
     val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()

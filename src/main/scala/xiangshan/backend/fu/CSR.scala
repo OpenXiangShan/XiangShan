@@ -1573,8 +1573,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.interrupt   := Mux(hasIntr, causeNO, 0.U)
     difftest.exception   := Mux(hasException, causeNO, 0.U)
     difftest.exceptionPC := dexceptionPC
-    if (env.EnableDifftest || env.FullBasicDiff) {
-      difftest.exceptionInst := csrio.exception.bits.instr
+    csrio.exception.bits.instr.foreach { instr =>
+      difftest.exceptionInst := instr
     }
   }
 
