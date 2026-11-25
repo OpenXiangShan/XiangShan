@@ -339,7 +339,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * Writeback (from execution units)
    */
   val excpWBs = in.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
-  val redirectWBs = in.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val branchWBs = in.writeback.filter(_.bits.params.hasBrhFu).toSeq
   private val writebackNeedFlush = excpWBs.map { wb =>
     val bits = wb.bits
@@ -800,18 +799,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Retirement eligibility
    */
-  // FIXME: should block commit, should delay mis-pred's writeback.
-  // when mispredict branches writeback, stop commit in the next 2 cycles
-  val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
-    wb.bits.redirect.get.bits.isMisPred && wb.bits.redirect.get.valid && wb.valid
-  ).toSeq)).orR
-  val misPredBlockCounter = Reg(UInt(3.W))
-  misPredBlockCounter := Mux(misPredWb,
-    "b111".U,
-    misPredBlockCounter >> 1.U
-  )
-  val misPredBlock = misPredBlockCounter(0)
-
   // When deq has redirect, in order to prevent committing instructions that should be flushed,
   // we block the commit for a few cycles
   val deqHitRedirectReg = RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)) ||
@@ -838,7 +825,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   )).asUInt.orR || intrBitSetReg || diffTrapPending
 
   // for instructions that may block others, we don't allow them to commit
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
+  val blockCommit = lastCycleFlush || hasWFI || in.redirect.valid ||
     (deqNeedFlush && !deqHasFlushed) || deqFlushBlock ||
     in.csr.criticalErrorState || out.trace.blockCommit
 

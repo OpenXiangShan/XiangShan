@@ -24,7 +24,9 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{
+  DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator, WritebackWithRedirectDelayQueue
+}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
@@ -153,14 +155,29 @@ class CtrlBlockImp(
   // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
 
+  private val writeBackRedirects = Seq(s1_s3_redirect, s2_s4_redirect)
+  private val redirectWriteBackDelay = coreParams.RedirectWriteBackDelay
+  require(redirectWriteBackDelay >= 0, "Redirect writeback delay must be nonnegative")
+
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
-    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
+    val killedByOlder = x.bits.robIdx.needFlush(writeBackRedirects)
     val delayed = Wire(Valid(new WriteBackRobBundle(x.bits.params, backendParams)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
-    delayed
+
+    if (redirectWriteBackDelay > 0 && delayed.bits.redirect.nonEmpty) {
+      // To prevent younger instructions from committing before the redirect takes effect,
+      // the redirecting instruction's writeback must reach the ROB in the same cycle as its redirect or later.
+      // TODO: Integrate with the ROB's slotNeedFlush mechanism to remove this delay logic.
+      val delayQueue = Module(new WritebackWithRedirectDelayQueue(x.bits.params, backendParams, redirectWriteBackDelay))
+      delayQueue.io.in := delayed
+      delayQueue.io.redirects := VecInit(writeBackRedirects)
+      delayQueue.io.out
+    } else {
+      delayed
+    }
   }).toSeq
 
   val needPerfCounterExuName = Seq("ALU", "BJU", "LDU", "FEX", "STA", "STD")

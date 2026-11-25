@@ -113,6 +113,7 @@ case class XSCoreParameters
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
   RobSize: Int = 160,
+  RedirectWriteBackDelay: Int = 1, // Zero bypasses the redirect writeback queue.
   RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
