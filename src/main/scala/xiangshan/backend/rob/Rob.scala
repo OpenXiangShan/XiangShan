@@ -1352,7 +1352,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lqIdx = Reg(Vec(RobSize, Vec(2, new LqPtr)))
   val debug_sqIdx = Reg(Vec(RobSize, Vec(2, new SqPtr)))
   val debug_exuData = Reg(Vec(RobSize, Vec(2, UInt(XLEN.W))))
-  val debug_exuDebug = Reg(Vec(RobSize, Vec(2, new DebugBundle)))
   val debug_lsInfo = RegInit(VecInit(Seq.fill(RobSize)(DebugLsInfo.init)))
   val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(VecInit(Seq.fill(2)(false.B))))
@@ -1414,15 +1413,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           debug.perfDebugInfo.tlbFirstReqTime := timer
           debug.perfDebugInfo.tlbRespTime := timer
         }
-        when(enqUop.robIdx.isFormer) {
-          robEntries(enqIndex).perfDebugInfo.foreach(_.dispatchTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.enqRsTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.selectTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.issueTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.writebackTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbFirstReqTime := timer)
-          robEntries(enqIndex).perfDebugInfo.foreach(_.tlbRespTime := timer)
-        }
         debug_lqIdxValid(enqIndex)(subIndex) := false.B
         enqHalfWritten(enqIndex)(subIndex) := true.B
       }
@@ -1440,9 +1430,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ptr = req.bits.uop.robIdx
       debug_lqIdx(ptr.value)(slotIndex(ptr)) := req.bits.uop.lqIdx
       debug_lqIdxValid(ptr.value)(slotIndex(ptr)) := true.B
-      when(ptr.isFormer) {
-        robEntries(ptr.value).debug_lqIdx.foreach(_ := req.bits.uop.lqIdx)
-      }
     }
   }
 
@@ -1457,7 +1444,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val subIdx = slotIndex(wb.bits.robIdx)
     when(wb.valid) {
       debug_exuData(wbIdx)(subIdx) := wb.bits.data
-      debug_exuDebug(wbIdx)(subIdx) := wb.bits.debug
       wb.bits.perfDebugInfo.foreach { x =>
         debug_microOp(wbIdx)(subIdx).debug.foreach { slotDebug =>
           slotDebug.perfDebugInfo.enqRsTime := x.enqRsTime
@@ -1467,21 +1453,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           slotDebug.perfDebugInfo.tlbFirstReqTime := x.tlbFirstReqTime
           slotDebug.perfDebugInfo.tlbRespTime := x.tlbRespTime
         }
-        when(wb.bits.robIdx.isFormer) {
-          robEntries(wbIdx).perfDebugInfo.foreach(_.enqRsTime := x.enqRsTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.selectTime := x.selectTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.issueTime := x.issueTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.writebackTime := x.writebackTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbFirstReqTime := x.tlbFirstReqTime)
-          robEntries(wbIdx).perfDebugInfo.foreach(_.tlbRespTime := x.tlbRespTime)
-        }
       }
       debug_lqIdx(wbIdx)(subIdx) := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
       debug_sqIdx(wbIdx)(subIdx) := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
-      when(wb.bits.robIdx.isFormer) {
-        robEntries(wbIdx).debug_lqIdx.foreach(_ := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr)))
-        robEntries(wbIdx).debug_sqIdx.foreach(_ := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
-      }
     }
     val debug_Uop = debug_microOp(wbIdx)(subIdx)
     val debug = debugMeta(debug_Uop)
@@ -1490,15 +1464,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
         p"skip ${wb.bits.debug.isSkipDiff} robIdx: ${wb.bits.robIdx}\n"
     )
-  }
-
-  for (wb <- branchWBs) {
-    val wbIdx = wb.bits.robIdx.value
-    val subIdx = slotIndex(wb.bits.robIdx)
-    when(wb.valid && wb.bits.redirect.get.bits.taken &&
-      Itype.isNonTaken(debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype)) {
-      debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype := Itype.Taken
-    }
   }
 
   for (i <- 0 until LduCnt) {
