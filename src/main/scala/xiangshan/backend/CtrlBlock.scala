@@ -391,7 +391,7 @@ class CtrlBlockImp(
     s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s4_csrIsTrap = DelayN(rob.out.exception.valid, 3)
-  private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s4_trapTargetFromCsr = io.robio.csr.csr2rob.trapTarget
 
   val flushTarget = Mux(s4_csrIsTrap, s4_trapTargetFromCsr.pc, s2_robFlushPc)
   val s4_trapTargetIAF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIAF
@@ -826,22 +826,15 @@ class CtrlBlockImp(
 
   io.redirect := s1_s3_redirect
 
-  // rob to int block
-  rob.in.csr.intrBitSet := io.robio.csr.intrBitSet
-  rob.in.csr.trapTarget := io.robio.csr.trapTarget
-  io.robio.csr.fflags := rob.out.csr.fflags
-  io.robio.csr.vxsat := rob.out.csr.vxsat
-  io.robio.csr.vstart := rob.out.csr.vstart
-  io.robio.csr.dirtyFs := rob.out.csr.dirtyFs
-  io.robio.csr.dirtyVs := rob.out.csr.dirtyVs
+  rob.in.csr := io.robio.csr.csr2rob
+  io.robio.csr.rob2csr := rob.out.csr
+  io.robio.csr.rob2csr.perfinfo.retiredInstr := RegNext(rob.out.csr.perfinfo.retiredInstr)
   // When wfi is disabled, it will not block ROB commit.
-  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
   rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
   rob.in.commitStuckCheckEnable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
   io.toTop.cpuWfi := DelayN(rob.out.cpuWfi, 5)
 
-  io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.out.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.out.exception
   io.robio.diffCommitForTrap.zip(rob.out.diffCommitForTrap).foreach { case (sink, source) => sink := source }
   rob.in.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
@@ -862,7 +855,6 @@ class CtrlBlockImp(
   rob.in.debug_ls := io.robio.debug_ls
   rob.in.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.in.lsTopdownInfo := io.robio.lsTopdownInfo
-  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.in.debugEnqLsq := io.debugEnqLsq
   rob.in.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.in.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)

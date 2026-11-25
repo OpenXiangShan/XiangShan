@@ -2725,35 +2725,8 @@ object Rob {
   }
 
   class RobCSRIO(implicit p: Parameters) extends XSBundle {
-    // Pending interrupt.
-    val intrBitSet = Input(Bool())
-
-    // Trap target.
-    val trapTarget = Input(new TargetPCBundle)
-
-    // WFI wakeup.
-    val wfiEvent   = Input(Bool())
-
-    // Critical error status.
-    val criticalErrorState = Input(Bool())
-
-    // Floating-point exception flags.
-    val fflags     = Output(Vec(5, Bool()))
-
-    // Vector saturation flag.
-    val vxsat      = Output(Bool())
-
-    // Vector restart index.
-    val vstart     = Output(Valid(UInt(XLEN.W)))
-
-    // Floating-point state dirtiness.
-    val dirtyFs   = Output(Bool())
-
-    // Vector state dirtiness.
-    val dirtyVs   = Output(Bool())
-
-    // Retired instruction count.
-    val perfinfo   = new RobCSRPerfInfo
+    val rob2csr = new RobCSROutIO
+    val csr2rob = new RobCSRInIO
   }
 
   class RobLsqIO(implicit p: Parameters) extends XSBundle {
