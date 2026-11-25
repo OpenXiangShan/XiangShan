@@ -681,9 +681,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.vls := RegEnable(excpUopInfo.isVectorMemory, excpHappen)
   out.exception.bits.trigger := RegEnable(excpState.bits.trigger, excpHappen)
 
-  // Difftest drives this observation gate in the section below.
-  val diffTrapPending = WireDefault(false.B)
-
   // data will be one cycle after valid
   out.readGPAMemAddr.valid := excpHappen
   out.readGPAMemAddr.bits.ftqPtr := excpState.bits.ftqPtr
@@ -803,8 +800,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Retirement eligibility
    */
+  // FIXME: should block commit, should delay mis-pred's writeback.
   // when mispredict branches writeback, stop commit in the next 2 cycles
-  // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
     wb.bits.redirect.get.bits.isMisPred && wb.bits.redirect.get.valid && wb.valid
   ).toSeq)).orR
@@ -814,32 +811,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val deqFlushBlockCounter = Reg(UInt(3.W))
-  val deqFlushBlock = deqFlushBlockCounter(0)
-  val deqHasCommitted = out.commits.isCommit && out.commits.commitValid(0)
-  // TODO *** WARNING ***
-  // Blocking commit. Don't change this before we fully understand the logic.
+
+  // When deq has redirect, in order to prevent committing instructions that should be flushed,
+  // we block the commit for a few cycles
   val deqHitRedirectReg = RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)) ||
     RegNext(RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)))
-  val criticalErrorState = in.csr.criticalErrorState
-  when(deqNeedFlush && deqHitRedirectReg){
-    deqFlushBlockCounter := "b111".U
-  }.otherwise{
-    deqFlushBlockCounter := deqFlushBlockCounter >> 1.U
-  }
+  val deqFlushBlock = holdForCycles(enable = deqNeedFlush && deqHitRedirectReg, cycles = 3)
 
+  val deqHasCommitted = out.commits.isCommit && out.commits.commitValid(0)
   when(deqHasCommitted){
     deqHasFlushed := false.B
   }.elsewhen(deqNeedFlush && out.flushOut.valid && !out.flushOut.bits.flushItself()){
     deqHasFlushed := true.B
   }
 
-  val traceBlock = out.trace.blockCommit
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
-    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
-
-  out.commits.isWalk := walkState
-  out.commits.isCommit := normalState && !blockCommit
+  // Difftest drives this observation gate in the section below.
+  // FIXME: diffTrapPending is simulation signal but affect after-silicon behavior
+  val diffTrapPending = WireDefault(false.B)
 
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
   val commit_vDeqGroup = VecInit(deqEntriesBankOrder.map(_.commit_v))
@@ -848,8 +836,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val allowOnlyOneCommit = VecInit(deqEntriesBankOrder.map(x =>
     x.commit_v && (x.slotNeedFlush(0) || x.slotNeedFlush(1) && CompressType.isNotNORMAL(x.entryPairType))
   )).asUInt.orR || intrBitSetReg || diffTrapPending
+
   // for instructions that may block others, we don't allow them to commit
-  out.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(out.commits.commitValid)))
+  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
+    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock ||
+    in.csr.criticalErrorState || out.trace.blockCommit
+
+  out.commits.isWalk := walkState
+  out.commits.isCommit := normalState && !blockCommit
+  out.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i =>
+    (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(out.commits.commitValid))
+  )
 
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
@@ -2461,6 +2458,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 object Rob {
   private val PerfEventCount = 19
   private val CriticalErrorCount = 1
+
+  // The output stays high for the specified cycles after each sampled enable.
+  def holdForCycles(enable: Bool, cycles: Int): Bool = {
+    require(cycles > 0)
+    val counter = Reg(UInt(cycles.W))
+    counter := Mux(enable, Fill(cycles, true.B), counter >> 1.U)
+    counter(0)
+  }
+
 
   class In(params: BackendParams)(implicit p: Parameters) extends XSBundle {
     // Core identity.
