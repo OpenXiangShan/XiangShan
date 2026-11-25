@@ -1220,7 +1220,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
 
     val misalignToDataBufferValid = allocated(rdataPtrExt(0).value) && committed(rdataPtrExt(0).value) &&
-                                    (!isVec(rdataPtrExt(0).value) && allvalid(rdataPtrExt(0).value) || vecMbCommit(rdataPtrExt(0).value)) &&
+                                    (!isVec(rdataPtrExt(0).value) && (allvalid(rdataPtrExt(0).value) || hasException(rdataPtrExt(0).value)) ||
+                                      vecMbCommit(rdataPtrExt(0).value)) &&
                                     canDeqMisaligned && (!isCross4KPage || isCross4KPageCanDeq || hasException(rdataPtrExt(0).value))
     // Only the first interface can write unaligned directives.
     // Simplified design, even if the two ports have exceptions, but still only one unaligned dequeue.
