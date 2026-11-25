@@ -1379,25 +1379,26 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     *   * if LoadQueueRARSize == VirtualLoadQueueSize, just need to exclude prefetching.
     *   * if LoadQueueRARSize < VirtualLoadQueueSize, need to consider the situation of s2_can_query
     */
-  // Only the oldest instructions can enter the misalign buffer, so do not enter the RAR or RAW queues.
   if (LoadQueueRARSize == VirtualLoadQueueSize) {
-    io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf && !s2_in.isFrmMisAlignBuf
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf
   } else {
-    io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
   }
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
   io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid || s2_nc_with_data, true.B, !s2_dcache_miss)
   io.lsq.ldld_nuke_query.req.bits.is_nc := s2_nc_with_data
+  io.lsq.ldld_nuke_query.req.bits.isFrmMisAlignBuf := s2_in.isFrmMisAlignBuf
 
   // st-ld violation require
-  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
+  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query
   io.lsq.stld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.stld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.stld_nuke_query.req.bits.paddr      := s2_in.paddr
   io.lsq.stld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid || s2_nc_with_data, true.B, !s2_dcache_miss)
   io.lsq.stld_nuke_query.req.bits.is_nc := s2_nc_with_data
+  io.lsq.stld_nuke_query.req.bits.isFrmMisAlignBuf := s2_in.isFrmMisAlignBuf
 
   // merge forward result
   // lsq has higher priority than sbuffer
