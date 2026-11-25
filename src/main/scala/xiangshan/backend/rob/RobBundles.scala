@@ -276,8 +276,6 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
 
   def has_excp = excpVec.orR || flushPipe || replayInst
   def not_commit = excpVec.orR || replayInst
-  // only exceptions are allowed to writeback when enqueue
-  def can_writeback = excpVec.orR
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

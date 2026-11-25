@@ -162,8 +162,6 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     current.isEnqExcp := true.B
   }
 
-  out.excp.valid  := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback
-  out.excp.bits   := Mux(s1_out_valid, s1_out_bits, enq_s1_bits)
   out.state.valid := currentValid
   out.state.bits  := current
 
@@ -189,9 +187,6 @@ object ExceptionGen {
   }
 
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
-    // Exception updates.
-    val excp = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
-
     // Oldest retained exception.
     val state = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
   }
