@@ -486,7 +486,7 @@ private[top] class KunminghuV2BaseConfig(n: Int) extends Config(
 )
 
 /** Single-core CHI SoC with the L2 connected directly to DDR through AXI4.
-  * The SoC address/PMA map, interrupt count, and module prefix match NHV3A.
+  * The SoC address/PMA map and module prefix match NHV3A.
   */
 class DefaultConfig(n: Int = 1) extends Config(
   (new KunminghuV2BaseConfig(n)).alter((site, here, up) => {
@@ -514,7 +514,7 @@ class DefaultConfig(n: Int = 1) extends Config(
         PMAConfigEntry(0x02200000L, a = 1, w = true, r = true),
         PMAConfigEntry(0x00040000L, a = 1, x = true, r = true)
       ),
-      extIntrs = 256,
+      extIntrs = 80,
       DMAIdBits = 12, // The SoC DMA path, including its AXI register slice, carries 12-bit IDs.
       MemIdBits = 12, // Match the SoC memory register slice and x2x bridge.
       XSTopPrefix = Some("bosc_")
