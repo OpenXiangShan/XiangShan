@@ -37,6 +37,7 @@ import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
 import xiangshan.mem.LoadStage._
 import xiangshan.mem.prefetch._
+import xiangshan.mem.prefetch.temporal.{L1TemporalLoad, L1TemporalParams}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 
@@ -854,6 +855,9 @@ class LoadUnitS2(param: ExeUnitParams)(
     // Prefetch train
     // TODO: this bundle is tooooooo big, define a smaller one
     val prefetchTrain = ValidIO(new TrainReqBundle)
+    val temporalLoad = Option.when(hasL1Lldp || prefetcherSeq.exists(_.isInstanceOf[L1TemporalParams]))(
+      ValidIO(new L1TemporalLoad)
+    )
 
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -1232,6 +1236,24 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.meta_prefetch
   io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()
   io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refill_latency
+  io.prefetchTrain.bits.lldpTrigger.foreach(trigger => trigger := 0.U.asTypeOf(trigger))
+
+  io.temporalLoad.foreach { load =>
+    load.valid := pipeIn.valid && !kill && in.hasROBEntry && accessType.isScalar() && !isPrefetch &&
+      !isUnalignTail && tlbHit && !exception && !isUncache && !isUncacheReplay &&
+      io.dcacheResp.valid && !io.dcacheResp.bits.tag_error &&
+      (!io.dcacheResp.bits.replay || io.dcacheResp.bits.handled)
+    load.bits.robIdx := robIdx
+    load.bits.lqIdx := uop.lqIdx
+    load.bits.pc := uop.pc
+    load.bits.vaddr := in.vaddr
+    load.bits.paddr := paddr
+    load.bits.miss := io.dcacheResp.bits.miss
+    load.bits.kind := 2.U
+    load.bits.mshr.foreach(_ := io.dcacheResp.bits.mshr_id)
+    load.bits.missAccepted.foreach(_ := io.dcacheResp.bits.handled && io.dcacheResp.bits.miss)
+    load.bits.way.foreach(_ := io.dcacheResp.bits.replayCarry.real_way_en)
+  }
 
   io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
   io.debugInfo.isDCacheMiss := pipeIn.valid && !kill && cause(C_DM)
@@ -2046,6 +2068,9 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle)
+  val temporalLoad = Option.when(hasL1Lldp || prefetcherSeq.exists(_.isInstanceOf[L1TemporalParams]))(
+    ValidIO(new L1TemporalLoad)
+  )
   // Software instruction prefetch
   val swInstrPrefetch = ValidIO(new SoftIPrefetchBundle)
   // CSR control signals and load trigger
@@ -2162,6 +2187,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.prefetchTrainHintS2 := s2.io.prefetchTrain.valid
   io.prefetchTrain.valid := GatedValidRegNext(s2.io.prefetchTrain.valid)
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)
+  io.temporalLoad.zip(s2.io.temporalLoad).foreach { case (out, in) =>
+    out.valid := GatedValidRegNext(in.valid) && !out.bits.robIdx.needFlush(io.redirect)
+    out.bits := RegEnable(in.bits, in.valid)
+  }
   s2.io.csrCtrl := io.csrCtrl
   s2.io.stdDataWrite := io.stdDataWrite
 

@@ -24,6 +24,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
+import xiangshan.mem.prefetch.LldpLoadInfo
 import utility._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
@@ -110,6 +111,7 @@ object Bundles {
 
   // Frontend --[CtrlBlock]--> DecodeInUop
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
+    val lldpPc = Option.when(hasL1Lldp)(UInt(VAddrBits.W))
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
     val satpFlushFirstFetchFault = Bool()
@@ -133,6 +135,7 @@ object Bundles {
       this.vtype            := source.vtype
       this.specvtype        := source.specvtype
       this.debug.foreach(_.pc := source.pc)
+      this.lldpPc.foreach(_ := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
   }
@@ -143,6 +146,7 @@ object Bundles {
 
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
+    val lldpPc = Option.when(hasL1Lldp)(UInt(VAddrBits.W))
     val debugSerial = Bool()
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -237,6 +241,7 @@ object Bundles {
   }
 
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
+    val lldpLoad = Option.when(hasL1Lldp)(Valid(new LldpLoadInfo))
     val debugSerial = Bool()
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -610,6 +615,7 @@ object Bundles {
   }
   // DecodeOutUop --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
+    val lldpLoad = Option.when(hasL1Lldp)(Valid(new LldpLoadInfo))
     def numSrc          = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)

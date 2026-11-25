@@ -691,6 +691,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   val p1_l2PfVA = WireInit(0.U(VAddrBits.W))
   p1_pfReq.triggerPC := p1_train.pc
   p1_pfReq.triggerVA := p1_train.vaddr
+  p1_pfReq.lldpTrigger.foreach(_ := p1_train.lldpTrigger.get)
   p1_pfReq.prefetchVA := getPrefetchVAddr(p1_train.vaddr, p1_info.delta)
   p1_pfReq.prefetchTarget := PrefetchTarget.L3.id.U
   p1_stat_prefetch_isEntryHit := p1_valid
@@ -777,6 +778,7 @@ extends DCacheModule {
     val pvalid = Bool()
     val target = UInt(PrefetchTarget.PfTgtBits.W)
     val tlbPending = Bool()
+    val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
 
     def getPrefetchVA: UInt = Cat(vline, 0.U(DCacheLineOffset.W))
     def getPrefetchPA: UInt = Cat(pline, 0.U(DCacheLineOffset.W))
@@ -787,6 +789,7 @@ extends DCacheModule {
       this.pvalid := false.B
       this.target := src.prefetchTarget
       this.tlbPending := false.B
+      lldpTrigger.foreach(_ := src.lldpTrigger.get)
     }
     def updateEntryMerge(target: UInt): Unit = {
       when(target < this.target) {
@@ -989,6 +992,8 @@ extends DCacheModule {
   io.l1_req.bits.confidence := 1.U
   io.l1_req.bits.is_store := false.B
   io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BERTI
+  io.l1_req.bits.temporalOwner.foreach(_ := DontCare)
+  io.l1_req.bits.lldpTrigger.foreach(_ := entries(l1PfIdxGlobal).lldpTrigger.get)
   when(l1PfIdxArb.io.out.fire) {
     valids(l1PfIdxGlobal) := false.B
   }

@@ -116,6 +116,7 @@ class DecodeStageImp(
     }
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
+        ctrl.lldpPc.foreach(_ := inMopBits.lldpPc.get)
         ctrl.foldpc           := inMopBits.foldpc
         ctrl.exceptionVec     := inMopBits.exceptionVec
         ctrl.satpFlushFirstFetchFault := inMopBits.satpFlushFirstFetchFault
@@ -148,6 +149,7 @@ class DecodeStageImp(
     uop.valid := coUop.valid
     uop.bits match {
       case bits =>
+        bits.lldpPc.foreach(_ := mopInfo.lldpPc.get)
         bits.foldpc := mopInfo.foldpc
         bits.exceptionVec extendFrom mopInfo.exceptionVec
         bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII

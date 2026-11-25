@@ -46,7 +46,7 @@ import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
-import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
+import xiangshan.mem.prefetch.{LldpLoadInfo, LldpValueSource, PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
   val intSchdParams = backendParams.intSchdParams.get
@@ -636,7 +636,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   var pf2tlbIndexMap: Seq[Int] = Seq()
   var tmp_pf_num_in_dtlb_ld: Int = 0
   var tmp_pf_num_in_dtlb_pf: Int = 1 // 1 for l2 prefetch
-  prefetcherSeq foreach { x =>
+  prefetcherTlbPorts.map(_._1) foreach { x =>
     if(x.tlbPlace == TLBPlace.dtlb_ld){
       pf2tlbIndexMap = pf2tlbIndexMap :+ (LduCnt + tmp_pf_num_in_dtlb_ld)
       tmp_pf_num_in_dtlb_ld += 1
@@ -658,7 +658,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   println(f"  TlbStartVec = ${TlbStartVec}")
   println(f"  TlbEndVec = ${TlbEndVec}")
   println(f"TLB for Prefetcher:")
-  prefetcherSeq zip pf2tlbIndexMap foreach { case (pf, idx) =>
+  prefetcherTlbPorts.map(_._1) zip pf2tlbIndexMap foreach { case (pf, idx) =>
     println(f"  TLB #$idx%-2d => ${pf.name}")
   }
   println(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
@@ -802,6 +802,113 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_loadFireHint := newLoadUnits.map(_.io.prefetchTrainHintS1)
   prefetcher.io.trainSource.s2_loadFireHint := newLoadUnits.map(_.io.prefetchTrainHintS2)
   prefetcher.io.trainSource.s3_load := newLoadUnits.map(_.io.prefetchTrain)
+  prefetcher.io.context.foreach { context =>
+    val contextEpoch = RegInit(0.U(16.W))
+    val contextChanged = sfence.valid || tlbcsr.satp.changed || tlbcsr.vsatp.changed ||
+      tlbcsr.hgatp.changed || tlbcsr.priv.virtChanged
+    when(contextChanged) {
+      contextEpoch := contextEpoch + 1.U
+    }
+    context := Cat(contextEpoch, tlbcsr.priv.virt, tlbcsr.priv.dmode,
+      Mux(tlbcsr.priv.virt, tlbcsr.hgatp.vmid, 0.U),
+      Mux(tlbcsr.priv.virt, tlbcsr.vsatp.asid, tlbcsr.satp.asid))
+    prefetcher.io.contextChanged.get := contextChanged
+  }
+  prefetcher.io.temporal.foreach { temporal =>
+    temporal.redirect := redirect
+    temporal.load := newLoadUnits.map(_.io.temporalLoad.get)
+    temporal.feedback <> dcache.io.temporalFeedback.get
+    dcache.io.temporalContext.get := prefetcher.io.context.get
+    for (i <- temporal.allocate.indices) {
+      val enq = io.ooo_to_mem.enqLsq
+      temporal.allocate(i).valid := enq.req(i).valid && enq.needAlloc(i)(0) &&
+        !enq.req(i).bits.uop.robIdx.needFlush(redirect)
+      temporal.allocate(i).bits := enq.req(i).bits.reqStartPtr.lqIdx
+    }
+  }
+  prefetcher.io.lldp.foreach { lldp =>
+    val valid = RegInit(VecInit.fill(VirtualLoadQueueSize)(false.B))
+    val issued = RegInit(VecInit.fill(VirtualLoadQueueSize)(false.B))
+    val owner = Reg(Vec(VirtualLoadQueueSize, new RobPtr))
+    val info = Reg(Vec(VirtualLoadQueueSize, new LldpLoadInfo))
+    val addressValid = RegInit(VecInit.fill(VirtualLoadQueueSize)(false.B))
+    val addresses = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W)))
+    val pairObserved = RegInit(VecInit.fill(VirtualLoadQueueSize)(false.B))
+    lldp.redirect := redirect
+    when(prefetcher.io.contextChanged.get) {
+      addressValid.foreach(_ := false.B)
+    }
+    val enq = io.ooo_to_mem.enqLsq
+    for (i <- enq.req.indices) {
+      val allocation = enq.req(i)
+      val uop = allocation.bits.uop
+      val slot = allocation.bits.reqStartPtr.lqIdx.value
+      when(allocation.valid && enq.needAlloc(i)(0) && !uop.robIdx.needFlush(redirect)) {
+        valid(slot) := uop.lldpLoad.get.valid
+        issued(slot) := false.B
+        owner(slot) := uop.robIdx
+        info(slot) := uop.lldpLoad.get.bits
+        addressValid(slot) := false.B
+        pairObserved(slot) := false.B
+      }
+    }
+    for (i <- issueLda.indices) {
+      val issue = issueLda(i)
+      val slot = issue.bits.lqIdx.get.value
+      val first = issue.fire && valid(slot) && owner(slot).isSameSlot(issue.bits.robIdx) &&
+        !issued(slot) && !issue.bits.robIdx.needFlush(redirect)
+      when(first) {
+        issued(slot) := true.B
+      }
+      lldp.train(i).valid := first && info(slot).producer.valid
+      lldp.train(i).bits := info(slot).producer.bits
+
+      val load = newLoadUnits(i).io.temporalLoad.get
+      val loadSlot = load.bits.lqIdx.value
+      val present = valid(loadSlot) && owner(loadSlot).isSameSlot(load.bits.robIdx)
+      lldp.demand(i).valid := load.valid && present
+      lldp.demand(i).bits.load := load.bits
+      lldp.demand(i).bits.info := info(loadSlot)
+      val acceptedLoad = load.valid && present && !prefetcher.io.contextChanged.get
+      when(acceptedLoad && !addressValid(loadSlot)) {
+        addresses(loadSlot) := load.bits.paddr
+        addressValid(loadSlot) := true.B
+      }
+      val dependence = info(loadSlot)
+      val producerSlot = dependence.producerLqIdx.value
+      val pair = lldp.addressTrain(i)
+      pair.valid := acceptedLoad && dependence.producer.valid && addressValid(producerSlot) &&
+        owner(producerSlot).isSameSlot(dependence.producerRobIdx) && !pairObserved(loadSlot) &&
+        !dependence.producerRobIdx.needFlush(redirect)
+      pair.bits.producer := dependence.producer.bits.producer
+      pair.bits.consumer := dependence.producer.bits.consumer
+      pair.bits.producerAddress := addresses(producerSlot)
+      pair.bits.consumerAddress := load.bits.paddr
+      pair.bits.consumerVaddr := load.bits.vaddr
+      pair.bits.robIdx := load.bits.robIdx
+      when(pair.valid) {
+        pairObserved(loadSlot) := true.B
+      }
+      val spatialTrigger = prefetcher.io.trainSource.s3_load(i).bits.lldpTrigger.get
+      spatialTrigger.valid := load.valid && present &&
+        newLoadUnits(i).io.prefetchTrain.bits.robIdx.isSameSlot(load.bits.robIdx) &&
+        !prefetcher.io.contextChanged.get
+      spatialTrigger.bits.pc := info(loadSlot).pc
+      spatialTrigger.bits.context := prefetcher.io.context.get
+      spatialTrigger.bits.offset := load.bits.paddr(spatialTrigger.bits.offset.getWidth - 1, 0)
+      spatialTrigger.bits.dataType := info(loadSlot).dataType
+      spatialTrigger.bits.source := LldpValueSource.Spatial.asUInt
+      spatialTrigger.bits.depth := false.B
+      spatialTrigger.bits.addressRef.valid := false.B
+      spatialTrigger.bits.addressRef.bits := DontCare
+      prefetcher.io.temporal.foreach { temporal =>
+        temporal.load(i).bits.kind := Mux(present, info(loadSlot).dataType.floating.asUInt, 2.U)
+      }
+    }
+    lldp.refill := dcache.io.lldpRefill.get
+    lldp.prefetch := dcache.io.lldpPrefetch.get
+    lldp.invalidate := dcache.io.lldpInvalidate.get
+  }
   prefetcher.io.trainSource.s3_ptrChasing := newLoadUnits.map(_ => false.B) // TODO: remove ptr chasing logic in prefetcher
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS1)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS2)
@@ -812,7 +919,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     prefetcher.io.tlb_req(i).resp.bits := DontCare
     prefetcher.io.pmp_resp(i) := DontCare
   }
-  pf2tlbIndexMap.zipWithIndex.foreach{ case (k, i) =>
+  pf2tlbIndexMap.zip(prefetcherTlbPorts.map(_._2)).foreach { case (k, i) =>
     dtlb_reqs(k) <> prefetcher.io.tlb_req(i)
     prefetcher.io.pmp_resp(i) := pmp_check(k).resp
   }

@@ -224,6 +224,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val source = new L1PrefetchSource()
   val debug_va_region = UInt(REGION_TAG_BITS.W)
   val confidence = UInt(1.W)
+  val lldpTriggers = Option.when(hasL1Lldp)(Vec(BIT_VEC_WITDH, Valid(new LldpTrigger)))
 
   def reset(index: Int) = {
     tag := region_hash_tag(index.U)
@@ -234,6 +235,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     source.value := L1_HW_PREFETCH_NULL
     debug_va_region := 0.U
     confidence := 0.U
+    lldpTriggers.foreach(triggers => triggers := 0.U.asTypeOf(triggers))
   }
 
   def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
@@ -288,6 +290,12 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res.source := x.source
     res.debug_va_region := x.region
     res.confidence := x.confidence
+    res.lldpTriggers.foreach { triggers =>
+      for ((trigger, i) <- triggers.zipWithIndex) {
+        trigger := x.lldpTrigger.get
+        trigger.valid := x.lldpTrigger.get.valid && x.bit_vec(i)
+      }
+    }
 
     res
   }
@@ -345,6 +353,14 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       entry := req
     }.elsewhen(update) {
       entry.update(update_bit_vec = req.bit_vec)
+      entry.lldpTriggers.foreach { triggers =>
+        for ((trigger, i) <- triggers.zipWithIndex) {
+          when(req.bit_vec(i) && !entry.bit_vec(i)) {
+            trigger := req.lldpTriggers.get(i)
+            trigger.valid := req.lldpTriggers.get(i).valid && entry.debug_va_region === req.debug_va_region
+          }
+        }
+      }
     }
   }
 
@@ -801,6 +817,11 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
+    l1_pf_req_arb.io.in(i).bits.req.temporalOwner.foreach(_ := DontCare)
+    l1_pf_req_arb.io.in(i).bits.req.lldpTrigger.foreach { trigger =>
+      val selected = get_candidate_oh(l1_pf_req_arb.io.in(i).bits.req.paddr)
+      trigger := Mux1H(selected, l1_array(i).lldpTriggers.get)
+    }
     l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
   }
 

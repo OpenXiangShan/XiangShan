@@ -658,9 +658,14 @@ trait HasXSParameter {
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
+  def hasL1Lldp = prefetcherSeq.exists(_.isInstanceOf[xiangshan.mem.prefetch.L1LldpParams])
+  def hasL1Temporal = prefetcherSeq.exists(_.isInstanceOf[xiangshan.mem.prefetch.temporal.L1TemporalParams])
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
+  def prefetcherTlbPorts = prefetcherSeq.zipWithIndex.filterNot { case (pf, _) =>
+    hasL1Lldp && pf.isInstanceOf[xiangshan.mem.prefetch.temporal.L1TemporalParams]
+  }
   def PfNumInDtlbLD = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_ld)
-  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 1 // 1 for l2 prefetch
+  def PfNumInDtlbPF = prefetcherTlbPorts.count(_._1.tlbPlace == TLBPlace.dtlb_pf) + 1 // 1 for l2 prefetch
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasBerti = coreParams.prefetcher.exists(_.isInstanceOf[BertiParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])

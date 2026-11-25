@@ -24,6 +24,8 @@ import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.mem.prefetch.LldpTrigger
+import xiangshan.mem.prefetch.temporal.{L1TemporalPrefetcher, TemporalOwner}
 
 trait HasL1PrefetchSourceParameter {
   // l1 prefetch source related
@@ -36,6 +38,8 @@ trait HasL1PrefetchSourceParameter {
   def L1_HW_PREFETCH_STREAM = 3.U
   def L1_HW_PREFETCH_STORE  = 4.U
   def L1_HW_PREFETCH_BERTI = 5.U
+  def L1_HW_PREFETCH_TEMPORAL = 6.U
+  def L1_HW_PREFETCH_LLDP = 7.U
   
   // ------------------------------------------------------------------------------------------------------------------------
   // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
@@ -62,6 +66,8 @@ class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParam
   val confidence = UInt(1.W)
   val is_store = Bool()
   val pf_source = new L1PrefetchSource
+  val temporalOwner = Option.when(hasL1Temporal)(new TemporalOwner(L1TemporalPrefetcher.ContextBits))
+  val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
 
   // when l1 cache prefetch req arrives at load unit:
   // if (confidence == 1)
@@ -99,5 +105,7 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
   io.req.bits.vaddr := 0.U
   io.req.bits.confidence := LFSR64(seed=Some(789L))(4,0) === 0.U
   io.req.bits.is_store := LFSR64(seed=Some(890L))(4,0) === 0.U
+  io.req.bits.temporalOwner.foreach(_ := DontCare)
+  io.req.bits.lldpTrigger.foreach(trigger => trigger := 0.U.asTypeOf(trigger))
   io.req.valid := LFSR64(seed=Some(901L))(3,0) === 0.U
 }

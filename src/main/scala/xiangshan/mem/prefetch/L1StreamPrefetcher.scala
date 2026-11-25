@@ -130,6 +130,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   // debug usage
   val trigger_pc = UInt(VAddrBits.W)
   val trigger_va = UInt(VAddrBits.W)
+  val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
 
   // align prefetch vaddr and width to region
   def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: UInt, decr_mode: Bool, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
@@ -140,6 +141,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
 
     res.trigger_pc := t_pc
     res.trigger_va := t_va
+    res.lldpTrigger.foreach(trigger => trigger := 0.U.asTypeOf(trigger))
 
     val region_bits = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
@@ -302,6 +304,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc    = RegEnable(s0_pc, s0_valid)
+  private val s1LldpTrigger = io.train_req.bits.lldpTrigger.map(RegEnable(_, s0_valid))
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
   val s1_miss  = RegEnable(s0_miss, s0_valid)
   val s1_pfHit = RegEnable(s0_pfHit, s0_valid)
@@ -372,6 +375,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   val s2_valid = GatedValidRegNext(s1_valid)
   val s2_index = RegEnable(s1_index, s1_valid)
   val s2_pc    = RegEnable(s1_pc, s1_valid)
+  private val s2LldpTrigger = s1LldpTrigger.map(RegEnable(_, s1_valid))
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid)
   val s2_region_bits = RegEnable(s1_region_bits, s1_valid)
   val s2_region_tag = RegEnable(s1_region_tag, s1_valid)
@@ -399,6 +403,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     t_pc = s2_pc,
     t_va = s2_vaddr
     )
+  s2_pf_l1_req_bits.lldpTrigger.foreach(_ := s2LldpTrigger.get)
   val s2_pf_l2_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid && io.fdbkDegree > 0.U,
     vaddr = s2_l2_vaddr,

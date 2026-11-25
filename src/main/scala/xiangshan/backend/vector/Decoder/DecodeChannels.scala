@@ -651,6 +651,7 @@ object DecodeChannelOutput {
 }
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
+  val lldpPc = Option.when(hasL1Lldp)(UInt(VAddrBits.W))
   val debugSerial      = Bool()
   val foldpc           = UInt(MemPredPCWidth.W)
   val exceptionVec     = ExceptSparseVec(ExceptionNO.fromFrontendSet)

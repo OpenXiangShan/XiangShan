@@ -825,6 +825,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
 
+  if (hasL1Lldp) {
+    val lldp = Module(new LldpRename)
+    lldp.io.redirect := io.redirect
+    for (i <- io.out.indices) {
+      val out = io.out(i)
+      lldp.io.input(i).valid := out.fire
+      lldp.io.input(i).bits.uop := out.bits
+      lldp.io.input(i).bits.uop.lldpLoad.get := 0.U.asTypeOf(out.bits.lldpLoad.get)
+      lldp.io.input(i).bits.pc := io.in(i).bits.lldpPc.get
+      out.bits.lldpLoad.get := lldp.io.load(i)
+      uops(i).lldpLoad.get := 0.U.asTypeOf(out.bits.lldpLoad.get)
+    }
+  }
+
   // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
   // Link uop now has Src1Gp (for correct bypass in Rename), cleared to SrcType.no
   // on output, so uops(i).psrc(0) and the bypass chain are both correct.

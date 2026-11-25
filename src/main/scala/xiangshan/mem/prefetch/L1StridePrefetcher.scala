@@ -195,6 +195,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc_hash = RegEnable(s0_pc_hash, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
+  private val s1LldpTrigger = io.train_req.bits.lldpTrigger.map(RegEnable(_, s0_valid))
   val s1_hit = RegEnable(s0_hit, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
@@ -232,6 +233,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   // s2: calculate L1 & L2 pf addr
   val s2_valid = GatedValidRegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
+  private val s2LldpTrigger = s1LldpTrigger.map(RegEnable(_, s1_valid && s1_can_send_pf))
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
   val s2_decr_mode = RegEnable(s1_decr_mode, s1_valid && s1_can_send_pf)
   val s2_l1_depth = s2_stride << l1_stride_ratio
@@ -253,6 +255,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     t_pc = 0xdeadbeefL.U,
     t_va = 0xdeadbeefL.U
     )
+  s2_l1_pf_req_bits.lldpTrigger.foreach(_ := s2LldpTrigger.get)
   val s2_l2_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid && io.fdbkDegree > 0.U,
     vaddr = s2_l2_pf_vaddr,

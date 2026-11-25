@@ -47,6 +47,8 @@ import freechips.rocketchip.diplomacy._
 import xiangshan.backend.regfile._
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import xiangshan.mem.prefetch.L1LldpParams
+import xiangshan.mem.prefetch.temporal.L1TemporalParams
 import device.EnableJtag
 import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
@@ -578,6 +580,26 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
+)
+
+class L1TemporalConfig(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(core =>
+      core.copy(prefetcher = core.prefetcher :+ L1TemporalParams())
+    )
+  })
+)
+
+class L1LldpConfig(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(core => core.copy(prefetcher = core.prefetcher :+ L1LldpParams()))
+  })
+)
+
+class L1LldpTemporalConfig(n: Int = 1) extends Config(
+  new L1LldpConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(core => core.copy(prefetcher = core.prefetcher :+ L1TemporalParams()))
+  })
 )
 
 class NoRobCompressionConfig(n: Int = 1) extends Config(

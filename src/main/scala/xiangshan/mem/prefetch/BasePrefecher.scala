@@ -87,6 +87,7 @@ class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
   val isFirstIssue = Bool()
   val isHwPrefetch = Bool()
   val refillLatency = UInt(LATENCY_WIDTH.W)
+  val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
 }
 
 class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
@@ -94,6 +95,7 @@ class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
   val triggerVA = UInt(VAddrBits.W)
   val prefetchVA = UInt(VAddrBits.W)
   val prefetchTarget = UInt(PrefetchTarget.PfTgtBits.W)
+  val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
 }
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle with HasPrefetcherParams {

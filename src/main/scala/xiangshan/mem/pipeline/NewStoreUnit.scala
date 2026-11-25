@@ -696,6 +696,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.metaSource := L1_HW_PREFETCH_NULL
   io.prefetchTrain.bits.isHwPrefetch := isHwPrefetch
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
+  io.prefetchTrain.bits.lldpTrigger.foreach(trigger => trigger := 0.U.asTypeOf(trigger))
 
   io.unalignHeadTlbHit := fire && isUnalignHead && tlbHit
 

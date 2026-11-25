@@ -32,6 +32,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
+import xiangshan.mem.prefetch.temporal.{L1TemporalPrefetcher, TemporalFeedback, TemporalL1Feedback}
 import xiangshan.mem.Bundles.SbufferForwardReq
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
 import freechips.rocketchip.tilelink.TLMessages.GrantData
@@ -880,6 +881,11 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
+  val lldpRefill = Option.when(hasL1Lldp)(Valid(new LldpRefill))
+  val lldpPrefetch = Option.when(hasL1Lldp)(Valid(new LldpPrefetchResult))
+  val lldpInvalidate = Option.when(hasL1Lldp)(Valid(new MissTrackInvalidate))
+  val temporalContext = Option.when(hasL1Temporal)(Input(UInt(L1TemporalPrefetcher.ContextBits.W)))
+  val temporalFeedback = Option.when(hasL1Temporal)(Decoupled(new TemporalFeedback(L1TemporalPrefetcher.ContextBits)))
 }
 
 private object ArbiterCtrl {
@@ -1151,6 +1157,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
+  io.lldpRefill.foreach(_ := mainPipe.io.lldpRefill.get)
+  io.lldpPrefetch.foreach(_ := mainPipe.io.lldpPrefetch.get)
+  io.lldpInvalidate.foreach { invalidate =>
+    val tag = mainPipe.io.tag_write
+    val meta = mainPipe.io.meta_write
+    invalidate.valid := tag.fire || (meta.fire && !meta.bits.meta.coh.isValid())
+    invalidate.bits.idx := meta.bits.idx
+    invalidate.bits.way := meta.bits.way_en
+  }
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {
@@ -1628,6 +1643,37 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   mainPipe.io.miss_resp := missQueue.io.resp(0)
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp(w + 1) }
+
+  io.temporalFeedback.foreach { feedback =>
+    val tracker = Module(new TemporalL1Feedback)
+    val tagWrite = mainPipe.io.tag_write
+    val metaWrite = mainPipe.io.meta_write
+    tracker.io.context := io.temporalContext.get
+    tracker.io.clear := mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _)
+    tracker.io.result := mainPipe.io.temporalResult.get
+    tracker.io.refill := mainPipe.io.temporalRefill.get
+    tracker.io.install := mainPipe.io.misstrack_install
+    tracker.io.storeHit := mainPipe.io.temporalStoreHit.get
+    tracker.io.invalidate.valid := tagWrite.fire || (metaWrite.fire && !metaWrite.bits.meta.coh.isValid())
+    tracker.io.invalidate.bits.idx := metaWrite.bits.idx
+    tracker.io.invalidate.bits.way := metaWrite.bits.way_en
+    for ((alloc, miss) <- tracker.io.alloc.zip(missQueue.io.resp)) {
+      alloc.valid := miss.allocated
+      alloc.bits := miss.id
+    }
+    for ((sent, acquire) <- tracker.io.sent.zip(missQueue.io.mem_acquire)) {
+      sent.valid := acquire.fire && acquire.bits.opcode === TLMessages.AcquireBlock
+      sent.bits.mshr := acquire.bits.source
+      sent.bits.paddr := acquire.bits.address
+    }
+    for (lane <- 0 until LoadPipelineWidth) {
+      val miss = missQueue.io.resp(lane + 1)
+      tracker.io.loads(lane) := ldu(lane).io.mtrack.s2
+      tracker.io.loadMiss(lane).valid := ldu(lane).io.miss_req.fire && !miss.allocated
+      tracker.io.loadMiss(lane).bits := miss.id
+    }
+    feedback <> tracker.io.feedback
+  }
 
   if(StorePrefetchL1Enabled) {
     for (w <- 0 until backendParams.StaCnt) {

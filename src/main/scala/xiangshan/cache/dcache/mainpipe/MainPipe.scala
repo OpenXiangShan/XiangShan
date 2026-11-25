@@ -26,6 +26,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
+import xiangshan.mem.prefetch.temporal.{L1TemporalPrefetcher, TemporalL1Result, TemporalOwner}
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 import xiangshan.mem.{L1PrefetchReq, skidBuffer}
 
@@ -71,6 +72,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  val temporalOwner = Option.when(hasL1Temporal)(new TemporalOwner(L1TemporalPrefetcher.ContextBits))
+  val lldpTrigger = Option.when(hasL1Lldp)(Valid(new LldpTrigger))
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -113,10 +116,13 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.cmd := MemoryOpConstants.M_PFR
     req.addr := prefetch.paddr
     req.vaddr := prefetch.vaddr
+    req.store_mask := 0.U
     req.replace := false.B
     req.error := false.B
     req.miss_fail_cause_evict_btot := false.B
     req.pf_source := prefetch.pf_source.value
+    req.temporalOwner.foreach(_ := prefetch.temporalOwner.get)
+    req.lldpTrigger.foreach(_ := prefetch.lldpTrigger.get)
     req.access := false.B
     req.id := 0.U
     req
@@ -166,6 +172,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     // hardware prefetch
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
+    val lldpRefill = Option.when(hasL1Lldp)(Valid(new LldpRefill))
+    val lldpPrefetch = Option.when(hasL1Lldp)(Valid(new LldpPrefetchResult))
+    val temporalResult = Option.when(hasL1Temporal)(Valid(new TemporalL1Result))
+    val temporalRefill = Option.when(hasL1Temporal)(Valid(UInt(log2Up(cfg.nMissEntries).W)))
+    val temporalStoreHit = Option.when(hasL1Temporal)(Valid(new MissTrackResident))
     // pass to Prefetch Monitor for statistic
     val prefetch_stat = Output(new PipePrefetchStatBundle)
 
@@ -303,6 +314,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s0_req = req.bits
   val s0_idx = get_dcache_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
+
+  private def canReplayLldpHit(req: MainPipeReq): Bool = req.lldpTrigger.map { trigger =>
+    req.isPrefetch && req.pf_source === L1_HW_PREFETCH_LLDP && trigger.valid &&
+      !trigger.bits.depth && !trigger.bits.dataType.floating
+  }.getOrElse(false.B)
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
   val s0_fire = req.valid && s0_can_go
 
@@ -355,11 +371,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
-  val s1_need_data = if (dcacheParameters.alwaysReleaseData) {
+  val s1_lldp_hit_read = WireDefault(false.B)
+  val s1_need_data = s1_lldp_hit_read || (if (dcacheParameters.alwaysReleaseData) {
     RegEnable(banked_need_data, s0_fire)
   } else {
     Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire), s1_repl_coh.state === ClientStates.Dirty)
-  }
+  })
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
@@ -463,6 +480,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_tag_match && s1_has_permission
+  s1_lldp_hit_read := s1_isPrefetch && s1_hit && canReplayLldpHit(s1_req)
   val s1_isStore = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isStore
   val s1_isAMO = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isAMO && s1_req.cmd =/= M_XSC
   val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO || s1_isPrefetch) && !s1_hit
@@ -901,7 +919,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.data_read_intend := s1_valid && s1_need_data
   io.data_readline.valid := s1_valid && s1_need_data
-  io.data_readline.bits.rmask := s1_banked_rmask
+  io.data_readline.bits.rmask := Mux(s1_lldp_hit_read, banked_full_rmask, s1_banked_rmask)
   io.data_readline.bits.way_en := s1_way_en
   io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr
@@ -930,6 +948,28 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way
+  val prefetchMerged = io.miss_req.fire && !io.miss_resp.allocated
+  io.temporalResult.foreach { result =>
+    result.valid := s2_fire && s2_isPrefetch && s2_req.pf_source === L1_HW_PREFETCH_TEMPORAL
+    result.bits.paddr := s2_req.addr
+    result.bits.vaddr := s2_req.vaddr
+    result.bits.mshr := io.miss_resp.id
+    result.bits.cacheHit := s2_hit
+    result.bits.allocated := io.miss_resp.allocated
+    result.bits.merged := prefetchMerged
+    result.bits.owner := s2_req.temporalOwner.get
+  }
+  io.lldpPrefetch.foreach { result =>
+    result.valid := s2_fire && s2_isPrefetch && s2_req.lldpTrigger.get.valid
+    result.bits.trigger := s2_req.lldpTrigger.get.bits
+    result.bits.fromLldp := s2_req.pf_source === L1_HW_PREFETCH_LLDP
+    result.bits.dataHit := s2_hit && canReplayLldpHit(s2_req)
+    result.bits.mshr := io.miss_resp.id
+    result.bits.allocated := io.miss_resp.allocated
+    result.bits.merged := prefetchMerged
+    result.bits.paddr := s2_req.addr
+    result.bits.vaddr := s2_req.vaddr
+  }
 
   io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
   io.wbq_conflict_check.bits := s2_req.addr
@@ -1060,6 +1100,28 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.misstrack_install.bits.vaddr := s3_req.vaddr
   io.misstrack_install.bits.paddr := s3_req.addr
   io.misstrack_install.bits.way := s3_way_en
+  io.temporalRefill.foreach { refill =>
+    refill.valid := io.tag_write.fire
+    refill.bits := s3_req.miss_id
+  }
+  io.temporalStoreHit.foreach { hit =>
+    hit.valid := s3_fire && (s3_store_hit || (s3_amo_hit && !s3_sc_fail)) && !s3_error_wb
+    hit.bits.vaddr := s3_req.vaddr
+    hit.bits.paddr := s3_req.addr
+    hit.bits.way := s3_way_en
+  }
+  io.lldpRefill.foreach { refill =>
+    val chainHit = s3_fire && s3_isPrefetch && s3_hit && canReplayLldpHit(s3_req) && !s3_error_wb
+    refill.valid := io.tag_write.fire || chainHit
+    refill.bits.chainHit.valid := chainHit
+    refill.bits.chainHit.bits := s3_req.lldpTrigger.get.bits
+    refill.bits.mshr := s3_req.miss_id
+    refill.bits.paddr := s3_req.addr
+    refill.bits.vaddr := s3_req.vaddr
+    refill.bits.way := s3_way_en
+    refill.bits.data := s3_data_words.asUInt
+    refill.bits.readable := io.misstrack_install.valid
+  }
 
   io.tag_write_intend := s3_req.miss && s3_valid
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)

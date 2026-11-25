@@ -1061,6 +1061,8 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.amo_cmp  := req.amo_cmp
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
+  io.main_pipe_req.bits.temporalOwner.foreach(_ := DontCare)
+  io.main_pipe_req.bits.lldpTrigger.foreach(_ := DontCare)
   io.main_pipe_req.bits.access := access
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
@@ -1107,6 +1109,7 @@ for(i <- 0 until reqNum) {
   io.refill_train.bits.robIdx := DontCare
   io.refill_train.bits.isFirstIssue := DontCare
   io.refill_train.bits.isHwPrefetch := DontCare
+  io.refill_train.bits.lldpTrigger.foreach(trigger => trigger := 0.U.asTypeOf(trigger))
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)

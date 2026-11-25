@@ -10,8 +10,9 @@ import xiangshan._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.{FuType, PMPRespBundle}
 import xiangshan.cache.mmu._
-import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle}
+import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle, MissTrackInvalidate}
 import xiangshan.mem._
+import xiangshan.mem.prefetch.temporal.{L1TemporalLoad, L1TemporalParams, L1TemporalPrefetcher, TemporalFeedback}
 import xiangshan.mem.trace._
 
 object TLBPlace extends Enumeration{
@@ -79,6 +80,9 @@ class TrainSourceIO(implicit p: Parameters) extends PrefetchBundle {
 }
 
 class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
+  private val temporalParams = prefetcherSeq.collectFirst { case params: L1TemporalParams => params }
+  private val temporalIndex = prefetcherSeq.indexWhere(_.isInstanceOf[L1TemporalParams])
+  private val lldpIndex = prefetcherSeq.indexWhere(_.isInstanceOf[L1LldpParams])
   println(s"PrefetcherWrapper:")
   prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
     println(f"  Prefetcher #$idx%-2d => ${pf.name}")
@@ -93,6 +97,28 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val fromOOO = Flipped(new OOOToPrefetchIO)
     // train
     val trainSource = Flipped(new TrainSourceIO)
+    val temporal = temporalParams.map { _ =>
+      Flipped(new Bundle {
+        val redirect = Valid(new Redirect)
+        val allocate = Vec(LSQEnqWidth, Valid(new LqPtr))
+        val load = Vec(LD_TRAIN_WIDTH, Valid(new L1TemporalLoad))
+        val feedback = Decoupled(new TemporalFeedback(L1TemporalPrefetcher.ContextBits))
+      })
+    }
+    val context = Option.when(temporalParams.nonEmpty || hasL1Lldp)(Input(UInt(L1TemporalPrefetcher.ContextBits.W)))
+    val contextChanged = context.map(_ => Input(Bool()))
+    val lldp = Option.when(hasL1Lldp)(Flipped(new Bundle {
+      val train = Vec(LD_TRAIN_WIDTH, Valid(new LldpDependence(VAddrBits)))
+      val demand = Vec(LD_TRAIN_WIDTH, Valid(new Bundle {
+        val load = new L1TemporalLoad
+        val info = new LldpLoadInfo
+      }))
+      val refill = Valid(new LldpRefill)
+      val prefetch = Valid(new LldpPrefetchResult)
+      val invalidate = Valid(new MissTrackInvalidate)
+      val addressTrain = Vec(LD_TRAIN_WIDTH, Valid(new LldpAddressTrain))
+      val redirect = Valid(new Redirect)
+    }))
     // tlb
     val tlb_req = Vec(prefetcherNum, new TlbRequestIO(nRespDups = 2))
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
@@ -313,7 +339,84 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
    * load prefetch to l1 Dcache
    * stride
    */
-  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
+  val existingL1 = Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
+  val lldp = io.lldp.map { source =>
+    val module = Module(new L1LldpPrefetcher)
+    module.io.enable := l1D_pf_enable && Constantin.createRecord(s"pf_enableL1Lldp$hartId", initValue = true)
+    module.io.context := io.context.get
+    module.io.contextChanged := io.contextChanged.get
+    module.io.train := source.train
+    module.io.demand := source.demand
+    module.io.refill := source.refill
+    module.io.prefetch := source.prefetch
+    module.io.invalidate := source.invalidate
+    module.io.addressTrain := source.addressTrain
+    module.io.redirect := source.redirect
+    module.io.role.ready := true.B
+    io.tlb_req(lldpIndex) <> module.io.tlb
+    module.io.pmp := io.pmp_resp(lldpIndex)
+    module
+  }
+  val temporal = temporalParams.map { params =>
+    val module = Module(new L1TemporalPrefetcher(params))
+    val source = io.temporal.get
+    module.io.enable := l1D_pf_enable && Constantin.createRecord(s"pf_enableL1Temporal$hartId", initValue = true)
+    module.io.context := io.context.get
+    module.io.contextChanged := io.contextChanged.get
+    module.io.redirect := source.redirect
+    module.io.allocate := source.allocate
+    module.io.load := source.load
+    module.io.feedback <> source.feedback
+    module.io.role.valid := false.B
+    module.io.role.bits := 0.U.asTypeOf(module.io.role.bits)
+    lldp.foreach(pf => module.io.role <> pf.io.role)
+    if (!hasL1Lldp) {
+      io.tlb_req(temporalIndex) <> module.io.tlb
+      module.io.pmp := io.pmp_resp(temporalIndex)
+    }
+    module
+  }
+  for (dependence <- lldp; timing <- temporal) {
+    val clients = Seq(dependence.io.tlb, timing.io.tlb)
+    val port = io.tlb_req(lldpIndex)
+    val arb = Module(new RRArbiter(chiselTypeOf(port.req.bits), clients.size))
+    val owner = RegInit(0.U(1.W))
+    val inFlight = RegInit(false.B)
+    val pmpCycle = RegNext(port.resp.fire, false.B)
+
+    for ((client, i) <- clients.zipWithIndex) {
+      arb.io.in(i) <> client.req
+      client.resp.valid := port.resp.valid && inFlight && owner === i.U
+      client.resp.bits := port.resp.bits
+    }
+    port.req.valid := arb.io.out.valid && !inFlight && !pmpCycle
+    port.req.bits := arb.io.out.bits
+    val ownerPort = Mux(owner === 0.U, clients.head.req.bits.pmp_addr, clients.last.req.bits.pmp_addr)
+    when(inFlight) {
+      // The DTLB consumes the physical address one cycle after request acceptance.
+      port.req.bits.pmp_addr := ownerPort
+    }
+    port.req_kill := false.B
+    arb.io.out.ready := port.req.ready && !inFlight && !pmpCycle
+    // The nonblocking DTLB requires ready high even between requests.
+    port.resp.ready := true.B
+    when(port.req.fire) {
+      owner := arb.io.chosen
+      inFlight := true.B
+    }
+    when(port.resp.fire) {
+      inFlight := false.B
+    }
+    timing.io.pmp := io.pmp_resp(lldpIndex)
+  }
+  val l1Sources = Seq(existingL1) ++ lldp.map(_.io.request) ++ temporal.map(_.io.request)
+  if (l1Sources.size == 1) {
+    io.l1_pf_to_l1 <> existingL1
+  } else {
+    val arb = Module(new RRArbiter(new L1PrefetchReq, l1Sources.size))
+    arb.io.in.zip(l1Sources).foreach { case (input, request) => input <> request }
+    io.l1_pf_to_l1 <> arb.io.out
+  }
 
   /** load/store prefetch to l2 cache
    *  stride, sms
