@@ -1,209 +1,74 @@
 # Frontend Risks Around Backend Redirect
 
-## 主题结论
+本文整理 redirect 接收路径的验证关注点。下列条目
+用于组织场景和证据，当前版本是否存在功能缺陷需由同版本运行判定。
 
-frontend 直接消费 backend redirect 的主路径是明确的，但当前实现里有几处功能正确性风险，尤其集中在时序配对、异常归属和 redirect 后训练隔离。
+## 主路径与源码入口
 
-这里的“风险”分两类：
+- `src/main/scala/xiangshan/frontend/ftq/BackendRedirectReceiver.scala`
+- `src/main/scala/xiangshan/frontend/ftq/IfuRedirectReceiver.scala`
+- `src/main/scala/xiangshan/frontend/ftq/Ftq.scala`
+- `src/main/scala/xiangshan/frontend/ftq/ResolveQueue.scala`
 
-- 代码里已有注释、`FIXME`、`XSError` 线索支持的高置信风险
-- 从当前实现方式推导出的设计脆弱点
+backend redirect 与 IFU writeback 分别进入 receiver，FTQ 优先选择 backend
+redirect。最终 redirect 恢复 `bpuPtr/pfPtr/fetchPtr/pnrPtr`，驱动 BPU
+恢复和 ICache flush。IFU 的 redirect valid 来自 backend receiver。
 
-## 主路径概览
+## R1. Ahead 匹配与寄存路径
 
-backend redirect 由 frontend 顶层直接送进 FTQ：
+`ftqIdxAhead` 为单个 `Valid[FtqPtr]`。receiver 将其寄存，只有前一拍 ahead
+有效且 pointer 等于当前 redirect 的 `ftqIdx` 时才走直接路径，其余实际
+redirect 经寄存路径处理。实际 redirect 与 ahead 同拍时优先读取实际索引。
 
-```scala
-ftq.io.fromBackend <> io.backend.toFtq
-```
+验证需要覆盖 ahead 匹配、不匹配、缺失、连续 redirect 和 FTQ wrap，确认
+meta 的提前读取与实际 redirect payload 属于同一个动态 entry。
 
-在 FTQ 中，redirect 入口分成两路：
+## R2. Backend 与 IFU redirect 优先级
 
-- `receiveBackendRedirect(io.fromBackend)`
-- `receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)`
+FTQ 固定优先选择 backend redirect。IFU receiver 还会在 backend redirect
+有效时抑制 IFU redirect 和 IFU resolve。需要用明确的年龄及路径关系构造
+同拍冲突，检查恢复目标和被抑制的训练事务。
 
-随后用固定优先级仲裁：
+## R3. Backend fault 与 satpFlush 归属
 
-```scala
-redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
-```
+FTQ 保存 `backendException`、`hasSatpFlush` 和 `backendFlagPtr`。
+当 backend redirect 带 fault 或 satpFlush 时，标记 pointer 取自
+`backendRedirect.bits.newFtqIdx`。prefetch/main-fetch 按该 pointer 匹配标记。
 
-仲裁后的 redirect 影响：
+`fetchPtr` 领先标记 entry 至少三个 fetch block 后清除标记。应覆盖 source
+flush-itself/flush-after、BPU override、连续 fault、satpFlush 与双 fetch
+降级，检查异常和标记只进入对应的新路径事务。
 
-- FTQ 指针回退：`bpuPtr` / `ifuPtr` / `pfPtr`
-- `toBpu.redirect`
-- `toICache.redirectFlush`
+## R4. Redirect 与预取、双 fetch
 
-而发给 IFU 的 valid 则直接取 `backendRedirect.valid`，并不是最终仲裁后的 `redirect.valid`。
+当前预取经过 `PrefetchQueue`，main fetch 使用 `toMainPipe`。redirect 恢复
+pointer，S2/S3 override 也会分别回退 prefetch/fetch pointer。第二个候选需
+越过 `pnrPtr`，且不能带 backend flag。
 
-## backend redirect 接收端的关键假设
+应检查这些事件相邻或重叠时的候选取消、首个恢复请求、标记归属和重复请求。
 
-`BackendRedirectReceiver` 的当前设计依赖一个时序约定：
+## R5. ResolveQueue 的三周期隔离
 
-- backend 可以提前 1 拍给出某些 redirect 的 `ftqIdx`
-- frontend 先用这个 `ftqIdx` 去读元数据
-- 真正 redirect 到达时，如果上一拍收到了 ahead 索引，就直接配对使用
-- 否则把 redirect 再寄存 1 拍
+`ResolveQueue` 使用 `RedirectDelay=3` 传播 backend redirect。FTQ 的 trainCache
+还会检查当拍及前一拍 redirect，过滤 younger train。队列中的 branch meta
+与被复用的 FTQ slot 需要保持归属一致。
 
-当前实现还带有三个值得记住的特征：
+延长 resolve 延迟、制造 slot wrap/reuse，并让 BPU train backpressure 与
+redirect 重叠，检查被冲掉的分支不会进入后续有效训练。
 
-- 只使用 `ftqIdxAhead(0)`
-- `ftqIdxSelOH` 没有在 frontend 侧参与选择
-- 用于强校验 ahead 索引与真实 redirect 配对关系的 `XSError` 被注释掉了
+## R6. IFU Redirect payload 的使用边界
 
-## backend exception 注入路径
+`io.toIfu.redirect.bits` 在 FTQ 中赋为 `DontCare`，其 valid 用于 flush。
+接口消费者若新增 payload 依赖，需要同时更新驱动端、bundle 和观测契约。
 
-backend redirect 可能携带：
+## 当前环境边界
 
-- `backendIPF`
-- `backendIGPF`
-- `backendIAF`
+`env/bundles/backend.py` 绑定标量 ahead 的 valid、flag 和 value。
+BackendModel 要求显式 ahead 的 flag/value 成对提供、redirect 具有 source FTQ
+上下文，且调度时间至少留出一拍。backend-fault redirect 也需合法的 source
+身份，已提交 FTQ entry 受 stale-context 检查保护。
 
-FTQ 会把它们转换成 frontend 可见异常，并缓存在：
-
-- `backendException`
-- `backendExceptionPtr`
-
-随后只在 pointer 命中时注入到：
-
-- `prefetchReq.bits.backendException`
-- `fetchReq.bits.isBackendException`
-
-这条路径的核心假设是：redirect 到来时，异常应归属到 `ifuWbPtr(0)` 指向的 FTQ entry。
-
-## IFU 和 ResolveQueue 的影响
-
-IFU 把 backend redirect 当成最高优先级 flush 条件之一，并在 redirect 时清空半条 RVI / IBuffer 相关的跨拍状态。  
-`ResolveQueue` 则使用固定 3 拍窗口隔离 redirect 之后的 resolve / train。
-
-这两点都直接影响功能正确性：
-
-- IFU 是否会在 redirect 后残留旧 block 上下文
-- BPU 是否会接收到本应被 flush 的 branch 训练
-
-## 主要风险列表
-
-### R1. `ftqIdxAhead` 与真实 redirect 缺少强校验
-
-优先级：高
-
-现象：
-
-- frontend 依赖 `ftqIdxAhead(0)` 与下一拍真实 redirect 严格配对
-- 但相应的强校验断言被注释掉了
-
-主要后果：
-
-- 用错 FTQ entry 读取 redirect 元数据
-- BPU redirect 绑到错误 entry
-- prefetch / topdown / 统计信息错绑
-- 严重时恢复到错误控制流位置
-
-### R2. backend redirect 无条件压过同拍 IFU redirect
-
-优先级：中
-
-现象：
-
-- FTQ 用固定优先级 `Mux(backendRedirect.valid, backendRedirect, ifuRedirect)`
-- 没有年龄比较
-- 没有被覆盖 redirect 的保留或重放机制
-
-主要后果：
-
-- IFU 更老的 redirect 理论上可能被更年轻的 backend redirect 覆盖
-- 最终恢复点不一定等于“真实最老错误点”
-
-### R3. backend fault 归属使用 `ifuWbPtr(0)` 而不是 redirect 自带 `ftqIdx`
-
-优先级：高
-
-现象：
-
-- fault 归属并未直接绑定 `backendRedirect.bits.ftqIdx`
-- 而是依赖 redirect 到来时 `ifuWbPtr(0)` 恰好指向同一个 entry
-
-主要后果：
-
-- exception 被注入到错误 fetch block
-- 正确 fault entry 漏掉异常标记
-- fault 解释时机前后错位
-
-### R4. redirect 后 prefetch 依赖固定 1 拍延迟
-
-优先级：中
-
-现象：
-
-- `prefetchReq` 使用 `redirectNext`
-- 源码已明确标注 `FIXME`
-
-主要后果：
-
-- redirect 后的首批 prefetch 可能跑在旧上下文或不完整上下文上
-- fault 注入窗口与真实目标 entry 错位
-
-### R5. `ResolveQueue` 的 quarantine 窗口固定为 3 拍
-
-优先级：高
-
-现象：
-
-- `RedirectDelay = 3`
-- 源码直说这是经验值，不是严格证明出来的边界
-
-主要后果：
-
-- 已被 redirect 冲掉的 branch resolve 可能在 3 拍后才回来
-- 无效 branch 仍进入训练路径
-- BPU 学到错误路径，造成持续性预测污染
-
-### R6. frontend 对 redirect 扩展接口支持不完整
-
-优先级：低
-
-现象：
-
-- 只使用 `ftqIdxAhead(0)`
-- `ftqIdxSelOH` 未真正参与
-- `io.toIfu.redirect.bits := DontCare`
-
-主要后果：
-
-- 当前不一定立刻出错
-- 但接口扩展时容易 silently wrong
-
-## 建议优先验证的方向
-
-建议优先做下面几类检查：
-
-1. 恢复或重写 `BackendRedirectReceiver` 的配对断言，验证 `ftqIdxAhead` 和真实 redirect 的一一对应关系。
-2. 构造 backend redirect 与 IFU redirect 同拍到达场景，确认固定优先级是否符合真实设计意图。
-3. 在带 backend IPF / IAF / IGPF 的场景中，验证 `ifuWbPtr(0)` 与 `backendRedirect.bits.ftqIdx` 是否总能对齐。
-4. 拉长 resolve 返回延迟，检查 `ResolveQueue` 的 3 拍隔离窗口是否足够。
-5. 在 CSR / fence / 地址翻译切换场景下，检查 `redirectNext` 驱动的 prefetch 是否仍安全。
-
-## Current Env Status
-
-当前 `src/test/python/Frontend/env` 只能对其中一部分风险做硬约束，而且这些约束都必须来自当前黑盒边界可观察的信息：
-
-- env 现在明确拒绝未建模的 `ftqIdxAhead(0)` 使用；如果 drive path 试图依赖它，会直接 fail fast
-- env 现在要求 backend-fault redirect 提供足够的 FTQ 上下文，否则直接 fail fast
-- env 现在会在 redirect flush 时先裁掉本应被冲掉的 commit-visibility 状态；如果 flush 后仍有残留，则直接 fail fast
-
-但下面这些风险仍主要属于 DUT / frontend RTL 侧验证问题，而不是 env 可以凭当前观测面完全证明的性质：
-
-- `BackendRedirectReceiver` 内部 ahead 配对是否真的和下一拍 redirect 一一对应
-- backend fault 最终是否一定落在 frontend RTL 使用的正确 FTQ entry 上
-- `ResolveQueue` 固定 3 拍 quarantine 是否对所有微结构时序都充分
-- backend redirect 与 IFU redirect 的固定优先级是否符合真实设计意图
-
-换句话说，env 现在会拒绝“自己已知做不对”的路径，但不会假装拥有 RTL 内部不可见状态来替 DUT 做证明。
-
-如果这里对 env 的描述与 `docs/agents/frontend-backend-model.md` 的规范语义有冲突，以
-`docs/agents/frontend-backend-model.md` 为准；本页只讨论 redirect 消费路径上的 RTL 风险和
-当前黑盒验证边界。
-
-## 源文档
-
-- `docs/frontend_backend_redirect_risks.md`
+环境检查需要结合 DUT 波形验证 receiver、meta 和队列内部时序。
+BackendModel 的 queue、flush 和 commit 语义见
+[BackendModel 规范](../frontend-backend-model.md)，FTQ 路径见
+[FTQ 说明](../submodule-design/frontend-ftq.md)。

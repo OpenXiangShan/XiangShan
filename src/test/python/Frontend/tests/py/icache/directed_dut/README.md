@@ -79,9 +79,8 @@ predictors. Keep this order and the existing training predicates.
 Runtime program loads, translation changes, agent reconfiguration and retraining
 continue to use `run_initialization_steps`; they must not add a hardware reset.
 Call the common executor explicitly and keep observer registration separate
-from startup configuration. Startup wrappers and unused loader aliases have
-been removed; unit tests exercise the plans, public initialization steps and
-runtime helpers directly.
+from startup configuration. Unit tests exercise the plans, public initialization
+steps and runtime helpers directly.
 
 Build ordinary NOP payloads with `programs.build_nop_program`. The shared runtime
 `load_nop_program` retains its one-cycle default; callers replacing a zero-cycle
@@ -101,8 +100,8 @@ testcase's state and retains the environment's epoch validation. Later rearming
 and redirects remain part of the owning scenario's stimulus.
 
 Existing fixture defaults and per-test `defer` markers are preserved. A test
-already using fixture startup must retain that boundary during this migration;
-removing an extra startup is a separate behavior change requiring DUT validation.
+using fixture startup must preserve its reset and observer boundaries when
+changing preparation steps, and validate behavior changes with the DUT.
 Do not make this directory deferred by default while existing tests rely on
 fixture startup followed by runtime-only loading. Preserve observer boundaries
 and loader-specific `step_cycles`, including the one-cycle NOP loader.
@@ -129,7 +128,8 @@ to alter test behavior. `funcov_closure_pending` tests are excluded by the
 normal regression runner and exercised by its separate reachability mode.
 
 `test_icache_data_ecc_ibuffer_dut.py` implements the four Data-bank parity
-testpoints at CSV rows 832–835. Its 47 parameters cover:
+testpoints in the `icache_data_ecc_ibuffer` group. Its parameters cover the
+following request and fault placements.
 
 | Request | Fault placement | Parameters |
 | --- | --- | --- |
@@ -165,5 +165,6 @@ transaction diagnostics are included in the per-case JSON checks.
 Each CSV leaf owns one whole point; a point sample and all its distribution
 bins being covered are distinct measures. Toffee reports native bin hints in
 `funcov/toffee.funcov.json`, including samples from failed cases. HIT review
-therefore also requires the same run's passing testcase and checker evidence;
-the sampler does not update CSV status or evidence.
+requires valid same-run Condition and transaction evidence. A DUT Checkpoint
+failure is recorded separately. CLOSED requires correctness evidence and manual
+acceptance. The sampler leaves CSV status and evidence updates to review.

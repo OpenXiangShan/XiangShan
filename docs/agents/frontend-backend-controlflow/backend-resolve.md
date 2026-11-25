@@ -113,11 +113,11 @@ io.toFrontendBJUResolve.get.valid := io.out.valid
 3. 同拍生成 `resolve`
 4. 若需要修正路径，同拍也可能生成局部 `redirect`
 5. `resolve` 快速汇聚并由 `CtrlBlock` 送出
-6. 更晚阶段，这条指令若真正 ROB commit，才会出现 `callRetCommit`
+6. 更晚阶段，ROB 按序提交指令，满足条件后向 Frontend 发送所属 FTQ entry 的 commit
 
 因此通常可以认为：
 
-- `resolve` 早于 `callRetCommit`
+- 正确路径 CFI 的 `resolve` 完成后，该指令和所属 FTQ entry 才具备相应的提交资格
 - `resolve` 也通常早于 ROB 级 flush/commit 处理
 
 ## resolve ordering 的正确理解
@@ -183,8 +183,8 @@ io.toFrontendBJUResolve.get.valid := io.out.valid
 - `resolve` 必须按程序序出现
 - `resolve` 与最终采用的 `redirect` 一定同拍、同顺序
 
-## 源文档
+## 源码入口
 
-- `docs/backend_resolve_timing.md`
-- `docs/backend_resolve_redirect_relationship.md`
-- `docs/backend_resolve_redirect_ordering_case.md`
+- `src/main/scala/xiangshan/frontend/ftq/Ftq.scala`
+- `src/main/scala/xiangshan/frontend/ftq/IfuRedirectReceiver.scala`
+- `src/main/scala/xiangshan/backend/CtrlBlock.scala`

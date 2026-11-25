@@ -16,7 +16,7 @@ Read an additional document only when the task needs it:
   `docs/agents/frontend-debugging.md`.
 - BackendModel semantics, implementation map, and maintenance checks:
   `docs/agents/frontend-backend-model.md`.
-- `resolve`, `redirect`, `commit`, or `callRetCommit` RTL background:
+- `resolve`, `redirect`, or FTQ-entry `commit` RTL background:
   `docs/agents/frontend-backend-controlflow/README.md`.
 - Instruction-uncache or MMIO/non-MMIO boundaries:
   `docs/agents/frontend-uncache-boundaries.md` and, when applicable,
@@ -49,3 +49,7 @@ semantic rules.
 This doc set is intentionally small. Add durable facts here when they are
 repo-specific, stable enough to version, and important enough that an agent
 should be able to discover them without relying on chat history.
+
+Keep regression outcomes, build-specific failures, coverage snapshots, frozen
+run identities and concrete artifact locations with their run artifacts. Maintain
+reusable workflows, interface contracts and validation methods in this doc set.

@@ -176,11 +176,11 @@ mismatch/fetch-fault recovery and rejects competing explicit injection.
 With `TB_FRONTEND_SIM=vcs`, `TB_SKIP_DUT_FINISH=1` reuses one DUT and calls
 `dut.Finish()` once at pytest session teardown. It dumps the coverage accumulated
 by all cases as `<run_id>_vcs_batch`. When `TB_ENABLE_DUT_COVERAGE=1`, the
-compiled VDB is treated as a read-only template and copied to
-`$TB_COVERAGE_DIR/Frontend.vdb`, or to
+compiled VDB is copied to `$TB_COVERAGE_DIR/Frontend.vdb`, or to
 `build-frontend/artifacts/<run_id>/Frontend.vdb` without an override.
-Concurrent processes must use different run roots. Merge their completed VDBs
-with URG after all processes finish.
+Concurrent processes must use different run roots. After a successful run,
+the local VCS pytest wrapper merges its finalized coverage into
+`build-frontend/pylib-vcs/Frontend/Frontend.vdb` under the build lock.
 
 ## Bin-Trace Workflow
 

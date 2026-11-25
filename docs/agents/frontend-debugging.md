@@ -106,13 +106,14 @@ These frontend facts are easy to get wrong and should be checked early:
   not classified as CFI, do not enqueue resolve, and stop normal golden replay
   or instruction-commit advancement at that entry.
 
-## Time-Sensitive Case Notes
+## Investigation Artifacts
 
 Keep this file focused on stable debugging method and harness-facing facts.
 
 When an investigation produces cursor-specific, PC-specific, rerun-specific, or
-binary-specific notes, move them into a separate case-note or spec document
-instead of extending this guide with live incident state.
+binary-specific notes, store them with the corresponding run artifacts and
+record the exact input/build identity. Keep reusable checks in maintained tests
+and stable methods in this guide.
 
 ## Backend Reconstruction Rule
 
@@ -120,8 +121,8 @@ For frontend functional verification, use
 `docs/agents/frontend-backend-model.md` as the semantic and implementation contract.
 
 This debugging guide does not restate the backend-agent queue semantics.
-When the failure depends on `resolve`, `redirect`, `commit`, or
-`callRetCommit` behavior, first prove the observed DUT-facing symptom in
+When the failure depends on `resolve`, `redirect`, FTQ-entry `commit`, or
+BPU/RAS commit metadata, first prove the observed DUT-facing symptom in
 waveforms or monitor output, then consult:
 
 - `docs/agents/frontend-backend-model.md` for normative semantics, the current
@@ -146,6 +147,18 @@ waveforms or monitor output, then consult:
   answered. `TB_ENV_LOG_LEVEL` controls the case log; `TB_LOG_CLI_LEVEL`
   controls live terminal logging, so a quiet terminal does not imply the case
   log lacks INFO events.
+
+## VCS Batch Diagnostics
+
+Keep each process's waveform, case logs, failure callbacks and coverage database
+under its own repository-local run root. Preserve callback tracebacks and compare
+required aliases with the selected generated interface before assigning a cause.
+
+Check the pytest final summary and process exit status along with checker and
+monitor results. The session hook writes `TB_PYTEST_EXIT_STATUS_FILE` before
+`finish_vcs_batch_dut()`. Verify finalization evidence for the selected package.
+When logs are empty or a callback traceback is missing, retain that diagnostic
+gap with the run artifacts and reproduce with sufficient logging.
 
 ## Related References
 

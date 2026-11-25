@@ -20,7 +20,6 @@
 - `redirect`
 - `resolve`
 - `commit`
-- `callRetCommit`
 
 ## [规范] Backend mode
 
@@ -68,7 +67,6 @@ BackendModel 只持久保存一条指令队列。instruction commit 和 FTQ-entr
 
 - instruction commit 只允许从 `cfVec_queue` 头部按程序序选出连续可提交指令
 - `wrong`、`unknown`、exception 或未完成 resolve 的 CFI 都会停止本周期的候选扫描
-- 指令粒度的 `callRetCommit` 从已经标记为 committed 的指令派生
 - FTQ-entry 粒度的 `commit` 从 `cfVec_queue` 头部连续、已提交且同 FTQ entry 的指令聚合派生
 
 ### 队列边界
@@ -83,7 +81,7 @@ BackendModel 只持久保存一条指令队列。instruction commit 和 FTQ-entr
 
 - 核心状态包括 FTQ 生命周期、`_cfvec_queue`、`_pending_resolves` 和 `pending_events`。
 - 周期入口是 `plan_cycle_actions()`：采样 cfVec、更新 resolve、从 `_cfvec_queue`
-  计算 instruction commit 候选、选择 FTQ-entry commit、选择 redirect，并输出 callRetCommit。
+  计算 instruction commit 候选、选择 FTQ-entry commit 和 redirect。
 - `_sample_cfvec()` 负责“DUT 观测 -> queue entry -> 路径/异常语义”；
   exception-marked entry 保留身份，但不分类为普通 CFI。
 - `_ready_resolves_for_cycle()` 处理 resolve ready 条件；
@@ -108,10 +106,10 @@ BackendModel 只持久保存一条指令队列。instruction commit 和 FTQ-entr
 
 - ready redirect 不得因为 target PC 已经被观察到而静默丢弃；它仍需经过正常
   redirect drive 和语义 flush。
-- callRetCommit 回写应以 `ftq_flag/ftq_value/ftq_offset` 等稳定身份为主，不能把会随
-  queue 裁剪变化的 `queue_index` 当作语义主键。
-- `pending_work_count()` 必须覆盖 callRetCommit 等跨拍 pending 状态，否则 quiescent
-  判断会过早结束。
+- resolve 和 redirect 的归属应以 `ftq_flag/ftq_value/ftq_offset` 等稳定身份为主。
+  queue 裁剪时同步重映射保留的 `queue_index`。
+- `pending_work_count()` 统计 FTQ、pending resolve、pending event、当前 FTQ entry、
+  level-0 recovery target 和 active wrong-path episode。
 - recovery 进行中即使 queue 暂空，也不能通过 fallback commit 绕过恢复门控。
 - instruction commit 候选由当拍扫描 `_cfvec_queue` 得到；遇到非 correct、exception、
   非 pending、当拍新入队或 CFI 尚未 resolve 的指令即停止，不另存一份可校验的候选队列。
@@ -126,8 +124,6 @@ BackendModel 只持久保存一条指令队列。instruction commit 和 FTQ-entr
 - `_cfvec_queue` 是唯一持久指令流；不存在第二份持久的提交指令索引容器。
 - instruction commit 候选每拍从 `_cfvec_queue` 头部连续 correct-path 前缀计算；
   `wrong`、`unknown`、exception 或未完成 resolve 的 CFI 都会阻塞后续提交。
-- callRetCommit 的 pending/scheduled/visible 状态继续作为真实跨周期状态保留；redirect、
-  recovery 和 queue 裁剪必须同步删除或重定位其中的 `queue_index`。
 - FTQ-entry commit 直接检查 `_cfvec_queue` 头部同一 FTQ span 的 path、ROB commit、
   resolve 和 entry-boundary 状态。
 - Debug snapshot输出 `correct_prefix_len` / `correct_prefix_head`，在读取时从当前
@@ -164,7 +160,6 @@ BackendModel 只持久保存一条指令队列。instruction commit 和 FTQ-entr
 - 正确路径 CFI 若预测错误，`redirect` 已经发给 frontend 后，该 CFI 所在的
   FTQ entry 可以继续按正常条件退休；不得为了等待下一笔 recovery `cfVec`
   或恢复目标 FTQ 而继续阻塞 redirect source FTQ 自己。
-- `callRetCommit` 从“已提交指令”派生，且保持指令粒度。
 - FTQ-entry `commit` 仅由 `cfVec_queue` 头部连续、同 FTQ、已提交指令聚合派生。
 - FTQ entry 出队原因仅有两类：被 `commit` 退休，或被 `redirect` 作为 wrong-path 清除。
 - 不得因为 stale cleanup、fallback commit、pointer-rank 裁剪、queue 中暂时不可见或类似内部整理路径，静默删除 wrong-path 指令或 FTQ entry bookkeeping。
@@ -185,7 +180,7 @@ queue 中的每条指令至少需要具备以下语义信息：
 - 该指令当前位于正确路径还是错误路径
 - 若该指令是 CFI，则标记它是否已经被 `resolve` 过
 - 该指令是否带 frontend exception 标记以及具体 exception bits；带 exception 标记的 entry 不应再被当作普通 CFI 解析
-- 该指令是否已经具有对应的 `callRetCommit`
+- 该指令的 ROB commit 状态
 - 该指令属于哪个 FTQ entry（例如由 `ftq_flag` / `ftq_value` 标识）
 
 其中：
@@ -393,7 +388,7 @@ queue 中的每条指令至少需要具备以下语义信息：
 
 - `golden match` 负责提供“未来可提交资格”
 - 真正的 `rob commit` 需要由独立的顺序提交建模来决定，不能由 golden match 直接标成 committed
-- `callRetCommit` 与 FTQ-entry `commit` 都应从已经 committed 的指令派生
+- FTQ-entry `commit` 应从已经 committed 的指令派生
 
 如果实现把“与 golden trace 对齐”直接当成“已经 ROB commit”，则它虽然可能还能跑通部分 testcase，
 但语义上已经不再是在“模拟 backend 提交”，而是在用 golden trace 直接驱动 backend 事件。
@@ -417,7 +412,6 @@ instruction commit。代码里没有名为 commit frontier 的状态；当前实
 
 - `golden match` 先把指令标成 correct-path
 - 独立的提交调度器再把 queue 头连续前缀中的可提交指令推进到 committed
-- `callRetCommit` 从这些“已经 committed 的单条指令”派生
 - FTQ-entry `commit` 从这些“已经 committed 且位于 queue 头部的整 entry”派生
 
 实现可以使用不同的数据结构，但不能绕过这条独立的顺序提交，例如：
@@ -527,37 +521,27 @@ ROB 的提交顺序必须与 golden trace 一致，因此能够进入 `commit` �
 
 也就是说，delay 表示“已经具备发送资格之后的附加延迟”，而不是“用延迟替代发送条件本身”。
 
-## `callRetCommit` 的产生语义
+## FTQ 到 BPU/RAS 的提交反馈
 
-`callRetCommit` 是以指令为粒度的，不是以 FTQ entry 为粒度的。
+backend 对 Frontend 的提交接口是 `CtrlToFtqIO.commit: Valid[FtqPtr]`。
+BackendModel 先完成内部 instruction commit，再通过 BackendAgent 发出合法的
+FTQ-entry commit。
 
-只要某条指令已经被 ROB 提交，对应的 `callRetCommit` 就可以有效。
+FTQ 在 BPU meta 到达时保存每个 entry 的 `BpuCommitMeta`。当本地
+`commitPtr <= robCommitPtr` 时，FTQ 推进 `commitPtr`，同时将该 entry 的
+`metaQueueCommit` 送到 `io.toBpu.commit`。redirect 会修正 source entry 保存的
+`attribute.rasAction`。RAS 在 `io.commit.valid && io.enable` 时寄存该 meta，
+根据其中的 call/return 属性更新 committed stack。
 
-但在语义上只有 `call`、`ret` 指令的 `rasAction` 不为 `None`。
+源码入口为 `src/main/scala/xiangshan/backend/CtrlBlock.scala`、
+`src/main/scala/xiangshan/frontend/ftq/Ftq.scala` 和
+`src/main/scala/xiangshan/frontend/bpu/ras/Ras.scala`。
 
-因此：
+## 三类信号之间的关系
 
-- `callRetCommit` 的有效条件是“该指令已经被 ROB 提交”
-- `callRetCommit` 的语义粒度是“单条指令”
-- 只有 `call` / `ret` 指令会携带有意义的 `rasAction`
-- 环境不应把 `callRetCommit` 建模成“golden trace 对齐事件”
-- 环境应把它建模成“instruction commit 完成后，按指令派生出来的事件”
-
-## 四类信号之间的关系
-
-为了避免歧义，可以把四类行为理解为：
-
-- `redirect`：负责把错误路径拉回正确路径，并清除错误路径指令
-- `resolve`：描述 CFI 的解析结果；对正确路径 CFI 是必需事件
-- `commit`：描述一个 FTQ entry 已经整体完成 ROB 提交
-- `callRetCommit`：描述某条已提交指令在 call/ret 语义上的提交事件
-
-它们之间的关键约束如下：
-
-- 错误路径最终必须被 `redirect` 清除
-- 正确路径上的每条 CFI 最终必须被 `resolve`
-- 一个 FTQ entry 只有在满足提交条件后才能 `commit`
-- 某条指令只要已经被 ROB 提交，就可以独立地产生 `callRetCommit`
+- `redirect` 恢复路径并清除被冲掉的指令。
+- `resolve` 上报 CFI 的解析结果，正确路径 CFI 最终必须完成 resolve。
+- `commit` 上报已满足提交条件的 FTQ entry，按程序顺序发送。
 
 ## 实现自由度与不可改变的语义边界
 
@@ -576,7 +560,6 @@ ROB 的提交顺序必须与 golden trace 一致，因此能够进入 `commit` �
 - 正确路径上的每条 CFI 必须有 `resolve`
 - 错误路径上的 CFI 是否有 `resolve` 不作强制要求
 - `commit` 必须是 FTQ entry 粒度且严格保序
-- `callRetCommit` 必须是指令粒度
 
 如果新的实现不能满足上述语义，即使内部结构更复杂，也不应视为与本文档等价。
 

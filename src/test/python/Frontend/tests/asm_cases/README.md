@@ -1,53 +1,33 @@
 # Frontend Assembly Cases
 
-These `.S` files are source-level frontend instruction streams for frontend
-PC/CFI testcase design. They are kept separate from pytest regressions so each
-case can later be compiled into an ELF/bin and paired with a golden trace by
-the frontend bin-trace flow.
+These `.S` files provide frontend instruction streams for PC/CFI tests.
+The bin-trace flow compiles each selected source into a binary, obtains a NEMU
+golden trace, and checks DUT instruction delivery and control-flow recovery.
 
-Current bin-trace suite:
+## Suite selection
 
-`scripts/run_baremode_asm_suite.sh` runs every tracked `.S` below by default
-(24 cases). All cases must compile to a non-empty bin, generate a non-empty
-NEMU trace, and complete the DUT checker. The twelve cases already named by the
-canonical functional-coverage registry use directed coverage targets; the
-other twelve remain observed-only until their registry mappings are added.
-There is no hidden active-list exclusion: when a tracked assembly case fails,
-first diagnose and repair it so the default suite remains complete. Remove the
-source from `asm_cases/` only when the case is no longer a maintained
-regression.
+`scripts/run_baremode_asm_suite.sh` recursively discovers every `.S` file under
+`tests/asm_cases/` by default, including local generated files. Inspect the
+selection with `--list`, or pass explicit assembly paths to select cases.
+Run commands from the repository root with a compatible DUT and the mcpgateway
+Python environment.
 
-- `jiabowen/fe_2fetch_cross_page_blocked.S`
-- `jiabowen/fe_2fetch_mixed_rvc_rvi.S`
-- `jiabowen/fe_2fetch_rvi_cross_block.S`: includes RVI stitching across a
-  32-byte FTQ boundary, with a site at DefaultConfig's 64-byte fetch span.
-- `jiabowen/fe_2fetch_size_blocked.S`
-- `jiabowen/fe_2fetch_trained_short_blocks.S`
-- `jiabowen/fe_ifu_cacheable_meta_variation.S`
-- `jiabowen/fe_ifu_cfi_decode_basic.S`
-- `jiabowen/fe_ifu_mixed_rvc_rvi_boundary.S`
-- `jiabowen/fe_ifu_predecode_full.S`
-- `jiabowen/fe_ifu_rvc_seq_boundary.S`
-- `jiabowen/fe_ifu_rvi_seq_boundary.S`
-- `jiabowen/fe_ifu_s0_s1_pipeline_fill.S`
-- `jiabowen/fe_baremode_cond_nt.S`
-- `jiabowen/fe_baremode_direct_jmp.S`
-- `jiabowen/fe_baremode_seq_icache_basic.S`
-- `jiabowen/fe_jal_forward_jump_observes_target_pc.S`
-- `jiabowen/fe_jal_resolve_drains_pending_queue.S`
-- `jiabowen/fe_large_loop_multi_segment.S`
-- `jiabowen/fe_multi_branch_dense_loop.S`
-- `jiabowen/fe_multi_branch_random_positions.S`
-- `jiabowen/fe_multi_cfi_per_ftq_entry.S`
-- `ruierhan/fe_icache_prefetch_bpu_flush.S`: alternating branch outcomes for
-  PrefetchPipe/BPU flush alignment.
-- `ruierhan/fe_icache_prefetch_layouts.S`: 64-byte-relative branch placements
-  for PrefetchPipe dual-layout training.
-- `zhaoxinran/fe_instr_uncache_boundary_mix.S`: consolidated NEMU-runnable
-  InstrUncache boundary stream.
+```bash
+src/test/python/Frontend/scripts/run_baremode_asm_suite.sh --list
+src/test/python/Frontend/scripts/run_baremode_asm_suite.sh   src/test/python/Frontend/tests/asm_cases/jiabowen/fe_baremode_direct_jmp.S
+```
 
-Generated cases:
+Each selected case must compile to a non-empty binary, generate a non-empty
+trace, and complete the DUT checks. Coverage targets come from the canonical
+registry and the runner's mapping. Inspect the actual mapping for each case
+and keep unmapped observations diagnostic until reviewed.
 
-- `generate_cases.py`: deterministic offline generator.  Each generated `.S`
-  records its seed, parameters, and branch target map in the file header.
-- `generated/`: output directory for generated assembly cases.
+## Sources and generation
+
+Author directories contain maintained directed programs. Preserve instruction
+width, branch layout, cross-block/page positions and training prefixes when
+editing a case, and verify those properties in the linked binary.
+
+`generate_cases.py` is a deterministic offline generator. Generated `.S` headers
+record seeds, parameters and branch target maps, and `generated/` contains its
+output. Record the actual source/bin/trace hashes used for replay.

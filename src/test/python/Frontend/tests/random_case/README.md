@@ -8,11 +8,9 @@ The generator and scenarios cover four families: `cfg_layout_mix`,
 Generator/assembly/ProgramMap unit tests use temporary synthetic inputs; they do
 not replace the campaign corpus or establish a DUT HIT.
 
-The original 100-slot campaign identity index is still awaiting recovery. Restore
-per-slot membership, program/timing seeds, parameters, and original
-source/bin/trace/ProgramMap/scenario hashes (plus verified inputs for replay).
-Aggregate family counts cannot reconstruct identities. Do not generate a
-replacement corpus or replay closed historical inputs.
+Campaign evidence requires an identity index containing per-case membership,
+program/timing seeds, parameters and source/bin/trace/ProgramMap/scenario hashes.
+Retain the original inputs and verify their bindings before an audit or replay.
 
 Run all offline tooling tests from `src/test/python/Frontend` with the RISC-V
 GCC/binutils directory on `PATH` and the mcpgateway Python environment active:
@@ -48,14 +46,12 @@ HIT. Missing or inconsistent evidence remains ineligible.
 
 DUT execution is never part of the default offline gate. Do not use `--mode dut`
 or enable `TB_RUN_DUT` without coord's loader-valid manifest/compatibility ledger
-and explicit serialized slot handoff. Audit currently has no DUT slot. Random
+and serialized slot handoff. Random
 evidence goes to ctrl for canonical review; audit does not edit canonical
 coverage, registry, sampler, or ctrl contracts.
 
-`fixtures/historical/*.sh.txt` are nonexecutable, SHA256-pinned archival text.
-Tests inspect their historical semantics without running any `check` or `run`
-branch. They are not current replay entries. The seven old strategy documents
-remain historical references outside this current tooling delivery.
+`fixtures/historical/*.sh.txt` are nonexecutable, SHA256-pinned test fixtures.
+Tests inspect their command semantics as text.
 
 ## Coverage growth measurement (offline)
 
@@ -119,7 +115,7 @@ changed by this audit. Actual fullness, held payload stability, flush/recovery,
 wall time and within-run bin growth remain unmeasured without proper evidence.
 
 
-For the c242b00d5 translation risk expansion, `translation_exploration_plan.py`
+`translation_exploration_plan.py`
 constructs explicit stage1/onlyStage1/onlyStage2/allStage Python model scenarios
 in memory, with bounded PTW ready/latency, context IDs, PBMT/PMA and fault plans.
 It does not change the existing long-program wrapper, generate inputs or admit
@@ -128,8 +124,8 @@ runtime. Every plan reports `MODEL_ONLY`, `runtime_reachability=UNCONFIRMED`, an
 checker/continuation model; a NEMU normal trace cannot be silently reused.
 
 Normal PTW response overrides keep s2xlate/getGpa/memidx identity immutable.
-Agent late-response tests show only the Python output boundary: default fence
-flush drops pending responses; explicit preservation retains request identity.
+The agent response contract applies at the Python output boundary. Default fence
+flush drops pending responses, and explicit preservation retains request identity.
 A preserved response is not proof it passed the RTL PTWFilter or was consumed by
 TLB. VMID values must already fit a reviewed width; the planner never silently
 truncates them or claims to validate backend Fence implementation.

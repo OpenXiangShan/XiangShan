@@ -310,9 +310,8 @@ io.commits.isCommit := state === s_idle && !blockCommit
 3. 是否有更高优先级的 ROB flush 覆盖了 EXU redirect
 4. `level` 是 `flushAfter` 还是 `flush`
 
-## 源文档
+## 源码入口
 
-- `docs/backend_resolve_redirect_relationship.md`
-- `docs/backend_resolve_redirect_ordering_case.md`
-- `docs/rob_flush_redirect_conditions.md`
-- `docs/backend_redirect_level.md`
+- `src/main/scala/xiangshan/backend/CtrlBlock.scala`
+- `src/main/scala/xiangshan/backend/rob/Rob.scala`
+- `src/main/scala/xiangshan/frontend/ftq/BackendRedirectReceiver.scala`

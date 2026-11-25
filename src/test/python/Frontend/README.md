@@ -196,14 +196,14 @@ env.icache_agent.configure(
   - 一旦 `build-frontend/.waveform_format.verilator` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 - `scripts/gen_coverage_html.sh`
-  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] [input.dat ... | input_dir] [output_dir]`
-  - 不传输入时，默认收集 `data/*.dat`
+  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] <input.dat ... | input_dir> [output_dir]`
+  - 必须显式指定输入文件或目录，合并前核对 DUT 版本兼容性
   - 单个 `.dat` 默认输出到同目录下的 `<stem>.genhtml/`
-  - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
+  - 目录输入默认输出到该目录下的 `coverage.genhtml/`，多个 `.dat` 默认输出到首个输入文件同目录下的 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
   - HTML 行号左侧的 `[ + ]` / `[ - ]` 来自 `merged.info` 里的 `BRDA` 记录，但不一定都是 RTL `if/else` branch。`verilator_coverage -write-info` 会把部分 raw coverage point 转成 lcov `BRDA`；例如端口声明行 `output io_phr_444` 左侧两个 `+`，原始 `.dat` 中对应的是 `t=toggle` 的 `io_phr_444:0->1` 和 `io_phr_444:1->0`。遇到端口、wire、reg 声明行出现 `[ + + ]` 时，应回查 raw `.dat` 的 `t=` 和 `o=` 字段，不要直接解释成代码分支。
-  - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
-    `source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate && src/test/python/Frontend/scripts/gen_coverage_html.sh build-frontend/artifacts/<run_id>/coverage`
+  - 按 [本地验证环境入口](../../../../local_verification_env.md) 激活环境后，可生成指定目录的覆盖率报告。
+    `src/test/python/Frontend/scripts/gen_coverage_html.sh build-frontend/artifacts/<run_id>/coverage`
 - `Frontend.ignore`
   - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
   - `scripts/gen_coverage_html.sh` 也会默认读取该文件，并把文件级 pattern 转成 `genhtml --exclude`。
@@ -256,17 +256,9 @@ env.icache_agent.configure(
 
 ## 运行入口
 
-Frontend Verilator/Python 的构建、测试和覆盖率工具必须在干净 shell 中只激活
-赵欣冉维护的 mcpgateway 环境：
-
-```bash
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-```
-
-禁止 source `/nfs/share/unitychip/activate`。该环境会把旧版
-`libxspcomm.so` 注入 `LD_LIBRARY_PATH`，使当前生成的 Frontend Python DUT
-无法加载。若当前 shell 已经激活过 share 环境，应新开干净 shell，不能依靠再次
-source 或手工调整库顺序作为正式回归环境。
+Frontend Verilator/Python 的构建、测试和覆盖率工具使用 mcpgateway 环境。
+在干净 shell 中按 [本地验证环境入口](../../../../local_verification_env.md)
+激活环境。机器相关的激活路径仅保存在该本地文档中。
 
 - 构建 Verilator 版 Frontend Python DUT：
 
