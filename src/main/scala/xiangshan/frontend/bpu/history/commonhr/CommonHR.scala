@@ -20,6 +20,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
+import utility.XSPerfAccumulate
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
@@ -310,20 +311,26 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
   })
   private val s1DedupHits = dedupHitPositions(s1Hits, s1Update.positions)
 
+  private def countBefore(positions: Vec[UInt], hitMask: Vec[Bool], end: UInt): UInt =
+    PopCount(positions.zip(hitMask).map { case (pos, hit) => hit && pos < end })
+
+  private val s1HitPrefix = countBefore(s1Update.positions, s1DedupHits, s1Pred.cfiPosition)
+  private val s1NumLess = MuxCase(
+    s1HitPrefix,
+    Seq(
+      s1Update.abtbBlockNtCount.valid      -> s1Update.abtbBlockNtCount.bits,
+      s1Update.ubtbNumNotTakenBefore.valid -> s1Update.ubtbNumNotTakenBefore.bits
+    )
+  )
+
   private def updateHR(
-      base:                CommonHREntry,
-      startPc:             Pc,
-      pred:                Prediction,
-      positions:           Vec[UInt],
-      hitMask:             Vec[Bool],
-      bwTaken:             Bool,
-      takenPrefixOverride: Option[Valid[UInt]] = None
+      base:    CommonHREntry,
+      startPc: Pc,
+      pred:    Prediction,
+      numLess: UInt,
+      numHit:  UInt,
+      bwTaken: Bool
   ): CommonHREntry = {
-    val numLessFromHits = PopCount(positions.zip(hitMask).map { case (pos, hit) =>
-      hit && pos < pred.cfiPosition
-    })
-    val numLess = takenPrefixOverride.fold(numLessFromHits)(prefix => Mux(prefix.valid, prefix.bits, numLessFromHits))
-    val numHit = PopCount(hitMask)
     val isCond = pred.attribute.isConditional
     val next   = Wire(new CommonHREntry)
     next.valid           := true.B
@@ -345,19 +352,41 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers {
     s1Base,
     s1Update.startPc,
     s1Pred,
-    s1Update.positions,
-    s1DedupHits,
-    io.s1_imliTaken,
-    Some(s1Update.ubtbNumNotTakenBefore)
+    s1NumLess,
+    PopCount(s1DedupHits),
+    io.s1_imliTaken
   )
   private val s2Next     = updateHR(
     s2Base,
     s2_update.startPc,
     s2_prediction,
-    s2_update.positions,
-    s2_hitMask,
+    countBefore(s2_update.positions, s2_hitMask, s2_prediction.cfiPosition),
+    s2_numHit,
     s2_overrideBwTaken
   )
+
+  if (!env.FPGAPlatform) {
+    val s1UsedBlockNt = s1Advance && s1Pred.taken && s1Update.abtbBlockNtCount.valid
+    val s2UsedBlockNt = RegEnable(s1UsedBlockNt, s1_fire)
+    val s3UsedBlockNt = RegEnable(s2UsedBlockNt, s2_fire)
+
+    val s3HitPrefix   = RegEnable(RegEnable(s1HitPrefix, s1_fire), s2_fire)
+    val s3BlockNt     = RegEnable(RegEnable(s1Update.abtbBlockNtCount.bits, s1_fire), s2_fire)
+    val s3S1Position  = RegEnable(RegEnable(s1Pred.cfiPosition, s1_fire), s2_fire)
+    val s3S1Attribute = RegEnable(RegEnable(s1Pred.attribute, s1_fire), s2_fire)
+    val compare = s3_fire && !r0_valid && s3UsedBlockNt && s3_taken &&
+      s3S1Position === s3_firstTakenPos && s3S1Attribute === s3_prediction.attribute
+
+    def distance(count: UInt, reference: UInt): UInt =
+      Mux(count >= reference, count - reference, reference - count)
+
+    val hitError   = distance(s3HitPrefix, io.s3NumNotTakenBefore)
+    val blockError = distance(s3BlockNt, io.s3NumNotTakenBefore)
+    XSPerfAccumulate("abtb_nt_count_used", s1UsedBlockNt)
+    XSPerfAccumulate("abtb_nt_count_closer", compare && blockError < hitError)
+    XSPerfAccumulate("abtb_nt_count_equal", compare && blockError === hitError)
+    XSPerfAccumulate("abtb_nt_count_farther", compare && blockError > hitError)
+  }
 
   // S3 overrides only redirect the PC. The flushed S1 block must not append
   // history, but history appended by earlier S1 blocks is retained.

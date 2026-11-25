@@ -63,6 +63,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     )
   )
 
+  // One tagged block count per bank/set, shared by all ways for that start PC.
+  private val blockNt = RegInit(VecInit.fill(NumBanks)(VecInit.fill(NumSets)(
+    0.U.asTypeOf(Valid(new AheadBtbBlockNt))
+  )))
+
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline control
      -------------------------------------------------------------------------------------------------------------- */
@@ -137,6 +142,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   s1_normalState.entries  := s1_entries
   s1_normalState.ctrVec   := s1_ctrVec
   s1_normalState.hitMask  := s1_normalState.getHitMask
+  s1_normalState.blockNt  := blockNt(s1_bankIdx)(s1_setIdx)
   s1_normalState.debug_indexPc.zip(s1_debugIndexPc).foreach { case (a, b) => a := b }
 
   // compute hit mask for the override state, which is used to rematch the old S2 state or the BPU S3 replay state
@@ -191,6 +197,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     pred.bits.target :=
       getFullTarget(s2_state.startPc, s2_state.entries(i).targetLowerBits, s2_state.entries(i).targetCarry)
   }
+  io.result.blockNtCount.valid := s2_valid && io.enable && s2_state.blockNt.valid &&
+    s2_state.blockNt.bits.tag === getTag(s2_state.startPc)
+  io.result.blockNtCount.bits := s2_state.blockNt.bits.count
+
   io.toMicroTage.result.zipWithIndex.foreach { case (pred, i) =>
     pred.valid             := s2_valid && s2_state.hitMask(i) && io.enable
     pred.bits.taken        := s2_state.ctrVec(i).isPositive
@@ -230,6 +240,18 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t0_train = io.fastTrain.get.bits
 
   private val t0_fire = io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.enable
+
+  // Use the actual ahead lookup set. A redirect can discard a still-valid S3 prediction.
+  when(t0_fire && !io.redirect && t0_train.blockNtCount.valid) {
+    blockNt.zipWithIndex.foreach { case (bank, i) =>
+      when(t0_train.abtbMeta.bankMask(i)) {
+        val entry = bank(t0_train.abtbMeta.setIdx)
+        entry.valid      := true.B
+        entry.bits.tag   := getTag(t0_train.startPc)
+        entry.bits.count := t0_train.blockNtCount.bits
+      }
+    }
+  }
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1

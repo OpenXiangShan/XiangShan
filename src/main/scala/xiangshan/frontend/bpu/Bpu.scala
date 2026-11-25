@@ -34,6 +34,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
+import xiangshan.frontend.bpu.history.commonhr.Helpers.dedupHitPositions
 import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
@@ -422,6 +423,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_isJumpVec      = RegEnable(s2_isJumpVec, s2_fire)
   private val s3_isCondVec      = RegEnable(s2_isCondVec, s2_fire)
 
+  private val s2_mbtbNtHits = VecInit(mbtb.io.result.zip(s2_isCondVec).map { case (entry, isCond) =>
+    isCond && !entry.bits.taken
+  })
+  private val s2_mbtbPositions = VecInit(mbtb.io.result.map(_.bits.cfiPosition))
+  private val s2_mbtbNtCount   = PopCount(dedupHitPositions(s2_mbtbNtHits, s2_mbtbPositions))
+  // An empty MBTB result has no sample to refresh the stored block count.
+  fastTrain.bits.blockNtCount.valid := s3_mbtbResult.map(_.valid).reduce(_ || _)
+  fastTrain.bits.blockNtCount.bits  := RegEnable(s2_mbtbNtCount, s2_fire)
+
   private val s3_s2FirstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
@@ -644,11 +654,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.s1Update.positions                   := s1_abtbPosition
   commonHR.io.s1Update.ubtbNumNotTakenBefore.valid := !s1_abtbValid && ubtb.io.prediction.valid
   commonHR.io.s1Update.ubtbNumNotTakenBefore.bits  := ubtb.io.numNotTakenBefore
+  commonHR.io.s1Update.abtbBlockNtCount.valid      := useAbtb && mbtb.io.enable && abtb.io.result.blockNtCount.valid
+  commonHR.io.s1Update.abtbBlockNtCount.bits       := abtb.io.result.blockNtCount.bits
   commonHR.io.s2Update.isOverride                  := s2_override
   commonHR.io.s2Update.startPc                     := s2_startPc.get.unGuard
   commonHR.io.s2Update.prediction                  := s2_prediction
   commonHR.io.s2Update.condHitMask                 := s2_isCondVec
-  commonHR.io.s2Update.positions                   := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
+  commonHR.io.s2Update.positions                   := s2_mbtbPositions
   commonHR.io.s2Update.targets                     := VecInit(mbtb.io.result.map(_.bits.target.unGuard))
   commonHR.io.s3Update.isOverride                  := s3_override
   commonHR.io.s3Update.startPc                     := s3_startPc.get.unGuard

@@ -319,6 +319,7 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
   val startPc:           Pc            = Pc()
   val branch:            BranchInfo    = new BranchInfo
   val numNotTakenBefore: UInt          = UInt(CfiPositionWidth.W)
+  val blockNtCount:      Valid[UInt]   = Valid(UInt(log2Ceil(NumBtbResultEntries + 1).W))
   val abtbMeta:          AheadBtbMeta  = new AheadBtbMeta
   val utageMeta:         MicroTageMeta = new MicroTageMeta
 }

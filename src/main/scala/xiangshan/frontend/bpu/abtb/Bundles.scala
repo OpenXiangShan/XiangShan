@@ -92,6 +92,11 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
 }
 
+class AheadBtbBlockNt(implicit p: Parameters) extends AheadBtbBundle {
+  val tag:   UInt = UInt(TagWidth.W)
+  val count: UInt = UInt(log2Ceil(NumBtbResultEntries + 1).W)
+}
+
 class PipelineState(implicit p: Parameters) extends AheadBtbBundle with Helpers {
   val startPc:  GuardedPc            = GuardedPc()
   val setIdx:   UInt                 = UInt(SetIdxWidth.W)
@@ -100,6 +105,7 @@ class PipelineState(implicit p: Parameters) extends AheadBtbBundle with Helpers 
   val entries:  Vec[AheadBtbEntry]   = Vec(NumWays, new AheadBtbEntry)
   val ctrVec:   Vec[SaturateCounter] = Vec(NumWays, TakenCounter())
   val hitMask:  Vec[Bool]            = Vec(NumWays, Bool())
+  val blockNt:  Valid[AheadBtbBlockNt] = Valid(new AheadBtbBlockNt)
 
   val debug_indexPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
 
@@ -109,6 +115,7 @@ class PipelineState(implicit p: Parameters) extends AheadBtbBundle with Helpers 
 
 class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
   val entries:       Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
+  val blockNtCount:  Valid[UInt]            = Valid(UInt(log2Ceil(NumBtbResultEntries + 1).W))
   val debug_startPc: Option[GuardedPc]      = Option.when(!env.FPGAPlatform)(GuardedPc())
 }
 

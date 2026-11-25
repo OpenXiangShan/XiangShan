@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.history.commonhr
 
 import chisel3._
 import chisel3.util.Valid
+import chisel3.util.log2Ceil
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
@@ -42,6 +43,7 @@ class S1Update(implicit p: Parameters) extends CommonHRBundle {
   val condHitMask:           Vec[Bool]   = Vec(NumAheadBtbPredictionEntries, Bool())
   val positions:             Vec[UInt]   = Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W))
   val ubtbNumNotTakenBefore: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val abtbBlockNtCount:      Valid[UInt] = Valid(UInt(log2Ceil(NumBtbResultEntries + 1).W))
 }
 
 class S2Update(implicit p: Parameters) extends Update {
