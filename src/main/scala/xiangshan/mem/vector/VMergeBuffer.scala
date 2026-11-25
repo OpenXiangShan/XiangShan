@@ -302,6 +302,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entry.vaNeedExt    := selPort(0).vaNeedExt
         entry.gpaddr       := gpaddr
         entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
+        when(entry.fof) {
+          entry.vl         := entry.originVl
+        }
       }.otherwise{
         entry.vl           := Mux(entry.vl < vstart, entry.vl, vstart)
       }
