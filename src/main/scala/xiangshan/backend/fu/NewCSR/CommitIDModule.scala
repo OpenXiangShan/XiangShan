@@ -50,8 +50,10 @@ class CommitIDModule(shaWidth: Int, hartIdlen: Int) extends Module {
   io.commitID := BigInt(sha, 16).U(shaWidth.W)
   io.dirty := dirty.U
 
+  /*
   val printCommitIDMod = Module(new PrintCommitIDModule(shaWidth, hartIdlen))
   printCommitIDMod.io.hartID := io.hartId
   printCommitIDMod.io.commitID := io.commitID
   printCommitIDMod.io.dirty := io.dirty
+  */
 }
