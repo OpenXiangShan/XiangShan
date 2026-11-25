@@ -580,6 +580,18 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+private[top] class WithL2Replacement(replacement: String) extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map { tile =>
+    tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(replacement = replacement)))
+  }
+})
+
+class L2LRUConfig(n: Int = 1) extends Config(new WithL2Replacement("lru") ++ new DefaultConfig(n))
+
+class L2PLRUConfig(n: Int = 1) extends Config(new WithL2Replacement("plru") ++ new DefaultConfig(n))
+
+class L2DRRIPConfig(n: Int = 1) extends Config(new WithL2Replacement("drrip") ++ new DefaultConfig(n))
+
 class NoRobCompressionConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))

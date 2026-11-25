@@ -58,6 +58,8 @@ jobs:
     runs-on: perf
     timeout-minutes: 7200
     name: Build EMU for Performance Regression
+    env:
+      XS_CONFIG: ${{ inputs.xs_config }}
     outputs:
       COMMIT_SHA: ${{ steps.set_env.outputs.COMMIT_SHA }}
       SHORT_SHA: ${{ steps.set_env.outputs.SHORT_SHA }}
@@ -75,6 +77,11 @@ jobs:
       - name: Set env
         id: set_env
         run: |
+          if [[ ! "$XS_CONFIG" =~ ^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$ ]]; then
+            echo "Error: xs_config must be a config class name such as DefaultConfig or top.DefaultConfig" >&2
+            exit 1
+          fi
+
           COMMIT_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short=9 HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
@@ -82,7 +89,7 @@ jobs:
           echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "DATE=${DATE}" >> "$GITHUB_OUTPUT"
 
-          SPEC_TAG="-${{ inputs.xs_config }}"
+          SPEC_TAG="-${XS_CONFIG}"
           if [[ -n "${{ inputs.cst_file }}" ]]; then
             if [[ ! -f "${{ inputs.cst_file }}" ]]; then
               echo "Error: cst_file does not exist: ${{ inputs.cst_file }}"
@@ -114,7 +121,7 @@ jobs:
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-              --config "${{ inputs.xs_config }}" \
+              --config "$XS_CONFIG" \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \

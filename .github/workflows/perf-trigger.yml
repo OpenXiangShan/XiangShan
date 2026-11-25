@@ -24,13 +24,9 @@ on:
           - verilator
         default: gsim
       xs_config:
-        description: Config for XiangShan core
+        description: XiangShan config class name (e.g. DefaultConfig)
         required: false
-        type: choice
-        options:
-          - DefaultConfig
-          - BackendV2Config
-          - KunminghuV2Config
+        type: string
         default: DefaultConfig
       benchmark_type:
         description: Benchmark type
