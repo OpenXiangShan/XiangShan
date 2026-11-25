@@ -1032,9 +1032,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       s"The walking entry($i) should be valid\n")
   }
 
+  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
+  val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
+  val enqLatterNumWbVec = VecInit(in.enq.req.map(req => req.bits.latterNumWb))
+
   val redirectFlushesLatterOnly = in.redirect.valid &&
     (in.redirect.bits.robIdx.isFormer =/= in.redirect.bits.flushItself())
-  val downgradeToFormerByEntry = (0 until RobSize).map { i =>
+
+  for (i <- 0 until RobSize) {
     val entry = robEntries(i)
     val downgradeToFormer = redirectFlushesLatterOnly && in.redirect.bits.robIdx.value === i.U &&
       CompressType.isNotNORMAL(entry.entryPairType)
@@ -1042,27 +1047,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       entry.entryPairType := CompressType.NORMAL
       entry.traceBlockInPipe := entry.formerTraceBlockInPipe
     }
-    downgradeToFormer
-  }
 
-  // status field: writebacked
-  // enqueue logic set 6 writebacked to false
-
-  // writeback logic set numWbPorts writebacked to true
-
-  // if the first uop of an instruction is valid , write writebackedCounter
-  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
-  val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
-  val enqLatterNumWbVec = VecInit(in.enq.req.map(req => req.bits.latterNumWb))
-
-  for (i <- 0 until RobSize) {
     val enqOH = allocatingOHByEntry(i)
     val uopCanEnqSeq = enqUopHitsByEntry(i)
     val instCanEnqFlag = allocatingByEntry(i)
     val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
     val entryPairType = robEntries(i).entryPairType
-    val downgradeToFormer = downgradeToFormerByEntry(i)
     when(isFirstEnq){
       robEntries(i).realDestSize := realDestEnqNum
     }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
@@ -1095,7 +1086,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       slotNeedFlush := slotNeedFlush | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
     }
 
-    val entry = robEntries(i)
     val redirectClearsLatter = entry.valid && downgradeToFormer
     when(entry.valid) {
       // Keep canceled counts at zero if another writeback arrives before redirect.
@@ -1662,8 +1652,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(allocatingByEntry(i) && !in.redirect.valid) {
         entries(i).connectEnq(enqBankSelectUops(i))
       }
+      val downgradeToFormer = redirectFlushesLatterOnly && in.redirect.bits.robIdx.value === i.U &&
+        CompressType.isNotNORMAL(robEntries(i).entryPairType)
       entries(i).commit.noCompressReason.foreach { reason =>
-        when(downgradeToFormerByEntry(i)) {
+        when(downgradeToFormer) {
           reason := NoCompressReason.flushedHalf
         }
       }
