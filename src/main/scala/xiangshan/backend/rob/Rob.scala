@@ -1048,7 +1048,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       CompressType.isNotNORMAL(entry.entryPairType)
     when(downgradeToFormer) {
       entry.entryPairType := CompressType.NORMAL
-      entry.noCompressReason := NoCompressReason.flushedHalf
       entry.traceBlockInPipe := entry.formerTraceBlockInPipe
     }
     downgradeToFormer
@@ -1667,6 +1666,32 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * Performance counters for simulation (pre-silicon)
    */
 
+  // Keep simulation payloads separate from the entries used for retirement and recovery.
+  val robEntryDebug = OptionWrapper(backendParams.basicDebugEn, Reg(Vec(RobSize, new RobEntryDebugBundle)))
+  robEntryDebug.foreach { entries =>
+    for (i <- 0 until RobSize) {
+      when(allocatingByEntry(i) && !in.redirect.valid) {
+        entries(i).connectEnq(enqBankSelectUops(i))
+      }
+      entries(i).commit.noCompressReason.foreach { reason =>
+        when(downgradeToFormerByEntry(i)) {
+          reason := NoCompressReason.flushedHalf
+        }
+      }
+    }
+
+    // Sample the same row on the same edge as the functional dequeue cache.
+    val deqDebugRead = deqBanking.readRows(entries.map(_.commit), deqBankRaddr, backendParams.debugEn)
+    for (bank <- 0 until CommitWidth) {
+      val debug = Mux(allCommitted, deqDebugRead(bank + CommitWidth), deqDebugRead(bank))
+      deqEntriesBankOrder(bank).connectCommitDebug(debug)
+    }
+    if (backendParams.debugEn) {
+      dontTouch(entries)
+      dontTouch(deqDebugRead)
+    }
+  }
+
   // Debug/difftest-only view of the full uop.
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_)).flatten
   // Simulation diagnostics.
@@ -1694,14 +1719,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSInfo(out.commits.isCommit && out.commits.commitValid(i),
       "retired pc %x wen %d ldest %d pdest %x data %x\n",
       debugMeta(debug_microOp(deqPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
+      out.commits.info(i).rfWen.getOrElse(false.B),
       out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
       out.commits.info(i).basicDebug.map(_.pdest).getOrElse(0.U),
       debug_exuData(deqPtrVec(i).value)(0)
     )
     XSInfo(walkState && out.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
       debugMeta(debug_microOp(walkPtrVec(i).value).head).pc,
-      out.commits.info(i).rfWen,
+      out.commits.info(i).rfWen.getOrElse(false.B),
       out.commits.info(i).basicDebug.map(_.ldest).getOrElse(0.U),
       debug_exuData(walkPtrVec(i).value)(0)
     )
@@ -1821,7 +1846,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("RobEntriesCommited", ifCommit(PopCount(out.commits.commitValid)))
 
   // By CommitType
-  val commitIsNormal = out.commits.info.map(x => x.commitType === CommitType.NORMAL)
+  val commitIsNormal = out.commits.info.map(_.commitType.map(_ === CommitType.NORMAL).getOrElse(false.B))
 
   XSPerfAccumulate("NoCompressIsLoad", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsLoad).map(x => x._1 && x._2))))
   XSPerfAccumulate("NoCompressIsStore", ifCommit(PopCount(compressTypeIsNORMAL.zip(commitIsStore).map(x => x._1 && x._2))))
@@ -1837,9 +1862,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSPerfAccumulate(s"NoCompress_$fuName", ifCommit(PopCount(commitIsFuType)))
     val NoCompress_Source = commitIsFuType.zip(out.commits.info).map {
       case (valid, info) =>
-        val noEnoughInstr  = valid && info.noCompressReason === NoCompressReason.noEnoughInstr
-        val flushedHalf    = valid && info.noCompressReason === NoCompressReason.flushedHalf
-        val cannotCompress = valid && info.noCompressReason === NoCompressReason.cannotCompress
+        val noEnoughInstr  = valid && info.noCompressReason.map(_ === NoCompressReason.noEnoughInstr).getOrElse(false.B)
+        val flushedHalf    = valid && info.noCompressReason.map(_ === NoCompressReason.flushedHalf).getOrElse(false.B)
+        val cannotCompress = valid && info.noCompressReason.map(_ === NoCompressReason.cannotCompress).getOrElse(false.B)
         (noEnoughInstr, flushedHalf, cannotCompress)
     }
     XSPerfAccumulate(s"NoCompress_${fuName}_by_noEnoughInstr", ifCommit(PopCount(NoCompress_Source.map(_._1))))
@@ -1916,6 +1941,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val writeBackLatency = 1.U
 
   if (backendParams.debugEn) {
+    val entryDebug = robEntryDebug.get
     val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(backendParams.iqEntryNum, RobSize))
     topdownRobInfoCollect.io.in.zip(in.topdownIQInfoVec.get).foreach{ case (sink, source) =>
       sink.valid := source.valid
@@ -1928,6 +1954,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val topdownRobCandidate = topdownRobInfoCollect.io.out
     for (i <- 0 until RobSize) {
       when(robEntries(i).valid){
+        val debug = entryDebug(i)
         val hasWriteBack = robEntries(i).isWritebacked
         val isRobHead = i.U === deqPtr.value
 
@@ -1939,49 +1966,50 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
         val topdownIQCancelSource = topdownIQInfoCandidate.cancelSource
 
-        val topdownIssuedUpdate = topdownIQIssued || robEntries(i).topdownIssued.get
-        val topdownCanceled= !topdownIQIssued && robEntries(i).topdownIssued.get && topdownIQInfoValid &&
+        val topdownIssuedUpdate = topdownIQIssued || debug.topdownIssued.get
+        val topdownCanceled= !topdownIQIssued && debug.topdownIssued.get && topdownIQInfoValid &&
           topdownIQCancelSource =/= IQCancelSource.none
-        val topdownCanceledUpdate = topdownCanceled || robEntries(i).topdownCanceled.get
-        val topdownRobHeadUpdate = isRobHead || robEntries(i).topdownRobHead.get
-        val topdownIdealIssueUpdate = topdownIQIdealIssue || robEntries(i).topdownIdealIssue.get
+        val topdownCanceledUpdate = topdownCanceled || debug.topdownCanceled.get
+        val topdownRobHeadUpdate = isRobHead || debug.topdownRobHead.get
+        val topdownIdealIssueUpdate = topdownIQIdealIssue || debug.topdownIdealIssue.get
         val topdownCancelSrcUpdate = Mux(topdownCanceled, topdownIQCancelSource,
-          robEntries(i).topdownCancelSource.get)
+          debug.topdownCancelSource.get)
         val topdownCancelTimeUpdate = topdownCanceled
-        robEntries(i).topdownCanceled.foreach(_ := topdownCanceledUpdate)
-        robEntries(i).topdownIssued.foreach(_ := topdownIssuedUpdate)
-        robEntries(i).topdownRobHead.foreach(_ := topdownRobHeadUpdate)
-        robEntries(i).topdownIdealIssue.foreach(_ := topdownIdealIssueUpdate)
+        debug.topdownCanceled.foreach(_ := topdownCanceledUpdate)
+        debug.topdownIssued.foreach(_ := topdownIssuedUpdate)
+        debug.topdownRobHead.foreach(_ := topdownRobHeadUpdate)
+        debug.topdownIdealIssue.foreach(_ := topdownIdealIssueUpdate)
 
-        robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          robEntries(i).topdownIssueTime.get +& topdownIssuedUpdate))
-        robEntries(i).topdownLastIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+        debug.topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          debug.topdownIssueTime.get +& topdownIssuedUpdate))
+        debug.topdownLastIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
           Mux(topdownCanceled, 0.U,
-            robEntries(i).topdownLastIssueTime.get +& topdownIssuedUpdate)
+            debug.topdownLastIssueTime.get +& topdownIssuedUpdate)
         ))
-        robEntries(i).topdownRobHeadTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          robEntries(i).topdownRobHeadTime.get +& topdownRobHeadUpdate))
+        debug.topdownRobHeadTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          debug.topdownRobHeadTime.get +& topdownRobHeadUpdate))
         // only caculate rising edge of ideal issue
-        robEntries(i).topdownIdealIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-          Mux(topdownIQIdealIssue && !robEntries(i).topdownIdealIssue.get , 1.U,
-            robEntries(i).topdownIdealIssueTime.get +& robEntries(i).topdownIdealIssue.get)
+        debug.topdownIdealIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          Mux(topdownIQIdealIssue && !debug.topdownIdealIssue.get , 1.U,
+            debug.topdownIdealIssueTime.get +& debug.topdownIdealIssue.get)
         ))
-        robEntries(i).topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
-        robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
+        debug.topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
+        debug.topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
           val cancelMatch = topdownCancelSrcUpdate === index.asUInt
           cancelTime := Mux(hasWriteBack, 0.U,
-            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get + 1.U,
-              robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
+            Mux(topdownCanceled && cancelMatch, debug.topdownCancelTimeVec.get(index) + debug.topdownLastIssueTime.get + 1.U,
+              debug.topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
         })
       }
     }
     out.debugRobHeadStall.foreach{ case stall =>
       val deqEntry = robEntries(deqPtr.value)
-      val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
-      val issueTime = deqEntry.topdownIssueTime.get
-      val lastIssueTime = deqEntry.topdownLastIssueTime.get
-      val idealIssueTime = deqEntry.topdownIdealIssueTime.get
-      val robHeadTime = deqEntry.topdownRobHeadTime.get
+      val debug = entryDebug(deqPtr.value)
+      val deqEntryNormalLatency = Mux1H(debug.commit.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
+      val issueTime = debug.topdownIssueTime.get
+      val lastIssueTime = debug.topdownLastIssueTime.get
+      val idealIssueTime = debug.topdownIdealIssueTime.get
+      val robHeadTime = debug.topdownRobHeadTime.get
 
       val topdownIQInfoCandidate = topdownRobCandidate(deqPtr.value)
       val issued = topdownIQInfoCandidate.issued && topdownIQInfoCandidate.valid
@@ -1992,10 +2020,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       val waitTime = idealIssueTime - robHeadTime
       val idealWaitTime = idealIssueTime - issueTime
-      val robHeadFutype = deqEntry.debug_fuType.get
+      val robHeadFutype = debug.commit.debug_fuType.get
       val robHeadExecStall = deqEntry.valid && (lastIssueTime > deqEntryNormalLatency) && (lastIssueTime > waitTime)
-      val robHeadNotIssued = deqEntry.valid && (!deqEntry.topdownIssued.get && !issued)
-      val robHeadIssueCancel = deqEntry.valid && deqEntry.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
+      val robHeadNotIssued = deqEntry.valid && (!debug.topdownIssued.get && !issued)
+      val robHeadIssueCancel = deqEntry.valid && debug.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
       // issueDelay priority than cancel; only calculate idealWaitTime stall
       val robHeadIssueDelay = deqEntry.valid && (idealIssueTime > deqEntryNormalLatency) &&
         (robHeadTime < idealWaitTime)
@@ -2008,10 +2036,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
       ))
 
-      val robHeadCancelSource = deqEntry.topdownCancelSource.get
+      val robHeadCancelSource = debug.topdownCancelSource.get
 
-      val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
-      val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
+      val cancelTimeVec = debug.topdownCancelTimeVec.get
+      val cancelTimeFixVec = debug.topdownCancelTimeFixVec.get
       val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
         Mux(time < fix, 0.U, Mux((time === fix) && time.orR, 1.U, time - fix))
       }
@@ -2031,7 +2059,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         IQCancelSource.isld(lastMaxIdx)  -> IssueCancelStallLd.id.U   ,
         IQCancelSource.isst(lastMaxIdx)  -> IssueCancelStallSt.id.U   ,
       ))
-      deqEntry.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
+      debug.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
 
       stall.valid := robHeadExecStall || robHeadNotIssued || robHeadIssueCancel || robHeadIssueDelay
       stall.bits := MuxCase(BackendOtherCoreStall.id.U, Seq(
