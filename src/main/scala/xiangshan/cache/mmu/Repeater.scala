@@ -382,7 +382,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int, isITLB: Boolean = false)
   }
   io.ptw.resp.ready := true.B
 
-  val fromHwPrefetch = Reg(Vec(Size, Bool()))
+  io.rob_head_miss_in_tlb := Cat(filters.map(_.rob_head_miss_in_tlb)).orR
 }
 
 object PTWRepeaterNB {

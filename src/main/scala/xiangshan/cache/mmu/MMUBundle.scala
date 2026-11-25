@@ -225,7 +225,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     vpn_hit && index_hit.reduce(_ || _) && PopCount(wb_valididx) === 1.U && s2xlate_hit && pteidx_hit
   }
 
-  def apply(item: PtwRespS2withMemIdx): TlbSectorEntry = {
+  def apply(item: PtwRespS2WithGpa): TlbSectorEntry = {
     this.asid := item.s1.entry.asid
     val merge_level = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
@@ -426,12 +426,12 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
-    val data = Output(new PtwRespS2withMemIdx)
+    val data = Output(new PtwRespS2WithGpa)
   }))
   val pfClear = Input(Bool())
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2withMemIdx): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2WithGpa): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
@@ -458,12 +458,12 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   val multiHit = Output(Bool())
   val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
-    val data = Output(new PtwRespS2withMemIdx)
+    val data = Output(new PtwRespS2WithGpa)
   }))
   val pfClear = Input(Bool())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
-  def w_apply(valid: Bool, data: PtwRespS2withMemIdx): Unit = {
+  def w_apply(valid: Bool, data: PtwRespS2WithGpa): Unit = {
     this.w.valid := valid
     this.w.bits.data := data
   }
