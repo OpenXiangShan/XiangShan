@@ -701,11 +701,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * CSR flag tracking
    */
-  // update when enq
+
+  // TODO: Need optimize timing. Timing too bad.
+
+  /**
+   * Enq stage flag tracking: dirtyFs and dirtyVs
+   *
+   * To simplify the implementation, we collect and set them when enq
+   */
   val enqFlagTracker = Module(new RobSetFlagTracker(
-    2,
-    in.enq.req.size,
-    CommitWidth,
+    width = 2,
+    numUpdatePorts = in.enq.req.size,
+    numCommitPorts = CommitWidth,
     orderedUpdatePorts = true
   ))
   enqFlagTracker.in.update.zip(in.enq.req).zip(enqFireVec).foreach {
@@ -714,26 +721,29 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       update.bits.robIdx := req.bits.robIdx
       update.bits.setMask := Cat(req.bits.dirtyVs, req.bits.dirtyFs || req.bits.fflagsWen)
   }
-  enqFlagTracker.in.redirect := in.redirect
   enqFlagTracker.in.commit.zip(out.commits.commitValid).zip(out.commits.robIdx).foreach {
     case ((commit, valid), robIdx) =>
       commit.valid := out.commits.isCommit && valid
       commit.bits := robIdx
   }
+  enqFlagTracker.in.redirect := in.redirect
   val dirtyFs = enqFlagTracker.out.commitSetMask(0)
   val dirtyVs = enqFlagTracker.out.commitSetMask(1)
 
-  // Use the former slots of deqPtr and enqPtr for the fflags and vxsat writeback
-  // window [deqPtrCmp, enqPtrCmp). It includes the head and excludes the allocation tail.
-  val deqPtrCmp = WireInit(deqPtr).asFormer
-  val enqPtrCmp = WireInit(enqPtr).asFormer
+  // Reset vstart if dirtyVs is set and vstart is not zero
+  val resetVstart = dirtyVs && !in.vstartIsZero
+  out.csr.vstart.valid := RegNext(Mux(excpHappen && deqHasExcp, excpState.bits.vstartEn, resetVstart))
+  out.csr.vstart.bits := RegNext(Mux(excpHappen && deqHasExcp, excpState.bits.vstart, 0.U))
+
+  /**
+   * Writeback stage flag tracking: fflags and vxsat
+   */
+
+  val fflagsWidth = 5
   private def wbSlotStillValid(robIdx: RobPtr): Bool = {
-    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
+    val wbEntry = robEntries(robIdx.value) // FIXME: this will cause timing issue
     wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.entryPairType))
   }
-
-  // update when writeback
-  val fflagsWidth = 5
 
   private val writebackFflagsCandidates = (0 until in.writeback.size).filter { index =>
     in.writeback(index).bits.fflags.nonEmpty
@@ -744,13 +754,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val writebackFlagCandidates =
     Seq.fill(fflagsWidth)(writebackFflagsCandidates) :+ writebackVxsatCandidates
   val writebackFlagTracker = Module(new RobSetFlagTracker(
-    fflagsWidth + 1,
-    in.writeback.size,
-    CommitWidth,
-    writebackFlagCandidates
+    width = fflagsWidth + 1,
+    numUpdatePorts = in.writeback.size,
+    numCommitPorts = CommitWidth,
+    candidateIndices = writebackFlagCandidates
   ))
   writebackFlagTracker.in.update.zip(in.writeback).foreach { case (update, wb) =>
-    val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
+    val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtr.asFormer) && wb.bits.robIdx.isBeforeSlot(enqPtr.asFormer)
     update.valid := wb.valid && wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
     update.bits.robIdx := wb.bits.robIdx
     update.bits.setMask := Cat(
@@ -789,10 +799,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   out.toVecExcpMod.logicPhyRegMap := rab.out.toVecExcpMod.logicPhyRegMap
   out.toVecExcpMod.excpInfo := vecExcpInfo
-
-  val resetVstart = dirtyVs && !in.vstartIsZero
-  out.csr.vstart.valid := RegNext(Mux(excpHappen && deqHasExcp, excpState.bits.vstartEn, resetVstart))
-  out.csr.vstart.bits := RegNext(Mux(excpHappen && deqHasExcp, excpState.bits.vstart, 0.U))
 
   /**
    * Retirement eligibility
