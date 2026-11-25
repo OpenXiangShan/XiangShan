@@ -365,8 +365,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walkFinished = walkPtrTrue.isAfterSlot(lastWalkPtr)
   // Mask all lanes while the read is prepared, then skip lanes before the walk start.
   val donotNeedWalk = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  // Per-lane walk validity for the row read in the previous cycle.
-  val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
 
   /**
    * Walk state
@@ -398,6 +396,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   )
   state := stateNext
+
+  // When walk finish, notify RAB and VType buffer
+  rab.in.fromRob.walkEnd := walkState && walkFinished
+  vtypeBuffer.in.fromRob.walkEnd := walkState && walkFinished
 
   /**
    * Recovery snapshots
@@ -689,24 +691,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.readGPAMemAddr.bits.isRVC := excpState.bits.isRVC
 
   /**
-   * Commits (and walk)
-   * They share the same width.
-   */
-  // T redirect.valid, T+1 use walkPtrVec read robEntries, T+2 start walk, shouldWalkVec used in T+2
-  when(in.redirect.valid){
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(RegNext(in.redirect.valid)){
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(walkState){
-    shouldWalkVec := VecInit(walkingPtrVec.map(_.isNotAfterSlot(lastWalkPtr)).zip(donotNeedWalk).map(x => x._1 && !x._2))
-  }.otherwise(
-    shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  )
-  rab.in.fromRob.walkEnd := walkState && walkFinished
-  vtypeBuffer.in.fromRob.walkEnd := walkState && walkFinished
-
-
-  /**
    * CSR flag tracking
    */
   // update when enq
@@ -862,13 +846,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     out.commits.info(i).ftqOffset := 0.U
     out.commits.info(i).ftqIdx := entry.ftqIdx - 1.U
     out.commits.robIdx(i) := deqPtrVec(i)
-
-    out.commits.walkValid(i) := shouldWalkVec(i)
-    XSError(
-      walkState &&
-      out.commits.isWalk && walkState && shouldWalkVec(i) &&
-      !walk_v(i),
-      s"The walking entry($i) should be valid\n")
   }
 
   // sync fflags/dirtyFs/vxsat to csr
@@ -1043,6 +1020,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Redirect In
    */
+
+  // After a redirect at T, read the walk row at T+1 and use it from T+2.
+  val canWalk = walkState && !in.redirect.valid && !redirectValidReg
+  out.commits.walkValid := VecInit(walkingPtrVec.zip(donotNeedWalk).map { case (ptr, skip) =>
+    canWalk && !skip && ptr.isNotAfterSlot(lastWalkPtr)
+  })
+
+  for (i <- 0 until CommitWidth) {
+    XSError(out.commits.walkValid(i) && !walk_v(i),
+      s"The walking entry($i) should be valid\n")
+  }
+
   val redirectFlushesLatterOnly = in.redirect.valid &&
     (in.redirect.bits.robIdx.isFormer =/= in.redirect.bits.flushItself())
   val downgradeToFormerByEntry = (0 until RobSize).map { i =>
@@ -2453,7 +2442,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(deqPtrVecForWalk)
     dontTouch(snapPtrReadBank)
     dontTouch(snapPtrVecForWalk)
-    dontTouch(shouldWalkVec)
     dontTouch(walkFinished)
     dontTouch(changeBankAddrToDeqPtr)
   }
