@@ -983,7 +983,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).bits.no_translate := false.B
     tlb_req_arb.io.in(i).bits.fullva := 0.U
     tlb_req_arb.io.in(i).bits.checkfullva := false.B
-    tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
     tlb_req_arb.io.in(i).bits.hyperinst := DontCare
