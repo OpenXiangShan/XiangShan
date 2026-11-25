@@ -28,8 +28,8 @@ import utility.XORFold
 import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
+import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
@@ -42,6 +42,8 @@ import xiangshan.frontend.IfuToGpAddrMem
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 
@@ -79,7 +81,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val csrFsIsOff: Bool = Input(Bool())
 
     // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -664,6 +666,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
+  uncacheFlushWb.bits.isMisPred := false.B
   uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
   uncacheFlushWb.bits.attribute := BranchAttribute.None
@@ -746,6 +749,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.bits.ftqIdx    := Mux(select, ftqIdx(1), ftqIdx(0))
     b.bits.pc        := Mux(select, startAddr(1), startAddr(0))
     b.bits.taken     := checkerRedirect.bits.taken
+    b.bits.isMisPred := true.B
     b.bits.ftqOffset := checkerRedirect.bits.endOffset
     b.bits.isRVC     := checkerRedirect.bits.isRVC
     b.bits.attribute := checkerRedirect.bits.attribute
@@ -766,6 +770,25 @@ class Ifu(implicit p: Parameters) extends IfuModule
   wbRedirect.prevIBufEnqPtr    := wbPrevIBufEnqPtr
   wbRedirect.halfRviInfo       := wbSelectedEndHalfRvi
   wbRedirect.halfRviInfo.valid := wbSelectedEndHalfRvi.valid && checkerRedirect.bits.invalidTaken
+
+  private val topdownPipe = Module(new TopDownPipeline(2))
+  topdownPipe.io.in := io.fromICache.topdown
+  topdownPipe.setReason(
+    0,
+    Seq(
+      s0_flushFromBpu -> TopDownCounters.OverrideBubble
+    )
+  )
+  topdownPipe.setReason(
+    2,
+    Seq(
+      (s2_valid && s2_useUncacheFetch && !s2_uncacheCanGo) -> TopDownCounters.UncacheFetchBubble
+    )
+  )
+  topdownPipe.setReason(Seq(
+    io.topdownOverride.valid -> io.topdownOverride.bits.reason
+  ))
+  io.toIBuffer.bits.topdown := topdownPipe.io.out
 
   private val s1_icachePerfInfo = RegEnable(io.fromICache.perf, s0_fire)
   private val s2_icachePerfInfo = RegEnable(s1_icachePerfInfo, s1_fire)
@@ -792,10 +815,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu
   perfAnalyzer.io.ifuPerfCtrl.fromICacheBubble := false.B
 
-  perfAnalyzer.io.topdownIn.icacheTopdown          := io.fromICache.topdown
-  perfAnalyzer.io.topdownIn.ftqTopdown             := io.fromFtq.topdownInfo
-  perfAnalyzer.io.topdownIn.backendRedirectTopdown := io.backendRedirectTopdown
-
   perfAnalyzer.io.perfInfo.icachePerfInfo                 := s2_icachePerfInfo
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(0)         := wbValid && wbFirstValid
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(1)         := wbValid && wbSecondValid
@@ -814,7 +833,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
-  io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
 }

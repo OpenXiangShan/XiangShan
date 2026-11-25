@@ -20,18 +20,10 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.Constantin
-import utility.HasPerfEvents
-import utility.SignExt
-import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import xiangshan.Redirect
-import xiangshan.TopDownCounters
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.BackendRedirectTopdown
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.icache.ICachePerfInfo
-import xiangshan.frontend.icache.ICacheTopdownInfo
 
 class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   class PerfAnalysisIO(implicit p: Parameters) extends IfuBundle {
@@ -44,15 +36,6 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val misPred:       Bool      = Bool()
       val misEndOffset:  UInt      = UInt(log2Ceil(FetchBlockInstNum).W)
       val uncacheBubble: Bool      = Bool()
-    }
-
-    class IfuTopdownIn(implicit p: Parameters) extends IfuBundle {
-      val icacheTopdown:          ICacheTopdownInfo      = new ICacheTopdownInfo
-      val ftqTopdown:             FrontendTopDownBundle  = new FrontendTopDownBundle
-      val backendRedirectTopdown: BackendRedirectTopdown = new BackendRedirectTopdown
-    }
-    class IfuTopdownOut(implicit p: Parameters) extends IfuBundle {
-      val topdown = new FrontendTopDownBundle
     }
 
     class ToIBufferPerfInfo(implicit p: Parameters) extends IfuBundle {
@@ -75,44 +58,13 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val fromICacheBubble: Bool = Bool()
     }
 
-    val ifuPerfCtrl: IfuPerfCtrl   = Input(new IfuPerfCtrl)
-    val topdownIn:   IfuTopdownIn  = Input(new IfuTopdownIn)
-    val topdownOut:  IfuTopdownOut = Output(new IfuTopdownOut)
-    val perfInfo:    IfuPerfInfo   = Input(new IfuPerfInfo)
+    val ifuPerfCtrl: IfuPerfCtrl = Input(new IfuPerfCtrl)
+    val perfInfo:    IfuPerfInfo = Input(new IfuPerfInfo)
   }
   val io: PerfAnalysisIO = IO(new PerfAnalysisIO)
-  private val icacheTopdown     = io.topdownIn.icacheTopdown
-  private val ftqTopdown        = io.topdownIn.ftqTopdown
   private val s3_icachePerfInfo = io.perfInfo.icachePerfInfo
   private val checkPerfInfo     = io.perfInfo.checkPerfInfo
   private val toIBufferInfo     = io.perfInfo.toIBufferInfo
-
-  private def numOfStage = 3
-  require(numOfStage > 1, "Ifu numOfStage must be greater than 1")
-  private val topdownStages = RegInit(VecInit.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle)))
-  // bubble events in IFU, only happen in stage 1
-  private val icacheMissBubble = icacheTopdown.iCacheMissBubble
-  private val itlbMissBubble   = icacheTopdown.itlbMissBubble
-
-  // only driven by clock, not valid-ready
-  topdownStages(0) := ftqTopdown
-  for (i <- 1 until numOfStage) {
-    topdownStages(i) := topdownStages(i - 1)
-  }
-  when(icacheMissBubble) {
-    topdownStages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
-  }
-  when(itlbMissBubble) {
-    topdownStages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
-  }
-  topdownStages.foreach(_.backendRedirectOverride(io.topdownIn.backendRedirectTopdown))
-
-  when(io.ifuPerfCtrl.ifuWbRedirect) {
-    for (i <- 0 until numOfStage) {
-      topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
-    }
-  }
-  io.topdownOut.topdown := topdownStages(numOfStage - 1)
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)
