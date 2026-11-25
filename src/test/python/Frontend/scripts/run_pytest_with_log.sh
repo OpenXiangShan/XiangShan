@@ -3,6 +3,8 @@
 #
 # Usage: src/test/python/Frontend/scripts/run_pytest_with_log.sh [pytest arguments...]
 # Without pytest arguments, runs the Frontend tests directory.
+# Both Verilator and VCS write <artifact_root>/failed.lst when tests fail.
+# Pass @<artifact_root>/failed.lst to the same runner to rerun those cases.
 #
 # Environment:
 #   TB_ENABLE_DUT_TESTS=1            Enable DUT integration tests.

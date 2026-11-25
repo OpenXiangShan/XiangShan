@@ -107,12 +107,15 @@ def _safe_path_component(value: str) -> str:
     return text.strip("._") or "run"
 
 
-def _artifact_root_dir(request, default_dir: Path) -> Path:
+def run_artifact_path(default_dir: Path) -> Path:
     raw = os.getenv("TB_ARTIFACT_DIR", "").strip()
     if raw:
-        root = Path(raw)
-    else:
-        root = default_dir / _safe_path_component(_effective_run_id())
+        return Path(raw)
+    return default_dir / _safe_path_component(_effective_run_id())
+
+
+def _artifact_root_dir(request, default_dir: Path) -> Path:
+    root = run_artifact_path(default_dir)
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -35,11 +35,32 @@ for _path in (_PYLIB_PATH,):
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 
+class _FailedTests:
+    def __init__(self):
+        self.nodeids: dict[str, None] = {}
+
+    def pytest_runtest_logreport(self, report):
+        if report.failed:
+            self.nodeids[report.nodeid] = None
+
+    def write(self, path: Path) -> None:
+        if self.nodeids:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            temporary.write_text("\n".join(self.nodeids) + "\n", encoding="utf-8")
+            temporary.replace(path)
+        elif path.is_file():
+            path.unlink()
+
+
 def pytest_configure(config):
-    if not hasattr(config, "workerinput") and not os.getenv("TB_RUN_ID", "").strip():
-        os.environ["TB_RUN_ID"] = (
-            f"frontend_pytest_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{os.getpid()}"
-        )
+    if not hasattr(config, "workerinput"):
+        if not os.getenv("TB_RUN_ID", "").strip():
+            os.environ["TB_RUN_ID"] = (
+                f"frontend_pytest_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{os.getpid()}"
+            )
+        # The controller also receives reports from xdist workers.
+        config.pluginmanager.register(_FailedTests(), "frontend-failed-tests")
     config.addinivalue_line(
         "markers",
         "funcov_bins(*bin_ids): declare the functional coverage Bin_ID targets for this DUT test",
@@ -73,9 +94,20 @@ def pytest_testnodedown(node, error):
 def pytest_sessionfinish(session, exitstatus):
     from env.runtime.fixtures import (
         finish_vcs_batch_dut,
+        run_artifact_path,
         toffee_session_report_path,
         write_toffee_session_report,
     )
+
+    config = session.config
+    failed_tests = config.pluginmanager.get_plugin("frontend-failed-tests")
+    if failed_tests is not None and not config.getoption("collectonly"):
+        failed_list = run_artifact_path(Path(_DATA_DIR)) / "failed.lst"
+        failed_tests.write(failed_list)
+        terminal = config.pluginmanager.get_plugin("terminalreporter")
+        if failed_tests.nodeids and terminal is not None:
+            terminal.write_line(f"[frontend] failed test list: {failed_list.resolve()}")
+            terminal.flush()
 
     if hasattr(session.config, "workerinput"):
         worker_id = str(session.config.workerinput.get("workerid", "worker"))
