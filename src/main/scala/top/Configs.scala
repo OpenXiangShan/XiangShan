@@ -578,7 +578,8 @@ class DefaultConfig(n: Int = 1) extends Config(
       L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
         replacement = "lru",
         enablePrefetchFeedback = false,
-        enableFdpInsertion = true
+        enableFdpInsertion = true,
+        enableFdpTaggedFilter = true
       ))
     ))
   }) ++ OpenLLCConfig("32MB", ways = 16, banks = 4)
