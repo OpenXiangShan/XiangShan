@@ -40,6 +40,8 @@ class PtwMshrIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst
   val feedback = Flipped(Valid(new PtwMshrFeedback))
   val resume = Flipped(Vec(2, Valid(new PtwMshrResume)))
   val complete = Flipped(Vec(2, Valid(UInt(log2Up(MissQueueSize).W))))
+  val retire = Flipped(Vec(PtwWidth, Valid(new PtwRespS2)))
+  val needed = Output(Vec(MissQueueSize, Bool()))
   val prefetchBusy = Output(Bool())
   val occupancy = Output(UInt(log2Up(MissQueueSize + 1).W))
   val full = Output(Bool())
@@ -53,6 +55,7 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val requests = Reg(Vec(MissQueueSize, new L2TlbInnerBundle))
   val live = RegInit(VecInit.fill(MissQueueSize)(false.B))
+  val owed = RegInit(VecInit.fill(MissQueueSize)(false.B))
   val pending = RegInit(VecInit.fill(MissQueueSize)(false.B))
   val busy = RegInit(VecInit.fill(MissQueueSize)(false.B))
   val first = Reg(Vec(MissQueueSize, Bool()))
@@ -60,6 +63,9 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val free = live.map(!_)
   val allocate = ParallelPriorityEncoder(free)
+  for (index <- requests.indices) {
+    io.needed(index) := live(index) && (owed(index) || from_pre(requests(index).source))
+  }
   val prefetchLive = requests.indices.map(index => live(index) && from_pre(requests(index).source))
   io.prefetchBusy := ParallelOR(prefetchLive)
   io.occupancy := PopCount(live)
@@ -80,6 +86,7 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
   when (io.req.fire) {
     requests(allocate) := io.req.bits
     live(allocate) := true.B
+    owed(allocate) := !from_pre(io.req.bits.source)
     pending(allocate) := true.B
     busy(allocate) := false.B
     first(allocate) := true.B
@@ -96,9 +103,8 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
     assert(live(feedback.mshrID) && busy(feedback.mshrID), "Cache feedback has no executing MSHR request")
     assert(!(feedback.retry && feedback.done), "Cache feedback both retries and completes a request")
     when (feedback.retry || feedback.done) { busy(feedback.mshrID) := false.B }
-    when (feedback.done) { live(feedback.mshrID) := false.B }
     when (feedback.retry) {
-      pending(feedback.mshrID) := true.B
+      pending(feedback.mshrID) := io.needed(feedback.mshrID)
       retryToLlptw(feedback.mshrID) := feedback.isLLptw
     }
   }
@@ -107,7 +113,7 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
       val mshrID = resume.bits.mshrID
       assert(live(mshrID) && busy(mshrID), "Walker handoff has no executing MSHR request")
       busy(mshrID) := false.B
-      pending(mshrID) := true.B
+      pending(mshrID) := io.needed(mshrID)
       retryToLlptw(mshrID) := resume.bits.isLLptw
     }
   }
@@ -115,17 +121,33 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
     when (complete.valid && !flush) {
       assert(live(complete.bits) && busy(complete.bits), "Walker completion has no executing MSHR request")
       busy(complete.bits) := false.B
-      live(complete.bits) := false.B
     }
   }
 
+  // Clear exactly the responsibilities consumed by the actual I/D response handshake
   for (index <- requests.indices) {
+    val incoming = io.req.fire && allocate === index.U
+    val request = Mux(incoming, io.req.bits, requests(index))
+    val consumed = io.retire.zipWithIndex.map { case (retire, source) =>
+      val result = retire.bits
+      retire.valid && request.source === source.U && request.s2xlate === result.s2xlate &&
+        result.hit(request.vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
+    }
+    when ((incoming || (live(index) && owed(index))) && ParallelOR(consumed)) {
+      owed(index) := false.B
+      pending(index) := false.B
+    }
+    // A retired request keeps its identity until its old Cache/walker operation drains
+    when (live(index) && !owed(index) && !pending(index) && !busy(index)) {
+      live(index) := false.B
+    }
     assert(!busy(index) || live(index), "An execution outlives its MSHR identity")
     assert(!(pending(index) && busy(index)), "An executing request is also queued")
   }
 
   when (flush) {
     live.foreach(_ := false.B)
+    owed.foreach(_ := false.B)
     pending.foreach(_ := false.B)
     busy.foreach(_ := false.B)
   }
