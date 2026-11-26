@@ -127,7 +127,6 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short=9 HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
@@ -273,7 +272,7 @@ jobs:
 
       - name: Run SPEC CPU checkpoints
         run: |
-          cd $SCRIPTS_HOME/perf_trigger
+          cd "$GITHUB_WORKSPACE/scripts/perf_trigger"
           EXTRA_OPTS=()
           if [[ -n "${{ inputs.warmup }}" ]]; then
             EXTRA_OPTS+=(--warmup "${{ inputs.warmup }}")
@@ -295,13 +294,14 @@ jobs:
             ${{ !inputs.disable_diff && '--nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so' || '' }} \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
             ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
+            --save-dramsim3 \
             --run \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
 
       - name: Generate report
         run: |
-          cd $SCRIPTS_HOME/perf_trigger
+          cd "$GITHUB_WORKSPACE/scripts/perf_trigger"
           python3 main.py \
             --gcpt-path "$CKPT_HOME" \
             --json-path "$CKPT_JSON_PATH" \
