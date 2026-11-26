@@ -206,31 +206,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
   val requestMptOnly = if (HasMptCheck) arb1.io.out.bits.mptOnly.get && mptEn.get else false.B
-  val tlbCounter = RegInit(0.U(log2Ceil(MissQueueSize + 1).W))
-  val reqVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
-  val respVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
-  for (i <- 0 until PtwWidth) {
-    when (io.tlb(i).req(0).fire) {
-      reqVec(i) := true.B
-    }
-    when (io.tlb(i).resp.fire) {
-      respVec(i) := true.B
-    }
-  }
-
-  when (flush) {
-    tlbCounter := 0.U
-  } .otherwise {
-    tlbCounter := tlbCounter + PopCount(reqVec) - PopCount(respVec)
-  }
-  XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
-
-  demandIn.valid := arb1.io.out.valid && tlbCounter < MissQueueSize.U && !flush
+  demandIn.valid := arb1.io.out.valid && !flush
   demandIn.bits.vpn := arb1.io.out.bits.vpn
   demandIn.bits.s2xlate := arb1.io.out.bits.s2xlate
   demandIn.bits.source := arb1.io.chosen
   demandIn.bits.mptOnly.foreach(_ := requestMptOnly)
-  arb1.io.out.ready := tlbCounter < MissQueueSize.U && demandIn.ready && !flush
+  arb1.io.out.ready := demandIn.ready && !flush
 
   val lookupMptOnly = mshr.io.lookup.bits.mptOnly.getOrElse(false.B)
   val lookupSource = mshr.io.lookup.bits.source
@@ -1020,8 +1001,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     XSPerfAccumulate(s"resp_fault_count${i}", io.tlb(i).resp.fire && (io.tlb(i).resp.bits.s1.pf || io.tlb(i).resp.bits.s1.af || io.tlb(i).resp.bits.s2.gpf || io.tlb(i).resp.bits.s2.gaf))
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && !mshr.io.req.ready)
-  XSPerfAccumulate("req_outstanding_cycle", tlbCounter)
-  XSPerfAccumulate("req_full_cycle", tlbCounter === MissQueueSize.U)
+  XSPerfAccumulate("req_outstanding_cycle", mshr.io.occupancy)
+  XSPerfAccumulate("req_full_cycle", mshr.io.full)
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
   XSPerfAccumulate("mem_outstanding_cycle", PopCount(waiting_resp))
   XSPerfAccumulate("mem_count", mem.a.fire)
