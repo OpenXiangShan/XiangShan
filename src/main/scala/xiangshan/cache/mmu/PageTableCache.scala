@@ -221,7 +221,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val refill_prefetch_dup = io.refill.bits.req_info_dup.map(a => from_pre(a.source))
   val refill_h = io.refill.bits.req_info_dup.map(a => Mux(a.s2xlate === allStage, onlyStage1, a.s2xlate))
   val flush_dup = sfence_dup.zip(io.csr_dup).map(f => f._1.valid || f._2.satp.changed || f._2.vsatp.changed || f._2.hgatp.changed || f._2.priv.virtChanged)
-  val flush = flush_dup(0)
+  val flush = flush_dup(0) || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
 
   // when refill, refuce to accept new req
   val rwHarzad = if (sramSinglePort) io.refill.valid else false.B
