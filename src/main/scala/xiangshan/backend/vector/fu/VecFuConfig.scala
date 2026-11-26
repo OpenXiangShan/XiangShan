@@ -281,6 +281,7 @@ object VecFuConfig {
   val MulCfg = VecFuConfig.fromFuConfig(FuConfig.MulCfg)
   val DivCfg = VecFuConfig.fromFuConfig(FuConfig.DivCfg)
   val FenceCfg = VecFuConfig.fromFuConfig(FuConfig.FenceCfg)
+  val ExtProxyCfg = VecFuConfig.fromFuConfig(FuConfig.ExtProxyCfg)
   val BkuCfg = VecFuConfig.fromFuConfig(FuConfig.BkuCfg)
   val VSetCfg = VecFuConfig.fromFuConfig(FuConfig.VSetCfg)
   val VSetRvfWvfCfg = VecFuConfig.fromFuConfig(FuConfig.VSetRvfWvfCfg)
@@ -322,6 +323,7 @@ object VecFuConfig {
     MulCfg,
     DivCfg,
     FenceCfg,
+    ExtProxyCfg,
     BkuCfg,
     VSetCfg,
     VSetRvfWvfCfg,

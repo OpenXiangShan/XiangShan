@@ -303,6 +303,8 @@ case class ExeUnitParams(
 
   def hasFence: Boolean = fuConfigs.map(_.isFence).reduce(_ || _)
 
+  def hasExtProxy: Boolean = fuConfigs.map(_.isExtProxy).reduce(_ || _)
+
   def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
 
   def hasAluFu = fuConfigs.map(_.fuType == FuType.alu).reduce(_ || _)

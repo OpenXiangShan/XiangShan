@@ -136,11 +136,17 @@ class DecodeChannels(
   val psdChannelOut: Seq[ValidIO[DecodeChannelOutput]] =
     psdUopOuts.map(x => makeValid(x.valid, DecodeChannelOutput.fromPseudoChannelUop(x.bits, VLEN)))
 
+  val extDecodeRows = p(xiangshan.ext.CoreExtPluginsKey).flatMap(_.decodeTable)
+  val extChannelOut: Seq[ValidIO[DecodeChannelOutput]] = (0 until mopWidth).map(i =>
+    xiangshan.ext.ExtDecodeHelper.decode(in.mops(i).bits.info.rawInst, extDecodeRows)
+  )
+
   val illegalChannelOut: Seq[ValidIO[DecodeChannelOutput]] = (0 until mopWidth).map { i =>
     val hasDecodedUop = vecChannelOut(i).head.valid ||
                         vsetChannelOut(i).valid ||
                         simChannelOut(i).head.valid ||
-                        psdChannelOut(i).valid
+                        psdChannelOut(i).valid ||
+                        extChannelOut(i).valid
     makeValid(instValids(i) && !hasDecodedUop, DecodeChannelOutput.illegalUop())
   }
 
@@ -235,6 +241,7 @@ class DecodeChannels(
               vecChannelOut(i).head.valid -> vecUopNumOHs(i),
               vsetChannelOut(i).valid -> NumUopOH.N1,
               simChannelOut(i).head.valid -> simpleUopNumOHs(i),
+              extChannelOut(i).valid -> NumUopOH.N1,
             )),
           ),
         ),
@@ -263,6 +270,7 @@ class DecodeChannels(
             vecChannelOut(i)(0).valid -> vecChannelOut(i)(0).bits,
             vsetChannelOut(i).valid -> vsetChannelOut(i).bits,
             simChannelOut(i)(0).valid -> simChannelOut(i)(0).bits,
+            extChannelOut(i).valid -> extChannelOut(i).bits,
           ))
         )
       )

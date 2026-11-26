@@ -963,6 +963,11 @@ class CtrlBlockImp(
 
   val criticalErrors = rob.getCriticalErrors
   generateCriticalErrors()
+  io.extRobCommit.foreach { c =>
+    c.isCommit    := rob.out.commits.isCommit
+    c.commitValid := rob.out.commits.commitValid
+    c.robIdx      := rob.out.commits.robIdx
+  }
 }
 
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -1108,6 +1113,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
+  val extRobCommit = Option.when(p(xiangshan.ext.CoreExtPluginsKey).nonEmpty)(
+    Output(new xiangshan.ext.ExtRobCommitIO)
+  )
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

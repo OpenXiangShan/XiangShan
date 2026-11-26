@@ -52,6 +52,8 @@ case class SchdBlockParams(
 
   def FenceCnt: Int = issueBlockParams.map(_.FenceCnt).sum
 
+  def ExtProxyCnt: Int = issueBlockParams.map(_.ExtProxyCnt).sum
+
   def BkuCnt: Int = issueBlockParams.map(_.BkuCnt).sum
 
   def VsetCnt: Int = issueBlockParams.map(_.VsetCnt).sum
@@ -75,6 +77,8 @@ case class SchdBlockParams(
   def hasCSR = CsrCnt > 0
 
   def hasFence = FenceCnt > 0
+
+  def hasExtProxy = ExtProxyCnt > 0
 
   def exuBlockParams =  issueBlockParams.flatMap(_.exuBlockParams)
 

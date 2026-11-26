@@ -24,6 +24,7 @@ object FuType extends ChiselOHEnum {
   val div = addType(name = "div")
   val fence = addType(name = "fence")
   val bku = addType(name = "bku")
+  val extProxy = addType(name = "extProxy")
 
   // fp
   val falu = addType(name = "falu")
@@ -55,7 +56,7 @@ object FuType extends ChiselOHEnum {
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
 
-  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku, extProxy)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -165,7 +166,9 @@ object FuType extends ChiselOHEnum {
 
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
-  def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
+  def isExtProxy(fuType: UInt): Bool = FuTypeOrR(fuType, extProxy)
+
+  def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv, extProxy)
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 

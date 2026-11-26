@@ -105,6 +105,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     memBlock.frontendBridge.icachectrl_node := l2top.inner.icachectrl_port_opt.get
   }
   l2top.inner.d_mmio_port := memBlock.uncache_port
+  p(xiangshan.ext.CoreExtPluginsKey).foreach(_.onTileLazyElaborated(this))
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
@@ -236,6 +237,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (debugOpts.ResetGen && enableL2) {
       core.module.reset := l2top.module.reset_core
     }
+    p(xiangshan.ext.CoreExtPluginsKey).foreach(_.onTileImpElaborated(this))
   }
 
   lazy val module = new XSTileImp(this)

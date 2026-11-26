@@ -118,6 +118,7 @@ case class XSCoreParameters
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
   EnableBackendV2Config: Boolean = false,
+  HasExtExec: Boolean = false,
   EnableDispatchIQBalanceOpt: Boolean = true,
   intPreg: PregParams = IntPregParams(
     numEntries = 224,
@@ -330,7 +331,7 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
+        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg) ++ Option.when(HasExtExec)(ExtProxyCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
         ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(

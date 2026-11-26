@@ -161,6 +161,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
   val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
+  val extExec = OptionWrapper(cfg.isExtProxy, new xiangshan.ext.ExtExecIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))

@@ -34,6 +34,7 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     exu.io.I2FDataIn.foreach(exuio => io.cross.I2FDataIn.get <> exuio)
     exu.io.F2IDataIn.foreach(exuio => io.cross.F2IDataIn.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
+    exu.io.extExec.foreach(exuio => io.extExec.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
     exu.io.vlIsZero.foreach(exuio => io.vlIsZero.get := exuio)
@@ -107,6 +108,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
 
   val fenceio = Option.when(params.hasFence)(new FenceIO)
+  val extExec = Option.when(params.hasExtProxy)(new xiangshan.ext.ExtExecIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
   val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))

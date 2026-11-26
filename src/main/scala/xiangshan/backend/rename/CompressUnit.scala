@@ -134,6 +134,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       FuType.isCsr(x.bits.fuType) ||
       FuType.isFence(x.bits.fuType) ||
       FuType.isAMO(x.bits.fuType) ||
+      FuType.isExtProxy(x.bits.fuType) ||
       isCbo ||
       cannotCompress ||
       slotNeedsFlush
