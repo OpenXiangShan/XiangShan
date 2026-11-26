@@ -296,12 +296,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence_dup(0)
     prefetch.io.csr := csr_dup(0)
-    arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
+    val prefetchIn = arb2.io.in(InArbPrefetchPort)
+    prefetchIn.valid := prefetch.io.out.valid
+    prefetchIn.bits.req_info := prefetch.io.out.bits
+    prefetchIn.bits.isHptwReq := false.B
+    prefetchIn.bits.isLLptw := false.B
+    prefetchIn.bits.hptwId := DontCare
+    prefetch.io.out.ready := prefetchIn.ready
 
     val isWriteL2TlbPrefetchTable = Constantin.createRecord(s"isWriteL2TlbPrefetchTable$hartId")
     val L2TlbPrefetchTable = ChiselDB.createTable(s"L2TlbPrefetch_hart$hartId", new L2TlbPrefetchDB)
     val L2TlbPrefetchDB = Wire(new L2TlbPrefetchDB)
-    L2TlbPrefetchDB.vpn := prefetch.io.out.bits.req_info.vpn
+    L2TlbPrefetchDB.vpn := prefetch.io.out.bits.vpn
     L2TlbPrefetchTable.log(L2TlbPrefetchDB, isWriteL2TlbPrefetchTable.orR && prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
   }
 
