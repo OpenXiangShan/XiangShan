@@ -1,7 +1,7 @@
 package xiangshan.backend.trace
 
 import chisel3._
-import chisel3.util.{RegEnable, ValidIO, log2Up}
+import chisel3.util.RegEnable
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.HasXSParameter
 
@@ -16,7 +16,7 @@ class TraceParams(
 class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = new Bundle {
     val fromEncoder    = Input(new FromEncoder)
-    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited))
+    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, TraceCommitWidth, IretireWidthCommited))
   }
   val out = new Bundle {
     val toPcMem        = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
@@ -40,7 +40,7 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
    */
   val s1_in = fromRob
   val s1_out = WireInit(0.U.asTypeOf(s1_in))
-  for(i <- 0 until CommitWidth) {
+  for(i <- s1_in.blocks.indices) {
     s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, false.B, !blockCommit)
     s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, 0.U.asTypeOf(s1_in.blocks(i).bits), s1_in.blocks(i).valid)
   }
@@ -59,7 +59,9 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
    * stage 3: groups with iaddr from pcMem(ftqidx & ftqOffset -> iaddr) -> encoder
    */
   val s3_in_groups = s2_out_groups
-  val s3_out_groups = RegNext(s3_in_groups)
   toPcMem := s3_in_groups
-  io.out.toEncoder := s3_out_groups
+  toEncoder.blocks.zip(s3_in_groups.blocks).foreach { case (out, in) =>
+    out.valid := RegNext(in.valid, false.B)
+    out.bits := RegEnable(in.bits, in.valid)
+  }
 }

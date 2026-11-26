@@ -923,6 +923,7 @@ trait HasXSParameter {
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
   def IretireWidthEncoded    = ((2 + RenameWidth + 1) * RenameWidth / 2).U.getWidth // 2 + 3 + ... + (RenameWidth + 1)
   def IretireWidthCommited   = (RenameWidth * 2).U.getWidth
+  def TraceCommitWidth       = if (EnableRobCompression) 2 * CommitWidth else CommitWidth
   def IretireWidthCompressed = (RenameWidth * CommitWidth * 2).U.getWidth
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 

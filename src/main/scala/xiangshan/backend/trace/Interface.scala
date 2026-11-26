@@ -21,11 +21,25 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
   val ilastsize = Ilastsize()
 }
 
+class TraceSlotPc(implicit val p: Parameters) extends Bundle with HasXSParameter {
+  val ftqIdx = new FtqPtr
+  val endOffset = UInt(FetchBlockInstOffsetWidth.W)
+}
+
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val iaddr     = if (hasIaddr)   Some(UInt(IaddrWidth.W))                else None
   val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
-  val ftqOffset = if (!hasIaddr)  Some(UInt(FetchBlockInstOffsetWidth.W))      else None
+  // Halfword offset of the first instruction. It can start one halfword before the FTQ entry.
+  val ftqOffset = if (!hasIaddr)  Some(SInt((FetchBlockInstOffsetWidth + 1).W)) else None
   val tracePipe = new TracePipe(iretireWidth)
+
+  def fromSlot(idx: FtqPtr, endOffset: UInt, headIsRVC: Bool, itype: UInt, halfWords: UInt, lastSize: UInt): Unit = {
+    ftqIdx.get := idx
+    ftqOffset.get := endOffset.zext - (!headIsRVC).asUInt.zext
+    tracePipe.itype := itype
+    tracePipe.iretire := halfWords
+    tracePipe.ilastsize := lastSize
+  }
 }
 
 class TraceBundle(hasIaddr: Boolean, blockSize: Int, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
@@ -51,7 +65,7 @@ class TraceCoreInterface(hasOffset: Boolean = false)(implicit val p: Parameters)
     }
     val groups = Vec(TraceGroupNum, ValidIO(new Bundle{
       val iaddr     = UInt(IaddrWidth.W)
-      val ftqOffset = if (hasOffset)  Some(UInt(FetchBlockInstOffsetWidth.W)) else None
+      val ftqOffset = if (hasOffset)  Some(SInt((FetchBlockInstOffsetWidth + 1).W)) else None
       val itype     = UInt(ItypeWidth.W)
       val iretire   = UInt(IretireWidthCompressed.W)
       val ilastsize = UInt(IlastsizeWidth.W)

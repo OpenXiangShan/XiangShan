@@ -303,6 +303,9 @@ object Bundles {
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     val formerTraceIretire = UInt(IretireWidthEncoded.W)
+    val latterTracePc = new TraceSlotPc
+    val latterTraceItype = Itype()
+    val latterTraceIlastsize = Ilastsize()
     // Take snapshot at this CFI inst
     val snapshot = Bool()
     val storeSetHit = Bool() // inst has been allocated an store set
