@@ -115,6 +115,10 @@ class PerfMeta(implicit p: Parameters) extends FtqBundle {
   // no matter how many mispredictions happened before, count correct-path only
   val mispredict:           Bool       = Bool()
   val mispredictBranchInfo: BranchInfo = new BranchInfo()
+
+  // Ifu ended this block somewhere else than the Bpu predicted (e.g. an uncached fetch ends it after one instruction),
+  // so bpuPerf.bpPred no longer describes the block
+  val ifuRedirected: Bool = Bool()
 }
 
 class FtqToPrefetchBundle(implicit p: Parameters) extends FtqBundle {
