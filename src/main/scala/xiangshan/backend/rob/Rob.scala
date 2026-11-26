@@ -136,8 +136,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * ROB Pointers and Allocation
    */
   // Enqueue: consecutive allocation candidates starting at the ROB tail (enqPtr).
-  val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
-  val enqPtr = enqPtrVec(0)
+  val enqPtrVec = enqPtrGenModule.out.ptrVec
+  val enqPtr = enqPtrVec.head
 
   // For each lane, advance the candidate pointer only for earlier valid first uops.
   val allocatePtrVec = VecInit((0 until RenameWidth).map { i =>
@@ -145,12 +145,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
 
   // Dequeue: the current commit candidates start at the ROB head (deqPtr).
-  val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
-  val deqPtr = deqPtrVec.head
-
+  val deqPtrVec = deqPtrGenModule.out.ptrVec
   // Dequeue pointers for the next cycle after the current commit decision.
-  val deqPtrVecNext = Wire(Vec(CommitWidth, Output(new RobPtr)))
-  // Let outside know Rob's current deqPtr
+  val deqPtrVecNext = deqPtrGenModule.out.nextPtrVec
+  val deqPtr = deqPtrVec.head
   out.robDeqPtr := deqPtr
 
   // When enqPtr equal deqPtr, rob is empty.
@@ -559,8 +557,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqVlsCanCommit := RegNext(commitHeadAllWritebackedReg) && rab.in.status.commitEnd
   val deqIsVlsExcp = deqHasExcp && excpUopInfo.isVectorMemory && !excpState.bits.isEnqExcp
   val deqIsVlsFlushPipe = deqHasFlushPipe && excpUopInfo.isVectorMemory
-  val deqCanExcp = deqHasExcp && (!deqIsVlsExcp || deqVlsCanCommit)
-  val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
 
   // lock at assertion of deqVlsExcpNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
@@ -586,7 +582,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   // out.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
+  val deqCanExcp = deqHasExcp && (!deqIsVlsExcp || deqVlsCanCommit)
+  val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
   val lastCycleFlush = RegNext(out.flushOut.valid)
+
   out.flushOut.valid := normalState && commitHeadValid && (intrEnable || deqCanExcp || deqCanFlushPipe) && !lastCycleFlush
   out.flushOut.bits := DontCare
   val flushIsFormer = intrEnable || commitHeadEntry.slotNeedFlush(0)
@@ -723,6 +722,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // FIXME: diffTrapPending is simulation signal but affect after-silicon behavior
   val diffTrapPending = WireDefault(false.B)
 
+  // TODO:  Bad timing: directly read rob entry with walking pointer and use.
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
   val deqValidBankOrder = VecInit(deqEntriesBankOrder.map(_.valid))
   val deqAllWritebackedBankOrder = VecInit(deqEntriesBankOrder.map(_.allWritebacked))
@@ -805,16 +805,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // a stale latter state survive either a whole-entry flush or a redirect that
   // removes only the latter half of the head entry.
   out.lsq.pendingPtr := Mux(resetsPendingSlot, deqPtr.asFormer, pendingPtrReg)
-
   out.lsq.pendingPtrNext := RegNext(deqPtrVecNext.head)
 
   /**
    * Pointer updates and capacity
    */
-  deqPtrVec := deqPtrGenModule.out.ptrVec
-  deqPtrVecNext := deqPtrGenModule.out.nextPtrVec
-
-  enqPtrVec := enqPtrGenModule.out.ptrVec
 
   // next walkPtrVec:
   // (1) redirect occurs: update according to state
@@ -822,6 +817,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapshots = snapshotGen.io.snapshots
   val snapPtrReadBank = snapshots(in.snpt.snptSelect)(0).lineHeadPtr
   val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank.addEntries(i.U).asFormer))
+
   walkPtrVecNext := Mux(in.redirect.valid,
     Mux(in.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
     Mux(walkState && !walkFinished, VecInit(walkPtrVec.map(_.addEntries(CommitWidth.U).asFormer)), walkPtrVec)
@@ -863,11 +859,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
 
-
   /**
    * ROB entry state updates
    */
 
+  // Calculate the range of redirect.
+  // Delay one cycle for better timing
   val redirectValidReg = RegNext(in.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
@@ -903,20 +900,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  /**
-   * Redirect In
-   */
-
   // After a redirect at T, read the walk row at T+1 and use it from T+2.
   val canWalk = walkState && !in.redirect.valid && !redirectValidReg
   out.commits.walkValid := VecInit(walkingPtrVec.zip(donotNeedWalk).map { case (ptr, skip) =>
     canWalk && !skip && ptr.isNotAfterSlot(lastWalkPtr)
   })
-
-  for (i <- 0 until CommitWidth) {
-    XSError(out.commits.walkValid(i) && !walk_v(i),
-      s"The walking entry($i) should be valid\n")
-  }
 
   val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
   val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
@@ -1308,7 +1296,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       commit.bits := robIdx
   }
 
-  // Commit stuck counter
+  // Commit stuck critical error
   val mmioBusy = out.lsq.mmioBusy // lsq know uncache request is rob head
   val commitStuck = (!out.commits.commitValid.reduce(_ || _) || !out.commits.isCommit) &&
     !mmioBusy && (wfiResume.B || !hasWFI)
@@ -1317,9 +1305,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   commitStuckCounter.in.runtimeEnable := in.commitStuckCheckEnable
   commitStuckCounter.in.overflowEnabled := commitStuckOverflowEnabled
 
-  /**
-   * Commit stuck critical error
-   */
   // check if stuck > 2^maxCommitStuckCycle
   val commitStuckOverflow = commitStuckCounter.out.overflow
   val criticalErrors = Seq(
@@ -1331,9 +1316,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Assertion
    */
+
   XSError(enqPtr.isBeforeSlot(deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
   for (i <- 0 until RenameWidth) {
     XSError(enqFirstUopFireVec(i) && in.enq.req(i).bits.replayInst, "enq should not set replayInst")
+  }
+
+  for (i <- 0 until CommitWidth) {
+    XSError(out.commits.walkValid(i) && !walk_v(i),
+      s"The walking entry($i) should be valid\n")
   }
 
   /**
