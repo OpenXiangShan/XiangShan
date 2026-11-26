@@ -207,6 +207,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // In other words, some uops may not allocate a new ROB entry and belong to an existing one.
 
   // Accepted uops: including those that continue an existing entry.
+  // CtrlBlock masks the request valid bits during and immediately after a redirect.
   val enqFireVec = VecInit(in.enq.req.map(req => req.valid && in.enq.canAccept))
   // Allocated uops: only the first uop allocates an entry and supplies its entry metadata.
   val enqFirstUopFireVec = VecInit(in.enq.req.zip(enqFireVec).map { case (req, fire) =>
@@ -232,9 +233,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Only the first uop of a batch will write the rob entry (for most fields).
   val allocatingOHByEntry = (0 until RobSize).map(i => allocatingOHFor(i.U))
   val allocatingByEntry = allocatingOHByEntry.map(_.asUInt.orR)
-  // The uops that belong to the rob entry.
-  // One rob entry may be hit by multiple uops due to rob compression.
-  val enqUopHitsByEntry = (0 until RobSize).map(i => enqUopHitsFor(i.U))
+
+  val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
+  val enqLatterNumWbVec = VecInit(in.enq.req.map(req => req.bits.latterNumWb))
+
+  // TODO: let CompressUnit generate final realDestSize for each entry
+  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
 
   // Share enqueue payload selection using a view sized for the allocation bandwidth.
   val enqBankSelectUops =
@@ -242,14 +246,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // Write the ROB entries
   for (i <- 0 until RobSize) {
+    val enqOH = allocatingOHByEntry(i)
+    val enqUopHitsByEntry = enqUopHitsFor(i.U)
+    val enqUpdatesRealDestSizeByEntry = Mux(robEntries(i).valid, Cat(enqUopHitsByEntry).orR, allocatingByEntry(i))
     // Should not be allocated twice
-    assert(PopCount(allocatingOHByEntry(i)) < 2.U, s"ROB entry $i allocation lanes are not one-hot")
+    assert(PopCount(enqOH) < 2.U, s"ROB entry $i allocation lanes are not one-hot")
 
-    when(allocatingByEntry(i) && !in.redirect.valid) {
+    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(enqUopHitsByEntry).map { case (needWrite, hit) =>
+      needWrite && hit
+    })
+    when(enqUpdatesRealDestSizeByEntry) {
+      robEntries(i).realDestSize := Mux(robEntries(i).valid, robEntries(i).realDestSize + realDestEnqNum, realDestEnqNum)
+    }
+
+    when(allocatingByEntry(i)) {
       robEntries(i).connectEnq(enqBankSelectUops(i))
 
       // uop belong to this rob entry
-      val uopsBelongEntry = enqUopHitsByEntry(i).zip(in.enq.req.map(_.bits))
+      val uopsBelongEntry = enqUopHitsByEntry.zip(in.enq.req.map(_.bits))
       // Select the youngest uop that hits this rob entry to update the traceBlockInPipe fields.
       val lastUop = ParallelPosteriorityMux(uopsBelongEntry)
       robEntries(i).traceBlockInPipe.itype := lastUop.traceBlockInPipe.itype
@@ -772,6 +786,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * LSQ pending slot
    */
+
+  // FIXME: Timing so bad when direct read rob Entries.
   val pendingEntry = robEntries(deqPtr.value)
 
   val pendingBackPtr = Wire(new RobPtr)
@@ -902,18 +918,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
     ) || redirectAll)
-    when(commitCond) {
-      robEntries(i).valid := false.B
-    }.elsewhen(allocatingByEntry(i) && !in.redirect.valid) {
-      robEntries(i).valid := true.B
-    }.elsewhen(needFlush){
+
+    when(commitCond || needFlush) {
       robEntries(i).valid := false.B
     }
   }
-
-  val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
-  val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
-  val enqLatterNumWbVec = VecInit(in.enq.req.map(req => req.bits.latterNumWb))
 
   val redirectFlushesLatterOnly = in.redirect.valid &&
     (in.redirect.bits.robIdx.isFormer =/= in.redirect.bits.flushItself())
@@ -927,25 +936,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       entry.traceBlockInPipe := entry.formerTraceBlockInPipe
     }
 
-    val enqOH = allocatingOHByEntry(i)
-    val uopCanEnqSeq = enqUopHitsByEntry(i)
-    val instCanEnqFlag = allocatingByEntry(i)
-    val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
-    val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
-    val entryPairType = robEntries(i).entryPairType
-    when(isFirstEnq){
-      robEntries(i).realDestSize := realDestEnqNum
-    }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
-      robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
-    }.elsewhen(downgradeToFormer){
-      when(CompressType.isCC(entryPairType) || CompressType.isCS(entryPairType)){
-        robEntries(i).realDestSize := robEntries(i).complexSlotHasDest
-      }.elsewhen(CompressType.isSC(entryPairType)){
-        robEntries(i).realDestSize := robEntries(i).realDestSize - robEntries(i).complexSlotHasDest
+    val entryPairType = entry.entryPairType
+    // CtrlBlock suppresses enqueue during a redirect.
+    when(downgradeToFormer) {
+      when(CompressType.isCC(entryPairType) || CompressType.isCS(entryPairType)) {
+        entry.realDestSize := entry.complexSlotHasDest
+      }.elsewhen(CompressType.isSC(entryPairType)) {
+        entry.realDestSize := entry.realDestSize - entry.complexSlotHasDest
       }
     }
-    val enqFormerNumWb = Mux1H(enqOH, enqFormerNumWbVec)
-    val enqLatterNumWb = Mux1H(enqOH, enqLatterNumWbVec)
+
     val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer))
     val latterWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && !writeback.bits.robIdx.isFormer))
     val slotNeedFlush = robEntries(i).slotNeedFlush
@@ -966,22 +966,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     val redirectClearsLatter = entry.valid && downgradeToFormer
+    // Keep canceled counts at zero if another writeback arrives before redirect.
+    // A flush marked at enqueue can still have writebacks to count.
+    val clearFormerNumWb = needFlushWriteBackFormer || slotNeedFlush(0) && !entry.formerNumWb.orR
+    // An unpaired entry has no latter slot, even if a squashed uop writes back late.
+    val clearLatterNumWb = CompressType.isNORMAL(entryPairType) || redirectClearsLatter ||
+      needFlushWriteBackFormer || needFlushWriteBackLater || slotNeedFlush.orR && !entry.latterNumWb.orR
     when(entry.valid) {
-      // Keep canceled counts at zero if another writeback arrives before redirect.
-      // A flush marked at enqueue can still have writebacks to count.
-      val clearFormerNumWb = needFlushWriteBackFormer || slotNeedFlush(0) && !entry.formerNumWb.orR
-      // An unpaired entry has no latter slot, even if a squashed uop writes back late.
-      val clearLatterNumWb = CompressType.isNORMAL(entryPairType) || redirectClearsLatter ||
-        needFlushWriteBackFormer || needFlushWriteBackLater || slotNeedFlush.orR && !entry.latterNumWb.orR
       assert(clearFormerNumWb || formerWbCnt <= entry.formerNumWb,
         s"ROB entry $i former writeback count underflow")
       assert(clearLatterNumWb || latterWbCnt <= entry.latterNumWb,
         s"ROB entry $i latter writeback count underflow")
+    }
+    // A new allocation initializes both counts in connectEnq.
+    when(!allocatingByEntry(i)) {
       entry.formerNumWb := Mux(clearFormerNumWb, 0.U, entry.formerNumWb - formerWbCnt)
       entry.latterNumWb := Mux(clearLatterNumWb, 0.U, entry.latterNumWb - latterWbCnt)
-    }.elsewhen(instCanEnqFlag) {
-      entry.formerNumWb := enqFormerNumWb
-      entry.latterNumWb := enqLatterNumWb
     }
 
     // Apply writeback to the surviving slot after restoring its trace above.
@@ -1661,7 +1661,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val robEntryDebug = OptionWrapper(backendParams.basicDebugEn, Reg(Vec(RobSize, new RobEntryDebugBundle)))
   robEntryDebug.foreach { entries =>
     for (i <- 0 until RobSize) {
-      when(allocatingByEntry(i) && !in.redirect.valid) {
+      when(allocatingByEntry(i)) {
         entries(i).connectEnq(enqBankSelectUops(i))
       }
       val downgradeToFormer = redirectFlushesLatterOnly && in.redirect.bits.robIdx.value === i.U &&

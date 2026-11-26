@@ -58,20 +58,20 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   def isWritebacked: Bool = !formerNumWb.orR && !latterNumWb.orR
 
   def connectEnq(robEnq: EnqRobUop): Unit = {
+    this.valid := true.B
     this.entryPairType := robEnq.entryPairType
-
+    this.formerNumWb := robEnq.formerNumWb
+    this.latterNumWb := robEnq.latterNumWb
     this.complexSlotHasDest := robEnq.complexSlotHasDest
-
+    this.vls := robEnq.isVectorMemory
+    this.interruptSafe := robEnq.interruptSafe
     this.ftqIdx := robEnq.ftqPtr
     this.ftqOffset := robEnq.ftqOffset
     this.slotHeadRvcMask := robEnq.slotHeadRvcMask
     this.predTaken := robEnq.predTaken
     this.needVTB := robEnq.isVset
-    this.vls := robEnq.isVectorMemory
-    this.interruptSafe := robEnq.interruptSafe
-    this.slotNeedFlush := robEnq.slotNeedFlush
-    // trace
     this.traceBlockInPipe := robEnq.traceBlockInPipe
+    this.slotNeedFlush := robEnq.slotNeedFlush
   }
 }
 
