@@ -384,11 +384,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // misc
     val dcacheError = Output(new L1BusErrorUnitInfo())
     val uncacheError = Output(new L1BusErrorUnitInfo())
-    val memInfo = new Bundle {
-      val sqFull = Output(Bool())
-      val lqFull = Output(Bool())
-      val dcacheMSHRFull = Output(Bool())
-    }
     val debug_ls = new DebugLSIO
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
@@ -1290,10 +1285,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
     x.reset_mtvec.foreach(_ := io.fromTopToBackend.reset_mtvec.get)
   }
-
-  io.memInfo.sqFull := RegNext(lsq.io.sqFull)
-  io.memInfo.lqFull := RegNext(lsq.io.lqFull)
-  io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)

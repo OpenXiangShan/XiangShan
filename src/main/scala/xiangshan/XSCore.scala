@@ -172,13 +172,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
-  backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.io_perf
   backend.io.perf.perfEventsLsu := memBlock.io_perf
   backend.io.perf.perfEventsHc := memBlock.io.inner_hc_perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
-  backend.io.perf.ctrlInfo := DontCare
 
   backend.io.mem.storeDebugInfo <> memBlock.io.mem_to_ooo.storeDebugInfo
 

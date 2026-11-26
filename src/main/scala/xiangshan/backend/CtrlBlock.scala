@@ -899,11 +899,6 @@ class CtrlBlockImp(
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.debugTopDown.toDispatch.robTrueCommit)
   rename.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
 
-  io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.out.robFull)
-  io.perfInfo.ctrlInfo.intdqFull := false.B
-  io.perfInfo.ctrlInfo.fpdqFull := false.B
-  io.perfInfo.ctrlInfo.lsdqFull := false.B
-
   val perfEvents = Seq(decode, rename, dispatch, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
 
@@ -1035,14 +1030,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val traceCoreInterface = new TraceCoreInterface(hasOffset = true)
 
-  val perfInfo = Output(new Bundle{
-    val ctrlInfo = new Bundle {
-      val robFull   = Bool()
-      val intdqFull = Bool()
-      val fpdqFull  = Bool()
-      val lsdqFull  = Bool()
-    }
-  })
   val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())

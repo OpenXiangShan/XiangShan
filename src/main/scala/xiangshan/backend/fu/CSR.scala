@@ -66,17 +66,6 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
   val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent)
   val retiredInstr = UInt(7.W)
-  val ctrlInfo = new Bundle {
-    val robFull   = Bool()
-    val intdqFull = Bool()
-    val fpdqFull  = Bool()
-    val lsdqFull  = Bool()
-  }
-  val memInfo = new Bundle {
-    val sqFull = Bool()
-    val lqFull = Bool()
-    val dcacheMSHRFull = Bool()
-  }
 }
 
 class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {

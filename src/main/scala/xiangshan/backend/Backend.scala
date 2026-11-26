@@ -567,7 +567,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
   csrio.perf <> io.perf
   csrio.perf.retiredInstr := rob2csr.perfinfo.retiredInstr
-  csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   private val fenceio = intRegion.io.fenceio.get
   io.fenceio <> fenceio
 

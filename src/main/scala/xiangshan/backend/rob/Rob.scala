@@ -1094,8 +1094,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     VecInit(walkPtrVecNext.map(_.value))
   )
 
-  out.robFull := !allowEnqueue
-
   /**
    * Submodule input connections
    */
@@ -2525,9 +2523,6 @@ object Rob {
   }
 
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
-    // ROB occupancy.
-    val robFull = Output(Bool())
-
     // ROB commit notifications.
     val commits = Output(new RobCommitIO)
 
