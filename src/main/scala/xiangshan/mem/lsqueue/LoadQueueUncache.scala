@@ -212,6 +212,11 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
     io.ncOut.bits.vaddr := req.vaddr
+    io.ncOut.bits.fullva := req.fullva
+    io.ncOut.bits.vaNeedExt := req.vaNeedExt
+    io.ncOut.bits.isHyper := req.isHyper
+    io.ncOut.bits.gpaddr := req.gpaddr
+    io.ncOut.bits.isForVSnonLeafPTE := req.isForVSnonLeafPTE
     io.ncOut.bits.nc := true.B
     io.ncOut.bits.mask := Mux(req.paddr(3), req.mask(15, 8), req.mask(7, 0))
     io.ncOut.bits.schedIndex := req.schedIndex
