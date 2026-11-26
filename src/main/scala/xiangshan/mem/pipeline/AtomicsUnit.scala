@@ -193,8 +193,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  val backendTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val backendTriggerCanFireVecNext = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   val triggerVa = io.dtlb.resp.bits.triggerVa
+  val atomicTlbHit = state === s_tlb_and_flush_sbuffer_req &&
+    have_sent_first_tlb_req && io.dtlb.resp.fire && !io.dtlb.resp.bits.miss
 
   assert(state === s_invalid ||
     uop.fuOpType(1,0) === "b10".U ||
@@ -224,8 +227,13 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     )
   }
   backendTriggerHitVec := store_hit.zip(load_hit).map { case (sh, lh) => sh || lh }
-  TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVec, backendTriggerHitVec,
+  TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVecNext, backendTriggerHitVec,
     backendTriggerTimingVec, backendTriggerChainVec)
+  // Capture this AMO's trigger result with its terminal TLB response.
+  // The registered result is consumed in s_pm, alongside the PMP response.
+  when (atomicTlbHit) {
+    backendTriggerCanFireVec := backendTriggerCanFireVecNext
+  }
 
   val actionVec = VecInit(tdata.map(_.action))
   val triggerAction = Wire(TriggerAction())
@@ -261,37 +269,30 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
 
-      exceptionVec(breakPoint) := triggerBreakpoint
-      trigger                  := triggerAction
-
       when (!io.dtlb.resp.bits.miss) {
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
-        when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
-          // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
-          // check for miss aligned exceptions, tlb exception are checked next cycle for timing
-          // if there are exceptions, no need to execute it
-          state := s_finish
-          out_valid := true.B
-          atom_override_xtval := true.B
-        }.otherwise {
-          state := s_pm
-        }
+        // Check the registered trigger result next cycle, before any cache request.
+        state := s_pm
       }
     }
   }
 
-  val pbmtReg = RegEnable(io.dtlb.resp.bits.pbmt(0), io.dtlb.resp.fire && !io.dtlb.resp.bits.miss)
+  val pbmtReg = RegEnable(io.dtlb.resp.bits.pbmt(0), atomicTlbHit)
   when (state === s_pm) {
     val pmp = WireInit(io.pmpResp)
     is_mmio := Pbmt.isIO(pbmtReg) || (Pbmt.isPMA(pbmtReg) && pmp.mmio)
 
-    // NOTE: only handle load/store exception here, if other exception happens, don't send here
+    exceptionVec(breakPoint) := triggerBreakpoint
+    trigger := triggerAction
+    val earlyException = exceptionVec(loadAddrMisaligned) || exceptionVec(storeAddrMisaligned) ||
+      triggerDebugMode || triggerBreakpoint
+
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
     val exception_pa_mmio_nc = pmp.mmio || Pbmt.isIO(pbmtReg) || Pbmt.isNC(pbmtReg)
     val exception_pa = pmp.st || pmp.ld || exception_pa_mmio_nc
-    when (exception_va || exception_pa) {
+    when (earlyException || exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
       atom_override_xtval := true.B
@@ -299,11 +300,13 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       // if sbuffer has been flushed, go to query dcache, otherwise wait for sbuffer.
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
-    // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
-      (pmp.ld || exception_pa_mmio_nc) && isLr
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
-      (pmp.ld || exception_pa_mmio_nc) && !isLr
+    // Keep the original early-exit behavior: trigger/misalignment does not add PMP faults.
+    when (!earlyException) {
+      exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
+        (pmp.ld || exception_pa_mmio_nc) && isLr
+      exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
+        (pmp.ld || exception_pa_mmio_nc) && !isLr
+    }
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
