@@ -92,8 +92,8 @@ class RobSlotInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
-  val commit_v = Bool()
-  val commit_w = Bool()
+  val valid = Bool()
+  val allWritebacked = Bool()
   val entryPairType = CompressType()
   val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
   val interruptSafe = Bool()
@@ -121,10 +121,10 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
 
   def connectCommitEntry(
     robEntry: RobEntryBundle,
-    commitW: Bool
+    allWritebacked: Bool
   ): Unit = {
-    this.commit_v := robEntry.valid
-    this.commit_w := commitW
+    this.valid := robEntry.valid
+    this.allWritebacked := allWritebacked
     this.entryPairType := robEntry.entryPairType
     this.realDestSize := robEntry.realDestSize
     this.interruptSafe := robEntry.interruptSafe

@@ -319,7 +319,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqEntriesBankOrder(deqPtrVec(i).value(commitOffsetWidth - 1, 0))
   }
   val commitHeadEntry = commitEntries.head
-  val commitHeadValid = commitHeadEntry.commit_v
+  val commitHeadValid = commitHeadEntry.valid
 
   // When find no snapshot, walk from deqPtr(oldest instruction)
   // Walk will take over deq bank addr and commit is blocked.
@@ -533,18 +533,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqExcpRobIdx = Mux(commitHeadEntry.slotNeedFlush(0), deqPtrFormer, deqPtrLatter)
 
   // Why delay one cycle?
-  val commit_w_delay = RegNext(commitHeadEntry.commit_w)
+  val commitHeadAllWritebackedReg = RegNext(commitHeadEntry.allWritebacked)
   val deqNeedFlush = (
     commitHeadEntry.slotNeedFlush(0) && formerNotFlushed ||
     commitHeadEntry.slotNeedFlush(1) &&
       CompressType.isNotNORMAL(commitHeadEntry.entryPairType) &&
       latterNotFlushed
-  ) && commitHeadEntry.commit_v && commitHeadEntry.commit_w
+  ) && commitHeadEntry.valid && commitHeadEntry.allWritebacked
   val deqNeedFlushAndHitExcpGenState = deqNeedFlush && excpState.valid && excpState.bits.robIdx.isSameSlot(deqExcpRobIdx)
 
   val excpGenStateIsExcp = excpState.bits.excpVec.orR
-  val deqHasExcp = deqNeedFlushAndHitExcpGenState && excpGenStateIsExcp && commit_w_delay
-  val deqHasFlushPipe = deqNeedFlushAndHitExcpGenState && excpState.bits.flushPipe && !deqHasExcp && commit_w_delay
+  val deqHasExcp = deqNeedFlushAndHitExcpGenState && excpGenStateIsExcp && commitHeadAllWritebackedReg
+  val deqHasFlushPipe =
+    deqNeedFlushAndHitExcpGenState && excpState.bits.flushPipe && !deqHasExcp && commitHeadAllWritebackedReg
   val deqHasReplayInst = deqNeedFlushAndHitExcpGenState && excpState.bits.replayInst
 
   /**
@@ -555,7 +556,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // vls exception can be committed only when RAB commit all its reg pairs
   // TODO: when vector is ready, check whether vls excp is needed
   val deqVlsCanCommit = RegInit(false.B)
-  deqVlsCanCommit := RegNext(commit_w_delay) && rab.in.status.commitEnd
+  deqVlsCanCommit := RegNext(commitHeadAllWritebackedReg) && rab.in.status.commitEnd
   val deqIsVlsExcp = deqHasExcp && excpUopInfo.isVectorMemory && !excpState.bits.isEnqExcp
   val deqIsVlsFlushPipe = deqHasFlushPipe && excpUopInfo.isVectorMemory
   val deqCanExcp = deqHasExcp && (!deqIsVlsExcp || deqVlsCanCommit)
@@ -622,7 +623,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     RedirectLevel.flushAfter
   ) // TODO use this to implement "exception next"
 
-  val isFlushPipe = commitHeadEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
+  val isFlushPipe = commitHeadEntry.allWritebacked && (deqHasFlushPipe || deqHasReplayInst)
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && excpState.bits.satpFlush
 
@@ -658,7 +659,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   // vsetvl instruction need another one cycle to write to vtype gen
   // TODO: check whether it still works when vector is ready
-  val isVsetFlushPipe = commitHeadEntry.commit_w && deqHasFlushed && excpState.bits.isVset
+  val isVsetFlushPipe = commitHeadEntry.allWritebacked && deqHasFlushed && excpState.bits.isVset
   out.toDecode.isResumeVType := vtypeBuffer.out.toDecode.isResumeVType || RegNext(isVsetFlushPipe)
 
   /**
@@ -723,11 +724,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val diffTrapPending = WireDefault(false.B)
 
   val walk_v = VecInit(walkingPtrVec.map(ptr => robEntries(ptr.value).valid))
-  val commit_vDeqGroup = VecInit(deqEntriesBankOrder.map(_.commit_v))
-  val commit_wDeqGroup = VecInit(deqEntriesBankOrder.map(_.commit_w))
-  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
+  val deqValidBankOrder = VecInit(deqEntriesBankOrder.map(_.valid))
+  val deqAllWritebackedBankOrder = VecInit(deqEntriesBankOrder.map(_.allWritebacked))
+  val commit_block = VecInit((0 until CommitWidth).map(i => !deqAllWritebackedBankOrder(i) && !hasCommitted(i)))
   val allowOnlyOneCommit = VecInit(deqEntriesBankOrder.map(x =>
-    x.commit_v && (x.slotNeedFlush(0) || x.slotNeedFlush(1) && CompressType.isNotNORMAL(x.entryPairType))
+    x.valid && (x.slotNeedFlush(0) || x.slotNeedFlush(1) && CompressType.isNotNORMAL(x.entryPairType))
   )).asUInt.orR || intrBitSetReg || diffTrapPending
 
   // for instructions that may block others, we don't allow them to commit
@@ -746,7 +747,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
     val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
-    commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
+    commitValidThisLine(i) :=
+      deqValidBankOrder(i) && deqAllWritebackedBankOrder(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
 
     val entry = commitEntries(i)
     out.commits.info(i) := entry
@@ -1087,7 +1089,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       deqBankRdataUpdate(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
-  deqBanking.updateDeqEntries(deqEntriesBankOrder, deqBankRdataUpdate, rdataUpdateValid, allCommitted)
+  deqBanking.updateDeqEntries(
+    deqEntries = deqEntriesBankOrder,
+    entries = deqBankRdataUpdate,
+    allWritebacked = rdataUpdateValid,
+    selectNextRow = allCommitted
+  )
 
   val commitReadAddrNext = Mux(stateNext === s_idle,
     VecInit(deqPtrVecNext.map(_.value)),
@@ -1106,8 +1113,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // Dequeue pointer generator
   deqPtrGenModule.in.state := state
-  deqPtrGenModule.in.deq_v := commit_vDeqGroup
-  deqPtrGenModule.in.deq_w := commit_wDeqGroup
+  deqPtrGenModule.in.deq_v := deqValidBankOrder
+  deqPtrGenModule.in.deq_w := deqAllWritebackedBankOrder
   deqPtrGenModule.in.excp_state := excpState
   deqPtrGenModule.in.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.in.hasNoSpecExec := hasWaitForward
@@ -1536,10 +1543,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       0.U
     )
     formerLenCommit(i) := traceHalfWordsToBytes(formerHalfWordsCommit(i))
-    when(commitEntries(i).commit_v && CompressType.isNotNORMAL(commitEntries(i).entryPairType)) {
+    when(commitEntries(i).valid && CompressType.isNotNORMAL(commitEntries(i).entryPairType)) {
       assert(instrSizeCommit(i) >= formerInstrCntCommit(i))
     }
-    when(commitEntries(i).commit_v && CompressType.isNORMAL(commitEntries(i).entryPairType)) {
+    when(commitEntries(i).valid && CompressType.isNORMAL(commitEntries(i).entryPairType)) {
       assert(latterInstrCntCommit(i) === 0.U)
     }
   }
@@ -1731,7 +1738,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // The dequeue row caches readiness, so read the counts from the ROB entry.
   val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
   when(noCommitCycleCnt === 14999.U) {
-    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${commitHeadEntry.commit_v} " +
+    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${commitHeadEntry.valid} " +
       p"realDest=${commitHeadEntry.realDestSize} " +
       p"ctype=${Binary(commitHeadEntry.entryPairType)} slotNeedFlush=${Binary(commitHeadEntry.slotNeedFlush)} " +
       p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
@@ -2419,8 +2426,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(deqBankRdataUpdate)
     val excpWBsVec = MixedVecInit(excpWBs)
     dontTouch(excpWBsVec)
-    dontTouch(commit_wDeqGroup)
-    dontTouch(commit_vDeqGroup)
+    dontTouch(deqAllWritebackedBankOrder)
+    dontTouch(deqValidBankOrder)
     dontTouch(commitSizeSumSeq)
     dontTouch(walkSizeSumSeq)
     dontTouch(commitSizeSumCond)

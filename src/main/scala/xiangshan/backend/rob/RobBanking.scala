@@ -130,16 +130,16 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
   def updateDeqEntries(
     deqEntries: Vec[RobCommitEntryBundle],
     entries: Vec[RobEntryBundle],
-    commitW: Vec[Bool],
+    allWritebacked: Vec[Bool],
     selectNextRow: Bool
   ): Unit = {
     require(deqEntries.length == bankNum)
-    require(entries.length == 2 * bankNum && commitW.length == entries.length)
+    require(entries.length == 2 * bankNum && allWritebacked.length == entries.length)
     for (bank <- 0 until bankNum) {
       val nextRowIndex = bank + bankNum
-      deqEntries(bank).connectCommitEntry(entries(bank), commitW(bank))
+      deqEntries(bank).connectCommitEntry(entries(bank), allWritebacked(bank))
       when(selectNextRow) {
-        deqEntries(bank).connectCommitEntry(entries(nextRowIndex), commitW(nextRowIndex))
+        deqEntries(bank).connectCommitEntry(entries(nextRowIndex), allWritebacked(nextRowIndex))
       }
     }
   }
