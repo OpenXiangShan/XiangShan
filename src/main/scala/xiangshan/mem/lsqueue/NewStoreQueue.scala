@@ -1314,8 +1314,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     io.writeToSbuffer    <> dataQueue.io.toSbuffer
-    // Keep the second-page forwarding guard until the matching Store actually leaves the SQ.
-    io.fromUnalignQueue.ready := headDeqPtr === io.fromUnalignQueue.bits.sqIdx && io.sqDeqCnt.orR
+    // The UnalignQueue entry is read here when its store is written toward the Sbuffer; the entry itself stays
+    // allocated (for forwarding) until the store leaves the SQ, see UnalignQueue.
+    io.fromUnalignQueue.ready := headCrossPage && writeSbufferWire.head.fire
 
     /*============================================ deqPtr generate ===================================================*/
     /*
@@ -1504,6 +1505,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
+        val deqPtr       = Input(new SqPtr)
+        val deq          = Input(Bool())
       }
       val toDeqModule = DecoupledIO(new Bundle {
         val paddr        = UInt(PAddrBits.W)
@@ -1519,11 +1522,17 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     private val allocated  = RegInit(VecInit(Seq.fill(queueSize)(false.B)))
     private val enqPtr     = RegInit(0.U.asTypeOf(new UqPtr))
     private val deqPtr     = RegInit(0.U.asTypeOf(new UqPtr))
+    // rdataPtr: the next entry DeqModule reads, moves when DeqModule writes that store toward the Sbuffer.
+    // deqPtr: the oldest entry, released when its store leaves the SQ, so forwarding still sees the second page.
+    private val rdataPtr   = RegInit(0.U.asTypeOf(new UqPtr))
     private val needCancel = WireInit(VecInit(Seq.fill(queueSize)(false.B)))
 
     private val headEntry  = entries(deqPtr.value)
+    private val rdataEntry = entries(rdataPtr.value)
 
     private val empty      = enqPtr.value === deqPtr.value && enqPtr.flag === deqPtr.flag
+    private val rdataEmpty = enqPtr.value === rdataPtr.value && enqPtr.flag === rdataPtr.flag
+    private val release    = !empty && headEntry.sqIdx === io.fromSQ.deqPtr && io.fromSQ.deq
     private val full       = enqPtr.value === deqPtr.value && enqPtr.flag =/= deqPtr.flag
 
     // enq
@@ -1542,7 +1551,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     (0 until queueSize).map{i =>
-      val deqCancel = i.U === deqPtr.value && io.toDeqModule.fire
+      val deqCancel = i.U === deqPtr.value && release
       when(needCancel(i) || deqCancel) { // when redirect, unalignQueue not allow enqueue.
         allocated(i) := false.B
       }.elsewhen((i.U === enqPtr.value) && doEnq){
@@ -1565,15 +1574,18 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       }
     }
 
-    when(io.toDeqModule.fire) {
+    when(release) {
       deqPtr := deqPtr + 1.U
+    }
+    when(io.toDeqModule.fire) {
+      rdataPtr := rdataPtr + 1.U
     }
     // When enqPtr.flag = 1, enqPtr.value = 0, deqPtr.flag=0, deqPtr.value = 0, the API '<'  fails to function correctly.
     XSError(enqPtr < deqPtr && !full, s"Something wrong in UnalignQueue!\n")
     // connection
-    io.toDeqModule.bits.paddr := headEntry.paddr
-    io.toDeqModule.bits.sqIdx := headEntry.sqIdx
-    io.toDeqModule.valid      := !empty
+    io.toDeqModule.bits.paddr := rdataEntry.paddr
+    io.toDeqModule.bits.sqIdx := rdataEntry.sqIdx
+    io.toDeqModule.valid      := !rdataEmpty
     io.forwardEntries.zip(entries).foreach { case (sink, source) =>
       sink.paddr := source.paddr
       sink.sqIdx := source.sqIdx
@@ -1693,6 +1705,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   // unalignQueue connection
   unalignQueue.io.redirect            := io.fromVirtualStoreQueue.redirectPtr
   unalignQueue.io.fromSQ.addrReadyPtr := addrReadyPtr
+  unalignQueue.io.fromSQ.deqPtr       := deqPtrExt.head
+  unalignQueue.io.fromSQ.deq          := sqDeqCnt.orR
   unalignQueue.io.fromStaS1.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
     sink <> source
   }
