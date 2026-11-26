@@ -187,6 +187,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
 
+  // The delayed redirect clears younger entries and masks the first walk read cycle.
+  val redirectValidReg = RegNext(in.redirect.valid)
+
   /**
    * Enqueue (from dispatch)
    */
@@ -736,12 +739,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     (deqNeedFlush && !deqHasFlushed) || deqFlushBlock ||
     in.csr.criticalErrorState || out.trace.blockCommit
 
-  out.commits.isWalk := walkState
+  // Commit state
   out.commits.isCommit := normalState && !blockCommit
   out.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i =>
     (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(out.commits.commitValid))
   )
 
+  // Walk state
+  // After a redirect at T, read the walk row at T+1 and use it from T+2.
+  val canWalk = walkState && !in.redirect.valid && !redirectValidReg
+  out.commits.isWalk := walkState
+  out.commits.walkValid := VecInit(walkingPtrVec.zip(donotNeedWalk).map { case (ptr, skip) =>
+    canWalk && !skip && ptr.isNotAfterSlot(lastWalkPtr)
+  })
+
+  // Per-entry commit eligibility and metadata.
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
@@ -865,7 +877,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // Calculate the range of redirect.
   // Delay one cycle for better timing
-  val redirectValidReg = RegNext(in.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
   val redirectAll = RegInit(false.B)
@@ -899,12 +910,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       robEntries(i).valid := false.B
     }
   }
-
-  // After a redirect at T, read the walk row at T+1 and use it from T+2.
-  val canWalk = walkState && !in.redirect.valid && !redirectValidReg
-  out.commits.walkValid := VecInit(walkingPtrVec.zip(donotNeedWalk).map { case (ptr, skip) =>
-    canWalk && !skip && ptr.isNotAfterSlot(lastWalkPtr)
-  })
 
   val enqNeedWriteRFSeq = in.enq.req.map(_.bits.needEnqRab)
   val enqFormerNumWbVec = VecInit(in.enq.req.map(req => req.bits.formerNumWb))
