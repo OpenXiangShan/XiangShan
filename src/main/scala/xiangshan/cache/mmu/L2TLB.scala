@@ -56,25 +56,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val ptwData = Output(Vec(4, UInt(64.W)))
   })
 
-  /* Ptw processes multiple requests
-   * Divide Ptw procedure into two stages: cache access ; mem access if cache miss
-   *           miss queue itlb       dtlb
-   *               |       |         |
-   *               ------arbiter------
-   *                            |
-   *                    l1 - l2 - l3 - sp
-   *                            |
-   *          -------------------------------------------
-   *    miss  |  queue                                  | hit
-   *    [][][][][][]                                    |
-   *          |                                         |
-   *    state machine accessing mem                     |
-   *          |                                         |
-   *          ---------------arbiter---------------------
-   *                 |                    |
-   *                itlb                 dtlb
-   */
-
+  // MSHR owns requests while the existing Cache and walkers execute them
   difftestIO <> DontCare
 
   val sfence_tmp = DelayN(io.sfence, 1)
@@ -141,15 +123,24 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mptc.get.io.pmp.resp <> pmp_check(4).resp
     mptc.get.io.sfence <> sfence_dup(3)
   }
-  val missQueue = Module(new L2TlbMissQueue)
+  val mshr = Module(new PtwMshr)
   val cache = Module(new PtwCache)
   val ptw = Module(new PTW)
   val hptw = Module(new HPTW)
   val llptw = Module(new LLPTW)
-  val blockmq = Module(new BlockHelper(3))
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
-  val arb2 = Module(new Arbiter(new L2TlbWithHptwIdBundle, ((if (l2tlbParams.enablePrefetch) 4 else 3) + (if (HasHExtension) 1 else 0))))
-
+  val requestArb = Option.when(l2tlbParams.enablePrefetch)(
+    Module(new Arbiter(new L2TlbInnerBundle, 2))
+  )
+  requestArb.foreach(arb => mshr.io.req <> arb.io.out)
+  val demandIn = requestArb.map(_.io.in(0)).getOrElse(mshr.io.req)
+  mshr.io.csr := csr_dup(0)
+  mshr.io.sfence := sfence_dup(0)
+  val ptwOwner = RegEnable(cache.io.resp.bits.mshrID.bits, ptw.io.req.fire)
+  val llptwOwners = Reg(Vec(l2tlbParams.llptwsize, UInt(log2Up(MissQueueSize).W)))
+  when (llptw.io.in.fire && !llptw.io.inPrefetchDrop) {
+    llptwOwners(llptw.io.mem.enq_ptr) := cache.io.resp.bits.mshrID.bits
+  }
   val mpt_arb = Option.when (HasMptCheck) (Module(new Arbiter(new MptReqBundle, 4+PtwWidth)))
   val mptOnlyPort = 5
   // req directly from l1tlb. in this situation, adress translation is disabled and the reqVPN is the actuall PA waiting to be mpt checked.
@@ -210,24 +201,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.source := llptw.io.hptw.req.bits.source
   llptw.io.hptw.req.ready := hptw_req_arb.io.in(InHptwArbLLPTWPort).ready
 
-  // arb2 input port
-  val InArbHPTWPort = 0
-  val InArbPTWPort = 1
-  val InArbMissQueuePort = 2
-  val InArbTlbPort = 3
-  val InArbPrefetchPort = 4
-  // NOTE: when cache out but miss and ptw doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
-
+  val requestMptOnly = if (HasMptCheck) arb1.io.out.bits.mptOnly.get && mptEn.get else false.B
   val tlbCounter = RegInit(0.U(log2Ceil(MissQueueSize + 1).W))
   val reqVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
   val respVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
-  val arb1MptOnly = if (HasMptCheck) {
-    arb1.io.out.bits.mptOnly.get && mptEn.get
-  } else {
-    false.B
-  }
-
   for (i <- 0 until PtwWidth) {
     when (io.tlb(i).req(0).fire) {
       reqVec(i) := true.B
@@ -244,65 +222,60 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
 
+  demandIn.valid := arb1.io.out.valid && !requestMptOnly && tlbCounter < MissQueueSize.U && !flush
+  demandIn.bits.vpn := arb1.io.out.bits.vpn
+  demandIn.bits.s2xlate := arb1.io.out.bits.s2xlate
+  demandIn.bits.source := arb1.io.chosen
+  demandIn.bits.mptOnly.foreach(_ := false.B)
+  val demandReady = if (HasMptCheck) {
+    Mux(requestMptOnly, mpt_arb.get.io.in(mptOnlyPort).ready, demandIn.ready)
+  } else demandIn.ready
+  arb1.io.out.ready := tlbCounter < MissQueueSize.U && demandReady && !flush
+
   if (HasMptCheck) { // assign arb1 out to mptc for mptOnly mode check
     mpt_arb.get.io.in(mptOnlyPort).bits.id := arb1.io.chosen // b101 + bx //tlb id to mptc id
     mpt_arb.get.io.in(mptOnlyPort).bits.mptOnly := true.B // used for l2tlb return control logic
     mpt_arb.get.io.in(mptOnlyPort).bits.reqPA := arb1.io.out.bits.vpn // for mpt only vpn is ppn
-    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && arb1MptOnly // valid when mptOnly and
+    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && requestMptOnly // valid when mptOnly and
     // s2xlate is dont care, it has nothing to do with mpt
   }
 
-  arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
-  arb2.io.in(InArbPTWPort).bits.req_info := ptw.io.llptw.bits.req_info
-  arb2.io.in(InArbPTWPort).bits.isHptwReq := false.B
-  arb2.io.in(InArbPTWPort).bits.isLLptw := false.B
-  arb2.io.in(InArbPTWPort).bits.hptwId := DontCare
-  ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
-  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready))
+  // Internal HPTW lookups do not allocate another translation request
+  val cacheArb = Module(new Arbiter(new PtwCacheReq, 2))
+  val hptwLookup = cacheArb.io.in(0)
+  hptwLookup.bits := 0.U.asTypeOf(hptwLookup.bits)
+  hptwLookup.valid := hptw_req_arb.io.out.valid && !flush
+  hptwLookup.bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
+  hptwLookup.bits.req_info.s2xlate := onlyStage2
+  hptwLookup.bits.req_info.source := hptw_req_arb.io.out.bits.source
+  hptwLookup.bits.isHptwReq := true.B
+  hptwLookup.bits.hptwId := hptw_req_arb.io.out.bits.id
+  hptw_req_arb.io.out.ready := hptwLookup.ready && !flush
+  val tableLookup = cacheArb.io.in(1)
+  tableLookup.bits := 0.U.asTypeOf(tableLookup.bits)
+  tableLookup.valid := mshr.io.lookup.valid && !flush
+  tableLookup.bits.req_info := mshr.io.lookup.bits
+  tableLookup.bits.mshrID.valid := true.B
+  tableLookup.bits.mshrID.bits := mshr.io.lookupMshrID
+  tableLookup.bits.isFirst := mshr.io.lookupFirst
+  mshr.io.lookup.ready := tableLookup.ready && !flush
+  cacheArb.io.out.ready := cache.io.req.ready && !flush
+  cache.io.req.valid := cacheArb.io.out.fire
+  cache.io.req.bits := cacheArb.io.out.bits
+  val cacheResp = cache.io.resp
 
-  arb2.io.in(InArbTlbPort).valid := arb1.io.out.fire && !arb1MptOnly
-  // not mpt only req will go to l2tlb,mptOnly goes to mptc directly
-  arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
-  arb2.io.in(InArbTlbPort).bits.req_info.s2xlate := arb1.io.out.bits.s2xlate
-  arb2.io.in(InArbTlbPort).bits.req_info.source := arb1.io.chosen
-  arb2.io.in(InArbTlbPort).bits.isHptwReq := false.B
-  arb2.io.in(InArbTlbPort).bits.isLLptw := false.B
-  arb2.io.in(InArbTlbPort).bits.hptwId := DontCare
-  // 1. arb1 and arb2 are both comb logic, so ready can work just the same cycle
-  // 2. arb1 can send one req at most in a cycle, so do not need to write
-  //    "tlbCounter <= (MissQueueSize - 2).U"
-  val arb1TargetReady = if (HasMptCheck) {
-    Mux(arb1MptOnly, mpt_arb.get.io.in(mptOnlyPort).ready, arb2.io.in(InArbTlbPort).ready)
-  } else {
-    arb2.io.in(InArbTlbPort).ready
-  }
-  arb1.io.out.ready := tlbCounter < MissQueueSize.U && arb1TargetReady
-  arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
-  arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
-  arb2.io.in(InArbHPTWPort).bits.req_info.s2xlate := onlyStage2
-  arb2.io.in(InArbHPTWPort).bits.req_info.source := hptw_req_arb.io.out.bits.source
-  arb2.io.in(InArbHPTWPort).bits.isHptwReq := true.B
-  arb2.io.in(InArbHPTWPort).bits.isLLptw := false.B
-  arb2.io.in(InArbHPTWPort).bits.hptwId := hptw_req_arb.io.out.bits.id
-  hptw_req_arb.io.out.ready := arb2.io.in(InArbHPTWPort).ready
   val hartId = p(XSCoreParamsKey).HartId
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
-    val recv = cache.io.resp
-    // NOTE: 1. prefetch doesn't gen prefetch 2. req from mq doesn't gen prefetch
-    // NOTE: 1. miss req gen prefetch 2. hit but prefetched gen prefetch
-    prefetch.io.in.valid := recv.fire && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit  ||
+    val recv = cacheResp
+    // Generate from a first demand miss or a hit on a prefetched entry
+    val prefetchTrigger = recv.fire && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit ||
       recv.bits.prefetch) && recv.bits.isFirst
+    prefetch.io.in.valid := prefetchTrigger
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence_dup(0)
     prefetch.io.csr := csr_dup(0)
-    val prefetchIn = arb2.io.in(InArbPrefetchPort)
-    prefetchIn.valid := prefetch.io.out.valid
-    prefetchIn.bits.req_info := prefetch.io.out.bits
-    prefetchIn.bits.isHptwReq := false.B
-    prefetchIn.bits.isLLptw := false.B
-    prefetchIn.bits.hptwId := DontCare
-    prefetch.io.out.ready := prefetchIn.ready
+    requestArb.get.io.in(1) <> prefetch.io.out
 
     val isWriteL2TlbPrefetchTable = Constantin.createRecord(s"isWriteL2TlbPrefetchTable$hartId")
     val L2TlbPrefetchTable = ChiselDB.createTable(s"L2TlbPrefetch_hart$hartId", new L2TlbPrefetchDB)
@@ -311,51 +284,39 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     L2TlbPrefetchTable.log(L2TlbPrefetchDB, isWriteL2TlbPrefetchTable.orR && prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
   }
 
-  if (HasMptCheck) {
-    for (i <- 0 until ((if (l2tlbParams.enablePrefetch) 4 else 3) + (if (HasHExtension) 1 else 0))) {
-      arb2.io.in(i).bits.req_info.mptOnly.get := DontCare // assign dont care to mpt port, it is not used. but arb2 uses L1TLB req as type, so...
-    }
-  }
-  arb2.io.out.ready := cache.io.req.ready
+  val toFsm = cacheResp.bits.toFsm
+  val bitmapToLLPTW = toFsm.bitmapCheck.map(b => b.jmp_bitmap_check && b.toLLPTW).getOrElse(false.B)
+  val bitmapToPTW = toFsm.bitmapCheck.map(b => b.jmp_bitmap_check && !b.toLLPTW).getOrElse(false.B)
+  val cacheToLLPTW = bitmapToLLPTW || (toFsm.l1Hit && !bitmapToPTW)
+  val cachePrefetch = from_pre(cacheResp.bits.req_info.source)
+  val cacheNeeded = mshr.io.needed(cacheResp.bits.mshrID.bits)
+  val canDispatch = cacheResp.valid && cacheResp.bits.mshrID.valid && cacheNeeded &&
+    !cacheResp.bits.hit && !cacheResp.bits.bypassed && !flush
 
-  // Instructs jmp_bitmap_check requests from cache need go to LLPTW/PTW for processing
-  val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
-  val toFsm_toPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && !cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
+  mshr.io.ptwReady := ptw.io.req.ready
+  mshr.io.llptwReady := llptw.io.in.ready
+  mshr.io.feedback.valid := cacheResp.fire && cacheResp.bits.mshrID.valid
+  mshr.io.feedback.bits.mshrID := cacheResp.bits.mshrID.bits
+  mshr.io.feedback.bits.retry := cacheNeeded && !cacheResp.bits.hit && !cachePrefetch &&
+    !ptw.io.req.fire && !llptw.io.in.fire
+  mshr.io.feedback.bits.isLLptw := cacheToLLPTW
+  val prefetchContinues = llptw.io.in.fire && !llptw.io.inPrefetchDrop
+  mshr.io.feedback.bits.done := !cacheNeeded || cacheResp.bits.hit || (cachePrefetch && !prefetchContinues)
 
-  val mq_arb = Module(new Arbiter(new L2TlbWithHptwIdBundle, 2))
-  mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptwReq && // hptw reqs are not sent to missqueue
-    (cache.io.resp.bits.bypassed || (
-      ((((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || toFsm_toPTW) || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
-      || (((cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW) || toFsm_toLLPTW) && !llptw.io.in.ready) // send to llptw, llptw is full
-    ))
+  ptw.io.llptw.ready := !flush
+  llptw.io.cache.ready := !flush
+  mshr.io.resume(0).valid := ptw.io.llptw.fire
+  mshr.io.resume(0).bits.mshrID := ptwOwner
+  mshr.io.resume(0).bits.isLLptw := true.B
+  mshr.io.resume(1).valid := llptw.io.cache.fire
+  mshr.io.resume(1).bits.mshrID := llptwOwners(llptw.io.cacheId)
+  mshr.io.resume(1).bits.isLLptw := false.B
+  mshr.io.complete(0).valid := ptw.io.resp.fire
+  mshr.io.complete(0).bits := ptwOwner
+  mshr.io.complete(1).valid := llptw.io.out.fire
+  mshr.io.complete(1).bits := llptwOwners(llptw.io.out.bits.id)
 
-  mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
-  mq_arb.io.in(0).bits.isHptwReq := false.B
-  mq_arb.io.in(0).bits.hptwId :=  DontCare
-  mq_arb.io.in(0).bits.isLLptw := (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW) || toFsm_toLLPTW
-  mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
-  mq_arb.io.in(1).bits.isHptwReq := false.B
-  mq_arb.io.in(1).bits.hptwId := DontCare
-  mq_arb.io.in(1).bits.isLLptw := false.B
-  mq_arb.io.in(1).valid := llptw.io.cache.valid
-  llptw.io.cache.ready := mq_arb.io.in(1).ready
-  missQueue.io.in <> mq_arb.io.out
-  missQueue.io.sfence  := sfence_dup(6)
-  missQueue.io.csr := csr_dup(5)
-  if (HasMptCheck) {
-    mq_arb.io.in(0).bits.req_info.mptOnly.get := DontCare
-    mq_arb.io.in(1).bits.req_info.mptOnly.get := DontCare
-  }
-
-  blockmq.io.start := missQueue.io.out.fire
-  blockmq.io.enable := ptw.io.req.fire
-
-  llptw.io.in.valid := cache.io.resp.valid &&
-    !cache.io.resp.bits.hit &&
-    (toFsm_toLLPTW || (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW)) &&
-    !cache.io.resp.bits.bypassed &&
-    !cache.io.resp.bits.isHptwReq
+  llptw.io.in.valid := canDispatch && cacheToLLPTW
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
   if (HasMptCheck) {
     llptw.io.in.bits.req_info.mptOnly.get := DontCare
@@ -385,34 +346,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     llptw.io.mptCheck.get.resp.valid := mptc.get.io.resp.valid && from_llptw(mptc.get.io.resp.bits.id) && (!mptc.get.io.resp.bits.mptOnly)
   }
 
-  cache.io.req.valid := arb2.io.out.fire
-  cache.io.req.bits.req_info := arb2.io.out.bits.req_info
-  cache.io.req.bits.mshrID.valid := false.B
-  cache.io.req.bits.mshrID.bits := 0.U
-  if (HasMptCheck) {
-    cache.io.req.bits.req_info.mptOnly.get := DontCare // mptonly is neverused in cache,actually, its never used anywhere in l2tlb except the output sel
-  }
-  cache.io.req.bits.isFirst := (arb2.io.chosen =/= InArbMissQueuePort.U && !arb2.io.out.bits.isHptwReq)
-  cache.io.req.bits.isHptwReq := arb2.io.out.bits.isHptwReq
-  cache.io.req.bits.hptwId := arb2.io.out.bits.hptwId
-  cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence_dup(2)
   cache.io.csr := csr_dup(2)
   cache.io.sfence_dup.zip(sfence_dup.drop(2).take(4)).map(s => s._1 := s._2)
   cache.io.csr_dup.zip(csr_dup.drop(2).take(3)).map(c => c._1 := c._2)
-  cache.io.resp.ready := MuxCase(mq_arb.io.in(0).ready || ptw.io.req.ready, Seq(
-    (!cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw.io.req.ready,
-    (cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw_resp_arb.io.in(HptwRespArbCachePort).ready,
-    cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    ((toFsm_toLLPTW || (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW)) && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
-    (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) -> mq_arb.io.in(0).ready
-  ))
+  cacheResp.ready := !flush && Mux(cacheResp.bits.isHptwReq,
+    Mux(cacheResp.bits.hit, hptw_resp_arb.io.in(HptwRespArbCachePort).ready, hptw.io.req.ready),
+    !cacheResp.bits.hit || outReady(cacheResp.bits.req_info.source, outArbCachePort))
 
-  // NOTE: missQueue req has higher priority
-  ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && ((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || toFsm_toPTW) &&
-    !cache.io.resp.bits.bypassed &&
-    !cache.io.resp.bits.isFirst &&
-    !cache.io.resp.bits.isHptwReq
+  ptw.io.req.valid := canDispatch && !cacheToLLPTW && !cacheResp.bits.isFirst && !cachePrefetch
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
 
   if (HasMptCheck) {
@@ -874,6 +816,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     case (resp, out) => resp <> out
   }
 
+  for (source <- 0 until PtwWidth) {
+    mshr.io.retire(source).valid := io.tlb(source).resp.fire
+    mshr.io.retire(source).bits := io.tlb(source).resp.bits
+  }
+
   // sfence
   when (flush) {
     for (i <- 0 until MemReqWidth) {
@@ -1048,7 +995,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     XSPerfAccumulate(s"llptw_resp_count${i}", mergeArb(i).in(outArbMqPort).fire)
     XSPerfAccumulate(s"resp_fault_count${i}", io.tlb(i).resp.fire && (io.tlb(i).resp.bits.s1.pf || io.tlb(i).resp.bits.s1.af || io.tlb(i).resp.bits.s2.gpf || io.tlb(i).resp.bits.s2.gaf))
   }
-  XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
+  XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && !mshr.io.req.ready)
   XSPerfAccumulate("req_outstanding_cycle", tlbCounter)
   XSPerfAccumulate("req_full_cycle", tlbCounter === MissQueueSize.U)
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
@@ -1110,10 +1057,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val isWriteL2TlbMissQueueTable = Constantin.createRecord(s"isWriteL2TlbMissQueueTable$hartId")
   val L2TlbMissQueueTable = ChiselDB.createTable(s"L2TlbMissQueue_hart$hartId", new L2TlbMissQueueDB)
   val L2TlbMissQueueInDB, L2TlbMissQueueOutDB = Wire(new L2TlbMissQueueDB)
-  L2TlbMissQueueInDB.vpn := missQueue.io.in.bits.req_info.vpn
-  L2TlbMissQueueOutDB.vpn := missQueue.io.out.bits.req_info.vpn
-  L2TlbMissQueueTable.log(L2TlbMissQueueInDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.in.fire, "L2TlbMissQueueIn", clock, reset)
-  L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.out.fire, "L2TlbMissQueueOut", clock, reset)
+  L2TlbMissQueueInDB.vpn := mshr.io.req.bits.vpn
+  L2TlbMissQueueOutDB.vpn := mshr.io.lookup.bits.vpn
+  L2TlbMissQueueTable.log(L2TlbMissQueueInDB, isWriteL2TlbMissQueueTable.orR && mshr.io.req.fire, "L2TlbMissQueueIn", clock, reset)
+  L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, isWriteL2TlbMissQueueTable.orR && mshr.io.lookup.fire, "L2TlbMissQueueOut", clock, reset)
 }
 
 /** BlockHelper, block missqueue, not to send too many req to cache
