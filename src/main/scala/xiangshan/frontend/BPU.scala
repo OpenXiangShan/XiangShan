@@ -179,7 +179,7 @@ class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst 
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
-    with HasBPUConst with BPUUtils with HasPerfEvents {
+    with HasBPUConst with BPUUtils with HasPerfEventInfos {
   val meta_size      = 0
   val spec_meta_size = 0
   val is_fast_pred   = false
@@ -230,7 +230,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.out.s2.pc := s2_pc_dup.zip(s2_pc_guard_dup).map { case (pc, guard) => Cat(guard, pc.getAddr()) }
   io.out.s3.pc := s3_pc_dup.zip(s3_pc_guard_dup).map { case (pc, guard) => Cat(guard, pc.getAddr()) }
 
-  val perfEvents: Seq[(String, UInt)] = Seq()
+  val perfEvents: Seq[PerfEventInfo] = Seq()
 
   def getFoldedHistoryInfo: Option[Set[FoldedHistoryInfo]] = None
 }
@@ -253,7 +253,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val target_use_sign_ext = Input(Bool())
 }
 
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
+class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEventInfos
     with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
 
@@ -1255,6 +1255,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSPerfAccumulate("s3_redirect", s3_redirect_dup(0))
   XSPerfAccumulate("s1_not_valid", !s1_valid_dup(0))
 
-  val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
+  val perfEvents = predictors.asInstanceOf[Composer].getPerfEventInfos
   generatePerfEvent()
 }

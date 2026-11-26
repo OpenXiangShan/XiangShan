@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.{XSDebug, XSPerfAccumulate}
 import xiangshan.L1CacheErrorInfo
 
 class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
