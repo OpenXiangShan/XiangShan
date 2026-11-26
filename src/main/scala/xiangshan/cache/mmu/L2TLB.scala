@@ -381,6 +381,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   cache.io.req.valid := arb2.io.out.fire
   cache.io.req.bits.req_info := arb2.io.out.bits.req_info
+  cache.io.req.bits.mshrID.valid := false.B
+  cache.io.req.bits.mshrID.bits := 0.U
   if (HasMptCheck) {
     cache.io.req.bits.req_info.mptOnly.get := DontCare // mptonly is neverused in cache,actually, its never used anywhere in l2tlb except the output sel
   }

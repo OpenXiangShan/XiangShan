@@ -120,6 +120,7 @@ class PageCacheRespBundle(implicit p: Parameters) extends PtwBundle {
 
 class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
   val req_info = new L2TlbInnerBundle()
+  val mshrID = Valid(UInt(log2Up(MissQueueSize).W))
   val isFirst = Bool()
   val bypassed = if (EnableSv48) Vec(4, Bool()) else Vec(3, Bool())
   val isHptwReq = Bool()
@@ -130,6 +131,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val req = Flipped(DecoupledIO(new PtwCacheReq()))
   val resp = DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
+    val mshrID = Valid(UInt(log2Up(MissQueueSize).W))
     val isFirst = Bool()
     val hit = Bool()
     val prefetch = Bool() // is the entry fetched by prefetch
@@ -696,6 +698,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val idx = stageResp.bits.req_info.vpn(2, 0)
   val stage1Pf = !Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.req_info   := stageResp.bits.req_info
+  io.resp.bits.mshrID := stageResp.bits.mshrID
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := (resp_res.l0.hit || resp_res.sp.hit) && (!isAllStage || isAllStage && stage1Pf)
   if (EnableSv48) {
