@@ -37,9 +37,11 @@ class PtwMshrIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst
   val lookupFirst = Output(Bool())
   val ptwReady = Input(Bool())
   val llptwReady = Input(Bool())
+  val mptReady = Input(Bool())
+  val mptBlocked = Input(Vec(PtwWidth, Bool()))
   val feedback = Flipped(Valid(new PtwMshrFeedback))
   val resume = Flipped(Vec(2, Valid(new PtwMshrResume)))
-  val complete = Flipped(Vec(2, Valid(UInt(log2Up(MissQueueSize).W))))
+  val complete = Flipped(Vec(2 + PtwWidth, Valid(UInt(log2Up(MissQueueSize).W))))
   val retire = Flipped(Vec(PtwWidth, Valid(new PtwRespS2)))
   val needed = Output(Vec(MissQueueSize, Bool()))
   val prefetchBusy = Output(Bool())
@@ -63,6 +65,8 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val free = live.map(!_)
   val allocate = ParallelPriorityEncoder(free)
+  val sourceBusy = VecInit((0 until PtwWidth).map(source =>
+    ParallelOR(requests.indices.map(index => live(index) && busy(index) && requests(index).source === source.U))))
   for (index <- requests.indices) {
     io.needed(index) := live(index) && (owed(index) || from_pre(requests(index).source))
   }
@@ -74,8 +78,12 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val candidates = requests.indices.map { index =>
     val request = requests(index)
-    val ready = first(index) || Mux(retryToLlptw(index), io.llptwReady, io.ptwReady)
-    live(index) && pending(index) && ready
+    val mptOnly = request.mptOnly.getOrElse(false.B)
+    val source = request.source
+    val sourceBlocked = source < PtwWidth.U && io.mptBlocked(source)
+    val ready = Mux(mptOnly, io.mptReady && !sourceBusy(source),
+      first(index) || Mux(retryToLlptw(index), io.llptwReady, io.ptwReady))
+    live(index) && pending(index) && !sourceBlocked && ready
   }
   val selected = ParallelPriorityEncoder(candidates)
   io.lookup.valid := ParallelOR(candidates) && !flush

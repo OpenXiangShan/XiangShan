@@ -141,6 +141,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   when (llptw.io.in.fire && !llptw.io.inPrefetchDrop) {
     llptwOwners(llptw.io.mem.enq_ptr) := cache.io.resp.bits.mshrID.bits
   }
+  val mptOnlyPending = Option.when(HasMptCheck)(RegInit(VecInit.fill(PtwWidth)(false.B)))
+  val mptOnlyOwners = Option.when(HasMptCheck)(Reg(Vec(PtwWidth, UInt(log2Up(MissQueueSize).W))))
+
   val mpt_arb = Option.when (HasMptCheck) (Module(new Arbiter(new MptReqBundle, 4+PtwWidth)))
   val mptOnlyPort = 5
   // req directly from l1tlb. in this situation, adress translation is disabled and the reqVPN is the actuall PA waiting to be mpt checked.
@@ -222,22 +225,30 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
 
-  demandIn.valid := arb1.io.out.valid && !requestMptOnly && tlbCounter < MissQueueSize.U && !flush
+  demandIn.valid := arb1.io.out.valid && tlbCounter < MissQueueSize.U && !flush
   demandIn.bits.vpn := arb1.io.out.bits.vpn
   demandIn.bits.s2xlate := arb1.io.out.bits.s2xlate
   demandIn.bits.source := arb1.io.chosen
-  demandIn.bits.mptOnly.foreach(_ := false.B)
-  val demandReady = if (HasMptCheck) {
-    Mux(requestMptOnly, mpt_arb.get.io.in(mptOnlyPort).ready, demandIn.ready)
-  } else demandIn.ready
-  arb1.io.out.ready := tlbCounter < MissQueueSize.U && demandReady && !flush
+  demandIn.bits.mptOnly.foreach(_ := requestMptOnly)
+  arb1.io.out.ready := tlbCounter < MissQueueSize.U && demandIn.ready && !flush
 
-  if (HasMptCheck) { // assign arb1 out to mptc for mptOnly mode check
-    mpt_arb.get.io.in(mptOnlyPort).bits.id := arb1.io.chosen // b101 + bx //tlb id to mptc id
-    mpt_arb.get.io.in(mptOnlyPort).bits.mptOnly := true.B // used for l2tlb return control logic
-    mpt_arb.get.io.in(mptOnlyPort).bits.reqPA := arb1.io.out.bits.vpn // for mpt only vpn is ppn
-    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && requestMptOnly // valid when mptOnly and
-    // s2xlate is dont care, it has nothing to do with mpt
+  val lookupMptOnly = mshr.io.lookup.bits.mptOnly.getOrElse(false.B)
+  val lookupSource = mshr.io.lookup.bits.source
+  mshr.io.mptReady := (if (HasMptCheck) mpt_arb.get.io.in(mptOnlyPort).ready else false.B)
+  for (source <- 0 until PtwWidth) {
+    mshr.io.mptBlocked(source) := mptOnlyPending.map(_(source)).getOrElse(false.B)
+  }
+  if (HasMptCheck) {
+    val input = mpt_arb.get.io.in(mptOnlyPort)
+    input.valid := mshr.io.lookup.valid && lookupMptOnly && !flush
+    input.bits.id := lookupSource
+    input.bits.mptOnly := true.B
+    input.bits.reqPA := mshr.io.lookup.bits.vpn
+    when (input.fire) {
+      mptOnlyPending.get(lookupSource) := true.B
+      mptOnlyOwners.get(lookupSource) := mshr.io.lookupMshrID
+    }
+    when (flush) { mptOnlyPending.get.foreach(_ := false.B) }
   }
 
   // Internal HPTW lookups do not allocate another translation request
@@ -253,12 +264,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw_req_arb.io.out.ready := hptwLookup.ready && !flush
   val tableLookup = cacheArb.io.in(1)
   tableLookup.bits := 0.U.asTypeOf(tableLookup.bits)
-  tableLookup.valid := mshr.io.lookup.valid && !flush
+  tableLookup.valid := mshr.io.lookup.valid && !lookupMptOnly && !flush
   tableLookup.bits.req_info := mshr.io.lookup.bits
   tableLookup.bits.mshrID.valid := true.B
   tableLookup.bits.mshrID.bits := mshr.io.lookupMshrID
   tableLookup.bits.isFirst := mshr.io.lookupFirst
-  mshr.io.lookup.ready := tableLookup.ready && !flush
+  mshr.io.lookup.ready := Mux(lookupMptOnly, mshr.io.mptReady, tableLookup.ready) && !flush
   cacheArb.io.out.ready := cache.io.req.ready && !flush
   cache.io.req.valid := cacheArb.io.out.fire
   cache.io.req.bits := cacheArb.io.out.bits
@@ -813,19 +824,25 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   for (source <- 0 until PtwWidth) {
     val mptOnly = if (HasMptCheck) {
-      MptSwitchBox.get(source).io.l1TLB.bits.outMptOnly
+      mptOnlyPending.get(source) && MptSwitchBox.get(source).io.l1TLB.bits.outMptOnly
     } else false.B
     val normalOwner = MuxLookup(mergeArb(source).chosen, cacheResp.bits.mshrID.bits)(Seq(
       outArbFsmPort.U -> ptwOwner,
       outArbMqPort.U -> llptwOwners(llptw_out.bits.id)
     ))
-    val needed = mptOnly || mshr.io.needed(normalOwner)
+    val resultOwner = Mux(mptOnly, mptOnlyOwners.map(_(source)).getOrElse(0.U), normalOwner)
+    val needed = mshr.io.needed(resultOwner)
     val out = outArb(source).out
     io.tlb(source).resp.valid := out.valid && needed && !flush
     io.tlb(source).resp.bits := out.bits
     out.ready := (io.tlb(source).resp.ready || !needed) && !flush
     mshr.io.retire(source).valid := io.tlb(source).resp.fire
     mshr.io.retire(source).bits := io.tlb(source).resp.bits
+    mshr.io.complete(2 + source).valid := out.fire && mptOnly
+    mshr.io.complete(2 + source).bits := resultOwner
+    mptOnlyPending.foreach { pending =>
+      when (out.fire && mptOnly) { pending(source) := false.B }
+    }
   }
 
   // sfence
