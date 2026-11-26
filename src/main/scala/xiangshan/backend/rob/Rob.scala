@@ -722,12 +722,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * Retirement eligibility
    */
-  // When deq has redirect, in order to prevent committing instructions that should be flushed,
-  // we block the commit for a few cycles
-  val deqHitRedirectReg = RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)) ||
-    RegNext(RegNext(in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)))
-  val deqFlushBlock = holdForCycles(enable = deqNeedFlush && deqHitRedirectReg, cycles = 3)
-
   val deqHasCommitted = out.commits.isCommit && out.commits.commitValid(0)
   when(deqHasCommitted){
     deqHasFlushed := false.B
@@ -750,7 +744,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // for instructions that may block others, we don't allow them to commit
   val blockCommit = lastCycleFlush || hasWFI || in.redirect.valid ||
-    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock ||
+    (deqNeedFlush && !deqHasFlushed) ||
     in.csr.criticalErrorState || out.trace.blockCommit
 
   // Commit state
@@ -2456,15 +2450,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 object Rob {
   private val PerfEventCount = 19
   private val CriticalErrorCount = 1
-
-  // The output stays high for the specified cycles after each sampled enable.
-  def holdForCycles(enable: Bool, cycles: Int): Bool = {
-    require(cycles > 0)
-    val counter = Reg(UInt(cycles.W))
-    counter := Mux(enable, Fill(cycles, true.B), counter >> 1.U)
-    counter(0)
-  }
-
 
   class In(params: BackendParams)(implicit p: Parameters) extends XSBundle {
     // Core identity.
