@@ -26,6 +26,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
+import utils.EnumUInt
 import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FtqToBpuIO
@@ -845,6 +846,174 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     s3_fire && s3_override,
     BpuPredictionSource.Stage3.getValidSeq(s3_perfMeta.bpSource.s3Source)
   )
+
+  // Credit the earliest stage whose full block prediction matches the result applied to the FTQ.
+  private val perf_finalPrediction   = s3_perfMeta.bpPred
+  private val perf_finalBlockValid   = s3_fire && !s3_flush
+  private val perf_finalMatchesS1    = s3_s1Prediction === perf_finalPrediction
+  private val perf_finalMatchesS2    = s3_s2Prediction === perf_finalPrediction
+  private val perf_finalBlockFirstS1 = perf_finalBlockValid && perf_finalMatchesS1
+  private val perf_finalBlockFirstS2 = perf_finalBlockValid && !perf_finalMatchesS1 && perf_finalMatchesS2
+  private val perf_finalBlockFirstS3 = perf_finalBlockValid && !perf_finalMatchesS1 && !perf_finalMatchesS2
+
+  private val perf_finalFallthrough = perf_finalBlockValid && !perf_finalPrediction.taken
+  XSPerfAccumulate("finalBlockPred_total", perf_finalBlockValid)
+  XSPerfAccumulate("finalBlockPred_fallthrough", perf_finalFallthrough)
+  XSPerfAccumulate("finalBlockPred_first_s1", perf_finalBlockFirstS1)
+  XSPerfAccumulate("finalBlockPred_first_s2", perf_finalBlockFirstS2)
+  XSPerfAccumulate("finalBlockPred_first_s3", perf_finalBlockFirstS3)
+  XSPerfAccumulate("finalBlockPred_first_s1_Fallthrough", perf_finalBlockFirstS1 && perf_finalFallthrough)
+  XSPerfAccumulate("finalBlockPred_first_s2_Fallthrough", perf_finalBlockFirstS2 && perf_finalFallthrough)
+  XSPerfAccumulate("finalBlockPred_first_s3_Fallthrough", perf_finalBlockFirstS3 && perf_finalFallthrough)
+
+  private val perf_finalTaken        = perf_finalBlockValid && perf_finalPrediction.taken
+  private val perf_finalTakenFirstS1 = perf_finalBlockFirstS1 && perf_finalPrediction.taken
+  private val perf_finalTakenFirstS2 = perf_finalBlockFirstS2 && perf_finalPrediction.taken
+  private val perf_finalTakenFirstS3 = perf_finalBlockFirstS3 && perf_finalPrediction.taken
+
+  XSPerfAccumulate("finalTakenPred_total", perf_finalTaken)
+  XSPerfAccumulate("finalTakenPred_first_s1", perf_finalTakenFirstS1)
+  XSPerfAccumulate("finalTakenPred_first_s2", perf_finalTakenFirstS2)
+  XSPerfAccumulate("finalTakenPred_first_s3", perf_finalTakenFirstS3)
+
+  XSPerfSeqAccumulate(
+    "finalTakenPred_first_s1",
+    perf_finalTakenFirstS1,
+    BpuPredictionSource.Stage1.getValidSeq(s3_perfMeta.bpSource.s1Source, exclude = Set("Fallthrough"))
+  )
+  XSPerfSeqAccumulate(
+    "finalTakenPred_first_s2",
+    perf_finalTakenFirstS2,
+    BpuPredictionSource.Stage2.getValidSeq(s3_perfMeta.bpSource.s2Source, exclude = Set("Fallthrough"))
+  )
+  XSPerfSeqAccumulate(
+    "finalTakenPred_first_s3",
+    perf_finalTakenFirstS3,
+    BpuPredictionSource.Stage3.getValidSeq(s3_perfMeta.bpSource.s3Source, exclude = Set("Fallthrough"))
+  )
+
+  locally {
+    // Keep the S1 candidates and their directions before the first-taken selection. Match them
+    // to MBTB by CFI position, since the predictors have different ways and result ordering.
+    val s1AbtbBranches = VecInit(abtb.io.result.entries.zipWithIndex.map { case (entry, i) =>
+      val branch = WireDefault(entry)
+      branch.bits.taken := s1_abtbTakenMask(i)
+      branch.bits.target := Mux(
+        s1_abtbFirstTakenBrOH(i) && debug_s1UseUras,
+        s1_abtbResult.target,
+        entry.bits.target
+      )
+      branch
+    })
+    val s1UbtbBranch = Wire(Valid(new Prediction))
+    s1UbtbBranch.valid := !s1_abtbValid && s1_ubtbPrediction.taken
+    s1UbtbBranch.bits  := s1_ubtbPrediction
+
+    val s1Branches = VecInit(s1AbtbBranches.toSeq :+ s1UbtbBranch)
+    val s1Sources = VecInit(s1AbtbBranches.zipWithIndex.map { case (branch, i) =>
+      MuxCase(
+        BpuPredictionSource.Stage1.Abtb,
+        Seq(
+          (s1_abtbFirstTakenBrOH(i) && debug_s1UseUras)               -> BpuPredictionSource.Stage1.AbtbUras,
+          (branch.bits.attribute.isConditional && s1_utageHitMask(i)) -> BpuPredictionSource.Stage1.AbtbUtage
+        )
+      )
+    } :+ s1_predictionSource)
+    val s3S1Branches = RegEnable(RegEnable(s1Branches, s1_fire), s2_fire)
+    val s3S1Sources  = RegEnable(RegEnable(s1Sources, s1_fire), s2_fire)
+    val s3S2Taken    = RegEnable(s2_takenMask, s2_fire)
+    val s3S2Tage     = RegEnable(VecInit(tage.io.prediction.fastTakenVec.map(_.valid)), s2_fire)
+
+    val s3Valid = perf_finalBlockValid
+    val hitBranches = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+      // Only count the predicted path through the first taken branch (inclusive).
+      val inPredictedPrefix = !s3_taken || entry.bits.cfiPosition <= s3_firstTakenBranch.bits.cfiPosition
+      // Count a duplicated position once. Prefer a taken entry, then break ties as CompareMatrix does.
+      val taken = s3_takenMask(i)
+      val preferredDuplicate = s3_mbtbResult.zipWithIndex.filter(_._2 != i).map { case (other, j) =>
+        val preferred = s3_takenMask(j) && !taken || (j > i).B && s3_takenMask(j) === taken
+        other.valid && other.bits.cfiPosition === entry.bits.cfiPosition && preferred
+      }
+      entry.valid && inPredictedPrefix && !VecInit(preferredDuplicate).asUInt.orR
+    }
+
+    val branchSources = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+      val taken      = s3_takenMask(i)
+      val firstTaken = s3_firstTakenBranchOH(i)
+      // Only the selected S3 branch receives a RAS or ITTAGE target.
+      val target         = Mux(firstTaken, s3_prediction.target, entry.bits.target)
+      val s1PositionHits = s3S1Branches.map(b => b.valid && b.bits.cfiPosition === entry.bits.cfiPosition)
+      val s1TakenHits    = s1PositionHits.zip(s3S1Branches).map { case (hit, b) => hit && b.bits.taken }
+      val s1MatchesOH = PriorityEncoderOH(Mux(
+        VecInit(s1TakenHits).asUInt.orR,
+        VecInit(s1TakenHits.reverse).asUInt,
+        VecInit(s1PositionHits.reverse).asUInt
+      )).asBools
+      val s1Branch = Mux1H(s1MatchesOH, s3S1Branches.reverse)
+      val matchesS1 = s1Branch.valid && s1Branch.bits.attribute === entry.bits.attribute &&
+        s1Branch.bits.taken === taken && (!taken || s1Branch.bits.target === target)
+      val matchesS2 = s3S2Taken(i) === taken && (!taken || entry.bits.target === target)
+
+      val s1Source = Mux1H(s1MatchesOH, s3S1Sources.reverse)
+      val s2Source =
+        Mux(s3_isCondVec(i) && s3S2Tage(i), BpuPredictionSource.Stage2.Tage, BpuPredictionSource.Stage2.Mbtb)
+      val s3Source = MuxCase(
+        BpuPredictionSource.Stage3.Mbtb,
+        Seq(
+          (firstTaken && s3_useRas)                                -> BpuPredictionSource.Stage3.Ras,
+          (firstTaken && s3_useIttage)                             -> BpuPredictionSource.Stage3.ITTage,
+          (s3_isCondVec(i) && s3_scUsed(i))                        -> BpuPredictionSource.Stage3.Sc,
+          (s3_isCondVec(i) && s3_tagePrediction.takenVec(i).valid) -> BpuPredictionSource.Stage3.Tage
+        )
+      )
+      val hit = hitBranches(i)
+      (
+        (hit && matchesS1, s1Source),
+        (hit && !matchesS1 && matchesS2, s2Source),
+        (hit && !matchesS1 && !matchesS2, s3Source)
+      )
+    }
+
+    def countSources(stage: String, sources: EnumUInt, branches: Seq[(Bool, UInt)]): Unit = {
+      XSPerfAccumulate(s"mbtbHitBranch_first_$stage", Mux(s3Valid, PopCount(branches.map(_._1)), 0.U))
+      val bySource = branches.map { case (first, source) =>
+        sources.getValidSeq(source, exclude = Set("Fallthrough")).map { case (name, selected) =>
+          (name, first && selected)
+        }
+      }.transpose
+      XSPerfSeqAccumulate(
+        s"mbtbHitBranch_first_$stage",
+        s3Valid,
+        bySource.map(hits => (hits.head._1, true.B, PopCount(hits.map(_._2))))
+      )
+    }
+
+    val takenHits = hitBranches.zip(s3_takenMask).map { case (hit, taken) => hit && taken }
+    val numHitBranches = PopCount(hitBranches)
+    XSPerfAccumulate("mbtbHitBranch_total", Mux(s3Valid, numHitBranches, 0.U))
+    XSPerfAccumulate("mbtbHitBranch_taken", Mux(s3Valid, PopCount(takenHits), 0.U))
+    // Fall-through supplies the block target, not the individual branch directions.
+    XSPerfAccumulate("mbtbHitBranch_inFallthroughBlock", Mux(perf_finalFallthrough, numHitBranches, 0.U))
+
+    // Compare SC with the TAGE output used by S3 (which may have selected the alternate).
+    // This measures direction changes independently of earliest-source attribution and block overrides.
+    val scUsedWithTage = hitBranches.zipWithIndex.map { case (hit, i) =>
+      hit && s3_isCondVec(i) && s3_scUsed(i) && s3_tagePrediction.takenVec(i).valid
+    }
+    val scFlippedTage = scUsedWithTage.zipWithIndex.map { case (used, i) =>
+      used && (s3_scTakenMask(i) =/= s3_tagePrediction.takenVec(i).bits)
+    }
+    val scFlippedTageToTaken    = scFlippedTage.zip(s3_scTakenMask).map { case (flip, taken) => flip && taken }
+    val scFlippedTageToNotTaken = scFlippedTage.zip(s3_scTakenMask).map { case (flip, taken) => flip && !taken }
+    XSPerfAccumulate("mbtbHitBranch_scUsedWithTage", Mux(s3Valid, PopCount(scUsedWithTage), 0.U))
+    XSPerfAccumulate("mbtbHitBranch_scFlippedTage", Mux(s3Valid, PopCount(scFlippedTage), 0.U))
+    XSPerfAccumulate("mbtbHitBranch_scFlippedTageToTaken", Mux(s3Valid, PopCount(scFlippedTageToTaken), 0.U))
+    XSPerfAccumulate("mbtbHitBranch_scFlippedTageToNotTaken", Mux(s3Valid, PopCount(scFlippedTageToNotTaken), 0.U))
+
+    countSources("s1", BpuPredictionSource.Stage1, branchSources.map(_._1))
+    countSources("s2", BpuPredictionSource.Stage2, branchSources.map(_._2))
+    countSources("s3", BpuPredictionSource.Stage3, branchSources.map(_._3))
+  }
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
