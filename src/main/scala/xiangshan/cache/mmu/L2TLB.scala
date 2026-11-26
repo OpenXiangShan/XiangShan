@@ -811,12 +811,19 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   }
 
-  // io.tlb.map(_.resp) <> outArb.map(_.out)
-  io.tlb.map(_.resp).zip(outArb.map(_.out)).map{
-    case (resp, out) => resp <> out
-  }
-
   for (source <- 0 until PtwWidth) {
+    val mptOnly = if (HasMptCheck) {
+      MptSwitchBox.get(source).io.l1TLB.bits.outMptOnly
+    } else false.B
+    val normalOwner = MuxLookup(mergeArb(source).chosen, cacheResp.bits.mshrID.bits)(Seq(
+      outArbFsmPort.U -> ptwOwner,
+      outArbMqPort.U -> llptwOwners(llptw_out.bits.id)
+    ))
+    val needed = mptOnly || mshr.io.needed(normalOwner)
+    val out = outArb(source).out
+    io.tlb(source).resp.valid := out.valid && needed && !flush
+    io.tlb(source).resp.bits := out.bits
+    out.ready := (io.tlb(source).resp.ready || !needed) && !flush
     mshr.io.retire(source).valid := io.tlb(source).resp.fire
     mshr.io.retire(source).bits := io.tlb(source).resp.bits
   }
