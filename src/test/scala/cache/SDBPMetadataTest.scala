@@ -198,6 +198,73 @@ class SDBPMetadataTest extends AnyFlatSpec {
     }
   }
 
+  it should "skip Hint-hit promotion and block directory reads only for sampled sets" in {
+    val base = parameters
+    implicit val p: Parameters = base.alterPartial {
+      // Use a distinct depth so the two Directory tests elaborate distinct SRAM definitions.
+      case L2ParamKey => base(L2ParamKey).copy(sets = 16, replacement = "sdbp",
+        sdbp = SDBPParams(samplerSets = 4, predictorEntries = 64))
+    }
+    simulate(new Directory) { dut =>
+      zeroInputs(dut.io)
+      dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B); dut.clock.step(24)
+
+      val read = dut.io.read
+      read.bits.wayMask.poke(15.U)
+      read.bits.replacerInfo.channel.poke(1.U)
+      def lookupToS3(tag: Int, opcode: UInt, refill: Boolean = false): Unit = {
+        read.ready.expect(true.B)
+        read.bits.tag.poke(tag.U)
+        read.bits.replacerInfo.opcode.poke(opcode)
+        read.bits.refill.poke(refill.B)
+        read.valid.poke(true.B); dut.clock.step()
+        read.valid.poke(false.B); dut.clock.step()
+        dut.io.resp.valid.expect(true.B)
+      }
+
+      for ((set, sampled) <- Seq(0 -> true, 1 -> false)) {
+        read.bits.set.poke(set.U)
+        dut.io.metaWReq.bits.set.poke(set.U)
+        dut.io.tagWReq.bits.set.poke(set.U)
+        dut.io.metaWReq.bits.wmeta.state.poke(MetaData.TIP)
+        dut.io.metaWReq.valid.poke(true.B)
+        dut.io.tagWReq.valid.poke(true.B)
+        for (way <- 0 until 4) {
+          dut.io.metaWReq.bits.wayOH.poke((1 << way).U)
+          dut.io.tagWReq.bits.wayOH.poke((1 << way).U)
+          dut.io.tagWReq.bits.wtag.poke((10 + way).U)
+          dut.clock.step()
+        }
+        dut.io.metaWReq.valid.poke(false.B)
+        dut.io.tagWReq.valid.poke(false.B)
+
+        for (tag <- Seq(11, 12, 13, 10)) {
+          lookupToS3(tag, TLMessages.Get)
+          dut.io.resp.bits.hit.expect(true.B)
+          dut.clock.step()
+        }
+
+        read.bits.replacerInfo.pcValid.poke(true.B)
+        read.bits.replacerInfo.sdbpSource.poke(SDBPSource.L2Stream)
+        lookupToS3(11, TLMessages.Hint)
+        dut.io.resp.bits.hit.expect(true.B)
+        dut.io.sdbpCommit.bits.set.poke(set.U)
+        dut.io.sdbpCommit.bits.way.poke(1.U)
+        dut.io.sdbpCommit.valid.poke(true.B)
+        read.ready.expect((!sampled).B)
+        dut.clock.step()
+        dut.io.sdbpCommit.valid.poke(false.B)
+        read.bits.replacerInfo.pcValid.poke(false.B)
+
+        lookupToS3(99, TLMessages.GrantData, refill = true)
+        dut.io.replResp.valid.expect(true.B)
+        dut.io.replResp.bits.retry.expect(false.B)
+        dut.io.replResp.bits.way.expect(1.U)
+        dut.clock.step()
+      }
+    }
+  }
+
   behavior of "SDBP request classification"
   it should "distinguish L1 prefetch Acquires, missing PCs and PC zero" in {
     val base = parameters
