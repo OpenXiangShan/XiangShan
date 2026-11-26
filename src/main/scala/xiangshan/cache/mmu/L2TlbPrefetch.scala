@@ -44,9 +44,11 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
     io.csr.priv.virtChanged || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   val next_line = get_next_line(io.in.bits.vpn)
-  val next_req = RegEnable(next_line, io.in.valid)
-  val input_valid = io.in.valid && !flush && !already_have(next_line)
-  val v = ValidHold(input_valid, io.out.fire, flush)
+  val v = RegInit(false.B)
+  val input_valid = io.in.valid && !v && !flush && !already_have(next_line)
+  val next_req = RegEnable(next_line, input_valid)
+  when (input_valid) { v := true.B }
+  when (io.out.fire || flush) { v := false.B }
   val s2xlate = Wire(UInt(2.W))
   s2xlate := MuxCase(noS2xlate, Seq(
     (io.csr.priv.virt && io.csr.vsatp.mode =/= 0.U && io.csr.hgatp.mode =/= 0.U) -> allStage,

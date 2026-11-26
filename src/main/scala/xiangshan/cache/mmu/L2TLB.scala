@@ -282,11 +282,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     // Generate from a first demand miss or a hit on a prefetched entry
     val prefetchTrigger = recv.fire && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit ||
       recv.bits.prefetch) && recv.bits.isFirst
-    prefetch.io.in.valid := prefetchTrigger
+    prefetch.io.in.valid := prefetchTrigger && !mshr.io.prefetchBusy && !prefetch.io.out.valid
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence_dup(0)
     prefetch.io.csr := csr_dup(0)
-    requestArb.get.io.in(1) <> prefetch.io.out
+    block_decoupled(prefetch.io.out, requestArb.get.io.in(1), mshr.io.prefetchBusy)
 
     val isWriteL2TlbPrefetchTable = Constantin.createRecord(s"isWriteL2TlbPrefetchTable$hartId")
     val L2TlbPrefetchTable = ChiselDB.createTable(s"L2TlbPrefetch_hart$hartId", new L2TlbPrefetchDB)

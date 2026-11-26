@@ -92,6 +92,7 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.lookupFirst := ParallelPriorityMux(candidates, first.toSeq)
 
   when (io.req.fire) {
+    assert(!from_pre(io.req.bits.source) || !io.prefetchBusy, "MSHR allocates a second autonomous prefetch")
     requests(allocate) := io.req.bits
     live(allocate) := true.B
     owed(allocate) := !from_pre(io.req.bits.source)
@@ -152,6 +153,7 @@ class PtwMshr(implicit p: Parameters) extends XSModule with HasPtwConst {
     assert(!busy(index) || live(index), "An execution outlives its MSHR identity")
     assert(!(pending(index) && busy(index)), "An executing request is also queued")
   }
+  assert(PopCount(prefetchLive) <= 1.U, "MSHR holds more than one autonomous prefetch")
 
   when (flush) {
     live.foreach(_ := false.B)
