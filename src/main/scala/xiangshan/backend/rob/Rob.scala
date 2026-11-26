@@ -377,6 +377,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
 
   // update commit status.
+  // The below is only used when deq banking
+  // TODO: Delete me when deq banking is no longer used
   allCommitted := out.commits.isCommit && commitValidThisLine.last
   when(allCommitted) {
     // if allCommitted is true, then let next line come in, hasCommitted will be reset
@@ -386,6 +388,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       hasCommitted(i) := commitValidThisLine(i) || hasCommitted(i)
     }
   }
+
+  // pipe rab commits for better timing and area
+  out.rabCommits := RegNext(rab.out.commits)
+  out.vlCommits := RegNext(vtypeBuffer.out.commits)
 
   /**
    * Writeback (from execution units)
@@ -447,10 +453,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   )
   state := stateNext
-
-  // pipe rab commits for better timing and area
-  out.rabCommits := RegNext(rab.out.commits)
-  out.vlCommits := RegNext(vtypeBuffer.out.commits)
 
   /**
    * VType buffer interface
@@ -783,25 +785,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // FIXME: Timing so bad when direct read rob Entries.
   val pendingEntry = robEntries(deqPtr.value)
+  val pendingBackPtr = deqPtr.asLatter
 
-  val pendingBackPtr = Wire(new RobPtr)
-  pendingBackPtr := deqPtr
-  pendingBackPtr.isFormer := false.B
+  val redirectsHead = in.redirect.valid && in.redirect.bits.robIdx.isSameEntry(deqPtr)
+  val redirectIsFormer = in.redirect.bits.robIdx.isFormer
+  val redirectFlushesItself = in.redirect.bits.flushItself()
+  val flushesHeadEntry = redirectIsFormer && redirectFlushesItself
+  val clearsHeadLatter = CompressType.isNotNORMAL(pendingEntry.entryPairType) &&
+    (redirectIsFormer =/= redirectFlushesItself)
+  val resetsPendingSlot = redirectsHead && (flushesHeadEntry || clearsHeadLatter)
 
-  val flushesHeadEntry = in.redirect.valid &&
-    in.redirect.bits.robIdx.isSameEntry(deqPtr) &&
-    in.redirect.bits.robIdx.isFormer &&
-    in.redirect.bits.flushItself()
-  val clearsHeadLatter = in.redirect.valid &&
-    in.redirect.bits.robIdx.isSameEntry(deqPtr) &&
-    CompressType.isNotNORMAL(pendingEntry.entryPairType) && (
-      in.redirect.bits.robIdx.isFormer && !in.redirect.bits.flushItself() ||
-      !in.redirect.bits.robIdx.isFormer && in.redirect.bits.flushItself()
-    )
-  val resetsPendingSlot = flushesHeadEntry || clearsHeadLatter
   // Entry validity is cleared by redirectValidReg one cycle after the redirect.
   // Keep the former slot selected until that delayed clear has taken effect.
   val resetsPendingSlotReg = RegNext(resetsPendingSlot, false.B)
+
+  // An uncached access in the latter slot may wait for the LSQ pending pointer
+  // before it can finish. Advance the pointer when the former slot finishes.
   val pendingPtrIsFormer = RegInit(true.B)
   when (
     resetsPendingSlot || resetsPendingSlotReg ||
@@ -923,21 +922,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until RobSize) {
     val entry = robEntries(i)
+    val entryPairType = entry.entryPairType
     val downgradeToFormer = redirectFlushesLatterOnly && in.redirect.bits.robIdx.value === i.U &&
-      CompressType.isNotNORMAL(entry.entryPairType)
+      CompressType.isNotNORMAL(entryPairType)
+
+    // Restore metadata for the surviving former slot.
+    // CtrlBlock suppresses enqueue during a redirect.
     when(downgradeToFormer) {
       entry.entryPairType := CompressType.NORMAL
       entry.traceBlockInPipe := entry.formerTraceBlockInPipe
-    }
 
-    val entryPairType = entry.entryPairType
-    // CtrlBlock suppresses enqueue during a redirect.
-    when(downgradeToFormer) {
       when(CompressType.isCC(entryPairType) || CompressType.isCS(entryPairType)) {
         entry.realDestSize := entry.complexSlotHasDest
       }.elsewhen(CompressType.isSC(entryPairType)) {
         entry.realDestSize := entry.realDestSize - entry.complexSlotHasDest
       }
+
+      assert(entry.valid, s"ROB entry $i must be valid when dropping its latter slot")
     }
 
     val formerWbCnt = PopCount(in.writeback.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer))
@@ -966,16 +967,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // An unpaired entry has no latter slot, even if a squashed uop writes back late.
     val clearLatterNumWb = CompressType.isNORMAL(entryPairType) || redirectClearsLatter ||
       needFlushWriteBackFormer || needFlushWriteBackLater || slotNeedFlush.orR && !entry.latterNumWb.orR
+    // A new allocation initializes both counts in connectEnq.
+    when(!allocatingByEntry(i)) {
+      entry.formerNumWb := Mux(clearFormerNumWb, 0.U, entry.formerNumWb - formerWbCnt)
+      entry.latterNumWb := Mux(clearLatterNumWb, 0.U, entry.latterNumWb - latterWbCnt)
+    }
+
     when(entry.valid) {
       assert(clearFormerNumWb || formerWbCnt <= entry.formerNumWb,
         s"ROB entry $i former writeback count underflow")
       assert(clearLatterNumWb || latterWbCnt <= entry.latterNumWb,
         s"ROB entry $i latter writeback count underflow")
-    }
-    // A new allocation initializes both counts in connectEnq.
-    when(!allocatingByEntry(i)) {
-      entry.formerNumWb := Mux(clearFormerNumWb, 0.U, entry.formerNumWb - formerWbCnt)
-      entry.latterNumWb := Mux(clearLatterNumWb, 0.U, entry.latterNumWb - latterWbCnt)
     }
 
     // Apply writeback to the surviving slot after restoring its trace above.
