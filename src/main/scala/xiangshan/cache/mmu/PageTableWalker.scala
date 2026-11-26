@@ -727,6 +727,7 @@ class LLPTWInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
 }
 
 class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
+  val inPrefetchDrop = Output(Bool())
   val in = Flipped(DecoupledIO(new LLPTWInBundle()))
   val out = DecoupledIO(new Bundle {
     val req_info = Output(new L2TlbInnerBundle())
@@ -966,6 +967,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     ))
   )
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
+  io.inPrefetchDrop := io.in.fire && !flush && enq_state === state_idle &&
+    (if (HasBitmapCheck) !io.in.bits.bitmapCheck.get.jmp_bitmap_check else true.B)
   when (io.in.fire && (if (HasBitmapCheck) !io.in.bits.bitmapCheck.get.jmp_bitmap_check else true.B)) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
