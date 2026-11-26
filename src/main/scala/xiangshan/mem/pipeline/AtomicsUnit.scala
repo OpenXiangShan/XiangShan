@@ -193,7 +193,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  val backendTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  // Compare the pointer-masked effective address the DTLB returns, like LoadUnit/StoreUnit. rs1 still holds
+  // the unmasked address when the first DTLB response arrives.
   val triggerVa = io.dtlb.resp.bits.triggerVa
 
   assert(state === s_invalid ||
@@ -224,6 +226,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     )
   }
   backendTriggerHitVec := store_hit.zip(load_hit).map { case (sh, lh) => sh || lh }
+  // triggerCanFireVec will update at T+1: compared in the cycle of the DTLB response, used in s_pm
   TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVec, backendTriggerHitVec,
     backendTriggerTimingVec, backendTriggerChainVec)
 
@@ -261,21 +264,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
 
-      exceptionVec(breakPoint) := triggerBreakpoint
-      trigger                  := triggerAction
-
       when (!io.dtlb.resp.bits.miss) {
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
-        when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
-          // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
-          // check for miss aligned exceptions, tlb exception are checked next cycle for timing
-          // if there are exceptions, no need to execute it
-          state := s_finish
-          out_valid := true.B
-          atom_override_xtval := true.B
-        }.otherwise {
-          state := s_pm
-        }
+        // The trigger result for this response is registered and only known in s_pm. Misaligned accesses
+        // go there too, because an address breakpoint outranks the misaligned exception.
+        state := s_pm
       }
     }
   }
@@ -291,7 +284,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
     val exception_pa_mmio_nc = pmp.mmio || Pbmt.isIO(pbmtReg) || Pbmt.isNC(pbmtReg)
     val exception_pa = pmp.st || pmp.ld || exception_pa_mmio_nc
-    when (exception_va || exception_pa) {
+    // A trigger or a misaligned address ends the access without the PMP check
+    val addrMisaligned = exceptionVec(loadAddrMisaligned) || exceptionVec(storeAddrMisaligned)
+    val skipPm = triggerDebugMode || triggerBreakpoint || addrMisaligned
+    exceptionVec(breakPoint) := triggerBreakpoint
+    trigger                  := triggerAction
+    when (skipPm || exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
       atom_override_xtval := true.B
@@ -300,10 +298,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
     // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
-      (pmp.ld || exception_pa_mmio_nc) && isLr
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
-      (pmp.ld || exception_pa_mmio_nc) && !isLr
+    when (!skipPm) {
+      exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
+        (pmp.ld || exception_pa_mmio_nc) && isLr
+      exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
+        (pmp.ld || exception_pa_mmio_nc) && !isLr
+    }
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
