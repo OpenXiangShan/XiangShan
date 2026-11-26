@@ -138,7 +138,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
 
 class MissResp(implicit p: Parameters) extends DCacheBundle {
   val id = UInt(log2Up(cfg.nMissEntries).W)
-  // cache miss request is handled by miss queue, either merged or newly allocated
+  // A hardware prefetch may be consumed and dropped; demand requests must allocate or merge.
   val handled = Bool()
   // Accepted through an existing owner or as a same-cycle follower.
   val merged = Bool()
@@ -1105,7 +1105,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("prefetch_req_primary", Cat((0 until reqNum).map(i=> primary_fire_vec(i) && io.queryME(i).req.bits.source === DCACHE_PREFETCH_SOURCE.U)).orR)
+  XSPerfAccumulate("prefetch_req_primary", io.miss_req_pipe_reg.alloc && input_req_is_prefetch)
   XSPerfAccumulate("prefetch_req_merged", Cat((0 until reqNum).map(i=> secondary_fire_vec(i) && io.queryME(i).req.bits.source === DCACHE_PREFETCH_SOURCE.U)).orR)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(GatedValidRegNextN(primary_fire, 2) && !release_entry, release_entry)
@@ -1362,27 +1362,29 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val free_entry_list = VecInit(free_entry_onehot.map(onehot =>
     ParallelMux(onehot.zipWithIndex.map { case (selected, e) => selected -> e.U(log2Up(cfg.nMissEntries).W) })))
 
-  // Same-cycle merge and existing-owner lookups run in parallel; software prefetches use load rules.
-  // Demand requests lead hardware prefetches; requests in the same class follow port order.
-  // Loads may follow load/store leaders; hardware prefetches may follow loads. Stores and AMOs never follow.
+  val mainpipeIsPrefetch = io.queryMQ(0).req.bits.isFromPrefetch
+  // A PF that cannot allocate (including one over quota) is consumed without leading or blocking loads
+  val enq_valid = VecInit(query_valid.zipWithIndex.map { case (valid, i) =>
+    if (i == 0) valid && (!mainpipeIsPrefetch || (prefetch_quota_available && can_allocate_vec(0))) else valid
+  })
+
+  // Port order determines both merge and allocation priority. MainPipe is always its own same-cycle leader.
   val sameCycleMerge = (0 until reqNum).map { i =>
     (0 until reqNum).map { j =>
       val follower = io.queryMQ(i).req.bits
       val leader = io.queryMQ(j).req.bits
-      (i != j).B && blockMatch(follower, leader) && aliasMatch(follower, leader) &&
-      (follower.isFromLoad || follower.isFromPrefetch) &&
-      (leader.isFromLoad || leader.isFromStore || leader.isFromPrefetch)
+      (j < i).B && blockMatch(follower, leader) && aliasMatch(follower, leader) &&
+      (if (j == 0) leader.isFromLoad || leader.isFromStore || leader.isFromPrefetch else true.B)
     }
   }
-  val leaderIdx = VecInit(MissQueueEnqLogic.mergeLeaders(
-    query_valid, io.queryMQ.map(_.req.bits.isFromPrefetch), sameCycleMerge))
+  val leaderIdx = VecInit(MissQueueEnqLogic.mergeLeaders(enq_valid, sameCycleMerge))
   val isLeader = VecInit((0 until reqNum).map(i => leaderIdx(i) === i.U))
 
   // A same-block request that cannot join an earlier port must retry, rather
   // than allocating another owner (e.g. an alias conflict or an AMO).
   val req_reject_vec = VecInit((0 until reqNum).map { i =>
     (0 until i).map { j =>
-      query_valid(j) && blockMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits) && !sameCycleMerge(i)(j)
+      enq_valid(j) && blockMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits) && !sameCycleMerge(i)(j)
     }.foldLeft(false.B)(_ || _)
   })
 
@@ -1416,18 +1418,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   for(i <- 0 until reqNum) {
     can_allocate_vec(i) := (free_entry_count =/= 0.U || reserved_for_req(i)) && !req_reject_vec(i) &&
-                            !ParallelORR(Cat(block_match_seqs(i) ++ Seq(match_from_pipe(i)))) &&
-                            (!io.queryMQ(i).req.bits.isFromPrefetch || prefetch_quota_available)
+                            !ParallelORR(Cat(block_match_seqs(i) ++ Seq(match_from_pipe(i))))
     val can_merge_from_entry = ParallelORR(Cat(secondary_ready_vec(i)))
     can_merge_vec(i) := can_merge_from_entry || can_merge_from_pipe(i)
   }
 
   // Late cancel/WBQ signals deliberately remain outside allocation ordering.
   val allocCandidates = (0 until reqNum).map { i =>
-    query_valid(i) && isLeader(i) && can_allocate_vec(i) && !reserved_for_req(i)
+    enq_valid(i) && isLeader(i) && can_allocate_vec(i) && !reserved_for_req(i)
   }
-  val alloc_order = MissQueueEnqLogic.allocationRanks(
-    allocCandidates, io.queryMQ.map(_.req.bits.isFromPrefetch))
+  val alloc_order = MissQueueEnqLogic.allocationRanks(allocCandidates)
 
   for (i <- 0 until reqNum) {
     val entryMergeMask = secondary_ready_vec(i)
@@ -1440,13 +1440,14 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       case (selected, entry) => selected && entry.io.load_merge_ready
     }))
     val hasFreeRank = reserved_for_req(i) || alloc_order(i) < free_entry_count
-    mergeValid(i) := query_valid(i) && isLeader(i) && can_merge_vec(i)
+    mergeValid(i) := enq_valid(i) && isLeader(i) && can_merge_vec(i)
     // can_allocate_vec already excludes every existing same-block owner, so
     // allocation ranking need not wait for the secondary-ready merge path.
-    allocValid(i) := query_valid(i) && isLeader(i) && can_allocate_vec(i) && hasFreeRank
+    allocValid(i) := enq_valid(i) && isLeader(i) && can_allocate_vec(i) && hasFreeRank
 
-    // Compute the capability before leader selection and final acceptance.
-    // Every mergeable allocating pipe owner also accepts matching loads.
+    // Check whether this request's target can also accept a load follower.
+    // If it can merge into an allocating pipe_reg, a matching load can too.
+    // For an existing MissEntry, check its load merge window separately.
     targetAcceptsLoad(i) := Mux(can_merge_vec(i),
       can_merge_from_pipe(i) || entryAcceptsLoad, !io.queryMQ(i).req.bits.isFromAMO)
     targetMshr(i) := ParallelMux(Seq(
@@ -1459,11 +1460,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val leaderAccepted = VecInit((0 until reqNum).map { i => (allocValid(i) || mergeValid(i)) && notCancel(i) })
 
   for (i <- 0 until reqNum) {
-    val leader = leaderIdx(i)
-    val followerAccepted = io.queryMQ(i).req.bits.isFromPrefetch ||
-      (io.queryMQ(i).req.bits.isFromLoad && targetAcceptsLoad(leader))
-    io.queryMQ(i).ready := query_valid(i) && leaderAccepted(leader) &&
-      (isLeader(i) || followerAccepted) && notCancel(i)
+    if (i == 0) {
+      // PF ready means consumed, even when no action is retained. Quota and
+      // current LoadPipe requests affect the action, never this ready.
+      io.queryMQ(i).ready := query_valid(i) && notCancel(i) &&
+        (mainpipeIsPrefetch || can_allocate_vec(i) || can_merge_vec(i))
+    } else {
+      val leader = leaderIdx(i)
+      io.queryMQ(i).ready := query_valid(i) && leaderAccepted(leader) &&
+        (isLeader(i) || targetAcceptsLoad(leader)) && notCancel(i)
+    }
   }
 
   // For each queryMQ request that was granted, connect to MissEntry or PipeReg
@@ -1548,13 +1554,22 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
   }
 
+  // Promotion changes only the retained request, never this cycle's ranks or ready.
+  val mainpipeLoadFollowers = (1 until reqNum).map(i => query_fire(i) && leaderIdx(i) === 0.U)
+  val promoteMainpipePrefetch = mainpipeIsPrefetch && mainpipeLoadFollowers.foldLeft(false.B)(_ || _)
+  val enqueueReqs = io.queryMQ.zipWithIndex.map { case (port, i) =>
+    if (i == 0) Mux(promoteMainpipePrefetch,
+      PriorityMux(mainpipeLoadFollowers.zip(io.queryMQ.drop(1).map(_.req.bits))), port.req.bits)
+    else port.req.bits
+  }
+
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
    */
   // Update parallel pipeline registers
   for (i <- 0 until reqNum) {
     when (query_fire(i)) {
-      parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      parallel_pipe_regs(i).req := enqueueReqs(i)
       parallel_pipe_regs(i).alloc := allocValid(i) && notCancel(i)
       parallel_pipe_regs(i).merge := mergeValid(i) && notCancel(i)
       parallel_pipe_regs(i).mshr_id := targetMshr(i)
@@ -1608,6 +1623,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
     when (query_fire(i) && !isLeader(i)) {
       assert(query_fire(leader), "a follower cannot be accepted without its leader")
+      assert(leaderAccepted(leader), "an accepted follower must have a retained owner")
       // Independently check the shared capability against the existing per-port
       // eligibility. This is verification logic, not the follower ready path.
       when (io.queryMQ(i).req.bits.isFromLoad && mergeValid(leader)) {
@@ -1888,7 +1904,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     Seq(parallel_pipe_regs(mainpipeMatchPipeIdx).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
   )
 
-  io.prefetch_stat.prefetch_miss := query_fire(0) && io.queryMQ(0).req.bits.isFromPrefetch
+  io.prefetch_stat.prefetch_miss := io.resp(0).allocated && enqueueReqs(0).isFromPrefetch
   io.prefetch_stat.pf_source := io.queryMQ(0).req.bits.pf_source
   io.prefetch_stat.load_miss := PopCount((0 until reqNum).map(j => query_fire(j) && io.queryMQ(j).req.bits.isFromLoad))
 
@@ -1912,10 +1928,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // L1MissTrace Chisel DB - support multiple enqueue ports
   val debug_miss_trace_vec = Wire(Vec(reqNum, new L1MissTrace))
   for (i <- 0 until reqNum) {
-    debug_miss_trace_vec(i).vaddr := io.queryMQ(i).req.bits.vaddr
-    debug_miss_trace_vec(i).paddr := io.queryMQ(i).req.bits.addr
-    debug_miss_trace_vec(i).source := io.queryMQ(i).req.bits.source
-    debug_miss_trace_vec(i).pc := io.queryMQ(i).req.bits.pc
+    debug_miss_trace_vec(i).vaddr := enqueueReqs(i).vaddr
+    debug_miss_trace_vec(i).paddr := enqueueReqs(i).addr
+    debug_miss_trace_vec(i).source := enqueueReqs(i).source
+    debug_miss_trace_vec(i).pc := enqueueReqs(i).pc
   }
 
   val isWriteL1MissQMissTable = Constantin.createRecord(s"isWriteL1MissQMissTable${p(XSCoreParamsKey).HartId}")
@@ -2002,14 +2018,14 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Perf count - adapted for multiple enqueue ports
   XSPerfAccumulate("miss_req", PopCount(query_fire))
   XSPerfAccumulate("miss_req_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated))))
-  XSPerfAccumulate("miss_req_load_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && io.queryMQ(i).req.bits.isFromLoad))))
-  XSPerfAccumulate("miss_req_store_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && io.queryMQ(i).req.bits.isFromStore))))
-  XSPerfAccumulate("miss_req_amo_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && io.queryMQ(i).req.bits.isFromAMO))))
-  XSPerfAccumulate("miss_req_prefetch_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && io.queryMQ(i).req.bits.isFromPrefetch))))
+  XSPerfAccumulate("miss_req_load_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && enqueueReqs(i).isFromLoad))))
+  XSPerfAccumulate("miss_req_store_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && enqueueReqs(i).isFromStore))))
+  XSPerfAccumulate("miss_req_amo_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && enqueueReqs(i).isFromAMO))))
+  XSPerfAccumulate("miss_req_prefetch_allocate", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && enqueueReqs(i).isFromPrefetch))))
   XSPerfAccumulate("miss_req_merge_load", PopCount(Cat((0 until reqNum).map(i => io.resp(i).merged && io.queryMQ(i).req.bits.isFromLoad))))
   XSPerfAccumulate("miss_req_reject_load", PopCount(Cat((0 until reqNum).map(i => io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.cancel && !io.queryMQ(i).ready && io.queryMQ(i).req.bits.isFromLoad))))
   XSPerfAccumulate("probe_blocked_by_miss", io.probe.block)
-  XSPerfAccumulate("prefetch_primary_fire", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && io.queryMQ(i).req.bits.isFromPrefetch))))
+  XSPerfAccumulate("prefetch_primary_fire", PopCount(Cat((0 until reqNum).map(i => io.resp(i).allocated && enqueueReqs(i).isFromPrefetch))))
   XSPerfAccumulate("prefetch_secondary_fire", PopCount(Cat((0 until reqNum).map(i => io.resp(i).merged && io.queryMQ(i).req.bits.isFromPrefetch))))
   XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
   XSPerfAccumulate("no_free_entry", !ParallelORR(Cat(entries.map(e => e.io.primary_ready))))
