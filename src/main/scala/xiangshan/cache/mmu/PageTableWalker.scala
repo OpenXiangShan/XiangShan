@@ -753,6 +753,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val flush_latch = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
   val cache = DecoupledIO(new L2TlbInnerBundle())
+  val cacheId = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
   val pmp = Vec(2, new Bundle {
     val req  = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
@@ -1288,6 +1289,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.cache.valid := Cat(is_cache).orR
   io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
+  io.cacheId := cache_ptr
 
   val has_bitmap_resp = ParallelOR(is_bitmap_resp).asBool
   if (HasBitmapCheck) {
