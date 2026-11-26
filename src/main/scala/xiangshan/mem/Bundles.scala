@@ -312,6 +312,8 @@ object Bundles {
   }
 
   class LoadRARNukeQuery(implicit p: Parameters) extends XSBundle {
+    val s1Reserve = ValidIO(new LrqAlloc)
+    val mayLateRevoke = Output(Bool())
     val req = DecoupledIO(new LoadNukeQueryReq)
     val resp = Flipped(ValidIO(new LoadNukeQueryResp))
     val revokeLastCycle = Output(Bool()) // revoke the req in the last cycle

@@ -18,11 +18,9 @@ package xiangshan.mem
 import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles.DynInst
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
 
@@ -42,244 +40,289 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     // release cacheline
     val release = Flipped(Valid(new Release))
 
-    // from VirtualLoadQueue
+    // dequeue boundaries
     val ldWbPtr = Input(new LqPtr)
+    val robPendingPtr = Input(new RobPtr)
 
     // global
     val lqFull = Output(Bool())
 
-    val validCount = Output(UInt())
+    val validCount = Output(UInt(log2Ceil(LoadQueueRARSize + 1).W))
   })
 
-  private val PartialPAddrStride: Int = 6
-  private val PartialPAddrBits: Int = 16
-  private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2 // avoid overlap
-  private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
-  private def boundary(x: Int, h: Int) = if (x < h) Some(x) else None
-  private def lowMapping = (0 until PartialPAddrLowBits).map(i => Seq(
-      boundary(PartialPAddrStride + i  , PartialPAddrBits),
-      boundary(PartialPAddrBits - i - 1, PartialPAddrBits)
-    )
-  )
-  private def highMapping = (0 until PartialPAddrHighBits).map(i => Seq(
-      boundary(i + PartialPAddrStride     , PAddrBits),
-      boundary(i + PartialPAddrStride + 11, PAddrBits),
-      boundary(i + PartialPAddrStride + 22, PAddrBits),
-      boundary(i + PartialPAddrStride + 33, PAddrBits)
-    )
-  )
-  private def genPartialPAddr(paddr: UInt) = {
-    val ppaddr_low = Wire(Vec(PartialPAddrLowBits, Bool()))
-    ppaddr_low.zip(lowMapping).foreach {
-      case (bit, mapping) =>
-        bit := mapping.filter(_.isDefined).map(x => paddr(x.get)).reduce(_^_)
-    }
+  private val LineOffsetBits = 6 // Byte offset within a 64-byte cache line.
+  private val PAddrHashBits = 16
+  private val LowHashBits = (PAddrHashBits - LineOffsetBits) / 2
+  private val HighHashBits = PAddrHashBits - LowHashBits
 
-    val ppaddr_high = Wire(Vec(PartialPAddrHighBits, Bool()))
-    ppaddr_high.zip(highMapping).foreach {
-      case (bit, mapping) =>
-        bit := mapping.filter(_.isDefined).map(x => paddr(x.get)).reduce(_^_)
-    }
-    Cat(ppaddr_high.asUInt, ppaddr_low.asUInt)
+  // The low hash bits fold address bits [15:6] in pairs from opposite ends.
+  private val lowHashInputs = Seq.tabulate(LowHashBits) { bit =>
+    Seq(LineOffsetBits + bit, PAddrHashBits - 1 - bit)
   }
+  // The high hash bits fold four 11-bit groups, skipping bits beyond the physical address width.
+  private val highHashInputs = Seq.tabulate(HighHashBits) { bit =>
+    Seq.tabulate(4)(group => LineOffsetBits + bit + group * HighHashBits).filter(_ < PAddrBits)
+  }
+  private val hashInputs = lowHashInputs ++ highHashInputs
+  private def hashLineAddress(paddr: UInt): UInt =
+    VecInit(hashInputs.map(inputs => inputs.map(bit => paddr(bit)).reduce(_ ^ _))).asUInt
 
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
-  //  LoadQueueRAR field
-  //  +-------+-------+-------+----------+
-  //  | Valid |  Uop  | PAddr | Released |
-  //  +-------+-------+-------+----------+
-  //
-  //  Field descriptions:
-  //  Allocated   : entry is valid.
-  //  MicroOp     : Micro-op
-  //  PAddr       : physical address.
-  //  Released    : DCache released.
-  class UopEntry(implicit p: Parameters) extends XSBundle {
-    val robIdx = new RobPtr()
-    val lqIdx = new LqPtr()
+
+  private val ports = 0 until LoadPipelineWidth
+  private val slots = 0 until LoadQueueRARSize
+  private val slotWidth = log2Ceil(LoadQueueRARSize)
+
+  object SlotState extends ChiselEnum {
+    val free, reserved, live, recovering = Value
   }
-  val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRARSize, new UopEntry))
-  val paddrModule = Module(new LqPAddrModule(
-    gen = UInt(PartialPAddrBits.W),
-    numEntries = LoadQueueRARSize,
-    numRead = LoadPipelineWidth,
-    numWrite = LoadPipelineWidth,
-    numWBank = LoadQueueNWriteBanks,
-    numWDelay = 1,
-    numCamPort = LoadPipelineWidth,
-    enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
-    paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
-  ))
-  paddrModule.io := DontCare
-  val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  import SlotState._
 
-  val freeList = Module(new BitMapFreeList(
-    size = LoadQueueRARSize,
-    allocWidth = LoadPipelineWidth
-  )).suggestName("LoadQueueRARFreelist")
-  freeList.io.freeBitmap := ~allocated.asUInt
+  // Table state is shared by all pipeline stages.
+  val state = RegInit(VecInit(slots.map(_ => free)))
+  val robUpper = Reg(Vec(LoadQueueRARSize, new RobPtr))
+  val lqUpper = Reg(Vec(LoadQueueRARSize, new LqPtr))
+  val tag = Reg(Vec(LoadQueueRARSize, UInt(PAddrHashBits.W)))
+  val released = Reg(Vec(LoadQueueRARSize, Bool()))
+  val shared = Reg(Vec(LoadQueueRARSize, Bool()))
+  val freeMask = VecInit(state.map(_ === free)).asUInt
+  val tracked = VecInit(state.map(s => s === live || s === recovering))
+  val flushed = robUpper.map(_.needFlush(io.redirect))
+  val lqCompleted = lqUpper.map(ptr => !isBefore(io.ldWbPtr, ptr))
 
-  // Real-allocation: load_s2
-  // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
-  // load enqueue can catch release.
-  val release1Cycle = io.release
-  // val release2Cycle = RegNext(io.release)
-  // val release2Cycle_dup_lsu = RegNext(io.release)
-  val release2Cycle = Wire(io.release.cloneType)
-  release2Cycle.bits := RegEnable(io.release.bits, io.release.valid)
-  release2Cycle.valid := RegNext(io.release.valid)
-  //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
+  val releaseTag = hashLineAddress(io.release.bits.paddr)
+  val previousReleaseTag = RegEnable(releaseTag, io.release.valid)
+  val previousReleaseValid = RegNext(io.release.valid, false.B)
 
-  // LoadQueueRAR enqueue condition:
-  // There are still not completed load instructions before the current load instruction.
-  // (e.g. "not completed" means that load instruction get the data or exception).
-  val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.robIdx.needFlush(io.redirect))
-  val hasNotWritebackedLoad = io.query.map(_.req.bits.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
-  val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+  // S2 pipeline registers, written by S1.
+  val s2HasReservation = RegInit(VecInit(ports.map(_ => false.B)))
+  val s2ReservedSlot = Reg(Vec(LoadPipelineWidth, UInt(slotWidth.W)))
+  val s2RobOlder = Reg(Vec(LoadPipelineWidth, Vec(LoadPipelineWidth, Bool())))
+  val s2LqOlder = Reg(Vec(LoadPipelineWidth, Vec(LoadPipelineWidth, Bool())))
 
-  // Allocate logic
-  val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
-  freeList.io.allocateCount := PopCount(acceptedVec)
+  // S3 pipeline registers, written by S2. Only a group's leader holds a target.
+  class RarIntent extends Bundle {
+    val robIdx = new RobPtr
+    val lqIdx = new LqPtr
+    val tag = UInt(PAddrHashBits.W)
+    val released = Bool()
+  }
+  val s3Intent = Reg(Vec(LoadPipelineWidth, new RarIntent))
+  val s3IntentValid = RegInit(VecInit(ports.map(_ => false.B)))
+  val s3GroupMembers = RegInit(VecInit(ports.map(_ => 0.U(LoadPipelineWidth.W))))
+  val s3Target = Reg(Vec(LoadPipelineWidth, UInt(slotWidth.W)))
+  val s3NewEntry = Reg(Vec(LoadPipelineWidth, Bool()))
+  val s3PrivateHead = Reg(Vec(LoadPipelineWidth, Bool()))
+  val s3RobOlder = Reg(Vec(LoadPipelineWidth, Vec(LoadPipelineWidth, Bool())))
+  val s3LqOlder = Reg(Vec(LoadPipelineWidth, Vec(LoadPipelineWidth, Bool())))
+  val s3Violation = Reg(Vec(LoadPipelineWidth, UInt((LoadQueueRARSize + LoadPipelineWidth).W)))
+  val s3ResponseValid = RegInit(VecInit(ports.map(_ => false.B)))
+  val s3TargetOH = ports.map(port => Mux(s3GroupMembers(port).orR,
+    UIntToOH(s3Target(port), LoadQueueRARSize), 0.U))
+  val s3TargetMask = s3TargetOH.reduce(_ | _)
 
-  for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
-    acceptedVec(w) := false.B
-    paddrModule.io.wen(w) := false.B
+  // S4 private-head registers. Their lifetime ends before the slot can be reused.
+  val s4HeadValid = RegInit(VecInit(ports.map(_ => false.B)))
+  val s4HeadSlot = Reg(Vec(LoadPipelineWidth, UInt(slotWidth.W)))
+  val s4HeadOH = ports.map(port => Mux(s4HeadValid(port), UIntToOH(s4HeadSlot(port), LoadQueueRARSize), 0.U))
+  val s4ProtectedMask = s4HeadOH.reduce(_ | _)
+  val s4RevokeMask = ports.map(port =>
+    Mux(io.query(port).revokeLastLastCycle, s4HeadOH(port), 0.U)).reduce(_ | _)
 
-    //  Allocate ready
-    val offset = PopCount(needEnqueue.take(w))
-    val canAccept = freeList.io.canAllocate(offset)
-    val enqIndex = freeList.io.allocateSlot(offset)
-    enq.ready := Mux(needEnqueue(w), canAccept, true.B)
+  // S1 — reserve slots and compare the incoming ports' ages.
+  val s1Request = io.query.map(_.s1Reserve)
+  val s1NeedsReservation = s1Request.map(r => r.valid && isAfter(r.bits.lqIdx, io.ldWbPtr) &&
+    !r.bits.robIdx.needFlush(io.redirect))
+  val freeList = Module(new BitMapFreeList(LoadQueueRARSize, LoadPipelineWidth))
+  freeList.io.freeBitmap := freeMask
+  val s1Rank = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadPipelineWidth).W)))
+  for (port <- ports) s1Rank(port) := PopCount(s1NeedsReservation.take(port))
+  val s1Granted = VecInit(ports.map(port =>
+    s1NeedsReservation(port) && freeList.io.canAllocate(s1Rank(port))))
+  val s1AllocatedSlot = s1Rank.map(rank => freeList.io.allocateSlot(rank))
+  val s1AllocateOH = ports.map(port => Mux(s1Granted(port),
+    UIntToOH(s1AllocatedSlot(port), LoadQueueRARSize), 0.U))
+  freeList.io.allocateCount := PopCount(s1Granted)
 
-    enqIndexVec(w) := enqIndex
-    when (needEnqueue(w) && canAccept) {
-      acceptedVec(w) := true.B
+  val s1RobOlder = VecInit(ports.map(i => VecInit(ports.map { j =>
+    val a = s1Request(i).bits
+    val b = s1Request(j).bits
+    a.robIdx.isBeforeSlot(b.robIdx) || (a.robIdx.isSameSlot(b.robIdx) &&
+      (isBefore(a.lqIdx, b.lqIdx) || (a.lqIdx === b.lqIdx && (i < j).B)))
+  })))
+  val s1LqOlder = VecInit(ports.map(i => VecInit(ports.map { j =>
+    val a = s1Request(i).bits.lqIdx
+    val b = s1Request(j).bits.lqIdx
+    isBefore(a, b) || (a === b && (i < j).B)
+  })))
 
-      //  Allocate new entry
-      allocated(enqIndex) := true.B
+  s2HasReservation := s1Granted
+  s2RobOlder := s1RobOlder
+  s2LqOlder := s1LqOlder
+  for (port <- ports) {
+    when (s1Granted(port)) { s2ReservedSlot(port) := s1AllocatedSlot(port) }
+  }
 
-      //  Write paddr
-      paddrModule.io.wen(w) := true.B
-      paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
+  // S2 — query the table and the registered S3 bypass, then choose each group's target.
+  val s2Request = io.query.map(_.req)
+  val s2Tag = s2Request.map(r => hashLineAddress(r.bits.paddr))
+  val s2NeedsEntry = s2Request.map(r => r.valid && isAfter(r.bits.lqIdx, io.ldWbPtr) &&
+    !r.bits.robIdx.needFlush(io.redirect))
+  val s2Accepted = VecInit(ports.map(port => s2NeedsEntry(port) && s2HasReservation(port)))
+  val s2MergeableMask = VecInit(slots.map(i => state(i) === live && !flushed(i) && !lqCompleted(i))).asUInt &
+    ~(s3TargetMask | s4ProtectedMask)
+  val s2RetainReservation = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s2RetainedMask = ports.map(port => Mux(s2RetainReservation(port),
+    UIntToOH(s2ReservedSlot(port), LoadQueueRARSize), 0.U)).reduce(_ | _)
 
-      //  Fill info
-      uop(enqIndex).robIdx := enq.bits.robIdx
-      uop(enqIndex).lqIdx := enq.bits.lqIdx
-      //  NC is uncachable and will not be explicitly released.
-      //  So NC requests are not allowed to have RAR
-      released(enqIndex) := enq.bits.nc || (
-        enq.bits.dataValid &&
-        (release2Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
-        release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
-      )
+  for (port <- ports) {
+    val request = s2Request(port)
+    request.ready := !s2NeedsEntry(port) || s2HasReservation(port)
+    val tableMatch = VecInit(tag.map(_ === s2Tag(port)))
+    val tableViolation = slots.map(i => tableMatch(i) && tracked(i) && released(i) &&
+      robUpper(i).isAfterSlot(request.bits.robIdx))
+    val pendingViolation = ports.map(i => s3IntentValid(i) && s3Intent(i).tag === s2Tag(port) &&
+      s3Intent(i).released && s3Intent(i).robIdx.isAfterSlot(request.bits.robIdx))
+    s3Violation(port) := VecInit(tableViolation ++ pendingViolation).asUInt
+    s3ResponseValid(port) := request.valid
+
+    val privateHead = io.query(port).mayLateRevoke
+    val groupMembers = VecInit(ports.map(j => s2Accepted(j) && ((j == port).B ||
+      (!privateHead && !io.query(j).mayLateRevoke && s2Tag(port) === s2Tag(j))))).asUInt
+    val olderPeers = VecInit(ports.map(j => s2RobOlder(j)(port))).asUInt
+    val groupLeader = s2Accepted(port) && !(groupMembers & olderPeers).orR
+    val existingMatch = tableMatch.asUInt & s2MergeableMask
+    val newEntry = privateHead || !existingMatch.orR
+    s2RetainReservation(port) := groupLeader && newEntry
+
+    s3GroupMembers(port) := Mux(groupLeader, groupMembers, 0.U)
+    s3IntentValid(port) := s2Accepted(port)
+    when (groupLeader) {
+      s3Target(port) := Mux(newEntry, s2ReservedSlot(port), PriorityEncoder(existingMatch))
+      s3NewEntry(port) := newEntry
+      s3PrivateHead(port) := privateHead
     }
-    val debug_robIdx = enq.bits.robIdx.asUInt
-    XSError(
-      needEnqueue(w) && enq.ready && allocated(enqIndex),
-      p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
-  }
-
-  //  LoadQueueRAR deallocate
-  // when the loads that "older than" current load were writebacked,
-  // current load will be released.
-  for (i <- 0 until LoadQueueRARSize) {
-    val deqNotBlock = !isBefore(io.ldWbPtr, uop(i).lqIdx)
-    val needFlush = uop(i).robIdx.needFlush(io.redirect)
-
-    when (allocated(i) && (deqNotBlock || needFlush)) {
-      allocated(i) := false.B
+    when (s2Accepted(port)) {
+      s3Intent(port).robIdx := request.bits.robIdx
+      s3Intent(port).lqIdx := request.bits.lqIdx
+      s3Intent(port).tag := s2Tag(port)
+      s3Intent(port).released := request.bits.nc || request.bits.dataValid &&
+        ((io.release.valid && releaseTag === s2Tag(port)) ||
+          (previousReleaseValid && previousReleaseTag === s2Tag(port)))
     }
+    XSError(s2Accepted(port) && (state(s2ReservedSlot(port)) =/= reserved ||
+      !robUpper(s2ReservedSlot(port)).isSameSlot(request.bits.robIdx)),
+      "RAR: S2 request does not own its S1 reservation")
+  }
+  s3RobOlder := s2RobOlder
+  s3LqOlder := s2LqOlder
+
+  // S3 — respond to the query and commit only the surviving members.
+  val s3Survives = VecInit(ports.map(port => s3IntentValid(port) && !io.query(port).revokeLastCycle &&
+    !s3Intent(port).robIdx.needFlush(io.redirect) && isAfter(s3Intent(port).lqIdx, io.ldWbPtr)))
+  val s3Writes = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s3GroupRob = Wire(Vec(LoadPipelineWidth, new RobPtr))
+  val s3GroupLq = Wire(Vec(LoadPipelineWidth, new LqPtr))
+  val s3GroupReleased = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s3GroupShared = Wire(Vec(LoadPipelineWidth, Bool()))
+  for (port <- ports) {
+    io.query(port).resp.valid := s3ResponseValid(port)
+    io.query(port).resp.bits.nuke := ParallelORR(s3Violation(port))
+
+    val remaining = s3GroupMembers(port) & s3Survives.asUInt
+    val youngestRob = VecInit(ports.map(i => remaining(i) && !(s3RobOlder(i).asUInt & remaining).orR))
+    val youngestLq = VecInit(ports.map(i => remaining(i) && !(s3LqOlder(i).asUInt & remaining).orR))
+    s3Writes(port) := remaining.orR
+    s3GroupRob(port) := Mux1H(youngestRob, s3Intent.map(_.robIdx))
+    s3GroupLq(port) := Mux1H(youngestLq, s3Intent.map(_.lqIdx))
+    s3GroupReleased(port) := (remaining & VecInit(s3Intent.map(_.released)).asUInt).orR
+    s3GroupShared(port) := PopCount(remaining) > 1.U
+
+    s4HeadValid(port) := s3Writes(port) && s3PrivateHead(port)
+    when (s3Writes(port) && s3PrivateHead(port)) { s4HeadSlot(port) := s3Target(port) }
+    XSError(s3GroupMembers(port).orR && Mux(s3NewEntry(port),
+      state(s3Target(port)) =/= reserved, state(s3Target(port)) =/= live),
+      "RAR: S3 destination changed while its group was in flight")
+    XSError(s3Writes(port) && (PopCount(youngestRob) =/= 1.U || PopCount(youngestLq) =/= 1.U),
+      "RAR: group ages must select one ROB upper bound and one LQ upper bound")
+    XSError(s3IntentValid(port) && PopCount(s3GroupMembers.map(_(port))) =/= 1.U,
+      "RAR: request must belong to one group")
   }
 
-  // if need replay revoke entry
-  val lastCanAccept = GatedRegNext(acceptedVec)
-  val lastAllocIndex = enqIndexVec.zip(acceptedVec).map(x => RegEnable(x._1, x._2))
-  val lastLastCanAccept = RegNext(lastCanAccept)
-  val lastLastAllocIndex = lastAllocIndex.zip(lastCanAccept).map(x => RegEnable(x._1, x._2))
+  // Each row has one state update, combining reservation, commit and retirement.
+  val recover = VecInit(slots.map(i => flushed(i) && (state(i) === recovering || state(i) === live && shared(i))))
+  val retireByRob = VecInit(slots.map(i => state(i) === recovering &&
+    robUpper(i).isNotAfterSlot(io.robPendingPtr) && !recover(i)))
+  val inserted = Wire(Vec(LoadQueueRARSize, Bool()))
+  for (i <- slots) {
+    val allocationPorts = VecInit(ports.map(port => s1AllocateOH(port)(i)))
+    val writingGroups = VecInit(ports.map(port => s3Writes(port) && s3TargetOH(port)(i)))
+    val hasWriter = writingGroups.asUInt.orR
+    val retire = state(i) === live && (flushed(i) || lqCompleted(i) || s4RevokeMask(i)) || retireByRob(i)
+    val keepOld = tracked(i) && (!retire || recover(i))
+    inserted(i) := hasWriter && !keepOld
 
-  for ((query, w) <- io.query.zipWithIndex) {
-    val revokeLastCycle = query.revokeLastCycle && lastCanAccept(w)
-    val revokeLastLastCycle = query.revokeLastLastCycle && lastLastCanAccept(w)
-    val revokeLastIndex = lastAllocIndex(w)
-    val revokeLastLastIndex = lastLastAllocIndex(w)
-
-    when (allocated(revokeLastIndex) && revokeLastCycle) {
-      allocated(revokeLastIndex) := false.B
+    // A delayed release belongs to a continuing row or its matching new occupants.
+    val incomingTag = Mux1H(writingGroups, s3Intent.map(_.tag))
+    val markReleased = RegNext(io.release.valid &&
+      (keepOld && tag(i) === releaseTag || hasWriter && incomingTag === releaseTag), false.B)
+    when (allocationPorts.asUInt.orR) {
+      state(i) := reserved
+      robUpper(i) := Mux1H(allocationPorts, s1Request.map(_.bits.robIdx))
+    }.elsewhen (recover(i)) {
+      state(i) := recovering
+      robUpper(i) := io.redirect.bits.robIdx
+    }.elsewhen (hasWriter) {
+      val incomingRob = Mux1H(writingGroups, s3GroupRob)
+      val incomingLq = Mux1H(writingGroups, s3GroupLq)
+      state(i) := live
+      when (!keepOld || incomingRob.isAfterSlot(robUpper(i))) { robUpper(i) := incomingRob }
+      when (!keepOld || isAfter(incomingLq, lqUpper(i))) { lqUpper(i) := incomingLq }
+      when (!keepOld) { tag(i) := incomingTag }
+      shared(i) := keepOld || (writingGroups.asUInt & s3GroupShared.asUInt).orR
+    }.elsewhen (retire || state(i) === reserved && (!s2RetainedMask(i) || flushed(i))) {
+      state(i) := free
     }
-    when (allocated(revokeLastLastIndex) && revokeLastLastCycle) {
-      allocated(revokeLastLastIndex) := false.B
-    }
-  }
-
-  // LoadQueueRAR Query
-  // Load-to-Load violation check condition:
-  // 1. Physical address match by CAM port.
-  // 2. release or nc_with_data is set.
-  // 3. Younger than current load instruction.
-  //val allocatedUInt = RegNext(allocated.asUInt)
-  for ((query, w) <- io.query.zipWithIndex) {
-    paddrModule.io.releaseViolationMdata(w) := genPartialPAddr(query.req.bits.paddr)
-
-    query.resp.valid := RegNext(query.req.valid)
-    // Generate real violation mask
-    val robIdxMask = VecInit(uop.map(_.robIdx).map(_.isAfterSlot(query.req.bits.robIdx)))
-    val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
-    for(i <- 0 until LoadQueueRARSize) {
-      matchMaskReg(i) := (allocated(i) &
-                         paddrModule.io.releaseViolationMmask(w)(i) &
-                         robIdxMask(i) &&
-                         released(i))
-      }
-    val matchMask = RegEnable(matchMaskReg, query.req.valid)
-    //  Load-to-Load violation check result
-    val ldLdViolationMask = matchMask
-    ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.nuke := ParallelORR(ldLdViolationMask)
-  }
-
-
-  // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
-  // update release flag in 1 cycle
-  when (release1Cycle.valid) {
-    paddrModule.io.releaseMdata.takeRight(1)(0) := genPartialPAddr(release1Cycle.bits.paddr)
-  }
-
-  (0 until LoadQueueRARSize).map(i => {
-    when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i)) && allocated(i) && release1Cycle.valid)) {
-      // Note: if a load has missed in dcache and is waiting for refill in load queue,
-      // its released flag still needs to be set as true if addr matches.
+    when (hasWriter) {
+      released(i) := (writingGroups.asUInt & s3GroupReleased.asUInt).orR ||
+        keepOld && (released(i) || markReleased)
+    }.elsewhen (markReleased) {
       released(i) := true.B
     }
-  })
 
-  // Unaligned replay may allocate one RAR entry for the head and another one
-  // for the tail. Do not wake C_RAR replays when the queue only has a few
-  // slots left; otherwise the head can consume the last slots and the paired
-  // tail immediately nacks, causing the same replay to spin.
-  val freeEntryCount = LoadQueueRARSize.U - PopCount(allocated)
-  val hasEnoughReplayEntries = freeEntryCount >= (2 * LoadPipelineWidth).U
-  io.lqFull := !hasEnoughReplayEntries
-  io.validCount := PopCount(allocated)
+    XSError(PopCount(ports.map(port => s3TargetOH(port)(i))) > 1.U,
+      "RAR: independent groups chose the same target")
+    XSError(hasWriter && (state(i) === free || state(i) === recovering || s4ProtectedMask(i) ||
+      (state(i) === reserved && flushed(i))), "RAR: surviving group lost ownership of its target")
+  }
 
-  // perf cnt
-  val canEnqCount = PopCount(io.query.map(_.req.fire))
-  val validCount = PopCount(allocated)
-  val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
-  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.nuke))
-
-  QueuePerf(LoadQueueRARSize, validCount, !allowEnqueue)
-  XSPerfAccumulate("enq", canEnqCount)
+  val allocatedCount = PopCount(tracked)
+  val freeCount = PopCount(freeMask)
+  io.lqFull := freeCount < (2 * LoadPipelineWidth).U
+  io.validCount := allocatedCount
+  val queryFireCount = PopCount(s2Request.map(_.fire))
+  val ldLdViolationCount = PopCount(io.query.map(q => q.resp.valid && q.resp.bits.nuke))
+  val insertCount = PopCount(inserted)
+  val commitCount = PopCount(s3Survives)
+  val writerCount = PopCount(s3Writes)
+  QueuePerf(LoadQueueRARSize, allocatedCount, allocatedCount > (LoadQueueRARSize - LoadPipelineWidth).U)
+  XSPerfAccumulate("enq", queryFireCount)
   XSPerfAccumulate("ld_ld_violation", ldLdViolationCount)
+  XSPerfAccumulate("reserve", PopCount(s1Granted))
+  XSPerfAccumulate("cancel", PopCount(s2HasReservation) - PopCount(s2Accepted) +&
+    (PopCount(s3IntentValid) - commitCount))
+  XSPerfAccumulate("insert", insertCount)
+  XSPerfAccumulate("merge_existing", writerCount - insertCount)
+  XSPerfAccumulate("merge_peer", commitCount - writerCount)
+  XSPerfAccumulate("merge_saved_high", Mux(freeCount <= (LoadQueueRARSize / 4).U, commitCount - insertCount, 0.U))
+  XSPerfAccumulate("reserve_nack", PopCount(s2NeedsEntry) - PopCount(s2Accepted))
+  XSPerfAccumulate("pending_release_hit", PopCount(ports.map(port =>
+    s3Survives(port) && io.release.valid && s3Intent(port).tag === releaseTag)))
+  XSPerfAccumulate("merged_redirect", PopCount(recover))
+  XSPerfAccumulate("retire_by_rob", PopCount(retireByRob))
   val perfEvents: Seq[(String, UInt)] = Seq(
-    ("enq", canEnqCount),
+    ("enq", queryFireCount),
     ("ld_ld_violation", ldLdViolationCount)
   )
   generatePerfEvent()
-  // End
 }

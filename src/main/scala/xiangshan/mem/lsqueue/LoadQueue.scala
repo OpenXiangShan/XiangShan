@@ -240,6 +240,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.robPendingPtr := io.rob.pendingPtr
   loadQueueRAR.io.validCount<> io.rarValidCount
   loadQueueRAR.io.query     <> io.ldu.rarNukeQuery
 

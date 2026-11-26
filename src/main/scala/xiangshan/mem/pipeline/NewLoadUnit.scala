@@ -513,6 +513,8 @@ class LoadUnitS1(param: ExeUnitParams)(
     val specialMode = Input(Bool())
     val lqHeadPtr = Input(new LqPtr)
 
+    val rarReserve = ValidIO(new LrqAlloc)
+
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp(2))) // TODO: parameterize 2
     val tlbReqKill = Output(Bool())
@@ -761,6 +763,11 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.uncacheForwardKill := kill
   io.mshrForwardKill := killDCache
   io.tldForwardKill := killDCache
+
+  io.rarReserve.valid := pipeIn.fire && !kill && !accessType.isPrefetch() && !in.isMMIOReplay()
+  io.rarReserve.bits.robIdx := robIdx
+  io.rarReserve.bits.lqIdx := uop.lqIdx
+  XSError(io.rarReserve.valid && !pipeOut.ready, "RAR: S1 reservation requires an unstalled load pipeline")
 
   io.dataPathMeta.valid := pipeIn.valid && !kill
   io.dataPathMeta.bits.bankOffset := paddr.take(DCacheVWordOffset)
@@ -2164,7 +2171,9 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.tldForwardResp := tldForwardRespMerged
   s2.io.uncacheBypassResp := io.uncacheBypass.s2Resp
   s2.io.staNukeQueryReq := io.staNukeQueryReq
+  io.rarNukeQuery.s1Reserve := s1.io.rarReserve
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq
+  io.rarNukeQuery.mayLateRevoke := s1.io_pipeOut.get.bits.unalignHead.get
   io.rawNukeQuery.req <> s2.io.rawNukeQueryReq
   io.prefetchTrainHintS2 := s2.io.prefetchTrain.valid
   io.prefetchTrain.valid := GatedValidRegNext(s2.io.prefetchTrain.valid)
