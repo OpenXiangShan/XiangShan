@@ -100,7 +100,7 @@ class ExtProxyUnitHarness(implicit p: Parameters) extends Module {
   proxy.io.out.ready := true.B
   io.outValid        := proxy.io.out.valid
   io.outData         := proxy.io.out.bits.res.data
-  io.outIllegal      := proxy.io.out.bits.ctrl.exceptionVec.map(_(illegalInstr)).getOrElse(false.B)
+  io.outIllegal      := proxy.io.out.bits.ctrl.exceptionVec(illegalInstr)
 
   val ext = proxy.io.extExec.get
   io.extReqValid            := ext.req.valid
