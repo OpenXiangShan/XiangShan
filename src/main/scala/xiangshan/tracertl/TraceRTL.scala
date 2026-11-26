@@ -30,7 +30,7 @@ class TraceAlignedFetch(implicit p: Parameters) extends TraceBundle {
   val foldPc        = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val pdInfoVec     = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
   val jumpOffsetVec = Vec(IBufferEnqueueWidth, GuardedPc())
-  val tracertlInfo     = Vec(IBufferEnqueueWidth, new TracertlInstrBundle)
+  val tracertlInfo  = Vec(IBufferEnqueueWidth, new TracertlInstrBundle)
 }
 
 class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
@@ -173,5 +173,5 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   aligned.foldPc        := VecInit(aligned.instrPcVec.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)))
   aligned.pdInfoVec     := VecInit(s3DecodedForIFU.map(_.pd))
   aligned.jumpOffsetVec := VecInit(s3DecodedForIFU.map(_.jumpOffset))
-  aligned.tracertlInfo     := VecInit(s3DecodedForIFU.map(_.compact.tracertlInfo))
+  aligned.tracertlInfo  := VecInit(s3DecodedForIFU.map(_.compact.tracertlInfo))
 }

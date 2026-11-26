@@ -193,7 +193,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
     )
     entry                   := 0.U.asTypeOf(new TraceCompactEntry)
     entry.valid             := sourceOH.asUInt.orR
-    entry.tracertlInfo         := Mux1H(sourceOH, cutInsts.map(_.bits))
+    entry.tracertlInfo      := Mux1H(sourceOH, cutInsts.map(_.bits))
     entry.instrEndOffset    := Mux1H(sourceOH, slotEndOffset)
     entry.selectBlock       := Mux1H(sourceOH, slotBlockSel)
     entry.isPrevEndHalfRvi  := Mux1H(sourceOH, slotInheritedRvi)

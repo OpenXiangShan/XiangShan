@@ -47,7 +47,9 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
   val enable = IO(Input(Bool()))
 
   // Field order is the argument order of trace_read_one_instr.
-  private val fields = new TracertlInstrBundle().elements.toSeq.reverse.map { case (name, data) => name -> data.getWidth }
+  private val fields = new TracertlInstrBundle().elements.toSeq.reverse.map { case (name, data) =>
+    name -> data.getWidth
+  }
   // GSIM's C++ ExtModule path does not automatically clear bits above a
   // narrow output port. Receive the complete C++ scalar and narrow it in RTL.
   private val portWidths = fields.map { case (name, w) => name -> TraceDpiType.storageWidth(w) }

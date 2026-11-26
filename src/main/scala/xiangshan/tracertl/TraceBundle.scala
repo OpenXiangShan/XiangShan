@@ -83,7 +83,7 @@ class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
 /** One instruction after removing holes from the position-indexed representation. */
 class TraceCompactEntry(implicit p: Parameters) extends TraceBundle {
   val valid             = Bool()
-  val tracertlInfo         = new TracertlInstrBundle
+  val tracertlInfo      = new TracertlInstrBundle
   val instrEndOffset    = UInt(FetchBlockInstOffsetWidth.W)
   val selectBlock       = Bool()
   val isPrevEndHalfRvi  = Bool()
