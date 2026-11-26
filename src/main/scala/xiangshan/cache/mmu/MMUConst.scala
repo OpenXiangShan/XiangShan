@@ -296,7 +296,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = if (EnableSv48) vpnnLen * 4 + extendVpnnBits else vpnnLen * 3 + extendVpnnBits
 
   // miss queue
-  val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
+  val MissQueueSize = 16
   val MemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3))
   else (l2tlbParams.llptwsize + 1 + 1)
 
