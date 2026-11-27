@@ -100,6 +100,7 @@ class LoadAccessType extends Bundle {
   def isSwPrefetch(): Bool = isPrefetch() && PrefetchType.isSwPrefetch(pftType)
   def isInstrPrefetch(): Bool = isPrefetch() && PrefetchType.isInstrPrefetch(pftType)
   def isDataPrefetch(): Bool = isPrefetch() && PrefetchType.isDataPrefetch(pftType)
+  def isWritePrefetch(): Bool = isPrefetch() && pftCoh === PrefetchCoh.write
 }
 
 object LoadAccessType {

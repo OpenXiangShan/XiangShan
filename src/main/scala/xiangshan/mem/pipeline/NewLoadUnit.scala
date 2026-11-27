@@ -401,11 +401,13 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready)
   io.ldin.ready := scalarIssue.ready
 
+  val isWritePrefetch = sink.bits.accessType.isWritePrefetch()
+
   io.tlbReq.valid := tlbReqValid
   io.tlbReq.bits.vaddr := tlbVAddr
   io.tlbReq.bits.fullva := tlbFullva
   io.tlbReq.bits.checkfullva := tlbCheckFullva
-  io.tlbReq.bits.cmd := TlbCmd.read
+  io.tlbReq.bits.cmd := Mux(isWritePrefetch, TlbCmd.write, TlbCmd.read)
   io.tlbReq.bits.hyperinst := tlbHlv
   io.tlbReq.bits.hlvx := tlbHlvx
   io.tlbReq.bits.size := DontCare
@@ -423,7 +425,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.debug.isFirstIssue := firstIssue
 
   io.dcacheReq.valid := dcacheReqValid && !noDCacheAccess
-  io.dcacheReq.bits.cmd := Mux(isPrefetch, MemoryOpConstants.M_PFR, MemoryOpConstants.M_XRD)
+  io.dcacheReq.bits.cmd := Mux(isPrefetch, Mux(isWritePrefetch, MemoryOpConstants.M_PFW, MemoryOpConstants.M_PFR), MemoryOpConstants.M_XRD)
   io.dcacheReq.bits.vaddr := dcacheVAddr
   io.dcacheReq.bits.vaddr_dup := dcacheVAddr
   io.dcacheReq.bits.data := DontCare
@@ -614,9 +616,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   val gpaddr = tlbResp.bits.gpaddr(0)
   val fullva = tlbResp.bits.fullva
 
-  val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
-  val af = tlbHit && tlbResp.bits.excp.head.af.ld
-  val gpf = tlbHit && tlbResp.bits.excp.head.gpf.ld
+  val isWritePrefetch = accessType.isWritePrefetch()
+  val pf = tlbHit && Mux(isWritePrefetch, tlbResp.bits.excp.head.pf.st, tlbResp.bits.excp.head.pf.ld)
+  val af = tlbHit && Mux(isWritePrefetch, tlbResp.bits.excp.head.af.st, tlbResp.bits.excp.head.af.ld)
+  val gpf = tlbHit && Mux(isWritePrefetch, tlbResp.bits.excp.head.gpf.st, tlbResp.bits.excp.head.gpf.ld)
   val tlbException = pf || af || gpf
 
   val killDCache = kill || tlbMiss || tlbException || specialRequest
@@ -923,7 +926,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     uop.exceptionVec(loadPageFault) ||
     uop.exceptionVec(loadGuestPageFault)
   val tlbAccessable = !tlbUnaccessable
-  val pmpUnaccessable = (pmp.ld || pmp.instr && LSUOpType.isHlvx(uop.fuOpType)) && tlbHit
+  val isWritePrefetch = isPrefetch && accessType.pftCoh === PrefetchCoh.write
+  val pmpUnaccessable = (Mux(isWritePrefetch, pmp.st, pmp.ld) || pmp.instr && LSUOpType.isHlvx(uop.fuOpType)) && tlbHit
 
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
