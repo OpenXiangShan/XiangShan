@@ -104,6 +104,7 @@ class SDBPTest extends AnyFlatSpec {
           val sig = random.nextInt(32768)
           val pcValid = step % 7 != 0
           val source = step % sdbpSources.size
+          val hintHit = source != 0 && step % 2 == 0
           val dead = step % 3 == 0
           val entries = model(set & (sets - 1))
           val hit = entries.indexWhere(e => e.valid && e.tag == tag)
@@ -122,6 +123,7 @@ class SDBPTest extends AnyFlatSpec {
           dut.io.commit.bits.signature.poke(sig.U)
           dut.io.commit.bits.source.poke(sdbpSources(source))
           dut.io.commit.bits.dead.poke(dead.B)
+          dut.io.commit.bits.hintHit.poke(hintHit.B)
           if (update) dut.io.selectedWay.expect(way.U)
           dut.io.hit.expect((update && hit >= 0).B)
           dut.io.writeEnable.expect(update.B)
@@ -135,12 +137,57 @@ class SDBPTest extends AnyFlatSpec {
           dut.io.commit.valid.poke(false.B)
           if (update) {
             old.valid = true; old.tag = tag; old.sig = sig
-            old.source = source; old.dead = dead; old.age = step
+            old.source = source; old.dead = dead
+            if (!hintHit || hit < 0) old.age = step
           }
         }
       }
     }
   }
+  it should "leave the Hint-hit way oldest while still writing and training the entry" in {
+    import SDBPSource.{Demand, L2Stream}
+    val params = SDBPParams(samplerSets = 2, samplerWays = Some(2), predictorEntries = 64)
+    simulate(new SDBPSampler(4, 4, params)) { dut =>
+      dut.io.read.valid.poke(false.B)
+      dut.io.commit.valid.poke(false.B)
+      def access(tag: Int, way: Int, hit: Boolean, source: SDBPSource.Type = Demand,
+        hintHit: Boolean = false, trainedSource: Option[SDBPSource.Type] = None): Unit = {
+        dut.io.read.bits.set.poke(0.U)
+        dut.io.read.bits.tag.poke(tag.U)
+        dut.io.read.valid.poke(true.B); dut.clock.step()
+        dut.io.read.valid.poke(false.B); dut.clock.step()
+        dut.io.commit.bits.signature.poke(tag.U)
+        dut.io.commit.bits.source.poke(source)
+        dut.io.commit.bits.dead.poke(false.B)
+        dut.io.commit.bits.hintHit.poke(hintHit.B)
+        dut.io.commit.valid.poke(true.B)
+        dut.io.hit.expect(hit.B)
+        dut.io.selectedWay.expect(way.U)
+        dut.io.writeEnable.expect(true.B)
+        dut.io.training.valid.expect(trainedSource.nonEmpty.B)
+        trainedSource.foreach { oldSource =>
+          dut.io.training.bits.source.expect(oldSource)
+          dut.io.training.bits.dead.expect((!hit).B)
+        }
+        dut.clock.step(); dut.io.commit.valid.poke(false.B)
+      }
+      for ((name, source, hintHit, samplerHit, nextVictim) <- Seq(
+        ("Hint hits the sampler", L2Stream, true, true, 0),
+        ("demand hits the sampler", Demand, false, true, 1),
+        ("prefetch refill hits the sampler", L2Stream, false, true, 1),
+        ("Hint misses the sampler", L2Stream, true, false, 1)
+      )) {
+        withClue(s"$name: ") {
+          dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
+          access(1, 0, hit = false)
+          access(2, 1, hit = false)
+          access(if (samplerHit) 1 else 3, 0, samplerHit, source, hintHit, Some(Demand))
+          access(4, nextVictim, hit = false, trainedSource = Some(if (nextVictim == 0) source else Demand))
+        }
+      }
+    }
+  }
+
   it should "reject invalid sampler geometry" in {
     for (sets <- Seq(0, 1, 3, 1024)) {
       intercept[IllegalArgumentException] { SDBPParams(samplerSets = sets).checkSets(512) }
@@ -167,6 +214,7 @@ class SDBPTest extends AnyFlatSpec {
         dut.io.commit.bits.source.poke(banksById(requestSource))
         dut.io.commit.bits.signature.poke(sig.U)
         dut.io.commit.bits.dead.poke((prediction != 0).B)
+        dut.io.commit.bits.hintHit.poke(false.B)
         val training = sampled != 0 && oldValid != 0 && (hit != 0 || evicted != 0)
         dut.io.writeEnable.expect((sampled != 0).B)
         dut.io.hit.expect((hit != 0).B)

@@ -74,7 +74,7 @@ class SDBPIntegrationTest extends AnyFlatSpec {
       dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
       def access(tag: Int, accepted: Boolean, refill: Boolean, source: SDBPSource.Type = Demand,
         pcValid: Boolean = true, training: Option[(SDBPSource.Type, Boolean)] = None, set: Int = 0,
-        samplerWrite: Boolean = true, candidate: Boolean = true): Unit = {
+        samplerWrite: Boolean = true, candidate: Boolean = true, hintHit: Boolean = false): Unit = {
         dut.io.read.bits.set.poke(set.U); dut.io.read.bits.tag.poke(tag.U)
         dut.io.read.bits.candidate.poke(candidate.B)
         dut.io.read.bits.signature.poke(0.U) // PC zero is valid, not a missing-PC sentinel.
@@ -88,6 +88,7 @@ class SDBPIntegrationTest extends AnyFlatSpec {
         dut.io.commit.valid.poke(accepted.B)
         dut.io.commit.bits.set.poke(set.U); dut.io.commit.bits.way.poke(2.U)
         dut.io.commit.bits.refill.poke(refill.B)
+        dut.io.commit.bits.hintHit.poke(hintHit.B)
         dut.io.liveTraining.expect(training.exists(!_._2).B)
         dut.io.deadTraining.expect(training.exists(_._2).B)
         dut.io.samplerWrite.expect((accepted && predicts && samplerWrite).B)
@@ -111,9 +112,9 @@ class SDBPIntegrationTest extends AnyFlatSpec {
       access(4, accepted = true, refill = true, training = Some(Demand -> true))
       access(5, accepted = true, refill = true, training = Some(Demand -> true))
       access(6, accepted = true, refill = false, set = 1, samplerWrite = false) // Unsampled still predicts.
-      access(5, accepted = true, refill = false, source = L1Stream, pcValid = false)
-      access(5, accepted = true, refill = false, source = L1Stream, training = Some(Demand -> false))
-      access(5, accepted = true, refill = false, source = L2Stream, training = Some(L1Stream -> false))
+      access(5, accepted = true, refill = false, source = L1Stream, pcValid = false, hintHit = true)
+      access(5, accepted = true, refill = false, source = L1Stream, training = Some(Demand -> false), hintHit = true)
+      access(5, accepted = true, refill = false, source = L2Stream, training = Some(L1Stream -> false), hintHit = true)
       access(8, accepted = true, refill = true, source = L2SmsAgt, training = Some(L2Stream -> true))
       for (tag <- 9 to 12) {
         access(tag, accepted = true, refill = true, source = L2SmsAgt, training = Some(L2SmsAgt -> true))

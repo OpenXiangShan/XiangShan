@@ -250,6 +250,7 @@ class SDBPMetadataTest extends AnyFlatSpec {
         dut.io.resp.bits.hit.expect(true.B)
         dut.io.sdbpCommit.bits.set.poke(set.U)
         dut.io.sdbpCommit.bits.way.poke(1.U)
+        dut.io.sdbpCommit.bits.hintHit.poke(true.B)
         dut.io.sdbpCommit.valid.poke(true.B)
         read.ready.expect((!sampled).B)
         dut.clock.step()
@@ -374,7 +375,7 @@ class SDBPMetadataTest extends AnyFlatSpec {
       dut.io.dirReplWayOH_s3.poke(4.U)
       def request(mshr: Boolean, hit: Boolean, tagWrite: Boolean, retry: Boolean = false,
         denied: Boolean = false, corrupt: Boolean = false, opcode: UInt = TLMessages.Get,
-        expected: Boolean): Unit = {
+        expected: Boolean, expectedHintHit: Boolean = false): Unit = {
         val task = dut.io.taskFromArb_s2.bits
         task.channel.poke(1.U); task.opcode.poke(opcode)
         task.mshrTask.poke(mshr.B); task.tagWen.poke(tagWrite.B)
@@ -388,15 +389,18 @@ class SDBPMetadataTest extends AnyFlatSpec {
         dut.io.sdbpCommit.valid.expect(expected.B)
         if (expected) {
           dut.io.sdbpCommit.bits.refill.expect(tagWrite.B)
+          dut.io.sdbpCommit.bits.hintHit.expect(expectedHintHit.B)
           dut.io.sdbpCommit.bits.way.expect((if (tagWrite) 2 else 1).U)
         }
         dut.clock.step(5)
         dut.io.sdbpCommit.valid.expect(false.B)
       }
       request(mshr = false, hit = false, tagWrite = false, expected = false)
+      request(mshr = false, hit = false, tagWrite = false, opcode = TLMessages.Hint, expected = false)
       request(mshr = false, hit = true, tagWrite = false, expected = true)
-      request(mshr = false, hit = true, tagWrite = false, opcode = TLMessages.Hint, expected = true)
+      request(mshr = false, hit = true, tagWrite = false, opcode = TLMessages.Hint, expected = true, expectedHintHit = true)
       request(mshr = true, hit = false, tagWrite = true, opcode = TLMessages.GrantData, expected = true)
+      request(mshr = true, hit = false, tagWrite = true, opcode = TLMessages.HintAck, expected = true)
       request(mshr = true, hit = false, tagWrite = true, retry = true, opcode = TLMessages.GrantData, expected = false)
       request(mshr = true, hit = false, tagWrite = true, denied = true, opcode = TLMessages.GrantData, expected = false)
       request(mshr = true, hit = false, tagWrite = true, corrupt = true, opcode = TLMessages.GrantData, expected = false)
