@@ -398,6 +398,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val extTlb = Vec(p(xiangshan.ext.CoreExtPluginsKey).count(_.enableL2TlbPort), Flipped(new TlbPtwIO))
     val l2_pmp_resp = new PMPRespBundle
     val l2_flush_done = Input(Bool())
 
@@ -757,6 +758,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
   val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
+  val extTlbRepeaters = ptw.io.tlb.drop(2).zip(io.extTlb).map { case (ptwPort, extPort) =>
+    PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, extPort, ptwPort, sfence, tlbcsr)
+  }
 
   lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
 

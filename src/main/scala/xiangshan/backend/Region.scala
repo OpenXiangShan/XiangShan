@@ -469,6 +469,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     io.vtype.get := exuBlock.io.vtype.get
     io.toIntPreg := wbDataPath.io.toIntPreg
     io.fenceio.get <> exuBlock.io.fenceio.get
+    io.extExec.foreach(_ <> exuBlock.io.extExec.get)
     io.csrToDecode.get <> exuBlock.io.csrToDecode.get
 
     dataPath.io.ldCancel := io.ldCancel
@@ -1064,6 +1065,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val fromVlWb = Input(backendParams.genVlWriteBackBundle)
   val og0Cancel = Output(ExuVec())
   val fenceio = Option.when(params.isIntSchd)(new FenceIO)
+  val extExec = Option.when(params.hasExtProxy)(new xiangshan.ext.ExtExecIO)
   val frm = Input(UInt(3.W))
   val vxrm = Input(UInt(2.W))
   val vstart = Option.when(params.isVecSchd)(Input(Vstart()))

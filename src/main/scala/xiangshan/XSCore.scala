@@ -72,6 +72,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   if (icacheCtrlEnabled) {
     frontend.inner.icache.ctrlUnitOpt.get.node := memBlock.inner.frontendBridge.icachectrl_node
   }
+  p(xiangshan.ext.CoreExtPluginsKey).foreach(_.onCoreLazyElaborated(this))
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -205,7 +206,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.intIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
-  memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
+  val extFlushSbs = p(xiangshan.ext.CoreExtPluginsKey).map(_ => WireInit(false.B))
+  memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb || extFlushSbs.foldLeft(false.B)(_ || _)
 
   memBlock.io.ooo_to_mem.sfence <> backend.io.mem.sfence
 
@@ -280,4 +282,5 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.dft_reset.zip(memBlock.io.dft_reset_frnt).foreach({ case (a, b) => a := b })
   backend.io.dft.zip(memBlock.io.dft_bcknd).foreach({ case (a, b) => a := b })
   backend.io.dft_reset.zip(memBlock.io.dft_reset_bcknd).foreach({ case (a, b) => a := b })
+  xiangshan.ext.ExtCoreHelper.elaborate(this, extFlushSbs)
 }

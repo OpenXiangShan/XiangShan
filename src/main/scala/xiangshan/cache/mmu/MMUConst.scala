@@ -259,7 +259,7 @@ trait HasTlbConst extends HasXSParameter {
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
-  val PtwWidth = 2
+  val PtwWidth = 2 + p(xiangshan.ext.CoreExtPluginsKey).count(_.enableL2TlbPort)
   val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
   val prefetchID = PtwWidth
 

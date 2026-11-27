@@ -48,6 +48,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   })))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
+  val extExec = Option.when(params.hasExtProxy)(new xiangshan.ext.ExtExecIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
   val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
   val vtype = Option.when(params.writeVlRf)((Valid(new VType)))
@@ -445,6 +446,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => exuio := fuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
+  io.extExec.foreach(exuio => funcUnits.foreach(fu => fu.io.extExec.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
   io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))

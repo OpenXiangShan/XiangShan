@@ -570,6 +570,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   private val fenceio = intRegion.io.fenceio.get
   io.fenceio <> fenceio
+  io.extExec.zip(intRegion.io.extExec).foreach { case (out, in) => out <> in }
+  io.extRobCommit.zip(ctrlBlock.io.extRobCommit).foreach { case (out, in) => out := in }
 
   intRegion.io.frm := csrio.fpu.frm
   intRegion.io.vxrm := csrio.vpu.vxrm
@@ -873,4 +875,8 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val topDownInfo = new TopDownInfo
   val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
   val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+  val extExec = Option.when(params.intSchdParams.exists(_.hasExtProxy))(new xiangshan.ext.ExtExecIO)
+  val extRobCommit = Option.when(p(xiangshan.ext.CoreExtPluginsKey).nonEmpty)(
+    Output(new xiangshan.ext.ExtRobCommitIO)
+  )
 }

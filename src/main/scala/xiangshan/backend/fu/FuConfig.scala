@@ -198,6 +198,8 @@ case class FuConfig (
 
   def isFence: Boolean = fuType == FuType.fence
 
+  def isExtProxy: Boolean = fuType == FuType.extProxy
+
   def isVecArith: Boolean = FuType.FuTypeOrR(
     fuType,
     FuType.vialu,
@@ -219,7 +221,7 @@ case class FuConfig (
 
   def isStd: Boolean = name.contains("std")
 
-  def ckAlwaysEn: Boolean = isCsr || isFence
+  def ckAlwaysEn: Boolean = isCsr || isFence || isExtProxy
 
   def needInstFrm: Boolean = needSrcFrm && !needOg2
 
@@ -370,6 +372,21 @@ object FuConfig {
     piped = false,
     latency = UncertainLatency(),
     flushPipe = true
+  )
+
+  val ExtProxyCfg: FuConfig = FuConfig (
+    name = "extProxy",
+    fuType = FuType.extProxy,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new xiangshan.ext.ExtProxyFu(cfg)(p)).suggestName("ExtProxy"),
+    srcData = Seq(
+      Seq(IntData(), IntData()),
+    ),
+    piped = false,
+    writeIntRf = true,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(illegalInstr, virtualInstr, loadAccessFault),
+    flushPipe = true,
+    immType = Set(Imm_LUI32()),
   )
 
   // Todo: split it to simple bitmap exu and complex bku
