@@ -61,25 +61,27 @@ object ROR64 {
 
 // AES forward shift rows
 object ForwardShiftRows {
-  def apply(src1: Seq[UInt], src2: Seq[UInt]): Seq[UInt] = {
-    VecInit(Seq(src1(0), src1(5), src2(2), src2(7),
-                src1(4), src2(1), src2(6), src1(3)))
+  def apply(src1: Vec[UInt], src2: Vec[UInt]): Vec[UInt] = {
+    VecInit(src1(0), src1(5), src2(2), src2(7),
+            src1(4), src2(1), src2(6), src1(3))
   }
 }
 
 // AES inverse shift rows
 object InverseShiftRows {
-  def apply(src1: Seq[UInt], src2: Seq[UInt]): Seq[UInt] = {
-    VecInit(Seq(src1(0), src2(5), src2(2), src1(7),
-                src1(4), src1(1), src2(6), src2(3)))
+  def apply(src1: Vec[UInt], src2: Vec[UInt]): Vec[UInt] = {
+    VecInit(src1(0), src2(5), src2(2), src1(7),
+            src1(4), src1(1), src2(6), src2(3))
   }
 }
 
 // AES encode sbox top
 object SboxAesTop {
-  def apply(i: UInt): Seq[Bool] = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 8)
     val t = Wire(Vec(6, Bool()))
     val o = Wire(Vec(21, Bool()))
+
     t( 0) := i( 3) ^ i( 1)
     t( 1) := i( 6) ^ i( 5)
     t( 2) := i( 6) ^ i( 2)
@@ -107,15 +109,17 @@ object SboxAesTop {
     o(18) := o( 2) ^ o( 8)
     o(19) := o(15) ^ o(13)
     o(20) := o( 1) ^ t( 3)
-    o
+    o.asUInt
   }
 }
 
 // AES decode sbox top
 object SboxIaesTop {
-  def apply(i: UInt): Seq[Bool] = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 8)
     val t = Wire(Vec(5, Bool()))
     val o = Wire(Vec(21, Bool()))
+
     t( 0) := i( 1) ^  i( 0)
     t( 1) := i( 6) ^  i( 1)
     t( 2) := i( 5) ^ ~i( 2)
@@ -142,15 +146,17 @@ object SboxIaesTop {
     o(18) := i( 3) ^ ~i( 0)
     o(19) := i( 5) ^ ~o( 1)
     o(20) := o( 1) ^  t( 3)
-    o
+    o.asUInt
   }
 }
 
 // SM4 encode/decode sbox top
 object SboxSm4Top {
-  def apply(i: UInt): Seq[Bool] = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 8)
     val t = Wire(Vec(7, Bool()))
     val o = Wire(Vec(21, Bool()))
+
     t( 0) := i(3) ^  i( 4)
     t( 1) := i(2) ^  i( 7)
     t( 2) := i(7) ^  o(18)
@@ -179,15 +185,17 @@ object SboxSm4Top {
     o(18) := i(2) ^  i( 6)
     o(19) := i(5) ^ ~o(14)
     o(20) := i(0) ^  t( 1)
-    o
+    o.asUInt
   }
 }
 
 // Sbox middle part for AES, AES^-1, SM4
 object SboxInv {
-  def apply(i: Seq[Bool]): Seq[Bool] = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 21)
     val t = Wire(Vec(46, Bool()))
     val o = Wire(Vec(18, Bool()))
+
     t( 0) := i( 3) ^ i(12)
     t( 1) := i( 9) & i( 5)
     t( 2) := i(17) & i( 6)
@@ -252,15 +260,17 @@ object SboxInv {
     o(15) := t(40) & i( 6)
     o(16) := t(39) & i( 0)
     o(17) := t(43) & i(12)
-    o
+    o.asUInt
   }
 }
 
 // AES encode sbox out
 object SboxAesOut {
-  def apply(i: Seq[Bool]): UInt = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 18)
     val t = Wire(Vec(30, Bool()))
     val o = Wire(Vec(8, Bool()))
+
     t( 0) := i(11) ^  i(12)
     t( 1) := i( 0) ^  i( 6)
     t( 2) := i(14) ^  i(16)
@@ -305,9 +315,11 @@ object SboxAesOut {
 
 // AES decode sbox out
 object SboxIaesOut {
-  def apply(i: Seq[Bool]): UInt = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 18)
     val t = Wire(Vec(30, Bool()))
     val o = Wire(Vec(8, Bool()))
+
     t( 0) := i( 2) ^ i(11)
     t( 1) := i( 8) ^ i( 9)
     t( 2) := i( 4) ^ i(12)
@@ -352,9 +364,11 @@ object SboxIaesOut {
 
 // SM4 encode/decode sbox out
 object SboxSm4Out {
-  def apply(i: Seq[Bool]): UInt = {
+  def apply(i: UInt): UInt = {
+    require(i.getWidth == 18)
     val t = Wire(Vec(30, Bool()))
     val o = Wire(Vec(8, Bool()))
+
     t( 0) := i( 4) ^  i( 7)
     t( 1) := i(13) ^  i(15)
     t( 2) := i( 2) ^  i(16)
@@ -417,7 +431,7 @@ object SboxSm4 {
 
 // Mix Column
 object XtN {
-  def Xt2(byte: UInt): UInt = ((byte << 1) ^ Mux(byte(7), "h1b".U, 0.U))(7,0)
+  def Xt2(byte: UInt): UInt = ((byte << 1).asUInt ^ Mux(byte(7), "h1b".U, 0.U))(7,0)
 
   def apply(byte: UInt, t: UInt): UInt = {
     val byte1 = Xt2(byte)
