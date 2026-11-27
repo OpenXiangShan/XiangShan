@@ -898,6 +898,8 @@ trait HasXSParameter {
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 17
+  // One global noEvent entry followed by all per-bank L2 events.
+  def numL2PerfEvents: Int = numPCntHc * coreParams.L2NBanks + 1
   def numPCntPtw: Int = 19
 
   def numCSRPCntFrontend = 8
