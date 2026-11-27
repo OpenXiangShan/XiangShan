@@ -97,6 +97,8 @@ trait MPTCacheParam extends HasTlbConst {
   val mptOff = 16 // mpt offset of PA
   val smmpt43PAddrBits = 43
   val smmpt52PAddrBits = 52
+
+
   // l3 8 TiB
   val l3Size  = 1
   val mptL3TagLen = 5
@@ -117,6 +119,9 @@ trait MPTCacheParam extends HasTlbConst {
   val l0nWays = 8
   val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets) // 32-5=27
   val l0Replacer = "setplru"
+  val hashSdidWidth: Int = 3
+  // hash vpn width
+  val hashPpnWidth: Int = 6
   // sp
   val spSize = 16
   // A G=4 MPT NAPOT entry covers 1/16 of the ordinary SP range at the

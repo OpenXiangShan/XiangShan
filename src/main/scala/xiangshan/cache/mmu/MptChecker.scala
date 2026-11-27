@@ -330,12 +330,12 @@ class MptCacheReq(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 // create pipe with reset
 class MPTPipe(implicit p: Parameters) extends MptCacheReq {
   val dataValid  = Bool()
-  val flushCache = Bool()
+  val flushPA = Bool()
   val flushSdid  = Bool()
 
   def applySplitData(MPTPipeControl: MPTPipeControl, MPTPipeData: MPTPipeData): Unit = {
     this.dataValid  := MPTPipeControl.dataValid
-    this.flushCache := MPTPipeControl.flushCache
+    this.flushPA := MPTPipeControl.flushPA
     this.flushSdid  := MPTPipeControl.flushSdid
     this.mptOnly    := MPTPipeControl.mptOnly
     this.reqPA      := MPTPipeData.reqPA
@@ -351,7 +351,7 @@ class MPTPipe(implicit p: Parameters) extends MptCacheReq {
     mptPipeData.sdid   := this.sdid
 
     mptPipeControl.dataValid  := this.dataValid
-    mptPipeControl.flushCache := this.flushCache
+    mptPipeControl.flushPA := this.flushPA
     mptPipeControl.flushSdid  := this.flushSdid
     mptPipeControl.mptOnly    := this.mptOnly
     (mptPipeControl, mptPipeData)
@@ -360,12 +360,12 @@ class MPTPipe(implicit p: Parameters) extends MptCacheReq {
 
 class MPTPipeControl(implicit p: Parameters) extends XSBundle with MPTCacheParam {
   val dataValid  = Bool()
-  val flushCache = Bool()
+  val flushPA = Bool()
   val flushSdid  = Bool()
   val mptOnly    = Bool()
   def applyPipeData(mptPipe: MPTPipe): Unit = {
     this.dataValid  := mptPipe.dataValid
-    this.flushCache := mptPipe.flushCache
+    this.flushPA := mptPipe.flushPA
     this.flushSdid  := mptPipe.flushSdid
     this.mptOnly    := mptPipe.mptOnly
   }
@@ -387,36 +387,20 @@ object MPTPipeWithReset {
       enqValid: Bool,
       enqBits: MPTPipe,
       reset: Bool,
-      latency: Int,
-      clearData: Bool = false.B
-  ): Valid[MPTPipe] = {
-    require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
-
-    if (latency == 0) {
-      val out = Wire(Valid(chiselTypeOf(enqBits)))
-      out.valid := enqValid
-      out.bits  := enqBits
-      out
-    } else {
-      val v = RegNext(enqValid, false.B) // valid has reset
+  ): MPTPipe = {
       val (mptPipeControlIn, mptPipeDataIn) = enqBits.createSplitData() // split input as data and control
-      val mptPipeData = RegEnable(mptPipeDataIn, (mptPipeControlIn.dataValid || mptPipeControlIn.flushCache || mptPipeControlIn.flushSdid) && enqValid)
+      val mptPipeData = RegEnable(mptPipeDataIn, (mptPipeControlIn.dataValid || mptPipeControlIn.flushPA || mptPipeControlIn.flushSdid) && enqValid)
       // data has no reset
       val mptPipeControl = RegEnable(mptPipeControlIn, 0.U.asTypeOf(mptPipeControlIn), enqValid) // control has reset
       val b              = Wire(chiselTypeOf(enqBits))
       // Kill ordinary in-flight requests on context-changing flush, but keep
       // fence cache invalidation requests alive.
-      when(clearData) {
+      when(reset) {
         mptPipeControl.dataValid := false.B
         mptPipeControl.mptOnly   := false.B
       }
-      when(reset) {
-        mptPipeControl := 0.U.asTypeOf(mptPipeControlIn)
-        v := false.B
-      }
       b.applySplitData(mptPipeControl, mptPipeData) // merge pipe control and data signal
-      apply(v, b, reset, latency - 1, clearData)
-    }
+      b
   }
 }
 
@@ -494,7 +478,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   fenceInputs.reqPA      := io.sfence.bits.addr(47, 12)
   fenceInputs.source     := io.req.bits.source
   fenceInputs.dataValid  := false.B
-  fenceInputs.flushCache := mfenceHasPA
+  fenceInputs.flushPA := mfenceHasPA
   fenceInputs.mptOnly    := false.B
   fenceInputs.flushSdid  := mfenceHasSDID
   fenceInputs.sdid       := fenceSDIDReg
@@ -503,7 +487,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   ioInputs.reqPA      := io.req.bits.reqPA
   ioInputs.source     := io.req.bits.source
   ioInputs.dataValid  := io.req.fire
-  ioInputs.flushCache := false.B
+  ioInputs.flushPA := false.B
   ioInputs.mptOnly    := io.req.bits.mptOnly
   ioInputs.flushSdid  := false.B
   ioInputs.sdid       := io.csr.mmpt.sdid
@@ -512,53 +496,24 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   // mmpt.changed also flush the pipe, apart from sfence.valid.
   // req stage will not reset during fence, as it needs to receive FenceInputs
-  val stageReq = MPTPipeWithReset(pipeFlowEn, pipeInputs, io.csr.mmpt.changed, 1, flushPipeOnly)
-  val stageDelayin = stageReq.bits
-  val stageDelay = MPTPipeWithReset(
-    pipeFlowEn,
-    stageDelayin,
-    io.sfence.valid || io.csr.mmpt.changed,
-    1,
-    flushPipeOnly
-  )
-  val stageCheckin = stageDelay.bits
-  val stageCheck = MPTPipeWithReset(
-    pipeFlowEn,
-    stageCheckin,
-    io.sfence.valid || io.csr.mmpt.changed,
-    1,
-    flushPipeOnly
-  )
-  val stageRespin = stageCheck.bits
-  val stageResp = MPTPipeWithReset(
-    pipeFlowEn,
-    stageRespin,
-    io.sfence.valid || io.csr.mmpt.changed,
-    1,
-    flushPipeOnly
-  )
+  val stageReq = MPTPipeWithReset(pipeFlowEn, pipeInputs, flushPipeOnly)
+  val stageDelayin = stageReq
+  val stageDelay = MPTPipeWithReset(pipeFlowEn, stageDelayin, flushPipeOnly)
+  val stageCheckin = stageDelay
+  val stageCheck = MPTPipeWithReset(pipeFlowEn, stageCheckin, flushPipeOnly)
+  val stageRespin = stageCheck
+  val stageResp = MPTPipeWithReset(pipeFlowEn, stageRespin, flushPipeOnly)
 
   // priority
   // 1. fence PA
   // 2. refill and last stage valid
   // 3. normal request
 
-  pipeInputs := Mux(io.sfence.valid, fenceInputs, Mux(refilling && stageResp.bits.dataValid, stageResp.bits, ioInputs))
-  // when(io.sfence.valid) {
+  pipeInputs := Mux(io.sfence.valid, fenceInputs, Mux(refilling && stageResp.dataValid, stageResp, ioInputs))
 
-  //   pipeInputs.dataValid := false.B
-  //   pipeInputs.mptOnly := false.B
-
-  //   stageDelayin.dataValid := false.B
-  //   stageDelayin.mptOnly := false.B
-
-  //   stageCheckin.dataValid := false.B
-  //   stageCheckin.mptOnly := false.B
-
-  //   stageRespin.dataValid := false.B
-  //   stageRespin.mptOnly := false.B
-  // }
-  io.req.ready := ((io.respMiss.ready && !refilling) || (refilling && !stageResp.bits.dataValid)) && !mfencevalid
+  // A lookup accepted behind this fence would sample L0 valid bits before the fence clears them.
+  io.req.ready := ((io.respMiss.ready && !refilling) || (refilling && !stageResp.dataValid)) &&
+    !mfencevalid && !(stageReq.flushPA || stageReq.flushSdid)
   // init cache tag
   val l3Tag   = Reg(Vec(l3Size, new MptCacheTag(tagLen = mptL3TagLen)))
   val l3Valid = RegInit(Vec(l3Size, Bool()), 0.U.asTypeOf(Vec(l3Size, Bool())))
@@ -591,9 +546,9 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val l0Valid = RegInit(Vec(l0nSets, Vec(l0nWays, Bool())), 0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, Bool()))))
   // Keep a register shadow of the SRAM-resident SDID tags so an x0/SDID MFENCE
   // can invalidate matching entries in every set without using a PA index.
-  val l0Sdid = RegInit(
-    Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))),
-    0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))))
+  val l0SdidHash = RegInit(
+    Vec(l0nSets, Vec(l0nWays, UInt(hashSdidWidth.W))),
+    0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, UInt(hashSdidWidth.W))))
   )
 
   val mptCacheL3Replace = Module(new PLRUOH(logWays = log2Up(l3Size))).io
@@ -605,18 +560,18 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   val (l3Hit, l3hitPPN) = {
     // val hitVecTemp = l3Tag.zip(l3Valid).map { case (x, v) =>
-    //   x.hitSdidPpn(stageReq.bits.reqPA, stageReq.bits.sdid) && v
+    //   x.hitSdidPpn(stageReq.reqPA, stageReq.sdid) && v
     // } // hit when valid and tag equal stagereq
     val hitVecHitPA = l3Tag.zip(l3Valid).map { case (x, v) =>
-      x.hit(stageReq.bits.reqPA) && v
+      x.hit(stageReq.reqPA) && v
     }
     val hitVecHitSDID = l3Tag.zip(l3Valid).map { case (x, v) =>
-      x.hitSdid(stageReq.bits.sdid) && v
+      x.hitSdid(stageReq.sdid) && v
     }
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
-    switch(Cat(stageReq.bits.flushCache, stageReq.bits.flushSdid).asUInt) {
+    switch(Cat(stageReq.flushPA, stageReq.flushSdid).asUInt) {
       is("b11".U) {
         hitVecTemp.zip(l3Valid).map { case (x, v) =>
           when(x)(v := false.B)
@@ -636,29 +591,29 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
         //NOP
       }
     }
-    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.bits.dataValid)
+    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.dataValid)
     // ready at stage check, use datavalid instead of stageReq.valid
-    val hitData = RegEnable(Mux1H(hitVecTemp, l3Data), stageReq.bits.dataValid)
+    val hitData = RegEnable(Mux1H(hitVecTemp, l3Data), stageReq.dataValid)
     // we can use onehot mux, should be faster.
-    val hit =RegEnable(hitVecTemp.reduce(_ || _), stageReq.bits.dataValid)
+    val hit =RegEnable(hitVecTemp.reduce(_ || _), stageReq.dataValid)
     // 1 bit hit, avaliable at stage delay after 2 or gates
     mptCacheL3Replace.access.bits := hitVec.asUInt
     // assign hitVec to plru to update plru state, miss(hitVec = h0) will not change the plru state
-    mptCacheL3Replace.access.valid := stageDelay.bits.dataValid // ready at stage check
+    mptCacheL3Replace.access.valid := stageDelay.dataValid // ready at stage check
     (hit, hitData)
   }
 
   val (l2Hit, l2hitPPN) = {
      val hitVecHitPA = l2Tag.zip(l2Valid).map { case (x, v) =>
-      x.hit(stageReq.bits.reqPA) && v
+      x.hit(stageReq.reqPA) && v
     }
     val hitVecHitSDID = l2Tag.zip(l2Valid).map { case (x, v) =>
-      x.hitSdid(stageReq.bits.sdid) && v
+      x.hitSdid(stageReq.sdid) && v
     }
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
-    switch(Cat(stageReq.bits.flushCache, stageReq.bits.flushSdid).asUInt) {
+    switch(Cat(stageReq.flushPA, stageReq.flushSdid).asUInt) {
       is("b11".U) {
         hitVecTemp.zip(l2Valid).map { case (x, v) =>
           when(x)(v := false.B)
@@ -678,28 +633,28 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
         //NOP
       }
     }
-    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.bits.dataValid) // ready at stage check
-    val hitData = RegEnable(Mux1H(hitVecTemp, l2Data), stageReq.bits.dataValid)
+    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.dataValid) // ready at stage check
+    val hitData = RegEnable(Mux1H(hitVecTemp, l2Data), stageReq.dataValid)
     // we can use onehot mux, should be faster.
-    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageReq.bits.dataValid)
+    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageReq.dataValid)
     // 1 bit hit, avaliable at stage delay after 2 or gates
     mptCacheL2Replace.access.bits := hitVec.asUInt
     // assign hitVec to plru to update plru state, miss(hitVec = h0) will not change the plru state
-    mptCacheL2Replace.access.valid := stageDelay.bits.dataValid // ready at stage check
+    mptCacheL2Replace.access.valid := stageDelay.dataValid // ready at stage check
     (hit, hitData)
   }
 
   val (l1Hit, l1hitPPN) = {
      val hitVecHitPA = l1Tag.zip(l1Valid).map { case (x, v) =>
-      x.hit(stageReq.bits.reqPA) && v
+      x.hit(stageReq.reqPA) && v
     }
     val hitVecHitSDID = l1Tag.zip(l1Valid).map { case (x, v) =>
-      x.hitSdid(stageReq.bits.sdid) && v
+      x.hitSdid(stageReq.sdid) && v
     }
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
-    switch(Cat(stageReq.bits.flushCache, stageReq.bits.flushSdid).asUInt) {
+    switch(Cat(stageReq.flushPA, stageReq.flushSdid).asUInt) {
       is("b11".U) {
         hitVecTemp.zip(l1Valid).map { case (x, v) =>
           when(x)(v := false.B)
@@ -719,15 +674,15 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
         //NOP
       }
     }
-    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.bits.dataValid) // ready at stage check
-    val hitData = RegEnable(Mux1H(hitVecTemp, l1Data), stageReq.bits.dataValid)
+    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.dataValid) // ready at stage check
+    val hitData = RegEnable(Mux1H(hitVecTemp, l1Data), stageReq.dataValid)
     // we can use onehot mux, should be faster.
-    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageReq.bits.dataValid)
+    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageReq.dataValid)
     // 1 bit hit, avaliable at stage delay after 2 or gates
 
     mptCacheL1Replace.access.bits := hitVec.asUInt
     // assign hitVec to plru to update plru state, miss(hitVec = h0) will not change the plru state
-    mptCacheL1Replace.access.valid := stageDelay.bits.dataValid // ready at stage check
+    mptCacheL1Replace.access.valid := stageDelay.dataValid // ready at stage check
     (hit, hitData)
 
   }
@@ -737,8 +692,8 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val hitAddrLevelTemp = Mux(l1Hit, "b0001".U, Mux(l2Hit, "b0010".U, Mux(l3Hit, "b0100".U, missLevel)))
   val hitAddrDataTemp = Mux(l1Hit, l1hitPPN.data, Mux(l2Hit, l2hitPPN.data,
     Mux(l3Hit, l3hitPPN.data, io.csr.mmpt.ppn(ppnLen - 1, 0))))
-  val hitAddrData  = RegEnable(hitAddrDataTemp, stageDelay.bits.dataValid)
-  val hitAddrLevel = RegEnable(hitAddrLevelTemp, stageDelay.bits.dataValid)
+  val hitAddrData  = RegEnable(hitAddrDataTemp, stageDelay.dataValid)
+  val hitAddrLevel = RegEnable(hitAddrLevelTemp, stageDelay.dataValid)
 
   // // // // // // // // // // // // // /
 
@@ -746,17 +701,17 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     val idx = geL0Set(pipeInputs.reqPA) //
 
     l0Data.io.r.req.bits.apply(setIdx = idx) // .. 0 delay stagereq reg get valid at the same time
-    l0Data.io.r.req.valid := pipeInputs.dataValid || pipeInputs.flushCache // read and write at the same time will not cause error, but read is invalid
+    l0Data.io.r.req.valid := pipeInputs.dataValid || pipeInputs.flushPA // read and write at the same time will not cause error, but read is invalid
 
     val l0validReg = RegEnable(
-      l0Valid(geL0Set(stageReq.bits.reqPA)),
+      l0Valid(geL0Set(stageReq.reqPA)),
       0.U.asTypeOf(Vec(l0nWays, Bool())),
-      stageReq.bits.dataValid || stageReq.bits.flushCache
+      stageReq.dataValid || stageReq.flushPA
     )
     when(mfenceFenceAll) {
       l0validReg := 0.U.asTypeOf(Vec(l0nWays, Bool()))
     }
-    val dataResp = RegEnable(l0Data.io.r.resp.data, stageReq.bits.dataValid || stageReq.bits.flushCache)
+    val dataResp = RegEnable(l0Data.io.r.resp.data, stageReq.dataValid || stageReq.flushPA)
     // data avaliable at stage delay
     val setTag  = dataResp.map(_.tag)
     val setData = dataResp.map(_.cacheData) // 4 entry+tag
@@ -764,33 +719,33 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
     // MfencePA
     val hitVecHitPA = setTag.zip(l0validReg).map { case (x, v) =>
-      x.hit(stageDelay.bits.reqPA) && v
+      x.hit(stageDelay.reqPA) && v
     }
     val hitVecHitSDID = setTag.zip(l0validReg).map { case (x, v) =>
-      x.hitSdid(stageDelay.bits.sdid) && v
+      x.hitSdid(stageDelay.sdid) && v
     }
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
 
-    switch(Cat(stageDelay.bits.flushCache, stageDelay.bits.flushSdid).asUInt) {
+    switch(Cat(stageDelay.flushPA, stageDelay.flushSdid).asUInt) {
       is("b11".U) {
         hitVecTemp.zipWithIndex.map { case (x, i) =>
-          when(x)(l0Valid(geL0Set(stageDelay.bits.reqPA))(i) := false.B)
+          when(x)(l0Valid(geL0Set(stageDelay.reqPA))(i) := false.B)
         }
       }
       is("b01".U) {
         for (set <- 0 until l0nSets) {
           for (way <- 0 until l0nWays) {
-            when(l0Valid(set)(way) && l0Sdid(set)(way) === stageDelay.bits.sdid) {
-              l0Valid(set)(way) := false.B
+            when(l0Valid(set)(way) && l0SdidHash(set)(way) === XORFold(stageDelay.sdid,hashSdidWidth)) {
+              l0Valid(set)(way) := false.B // a litte sdid overfence, saves area & cost
             }
           }
         }
       }
       is("b10".U) {
         hitVecHitPA.zipWithIndex.map { case (x, i) =>
-          when(x)(l0Valid(geL0Set(stageDelay.bits.reqPA))(i) := false.B)
+          when(x)(l0Valid(geL0Set(stageDelay.reqPA))(i) := false.B)
         }
       }
       is("b00".U) {
@@ -798,17 +753,17 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       }
     }
     //
-    val hitVec = RegEnable(VecInit(hitVecTemp), stageDelay.bits.dataValid) // valid at stage check
+    val hitVec = RegEnable(VecInit(hitVecTemp), stageDelay.dataValid) // valid at stage check
     val hitData = Mux1H(hitVecTemp, setData)
     // we use onehot mux, should be faster than ParallelPriorityMux. delay:log2(4)*2 = 4
-    val hitDataReg = RegEnable(hitData, stageDelay.bits.dataValid) // valid at stage check, total delay 11 gates
-    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageDelay.bits.dataValid) // 4-> 1 bit hit
+    val hitDataReg = RegEnable(hitData, stageDelay.dataValid) // valid at stage check, total delay 11 gates
+    val hit = RegEnable(hitVecTemp.reduce(_ || _), stageDelay.dataValid) // 4-> 1 bit hit
 
-    val hitPermsTemp = hitDataReg.extractPerm(stageCheck.bits.reqPA(3, 0)) // always 15:12 delay log2(16)*3 = 12 gates
+    val hitPermsTemp = hitDataReg.extractPerm(stageCheck.reqPA(3, 0)) // always 15:12 delay log2(16)*3 = 12 gates
 
     MptCacheL0Replace.access.bits := hitVec.asUInt // assign hitVec to plru to update plru state, miss(hitVec = h0) will not change the plru state
-    MptCacheL0Replace.access.valid := stageCheck.bits.dataValid // processing at stage check, ready at stage resp
-    MptCacheL0Replace.idx          := geL0Set(stageCheck.bits.reqPA)
+    MptCacheL0Replace.access.valid := stageCheck.dataValid // processing at stage check, ready at stage resp
+    MptCacheL0Replace.idx          := geL0Set(stageCheck.reqPA)
 
     val permsAsVec = Wire(Vec(16, UInt(3.W))) // perm xwr bits, total 16 xwrs in one mpte
     for (i <- 0 until 16) {
@@ -821,28 +776,28 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     val low8PermsAllEqual  = permsEqual.slice(0, 7).reduce(_ && _)                    // = permsEqual(6,0), delay 3
     val high8PermsAllEqual = permsEqual.slice(8, 15).reduce(_ && _)                   // = permsEqual(14,8)
     val allEqual           = low8PermsAllEqual && high8PermsAllEqual && permsEqual(7) // Delay 2
-    val tlbCompress = Mux(stageCheck.bits.reqPA(3, 0) < 8.U, low8PermsAllEqual, high8PermsAllEqual) // delay 3
+    val tlbCompress = Mux(stageCheck.reqPA(3, 0) < 8.U, low8PermsAllEqual, high8PermsAllEqual) // delay 3
 
     (
       hit,
-      RegEnable(hitPermsTemp, stageCheck.bits.dataValid),
-      RegEnable(tlbCompress, stageCheck.bits.dataValid),
-      RegEnable(allEqual, stageCheck.bits.dataValid)
+      RegEnable(hitPermsTemp, stageCheck.dataValid),
+      RegEnable(tlbCompress, stageCheck.dataValid),
+      RegEnable(allEqual, stageCheck.dataValid)
     ) // ready at stage resp,hit reaady at stage check
   }
 
   // val (sphit,spHitPerms,spPermIsNAPOT,splevel) = {
   val (sphit, spHitPerms, splevel) = {
     val hitVecHitPA = spTag.zip(spValid).map { case (x, v) =>
-      x.hitSp(stageReq.bits.reqPA) && v
+      x.hitSp(stageReq.reqPA) && v
     }
     val hitVecHitSDID = spTag.zip(spValid).map { case (x, v) =>
-      x.hitSdid(stageReq.bits.sdid) && v
+      x.hitSdid(stageReq.sdid) && v
     }
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
-    switch(Cat(stageReq.bits.flushCache, stageReq.bits.flushSdid).asUInt) {
+    switch(Cat(stageReq.flushPA, stageReq.flushSdid).asUInt) {
       is("b11".U) {
         hitVecTemp.zip(spValid).map { case (x, v) =>
           when(x)(v := false.B)
@@ -863,35 +818,35 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       }
     }
 
-    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.bits.dataValid) // ready at stage delay
+    val hitVec = RegEnable(VecInit(hitVecTemp), stageReq.dataValid) // ready at stage delay
     // // // //
     val levelVec  = spTag.map(x => x.level.get)
     val level     = Mux1H(hitVec, levelVec)       // ready at stage delay, require cache to be consistent
-    val levelReg  = RegEnable(level, stageDelay.bits.dataValid)
+    val levelReg  = RegEnable(level, stageDelay.dataValid)
     val levelUInt = Wire(UInt(mptLevelLenUInt.W)) // 4levels len 2
     levelUInt := OHToUInt(Cat(levelReg, 0.U(1.W)))
 
     val extractOffset = Mux1H(Seq(
-      level(2) -> stageDelay.bits.reqPA(3 + 9 * 3, 9 * 3),
-      level(1) -> stageDelay.bits.reqPA(3 + 9 * 2, 9 * 2),
-      level(0) -> stageDelay.bits.reqPA(3 + 9, 9)
+      level(2) -> stageDelay.reqPA(3 + 9 * 3, 9 * 3),
+      level(1) -> stageDelay.reqPA(3 + 9 * 2, 9 * 2),
+      level(0) -> stageDelay.reqPA(3 + 9, 9)
     ))
 
-    val extractOffsetReg = RegEnable(extractOffset, stageDelay.bits.dataValid) // ready at stage check
+    val extractOffsetReg = RegEnable(extractOffset, stageDelay.dataValid) // ready at stage check
 
     // val hitData = ParallelPriorityMux(hitVec zip l3Data)
     val hitData      = Mux1H(hitVec, spData)                         // we can use onehot mux, should be faster.
-    val hitDataReg   = RegEnable(hitData, stageDelay.bits.dataValid) // valid at stage check, total delay 11 gates
+    val hitDataReg   = RegEnable(hitData, stageDelay.dataValid) // valid at stage check, total delay 11 gates
     val hitPermsTemp = hitDataReg.extractPerm(extractOffsetReg)      // always 15:12 delay log2(16)*3 = 12 gates
-    val hit = RegEnable(hitVec.reduce(_ || _), stageDelay.bits.dataValid) // 1 bit hit
+    val hit = RegEnable(hitVec.reduce(_ || _), stageDelay.dataValid) // 1 bit hit
 
     mptCacheSpReplace.access.bits := hitVec.asUInt // assign hitVec to plru to update plru state, miss(hitVec = h0) will not change the plru state
-    mptCacheSpReplace.access.valid := stageDelay.bits.dataValid // ready at stage check
+    mptCacheSpReplace.access.valid := stageDelay.dataValid // ready at stage check
 
     (
       hit,
-      RegEnable(hitPermsTemp, stageCheck.bits.dataValid),
-      RegEnable(levelUInt, stageCheck.bits.dataValid)
+      RegEnable(hitPermsTemp, stageCheck.dataValid),
+      RegEnable(levelUInt, stageCheck.dataValid)
     ) // ready at stage resp,hit reaady at stage check
 
   }
@@ -905,18 +860,18 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   }
   val smmpt43MaxPpn = maxPpnForMode(smmpt43PAddrBits)
   val smmpt52MaxPpn = maxPpnForMode(smmpt52PAddrBits)
-  val reqPpnForRangeCheck = stageCheck.bits.reqPA.pad(rangeCompareWidth)
+  val reqPpnForRangeCheck = stageCheck.reqPA.pad(rangeCompareWidth)
   val overRangeFault = MuxLookup(io.csr.mmpt.mode, false.B)(Seq(
     1.U -> (reqPpnForRangeCheck > smmpt43MaxPpn),
     2.U -> (reqPpnForRangeCheck > smmpt52MaxPpn)
   ))
   val overRangeFaultReg = RegEnable(
-    stageCheck.bits.dataValid && overRangeFault,
+    stageCheck.dataValid && overRangeFault,
     false.B,
     pipeFlowEn
   )
 
-  val respHitReg = RegEnable(hitPerms & stageCheck.bits.dataValid, false.B, pipeFlowEn)
+  val respHitReg = RegEnable(hitPerms & stageCheck.dataValid, false.B, pipeFlowEn)
   // Data is latched regardless of dataValid. If dataValid is low, the hit signal is also considered invalid.
   // In this case, hitPerms actually holds the result from the previous pipeline stage.
 
@@ -928,10 +883,10 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     Seq(spHitPerms, l0HitPerms)
   ) // 1 mux at output, 2 gates, should be fine
   io.respHit.bits.perm             := Mux(overRangeFaultReg, 0.U, cacheHitPerm)
-  io.respHit.bits.source           := stageResp.bits.source
-  io.respHit.bits.mptOnly          := stageResp.bits.mptOnly
-  io.respHit.bits.reqPA            := stageResp.bits.reqPA
-  io.respHit.bits.sdid             := stageResp.bits.sdid
+  io.respHit.bits.source           := stageResp.source
+  io.respHit.bits.mptOnly          := stageResp.mptOnly
+  io.respHit.bits.reqPA            := stageResp.reqPA
+  io.respHit.bits.sdid             := stageResp.sdid
   io.respHit.bits.permIs32KContinuous := !overRangeFaultReg && l0hitReg && l0PermIs32KContinuous
   io.respHit.bits.permIs64KContinuous := !overRangeFaultReg && l0hitReg && l0PermIs64KContinuous
   io.respHit.bits.accessFault := overRangeFaultReg || ((!cacheHitPerm(0)) && cacheHitPerm(1))
@@ -943,7 +898,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   io.respHit.bits.mptLevel := Mux(overRangeFaultReg, 0.U, cacheHitLevel)
 
   val respMissReg = RegEnable(
-    !hitPerms && !overRangeFault && stageCheck.bits.dataValid,
+    !hitPerms && !overRangeFault && stageCheck.dataValid,
     false.B,
     pipeFlowEn
   )
@@ -951,10 +906,10 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   io.respMiss.valid := respMissReg && !refilling && !flushPipeOnly
   io.respMiss.bits.hitLevel := RegEnable(hitAddrLevel, pipeFlowEn)
   io.respMiss.bits.ppn     := RegEnable(hitAddrData, pipeFlowEn)
-  io.respMiss.bits.source  := stageResp.bits.source
-  io.respMiss.bits.mptOnly := stageResp.bits.mptOnly
-  io.respMiss.bits.pa      := stageResp.bits.reqPA
-  io.respMiss.bits.sdid    := stageResp.bits.sdid
+  io.respMiss.bits.source  := stageResp.source
+  io.respMiss.bits.mptOnly := stageResp.mptOnly
+  io.respMiss.bits.pa      := stageResp.reqPA
+  io.respMiss.bits.sdid    := stageResp.sdid
   // read logic end
   // refill write logic start
   /* If a circular pipe is used to resolve refill conflicts, the cache will be accessed twice with the same tag during the loop.
@@ -1010,7 +965,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       for (i <- 0 until l0nWays) {
         when(l0VictimWay(i) === 1.U && rfl0SetIdx === j.U) {
           l0Valid(j)(i) := true.B
-          l0Sdid(j)(i) := io.csr.mmpt.sdid
+          l0SdidHash(j)(i) := XORFold(io.csr.mmpt.sdid, hashSdidWidth)
         }
       }
     }
