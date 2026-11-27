@@ -436,7 +436,10 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         ),
         "flush": _read(
             recorder,
-            (_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",),
+            (
+                "Frontend_top.Frontend.inner_ftq.redirect_1_valid",
+                _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+            ),
         ),
         "fencei": _read(recorder, (_TOP + "io_fencei", _TOP + "__Vtogcov__io_fencei")),
         "acquire_valid": _read(

@@ -1716,15 +1716,23 @@ def test_missunit_fetch_prefetch_priority_samples_competition_conditions_only():
         assert not _hit(recorder, "icache_missunit_acquire", "fetch_priority_over_prefetch")
 
 
-def test_missunit_fetch_index_priority_requires_two_candidates_and_clean_controls():
+@pytest.mark.parametrize("flush_path", (
+    "Frontend_top.Frontend.inner_ftq.redirect_1_valid",
+    _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+))
+@pytest.mark.parametrize("flush", (None, 0, 1))
+def test_missunit_fetch_index_priority_requires_two_candidates_and_clean_controls(flush_path, flush):
     recorder = _Recorder()
     _set_missunit_acquire_controls(recorder)
+    delattr(recorder.env.dut, _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush")
+    if flush is not None:
+        recorder.set_missunit_signal(flush_path, flush)
     recorder.set_missunit_signal(_MISS + "acquireArb.io_in_0_valid", 1)
     recorder.set_missunit_signal(_MISS + "acquireArb.io_in_2_valid", 1)
 
     sample_icache_missunit_coverage(recorder, recorder.env, 9)
 
-    assert _hit(recorder, "icache_missunit_acquire", "fetch_index_priority")
+    assert _hit(recorder, "icache_missunit_acquire", "fetch_index_priority") == (flush == 0)
 
     recorder = _Recorder()
     _set_missunit_acquire_controls(recorder, flush=1)

@@ -72,7 +72,11 @@ def _snapshot(env) -> dict[str, int | None]:
         "prefetch_hit": _read(
             env, _MISS + "prefetchHit", _MISS + "__Vtogcov__prefetchHit"
         ),
-        "flush": _read(env, _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush"),
+        "flush": _read(
+            env,
+            "Frontend_top.Frontend.inner_ftq.redirect_1_valid",
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+        ),
         "fencei": _read(env, _TOP + "io_fencei"),
         "soft0_valid": _read(env, _TOP + "io_softPrefetch_0_valid"),
         "soft_pending": _read(
