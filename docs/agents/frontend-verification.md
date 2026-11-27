@@ -128,6 +128,34 @@ that boundary stable.
   similar workarounds. Use `docs/agents/frontend-debugging.md` as the normative
   root-cause workflow before attempting another behavioral change.
 
+## Commit Content Rules
+
+- Commit files with a clear purpose within the current task. For each added
+  file, explain why it belongs in version control and review its dependencies
+  and scope.
+- Keep machine-specific activation instructions, personal tool paths, and host
+  configuration in Git-ignored local directories.
+- Published documentation must be usable without private local documents or
+  personally named virtual environments. Remove references to ignored local
+  documents before committing.
+- Keep temporary or machine-specific run outputs, including logs, waveforms,
+  coverage data, snapshots, scripts, and historical replay artifacts, in
+  Git-ignored artifact directories. Small retained samples may be committed
+  when they meet the test input sample requirements below.
+- Renaming a temporary file, copying it into a test data directory, or adding
+  a hash manifest does not establish a reason to publish it.
+- A new test input sample must support an explicit behavioral test, use the
+  smallest practical input, and be reproducible from a clean checkout with documented
+  dependencies. Repository tools and shared test helpers may be reused. Avoid
+  dependencies on personal paths or past run directories.
+- Tests must verify maintained behavior. Checks of text, paths, command
+  ordering, or hashes need an explicit behavioral or integrity requirement.
+  Avoid checks that only freeze historical implementation details without
+  protecting such a requirement.
+- Before committing or providing commit commands, inspect the complete diff for
+  the selected files, including untracked additions, for local information,
+  generated artifacts, and unrelated changes.
+
 ## Commit Message Rules
 
 Inspect the staged diff first. Use a single-line `type(frontend): summary`
@@ -271,8 +299,7 @@ controls enabled during diagnosis before changing semantic logic.
 - Reuse fixtures from `src/test/python/Frontend/env/runtime/fixtures.py`.
 - Follow `src/test/python/Frontend/README.md` for Verilator `.dat` reporting and
   reviewed ignore/omit handling.
-- Do not commit transient logs, generated waveforms, or other temporary
-  artifacts unless they are intentional fixtures.
+- Apply the Commit Content Rules above to test input samples and generated files.
 
 ## Deeper References
 
