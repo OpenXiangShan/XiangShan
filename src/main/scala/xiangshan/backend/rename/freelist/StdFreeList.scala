@@ -54,7 +54,7 @@ class StdFreeList(
   for (i <- 0 until commitWidth) {
     // Why RegNext (from RAT and Rename): for better timing
     // Why we can RegNext: these free registers won't be used in the next cycle,
-    // since we set canAllocate only when the current free regs > RenameWidth.
+    // since new allocations require at least RenameWidth free registers.
     XSDebug(io.freeReq(i), p"req#$i free physical reg: ${io.freePhyReg(i)}\n")
   }
 
@@ -65,7 +65,8 @@ class StdFreeList(
   // allocate new physical registers for instructions at rename stage
   //
   val freeRegCnt = Wire(UInt()) // number of free registers in free list
-  io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
+  val hasFreeRegs = GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
+  io.canAllocate := hasFreeRegs || !io.allocateReq.asUInt.orR
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
   val freeListVec = Wire(Vec(freeListSize, Vec(RenameWidth, UInt(PhyRegIdxWidth.W))))
@@ -93,7 +94,7 @@ class StdFreeList(
   archHeadPtr := archHeadPtrNext
 
   val isWalkAlloc = io.walk && io.doAllocate
-  val isNormalAlloc = io.canAllocate && io.doAllocate
+  val isNormalAlloc = hasFreeRegs && io.doAllocate
   val isAllocate = isWalkAlloc || isNormalAlloc
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
   val headPtrAllocate = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)

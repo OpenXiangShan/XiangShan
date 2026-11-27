@@ -278,16 +278,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     fl.io.walk := io.rabCommits.isWalk
   }
   vlFreeList.io.walk := io.vlCommits.isWalk
-  // only when all free list and dispatch1 has enough space can we do allocation
-  // when lsqEnqCtrl recover finish, it can allocate freelist.
-  // when isWalk, freelist can definitely allocate
-  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
-  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
-  vecFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
-  vlFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.vlCommits.isWalk
-
-  //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
+
+  // Each list can walk independently of normal rename.
+  intFreeList.io.doAllocate := canOut || io.rabCommits.isWalk
+  fpFreeList.io.doAllocate  := canOut || io.rabCommits.isWalk
+  vecFreeList.io.doAllocate := canOut || io.rabCommits.isWalk
+  vlFreeList.io.doAllocate  := canOut || io.vlCommits.isWalk
 
   val isFusionVec = io.isFusionVec
   // Decode clears the second uop of every fusion pair. CompressUnit sees the
@@ -974,7 +971,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // bad pseculation  (rabwalk)
   val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
-  val recStall      = io.rabCommits.isWalk
+  val recStall      = io.rabCommits.isWalk || io.vlCommits.isWalk
   val ctrlRecStall  = debugRedirect.debugIsCtrl
   val mvioRecStall  = debugRedirect.debugIsMemVio
   val otherRecStall = recStall && !(ctrlRecStall || mvioRecStall)
@@ -1096,7 +1093,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("stall_cycle_int",      stallForIntFL)
   XSPerfAccumulate("stall_cycle_fp",       stallForFpFL)
   XSPerfAccumulate("stall_cycle_vec",      stallForVecFL)
-  XSPerfAccumulate("stall_cycle_vec",      stallForVlFL)
+  XSPerfAccumulate("stall_cycle_vl",       stallForVlFL)
   XSPerfAccumulate("stall_cycle_lsq_recover", stallForlsq)
 
   XSPerfHistogram("in_valid_range",  PopCount(io.in.map(_.valid)),  true.B, 0, DecodeWidth + 1, 1)
