@@ -1214,6 +1214,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // block replace when release an addr valid in mshr
     val replace = Flipped(new MissQueueBlockIO)
+    val store_block = Flipped(new MissQueueBlockIO)
 
     // block all way for set to BtoT
     val evict_set = Input(UInt())
@@ -2038,6 +2039,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.replace.req <> io.replace.req
       e.io.replace.block
     } ++ active_pipe_regs.map(_.block_and_alias_match(io.replace.req.bits))
+  ).orR
+
+  // Match physical lines across all aliases, including the MissEntry allocation handoff.
+  val store_block_addr = get_block(io.store_block.req.bits.addr)
+  io.store_block.block := io.store_block.req.valid && Cat(
+    entries.map(e => e.io.req_addr.valid && get_block(e.io.req_addr.bits) === store_block_addr) ++
+    active_pipe_regs.map(preg => preg.reg_valid() && !preg.cancel && get_block(preg.req.addr) === store_block_addr)
   ).orR
 
   val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
