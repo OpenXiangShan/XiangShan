@@ -202,8 +202,7 @@ env.icache_agent.configure(
   - 目录输入默认输出到该目录下的 `coverage.genhtml/`，多个 `.dat` 默认输出到首个输入文件同目录下的 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
   - HTML 行号左侧的 `[ + ]` / `[ - ]` 来自 `merged.info` 里的 `BRDA` 记录，但不一定都是 RTL `if/else` branch。`verilator_coverage -write-info` 会把部分 raw coverage point 转成 lcov `BRDA`；例如端口声明行 `output io_phr_444` 左侧两个 `+`，原始 `.dat` 中对应的是 `t=toggle` 的 `io_phr_444:0->1` 和 `io_phr_444:1->0`。遇到端口、wire、reg 声明行出现 `[ + + ]` 时，应回查 raw `.dat` 的 `t=` 和 `o=` 字段，不要直接解释成代码分支。
-  - 按 [本地验证环境入口](../../../../local_verification_env.md) 激活环境后，可生成指定目录的覆盖率报告。
-    `src/test/python/Frontend/scripts/gen_coverage_html.sh build-frontend/artifacts/<run_id>/coverage`
+  - `src/test/python/Frontend/scripts/gen_coverage_html.sh build-frontend/artifacts/<run_id>/coverage`
 - `Frontend.ignore`
   - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
   - `scripts/gen_coverage_html.sh` 也会默认读取该文件，并把文件级 pattern 转成 `genhtml --exclude`。
@@ -234,7 +233,6 @@ env.icache_agent.configure(
     `build-frontend/artifacts/<run_id>/inputs/<case>.trace.jsonl`
   - 通过现有 `tools/nemu_bin_to_golden_trace.py` 调用 NEMU 并转换 trace；
     raw NEMU log 默认写到 `build-frontend/artifacts/<run_id>/inputs/<case>.nemu.log`
-  - 调用前需要先激活 frontend Python/runtime 环境；脚本本身不写死 venv 路径
   - 可用 `NEMU_EXEC=/path/to/riscv64-nemu-interpreter` 手动指定 NEMU；
     默认使用 `ready-to-run/riscv64-nemu-interpreter`
   - bin-trace 验证支持 `vsetvli`、`vsetivli` 和 `vsetvl` 指令。
@@ -255,10 +253,6 @@ env.icache_agent.configure(
   - 路径: `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`
 
 ## 运行入口
-
-Frontend Verilator/Python 的构建、测试和覆盖率工具使用 mcpgateway 环境。
-在干净 shell 中按 [本地验证环境入口](../../../../local_verification_env.md)
-激活环境。机器相关的激活路径仅保存在该本地文档中。
 
 - 构建 Verilator 版 Frontend Python DUT：
 

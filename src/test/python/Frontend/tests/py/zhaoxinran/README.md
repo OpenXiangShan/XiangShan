@@ -29,8 +29,7 @@
 
 ## 可复现随机回归
 
-按 [本地验证环境入口](../../../../../../../local_verification_env.md)
-激活 mcpgateway 环境后，在仓库根目录运行 smoke 或 nightly。runner 调用
+在仓库根目录运行 smoke 或 nightly。runner 调用
 `run_pytest_with_log.sh`，启用 DUT 测试，并为日志和运行产物分配独立目录。
 nightly 会继续执行剩余 seed，任一 seed 失败时最终返回非零。
 

@@ -22,9 +22,6 @@ git submodule status --recursive
 
 `make init` 除初始化顶层依赖，还初始化 `rocket-chip/{cde,hardfloat}` 和 `XSCache/{OpenNCB,ZhuJiang}`。以父仓库记录的 gitlink 为准，不让 submodule 自行追最新分支。检查所需 submodule 无未初始化、提交不匹配或冲突状态；缺失的其他必需嵌套依赖按固定 gitlink 初始化。可用已有本地镜像加速获取，但必须逐项校验 SHA。
 
-在干净 shell 中按 [本地验证环境入口](../../../../../local_verification_env.md)
-激活 mcpgateway 环境，再导出绝对源码目录。
-
 ```bash
 # 在主仓库根目录执行，并先将 DUT_CHECKOUT 设置为实际的固定 SHA checkout。
 FRONTEND_MAIN_REPO="$PWD"
@@ -34,7 +31,7 @@ export NOOP_HOME="$(cd "${DUT_CHECKOUT:?请设置实际隔离 checkout 路径}" 
 cd "$NOOP_HOME"
 ```
 
-`NOOP_HOME` 必须 export，并指向实际构建 checkout。使用干净的 mcpgateway 环境，核对 native 库加载路径。
+`NOOP_HOME` 必须 export，并指向实际构建 checkout。核对 native 库加载路径。
 
 ## 3. 并行编译，串行调度
 
