@@ -64,3 +64,5 @@ src/test/python/Frontend/scripts/run_random_regression_suite.sh nightly
 | 页尾 RVI 拼接、半指令保持及 redirect 恢复 | `uncache/test_instr_uncache_port_boundaries.py::test_uncache_page_tail_rvi_need_resend_rechecks_next_page` | `test_mmio_page_tail_rvi_rechecks_next_page_before_delivery`、`test_mmio_page_tail_rvi_preserves_half_pc_data_and_state` |
 | 非 MMIO 的 PBMT.NC 取指 | `uncache/test_instr_uncache_port_boundaries.py::test_uncache_pbmt_nc_non_mmio_uses_uncache_path` | `test_pbmt_nc_non_mmio_enters_uncache_send_path` |
 | 后端取指异常重定向及恢复 | `test_redirect_flush_recovery_scenarios.py::test_rfr_s01_fault_redirect_recovery_three_fetches` | `test_backend_fault_redirect_recovery` |
+| 首笔及后续 MMIO 请求背压、握手与交付 | `mmio/test_mmio_fetch_boundary.py::test_mmio_tl_a_backpressure_holds_request_until_accepted` | `test_uncache_a_ready_backpressure_holds_request`、`test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request`、`test_mmio_send_req_with_ibuffer_ready_drives_tl_a` |
+| 单 beat MMIO 响应异常 | `mmio/test_mmio_fetch_boundary.py::test_mmio_single_beat_d_response_fault_is_reported` | `test_uncache_response_fault_reports_dut_exception`；保留 corrupt-only、denied-only、corrupt+denied 三种参数 |

@@ -147,7 +147,7 @@ BIN-202,L1,交叉覆盖,fetch_path_x_exception,,mmio_x_af,Frontend/关键交叉/
 BIN-203,L1,交叉覆盖,itlb_state_x_ptw_resp,,single_miss_x_leaf_pte,Frontend/关键交叉/itlb x ptw,PTW返回时进行交叉采样,itlb_result_type; ptw_resp_type,单次miss与leaf_pte返回组合被命中,P0,test_bin012_itlb_miss_walk_refill_pilot
 BIN-204,L1,交叉覆盖,ibuffer_state_x_backend_mode,,near_full_x_all_block,Frontend/关键交叉/ibuffer x backend_accept,backend.canAccept变化时进行交叉采样,ibuffer_state; backend_accept_mode,IBuffer near_full且backend全反压组合被命中,P1,tc_ibuffer_near_full_backpressure
 BIN-301,L1,场景覆盖,uncache_req_state,,normal_fire,Frontend/MMIO取指/InstrUncache/TL-A/请求握手,uncache A 通道 fire,ifu.io.toUncache; tl.a,出现至少一次 uncache A 请求握手,P0,test_instr_uncache_port_boundaries
-BIN-302,L1,场景覆盖,uncache_req_state,,a_ready_backpressure,Frontend/MMIO取指/InstrUncache/TL-A/请求反压,uncache A valid 且 ready 为 0,tl.a.valid; tl.a.ready,出现 uncache A 请求被 manager 反压,P1,test_uncache_a_ready_backpressure_holds_request
+BIN-302,L1,场景覆盖,uncache_req_state,,a_ready_backpressure,Frontend/MMIO取指/InstrUncache/TL-A/请求反压,uncache A valid 且 ready 为 0,tl.a.valid; tl.a.ready,出现 uncache A 请求被 manager 反压,P1,test_mmio_tl_a_backpressure_holds_request_until_accepted
 BIN-303,L1,场景覆盖,uncache_req_state,,wfi_blocked,Frontend/MMIO取指/InstrUncache/WFI/阻止新请求,backend wfi_req 拉高期间观察请求计数,backend.wfi; tl.a,wfi_req 高电平窗口内没有新增 uncache A 请求,P1,test_uncache_wfi_req_blocks_new_acquire
 BIN-304,L1,类型覆盖,uncache_resp_type,,clean,Frontend/MMIO取指/InstrUncache/TL-D/正常返回,uncache D 通道 fire,tl.d.denied; tl.d.corrupt,出现 clean uncache D response,P0,test_instr_uncache_port_boundaries
 BIN-305,L1,类型覆盖,uncache_resp_type,,corrupt,Frontend/MMIO取指/InstrUncache/TL-D/corrupt 返回,uncache D 通道 fire,tl.d.corrupt,出现 corrupt uncache D response,P1,test_uncache_corrupt_response_injection

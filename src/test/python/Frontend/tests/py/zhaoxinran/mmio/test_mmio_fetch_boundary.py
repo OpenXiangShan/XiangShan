@@ -4,6 +4,7 @@ import hashlib
 import os
 
 import pytest
+from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.model.golden_trace import GoldenTrace
 from env.runtime.frontend_init import FrontendInitConfig
 from env.support import record_scenario, scenario_rng
@@ -316,14 +317,18 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
 @pytest.mark.parametrize(
     "fault",
     [
-        pytest.param({"corrupt": 1}, id="corrupt"),
-        pytest.param({"corrupt": 1, "denied": 1}, id="corrupt-and-denied"),
+        pytest.param({"corrupt": 1}, id="corrupt", marks=pytest.mark.funcov_bins("BIN-1100")),
+        pytest.param(
+            {"corrupt": 1, "denied": 1}, id="corrupt-and-denied",
+            marks=pytest.mark.funcov_bins("BIN-1099", "BIN-1100"),
+        ),
+        pytest.param({"denied": 1}, id="denied", marks=pytest.mark.funcov_bins("BIN-1099")),
     ],
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int]):
     scenario_key = "zhaoxinran/mmio/single-beat-response-fault"
-    ordinal = int(bool(fault.get("denied")))
+    ordinal = 2 if not fault.get("corrupt") else int(bool(fault.get("denied")))
     base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
     pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc", ordinal=ordinal)[2])
     latency = configure_random_mmio_latency(env, rng)
@@ -348,7 +353,7 @@ def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int
     assert _wait_for_resp_delta(env, env.uncache_agent)
     assert uncache._wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
-    assert int(stats.get("corrupt_resp_count", 0)) == 1
+    assert int(stats.get("corrupt_resp_count", 0)) == int(fault.get("corrupt", 0))
     assert int(stats.get("denied_resp_count", 0)) == int(fault.get("denied", 0))
     assert env.monitor.exception_mark_count > 0
     _assert_target_exception(
@@ -439,14 +444,16 @@ def test_mmio_jal_instruction_is_delivered_as_control_flow(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1094")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
+    """Hold and release both the first MMIO request and a subsequent request."""
     scenario_key = "zhaoxinran/mmio/tl-a-backpressure"
     base_seed, seed, rng = scenario_rng(scenario_key)
     stall_cycles = rng.randint(4, 20)
     pc = prepare_mmio_cnop_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
     latency = configure_random_mmio_latency(env, rng)
-    env.uncache_agent.set_a_ready(0)
+    subsequent_stall_cycles = rng.randint(4, 20)
     record_scenario(
         env,
         scenario_key,
@@ -456,26 +463,70 @@ def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
             "pc": pc,
             "latency": latency,
             "stall_cycles": stall_cycles,
-            "expected_path": "tl_a_backpressure_then_accept",
+            "subsequent_stall_cycles": subsequent_stall_cycles,
+            "expected_path": "first_and_subsequent_tl_a_backpressure_then_accept",
         },
     )
+    snapshots: list[dict[str, int | None]] = []
+
+    def capture(cycle: int, active_env) -> None:
+        sample = owner_funcov._snapshot(active_env.functional_coverage, active_env.dut)
+        sample.update(
+            cycle=int(cycle),
+            tl_a_valid=int(active_env.uncache_if.a_valid.value),
+            tl_a_ready=int(active_env.uncache_if.a_ready.value),
+            tl_a_addr=int(active_env.uncache_if.a_bits_address.value),
+            tl_d_valid=int(active_env.uncache_if.d_valid.value),
+        )
+        snapshots.append(sample)
+
+    env.register_cycle_observer(capture)
+    env.uncache_agent.set_a_ready(0)
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_uncache_a_valid_addr(env, pc)
-    stalled_stats = env.uncache_agent.get_stats()
-    stalled_req_count = int(stalled_stats.get("req_count", 0))
-    assert int(env.uncache_if.a_valid.value) == 1
-    assert int(env.uncache_if.a_bits_address.value) == pc
-    env.step(stall_cycles)
-    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == stalled_req_count
-    assert int(env.uncache_if.a_valid.value) == 1
-    assert int(env.uncache_if.a_bits_address.value) == pc
+    for phase, hold_cycles in enumerate((stall_cycles, subsequent_stall_cycles)):
+        env.uncache_agent.set_a_ready(0)
+        env.step(1)
+        sample_cursor = len(snapshots)
+        assert run_until(
+            env, lambda: int(env.uncache_if.a_valid.value) == 1, max_cycles=8000
+        )
+        stalled_addr = int(env.uncache_if.a_bits_address.value)
+        req_before = int(env.uncache_agent.get_stats().get("req_count", 0))
+        if phase == 0:
+            assert stalled_addr == pc
+            assert req_before == 0
+        assert int(env.uncache_if.a_ready.value) == 0
+        env.step(hold_cycles)
+        assert int(env.uncache_agent.get_stats().get("req_count", 0)) == req_before
+        assert int(env.uncache_if.a_valid.value) == 1
+        assert int(env.uncache_if.a_bits_address.value) == stalled_addr
 
-    env.uncache_agent.set_a_ready(None)
-    assert uncache._wait_for_request_addr(env, pc)
-    assert _wait_for_resp_delta(env, env.uncache_agent)
-    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
+        env.uncache_agent.set_a_ready(None)
+        assert _wait_for_req_delta(env, env.uncache_agent) > req_before
+        assert _wait_for_resp_delta(env, env.uncache_agent)
+        phase_samples = snapshots[sample_cursor:]
+        assert any(
+            sample["tl_a_valid"] == 1 and sample["tl_a_ready"] == 0
+            for sample in phase_samples
+        ), {"phase": phase, "samples": phase_samples[-32:]}
+        fires = [
+            sample for sample in phase_samples
+            if sample["tl_a_valid"] == 1 and sample["tl_a_ready"] == 1
+            and sample["tl_a_addr"] == stalled_addr
+        ]
+        assert fires, {"phase": phase, "samples": phase_samples[-32:]}
+        assert any(sample["ifu_stall"] == 0 for sample in fires), {"phase": phase, "fires": fires}
+        first_d_cycle = min(sample["cycle"] for sample in phase_samples if sample["tl_d_valid"] == 1)
+        assert fires[0]["cycle"] < first_d_cycle, {"phase": phase, "samples": phase_samples[-32:]}
+        if phase == 0:
+            assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
+
+    req_before_resume = int(env.uncache_agent.get_stats().get("req_count", 0))
+    assert _wait_for_req_delta(env, env.uncache_agent) > req_before_resume
+    assert _wait_for_req_delta(env, env.uncache_agent) >= req_before_resume + 2
     assert not env.monitor.get_errors()
+    assert not env.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
