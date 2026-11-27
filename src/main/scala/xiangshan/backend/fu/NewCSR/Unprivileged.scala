@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import utility.GatedValidRegNext
+import xiangshan.EntropySourceIO
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.vector.Bundles._
@@ -14,6 +15,20 @@ import xiangshan.backend.decode.isa.CSRs
 import scala.collection.immutable.SeqMap
 
 trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
+
+  val seed = Module(new CSRModule("Seed", new CSRBundle {
+    val OPST = RO(31, 30).withDescription("Entropy source status.")
+    val ENTROPY = RO(15, 0).withDescription("Entropy, valid only for ES16.")
+  }) {
+    val entropy = IO(new EntropySourceIO)
+    val poll = IO(Input(Bool()))
+    val read = IO(Input(Bool()))
+    entropy.value.ready := poll
+    // Use the accepted access, not the delayed ordinary write enable, for snapshot/consume alignment.
+    rdata := Mux(poll && read,
+      Mux(entropy.value.valid, entropy.value.bits.csrValue, "h40000000".U(64.W)), 0.U)
+    regOut := 0.U
+  }).setAddr(CSRs.seed)
 
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
     val NX = WARL(0, wNoFilter).withDescription("Inexact accrued exception flag.")
@@ -191,6 +206,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   )
 
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
+    CSRs.seed   -> (seed.w            -> seed.rdata),
     CSRs.fflags -> (fcsr.wAliasFflags -> fcsr.fflagsRdata),
     CSRs.frm    -> (fcsr.wAliasFfm    -> fcsr.frmRdata),
     CSRs.fcsr   -> (fcsr.w            -> fcsr.rdata),
@@ -207,6 +223,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   ) ++ hpmcounters.map(counter => (counter.addr -> (counter.w -> counter.rdata)))
 
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
+    seed,
     fcsr,
     vcsr,
     vstart,
@@ -219,6 +236,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   ) ++ hpmcounters
 
   val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
+    CSRs.seed    -> seed.regOut.asUInt,
     CSRs.fflags  -> fcsr.fflags.asUInt,
     CSRs.frm     -> fcsr.frm.asUInt,
     CSRs.fcsr    -> fcsr.rdata.asUInt,

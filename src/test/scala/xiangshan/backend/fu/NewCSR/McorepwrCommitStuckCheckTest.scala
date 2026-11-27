@@ -20,6 +20,8 @@ class NewCSRHarness(implicit p: Parameters) extends Module {
   })
 
   val dut = Module(new NewCSR)
+  dut.io.entropy.value.valid := false.B
+  dut.io.entropy.value.bits := 0.U.asTypeOf(dut.io.entropy.value.bits)
 
   dut.io.fromTop.hartId := 0.U
   dut.io.fromTop.clintTime.valid := false.B

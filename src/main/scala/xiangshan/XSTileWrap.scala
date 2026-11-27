@@ -71,6 +71,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
+      val entropy = new EntropySourceIO
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
@@ -130,6 +131,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       msi_data_cpu := RegEnable(io.msiInfo.bits, msi_vld_sync)
     }
     tile.module.io.hartId := io.hartId
+    io.entropy <> tile.module.io.entropy
     tile.module.io.msiInfo.valid := msi_vld_cpu
     tile.module.io.msiInfo.bits := msi_data_cpu
 

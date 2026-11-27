@@ -309,6 +309,18 @@ class SoftIPrefetchBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
+class EntropySourceSnapshot extends Bundle {
+  val opst = UInt(2.W)
+  val entropy = UInt(16.W)
+
+  def csrValue: UInt = Cat(0.U(32.W), opst, 0.U(14.W), Mux(opst === 2.U, entropy, 0.U(16.W)))
+}
+
+// Per-hart, core-clock snapshot: ready is a one-cycle poll; !valid returns WAIT without stalling.
+class EntropySourceIO extends Bundle {
+  val value = Flipped(Decoupled(new EntropySourceSnapshot))
+}
+
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())

@@ -141,6 +141,10 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
+  soc.io.entropy.foreach { source =>
+    source.value.valid := false.B
+    source.value.bits := 0.U.asTypeOf(source.value.bits)
+  }
   soc.io.riscv_rst_mtvec.foreach{ _.foreach(_ := 0.U) }
   l_soc.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
   soc.io.traceCoreInterface.foreach(_.fromEncoder.enable := false.B)
