@@ -150,7 +150,7 @@ class ICacheControlAgent:
 
     def _check_response(self, cycle: int, snapshot: ICacheControlSnapshot) -> None:
         request = self.outstanding
-        ready = int(
+        next_ready = int(
             request is not None
             and request.accepted
             and request.accepted_cycle is not None
@@ -158,12 +158,12 @@ class ICacheControlAgent:
         )
         valid = snapshot.d_valid
         if valid != 1:
-            self._write(self.interface.d_ready, ready)
+            self._write(self.interface.d_ready, next_ready)
             return
         if request is None or not request.accepted:
             raise AssertionError("ICache control response arrived without an outstanding request")
-        if ready != 1:
-            self._write(self.interface.d_ready, 0)
+        if snapshot.d_ready != 1:
+            self._write(self.interface.d_ready, next_ready)
             return
         actual = {
             "opcode": snapshot.d_opcode,
@@ -188,7 +188,7 @@ class ICacheControlAgent:
         self.responses.append(record)
         self.response_count += 1
         self.outstanding = None
-        self._write(self.interface.d_ready, 1)
+        self._write(self.interface.d_ready, 0)
         self._emit(cycle, "handshake.icache_control_d", record)
 
     def on_clock_edge(self, cycle: int, snapshot: ICacheControlSnapshot) -> None:

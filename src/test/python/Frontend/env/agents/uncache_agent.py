@@ -117,9 +117,9 @@ class UncacheAgent:
             return
         if request.cycle != int(cycle):
             raise AssertionError("UncacheAgent received a stale request snapshot")
-        a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
-        self._write(self.interface.a_ready, a_ready)
-        if request.valid == 1 and a_ready == 1:
+        next_a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
+        self._write(self.interface.a_ready, next_a_ready)
+        if request.valid == 1 and request.ready == 1:
             addr = request.address
             blk = self.memory.read_block(addr, self.response_bytes)
             data = int.from_bytes(blk, "little")

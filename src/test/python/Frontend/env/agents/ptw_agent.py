@@ -519,11 +519,11 @@ class PTWAgent:
         if self.flush_pending_on_sfence and sampled.sfence_valid == 1:
             self._flush_pending(cycle)
 
-        req_ready = self._compute_req_ready(cycle)
-        self._write(self.interface.req_0_ready, req_ready)
+        next_req_ready = self._compute_req_ready(cycle)
+        self._write(self.interface.req_0_ready, next_req_ready)
 
         req_valid = sampled.req_valid
-        if req_valid == 1 and req_ready == 1:
+        if req_valid == 1 and sampled.req_ready == 1:
             vpn = sampled.req_vpn
             s2xlate = sampled.req_s2xlate
             get_gpa = sampled.req_get_gpa

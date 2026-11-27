@@ -32,6 +32,7 @@ def _agent(rate: float = 1.0, seed: int = 1) -> ICacheAgent:
         )
     })
     agent.configure(hit_latency=8, seed=seed, back_to_back_rate=rate)
+    agent.interface.a_ready.value = 1
     return agent
 
 
@@ -39,6 +40,7 @@ def _tick(agent: ICacheAgent, cycle: int, source=None) -> None:
     agent.on_clock_edge(cycle, ICacheRequestSnapshot(
         cycle=cycle,
         valid=int(source is not None),
+        ready=int(agent.interface.a_ready.value),
         source=0 if source is None else source,
         address=_BASE + (0 if source is None else source * 64),
     ))
@@ -124,9 +126,11 @@ def test_reset_discards_selected_successor() -> None:
     _tick(agent, 10, 1)
 
     assert agent.interface.d_valid.value == 0
-    for cycle in range(11, 20):
+    assert agent.req_count == 1
+    _tick(agent, 11, 1)
+    for cycle in range(12, 21):
         _tick(agent, cycle)
-    assert [record["cycle"] for record in agent.response_records] == [8, 9, 18, 19]
+    assert [record["cycle"] for record in agent.response_records] == [8, 9, 19, 20]
 
 
 def test_seed_replays_mixed_choices_without_changing_miss_draws() -> None:

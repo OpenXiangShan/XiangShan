@@ -81,15 +81,20 @@ def test_icache_control_agent_holds_request_until_handshake_and_checks_read_resp
     interface.d_bits_source.value = 7
     interface.d_bits_data.value = 0x1234
     snapshot = monitor.capture_icache_control(12)
-    interface.d_bits_data.value = 0
     agent.on_clock_edge(12, snapshot)
+    assert agent.response_count == 0
+    assert interface.d_ready.value == 1
+
+    snapshot = monitor.capture_icache_control(13)
+    interface.d_bits_data.value = 0
+    agent.on_clock_edge(13, snapshot)
 
     stats = agent.get_stats()
     assert stats["response_count"] == 1
     assert stats["outstanding"] is False
     assert stats["responses"] == [
         {
-            "cycle": 12,
+            "cycle": 13,
             "opcode": 1,
             "size": 3,
             "source": 7,
@@ -119,8 +124,9 @@ def test_icache_control_agent_rejects_mismatched_or_unsolicited_response() -> No
     interface.d_bits_size.value = 3
     interface.d_bits_source.value = 3
 
+    agent.on_clock_edge(4, monitor.capture_icache_control(4))
     with pytest.raises(AssertionError, match="opcode"):
-        agent.on_clock_edge(4, monitor.capture_icache_control(4))
+        agent.on_clock_edge(5, monitor.capture_icache_control(5))
 
     with pytest.raises(AssertionError, match="stale snapshot"):
-        agent.on_clock_edge(5, monitor.icache_control_snapshot)
+        agent.on_clock_edge(6, monitor.icache_control_snapshot)

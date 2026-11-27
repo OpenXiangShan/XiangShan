@@ -36,6 +36,7 @@ class FrontendCycleSnapshot:
 class ICacheRequestSnapshot:
     cycle: int
     valid: int
+    ready: int
     source: int
     address: int
 
@@ -44,6 +45,7 @@ class ICacheRequestSnapshot:
 class UncacheRequestSnapshot:
     cycle: int
     valid: int
+    ready: int
     address: int
     mem_back_type_mm: int
     mem_page_type_nc: int
@@ -54,6 +56,7 @@ class ICacheControlSnapshot:
     cycle: int
     a_ready: int
     d_valid: int
+    d_ready: int
     d_opcode: int
     d_size: int
     d_source: int
@@ -65,6 +68,7 @@ class PTWAgentInputSnapshot:
     cycle: int
     sfence_valid: int
     req_valid: int
+    req_ready: int
     req_vpn: int
     req_s2xlate: int
     req_get_gpa: int
@@ -212,6 +216,7 @@ class FrontendMonitor:
         self.icache_request_snapshot = ICacheRequestSnapshot(
             cycle=int(cycle),
             valid=self._read(self.icache_if.a_valid),
+            ready=self._read(self.icache_if.a_ready),
             source=self._read(self.icache_if.a_bits_source),
             address=self._read(self.icache_if.a_bits_address),
         )
@@ -223,6 +228,7 @@ class FrontendMonitor:
         self.uncache_request_snapshot = UncacheRequestSnapshot(
             cycle=int(cycle),
             valid=self._read(self.uncache_if.a_valid),
+            ready=self._read(self.uncache_if.a_ready),
             address=self._read(self.uncache_if.a_bits_address),
             mem_back_type_mm=self._read(self.uncache_if.a_bits_user_mem_back_type_mm),
             mem_page_type_nc=self._read(self.uncache_if.a_bits_user_mem_page_type_nc),
@@ -236,6 +242,7 @@ class FrontendMonitor:
             cycle=int(cycle),
             a_ready=self._read(self.icache_control_if.a_ready),
             d_valid=self._read(self.icache_control_if.d_valid),
+            d_ready=self._read(self.icache_control_if.d_ready),
             d_opcode=self._read(self.icache_control_if.d_bits_opcode),
             d_size=self._read(self.icache_control_if.d_bits_size),
             d_source=self._read(self.icache_control_if.d_bits_source),
@@ -275,6 +282,7 @@ class FrontendMonitor:
             cycle=int(cycle),
             sfence_valid=sfence_valid,
             req_valid=req_valid,
+            req_ready=self._read(ptw.req_0_ready),
             req_vpn=self._read(ptw.req_0_bits_vpn),
             req_s2xlate=self._read(ptw.req_0_bits_s2xlate),
             req_get_gpa=(
@@ -304,20 +312,28 @@ class FrontendMonitor:
             from_ftq_flag=flag,
         )
         cfvec = self.capture_cfvec_snapshot(cycle)
-        req_valid = self._read(self.ptw_if.req_0_valid)
-        req_ready = self._read(self.ptw_if.req_0_ready)
+        sampled = self.ptw_agent_input_snapshot
+        if sampled is not None and sampled.cycle == int(cycle):
+            request = {
+                "req_valid": sampled.req_valid,
+                "req_ready": sampled.req_ready,
+                "req_vpn": sampled.req_vpn,
+                "req_s2xlate": sampled.req_s2xlate,
+                "req_get_gpa": sampled.req_get_gpa,
+            }
+        else:
+            req_valid = self._read(self.ptw_if.req_0_valid)
+            req_ready = self._read(self.ptw_if.req_0_ready)
+            request = {
+                "req_valid": req_valid,
+                "req_ready": req_ready,
+                "req_vpn": self._read(self.ptw_if.req_0_bits_vpn),
+                "req_s2xlate": self._read(self.ptw_if.req_0_bits_s2xlate),
+                "req_get_gpa": int(self.ptw_get_gpa_provider() or 0) if req_valid and req_ready else 0,
+            }
         resp_valid = self._read(self.ptw_if.resp_valid)
         ptw = {
-            "req_valid": req_valid,
-            "req_ready": req_ready,
-            "req_vpn": self._read(self.ptw_if.req_0_bits_vpn),
-            "req_s2xlate": self._read(self.ptw_if.req_0_bits_s2xlate),
-            "req_get_gpa": (
-                self.ptw_agent_input_snapshot.req_get_gpa
-                if req_valid and req_ready and self.ptw_agent_input_snapshot is not None
-                and self.ptw_agent_input_snapshot.cycle == int(cycle)
-                else int(self.ptw_get_gpa_provider() or 0) if req_valid and req_ready else 0
-            ),
+            **request,
             "resp_valid": resp_valid,
             "resp_ready": self._read(self.ptw_if.resp_ready),
             "resp": {} if not resp_valid else {

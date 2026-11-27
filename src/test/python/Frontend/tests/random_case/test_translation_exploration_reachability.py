@@ -35,8 +35,8 @@ def _interface():
     return interface
 
 
-def _snapshot(cycle,*,request=0,stage=0,get_gpa=0,fence=0,ready=0):
-    return PTWAgentInputSnapshot(cycle=cycle,sfence_valid=fence,req_valid=request,
+def _snapshot(cycle,*,request=0,stage=0,get_gpa=0,fence=0,ready=0,request_ready=1):
+    return PTWAgentInputSnapshot(cycle=cycle,sfence_valid=fence,req_valid=request,req_ready=request_ready,
         req_vpn=0x80000,req_s2xlate=stage,req_get_gpa=get_gpa,resp_ready=ready,context={})
 
 
@@ -171,14 +171,15 @@ def test_onlystage2_fault_then_same_vpn_recovery_keeps_identity_in_model(fault):
 def test_periodic_request_ready_blocks_then_accepts_a_real_request_snapshot():
     agent,events=_agent()
     agent.configure(latency=1,req_ready_strategy='periodic',req_ready_high_cycles=1,req_ready_low_cycles=2)
-    agent.on_clock_edge(1,_snapshot(1,request=1))
-    agent.on_clock_edge(2,_snapshot(2,request=1))
+    agent.on_clock_edge(1,_snapshot(1,request=1,request_ready=0))
+    agent.on_clock_edge(2,_snapshot(2,request=1,request_ready=0))
     assert agent.req_count==0 and agent.req_blocked_cycles==2
-    agent.on_clock_edge(3,_snapshot(3,request=1))
-    agent.on_clock_edge(4,_snapshot(4,ready=1))
+    agent.on_clock_edge(3,_snapshot(3,request=1,request_ready=0))
+    agent.on_clock_edge(4,_snapshot(4,request=1,request_ready=1))
+    agent.on_clock_edge(5,_snapshot(5,ready=1))
     assert agent.req_count==agent.resp_count==1
-    assert [e['cycle'] for e in events if e['type']=='handshake.ptw_req']==[3]
-    assert [e['cycle'] for e in events if e['type']=='handshake.ptw_resp']==[4]
+    assert [e['cycle'] for e in events if e['type']=='handshake.ptw_req']==[4]
+    assert [e['cycle'] for e in events if e['type']=='handshake.ptw_resp']==[5]
 
 
 def test_pending_snapshot_preserves_asid_vmid_epoch_during_context_reuse():

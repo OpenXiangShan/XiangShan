@@ -188,9 +188,9 @@ class ICacheAgent:
 
     def _handle_request(self, cycle: int, request: ICacheRequestSnapshot) -> None:
         assert self.interface is not None
-        a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
-        self._write(self.interface.a_ready, a_ready)
-        if request.valid != 1 or a_ready != 1:
+        next_a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
+        self._write(self.interface.a_ready, next_a_ready)
+        if request.valid != 1 or request.ready != 1:
             return
         source = request.source
         addr = request.address

@@ -109,6 +109,7 @@ def test_ptw_agent_response_is_checked_after_handshake_decision(ready: int) -> N
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     env.ptw_agent.configure(latency=1, response_source="model")
     env.ptw_if.req_0_valid.value = 1
+    env.ptw_if.req_0_ready.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
     env.ptw_agent.on_clock_edge(10, env.monitor.capture_ptw_agent_inputs(10))
 
@@ -127,9 +128,13 @@ def test_ptw_agent_response_is_checked_after_handshake_decision(ready: int) -> N
 
 def test_ptw_agent_uses_monitored_request_and_context() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    env.ptw_agent.configure(latency=2, response_source="model")
+    env.ptw_agent.configure(
+        latency=2, response_source="model", req_ready_strategy="periodic",
+        req_ready_high_cycles=0, req_ready_low_cycles=1,
+    )
     env.monitor.ptw_get_gpa_provider = lambda: 1
     env.ptw_if.req_0_valid.value = 1
+    env.ptw_if.req_0_ready.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
     env.tlb_csr_if.io_tlbCsr_priv_imode.value = 1
 
@@ -144,6 +149,11 @@ def test_ptw_agent_uses_monitored_request_and_context() -> None:
         "cycle": 10, "vpn": 0x80001, "s2xlate": 0, "get_gpa": 1,
     }
     assert env.ptw_agent.pending[0].snapshot.priv_imode == 1
+    assert env.ptw_if.req_0_ready.value == 0
+    observed = env.monitor.capture_cycle_observation(10).ptw
+    assert observed["req_valid"] == observed["req_ready"] == 1
+    assert observed["req_vpn"] == 0x80001
+    assert observed["req_get_gpa"] == 1
     with pytest.raises(AssertionError, match="stale input snapshot"):
         env.ptw_agent.on_clock_edge(11, sampled)
 
@@ -152,6 +162,7 @@ def test_ptw_agent_uses_monitored_response_ready_and_sfence() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     env.ptw_agent.configure(latency=1, response_source="model")
     env.ptw_if.req_0_valid.value = 1
+    env.ptw_if.req_0_ready.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
     env.ptw_agent.on_clock_edge(10, env.monitor.capture_ptw_agent_inputs(10))
 
@@ -182,6 +193,7 @@ def test_ptw_nemu_sync_uses_monitored_csr_before_request_context(monkeypatch) ->
 
     env.ptw_agent.set_nemu_sync_hook(sync)
     env.ptw_if.req_0_valid.value = 1
+    env.ptw_if.req_0_ready.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
     env.tlb_csr_if.io_tlbCsr_satp_mode.value = 8
     sampled = env.monitor.capture_ptw_agent_inputs(10)
