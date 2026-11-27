@@ -95,10 +95,6 @@ def _install_vcs_vpi_name_adapter(dut) -> None:
         if relative_name.startswith("Frontend_top."):
             relative_name = relative_name[len("Frontend_top.") :]
         relative_name = relative_name.replace("__Vtogcov__", "")
-        if "." not in relative_name:
-            pin = getattr(dut, relative_name, None)
-            if pin is not None:
-                return pin
         pin = get_internal(relative_name, *args, **kwargs)
         width = getattr(pin, "W", None)
         if not callable(width) or width() <= 32 or not pin.IsVPIBinded():
