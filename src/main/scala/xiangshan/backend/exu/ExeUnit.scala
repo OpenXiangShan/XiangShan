@@ -98,9 +98,12 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
       fuVld_en_reg := fuVld_en
 
+      val uncerRobIdxReg = RegEnable(fu.io.in.bits.ctrl.robIdx, fu.io.in.fire)
+      val uncerFlushed = uncer_en_reg && uncerRobIdxReg.needFlush(io.flush)
+
       when(uncerLat.asBool && fu.io.in.fire) {
-        uncer_en_reg := true.B
-      }.elsewhen(uncerLat.asBool && fu.io.out.fire) {
+        uncer_en_reg := !fu.io.in.bits.ctrl.robIdx.needFlush(io.flush)
+      }.elsewhen(uncerLat.asBool && (fu.io.out.fire || uncerFlushed)) {
         uncer_en_reg := false.B
       }
 
