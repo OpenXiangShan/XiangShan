@@ -91,6 +91,8 @@ object Extensions {
 
   case object S extends PrivExt(Seq(SType), tableS)
 
+  case object Mpt extends PrivExt(Seq(MPTType), tableMpt)
+
   case object ZacasZabha extends CombExt[Zacas.type, Zabha.type] {
     override val types: Seq[InstType] = Seq(ZABHA_ZACASType)
     override val table: Map[BitPat, Seq[Opcode]] = tableZabhaZacas
@@ -161,7 +163,7 @@ object Extensions {
 
   def extensions(implicit p: Parameters): Seq[ExtBase] = Seq(
     I, M, A, F, D, Zicsr,
-    Sdext, Smrnmi, System, S, Svinval,
+    Sdext, Smrnmi, System, S, Svinval, Mpt,
     Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
     Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
     V, H,

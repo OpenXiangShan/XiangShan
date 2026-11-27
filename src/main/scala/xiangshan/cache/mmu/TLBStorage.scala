@@ -41,7 +41,7 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
-  for (i <- 0 until ports) {
+  val hitVecs = (0 until ports).map { i =>
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
@@ -56,7 +56,10 @@ class TLBFA(
       case (entry, (valid, refilling)) =>
         val stageMatch = entry.s2xlate === req.bits.s2xlate
         val hit = entry.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid),
-          vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+          vmid = io.csr.hgatp.vmid,
+          sdid = if (HasMptCheck) io.csr.mmpt.sdid else 0.U,
+          matchMpt = if (HasMptCheck) req.bits.matchMpt.get else false.B,
+          hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
         stageMatch && hit && valid && !refilling
     })
 
@@ -85,7 +88,7 @@ class TLBFA(
         resp.bits.mptperm.get(d).x := mptPerm.x
         resp.bits.mptperm.get(d).w := mptPerm.w
         resp.bits.mptperm.get(d).r := mptPerm.r
-        resp.bits.mptperm.get(d).af.get := false.B
+        resp.bits.mptperm.get(d).af := resp.bits.hit && mptPerm.af
       }
     }
 
@@ -99,6 +102,7 @@ class TLBFA(
     resp.bits.g_pbmt.suggestName("g_pbmt")
     resp.bits.perm.suggestName("perm")
     resp.bits.g_perm.suggestName("g_perm")
+    hitVec
   }
 
   when (io.w.valid) {
@@ -106,7 +110,16 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data)
   }
   // write assert, should not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
+  val w_hit_vec = VecInit(entries.zip(v).map { case (e, vi) =>
+    e.wbhit(
+      io.w.bits.data,
+      Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid),
+      io.csr.hgatp.vmid,
+      s2xlate = io.w.bits.data.s2xlate,
+      sdid = if (HasMptCheck) io.w.bits.data.mpt.get.sdid else 0.U,
+      matchMpt = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
+    ) && vi
+  })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
@@ -122,11 +135,17 @@ class TLBFA(
   val sfence = io.sfence
   val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv && (if (HasMptCheck) !(sfence.bits.mfence.get) else true.B)
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.fenceVirt))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.fenceVirt))
+  val sfenceSdid = if (HasMptCheck) io.csr.mmpt.sdid else 0.U
+  val mptSfenceOverFence = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid,
+    sdid = sfenceSdid, matchMpt = mptSfenceOverFence, hasS2xlate = io.csr.priv.fenceVirt))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid,
+    sdid = sfenceSdid, matchMpt = mptSfenceOverFence, hasS2xlate = io.csr.priv.fenceVirt))
+  // MPT can reduce the cached range below the leaf page size, so SFENCE must cover all subranges.
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
-    when (sfence.bits.rs1 || io.csr.priv.fenceVirt || (if (HasBitmapCheck) (io.csr.mbmc.BME === 1.U && io.csr.mbmc.CMODE === 0.U) else false.B)) { // virtual address *.rs1 <- (rs1===0.U)
+    when (sfence.bits.rs1 || io.csr.priv.fenceVirt || mptSfenceOverFence ||
+      (if (HasBitmapCheck) (io.csr.mbmc.BME === 1.U && io.csr.mbmc.CMODE === 0.U) else false.B)) { // virtual address *.rs1 <- (rs1===0.U)
       // Note: when virt=1, always flush all addr. See hfence.vvma comment.
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
@@ -144,6 +163,22 @@ class TLBFA(
       }.otherwise {
         // specific addr and specific asid
         v.zipWithIndex.map{ case (a, i) => a := a & !(sfenceHit(i) && !g(i)) }
+      }
+    }
+  }
+  if (HasMptCheck) {
+    val mfence_valid = sfence.valid && sfence.bits.mfence.get
+    val mfence_sdid = sfence.bits.id(sdidLen - 1, 0)
+    val mfenceRs2IsX0 = sfence.bits.rs2
+    when (mfence_valid) {
+      when (!mfenceRs2IsX0) {
+        // mfence with sdid target: flush all entries matching the sdid, regardless of address/pa form
+        v.zipWithIndex.map { case (a, i) =>
+          a := a && !(entries(i).sdid.get === mfence_sdid)
+        }
+      }.otherwise {
+        // mfence with x0 as the SDID operand: flush entries from all SDIDs
+        v.zipWithIndex.map { case (a, i) => a := false.B }
       }
     }
   }
@@ -209,14 +244,15 @@ class TLBFA(
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === sfence.bits.id) }
     }
   }
+
   if (HasMptCheck) {
-    when(sfence.valid && sfence.bits.mfence.get) {
-      v.zipWithIndex.map { case (a, i) => a := false.B } // mfence reset all
-    }
-    val modechange = DataChanged(io.csr.satp.mode).asBool || DataChanged(io.csr.vsatp.mode).asBool ||
-      DataChanged(io.csr.hgatp.mode).asBool
-    when(modechange) {
-      v.zipWithIndex.map { case (a, i) => a := false.B } // mptonly to ptw reset all
+    for (way <- 0 until nWays) {
+      for (port <- 0 until ports) {
+        when (io.r.req(port).valid && hitVecs(port)(way) && entries(way).mptperm.get.af) {
+          // Keep the entry data for the current response selected by hitVecReg.
+          v(way) := false.B
+        }
+      }
     }
   }
 

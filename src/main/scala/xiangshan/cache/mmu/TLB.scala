@@ -126,8 +126,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val Sv39x4Enable = csr.hgatp.mode === Sv39
   val Sv48x4Enable = csr.hgatp.mode === Sv48
 
-  val BareMode = Option.when(HasMptCheck)(
-    csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U)
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val mptEn = Option.when(HasMptCheck)(csr.mmpt.mode =/= 0.U)
   val vmEnable = Seq.fill(Width)(Wire(Bool()))
@@ -148,10 +146,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       else (Sv39Enable || Sv48Enable) && (info.mode < ModeM))
     val s2xlateEnable = isVirt &&
       (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (info.mode < ModeM)
-    info.translateEnable := (vmEnable(i) || s2xlateEnable) && !useReqS1Paddr(i)
+    val needTranslate = vmEnable(i) || s2xlateEnable
+    info.translateEnable := needTranslate && !useReqS1Paddr(i)
     if (HasMptCheck) {
-      info.mptCheckOnly.get := BareMode.get && RegEnable(!req(i).bits.no_translate, req(i).valid) &&
-        mptEn.get && (info.mode < ModeM)
+      val mptActive = mptEn.get && (info.mode < ModeM)
+      info.mptCheckOnly.get := !needTranslate && !req_out(i).no_translate && mptActive
+      info.mptCheckEnable.get := mptActive && (info.translateEnable || info.mptCheckOnly.get)
       io.ptw.req(i).bits.mptOnly.get := info.mptCheckOnly.get
     }
     info
@@ -164,7 +164,10 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     resp(i).bits.fullva := RegEnable(preCheck(i).effectiveVa, req(i).valid)
   }
 
-  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu || (if (HasMptCheck) (ptw.resp.fire && BareMode.get) else false.B)
+  val refill = ptw.resp.fire &&
+    (!(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill ||
+      (if (HasMptCheck) ptw.resp.bits.mpt.get.mptOnly else false.B)) &&
+    !flush_mmu
   // mpt only mode also returns and save to l1tlb
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
 
@@ -384,10 +387,20 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val req_need_gpa = hasGpf(idx)
     val req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
 
-    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(
+      get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
-    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(
+      get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     val ptw_getGpa = req_need_gpa && hitVec(idx)
     val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(idx).vaddr) && need_gpa_s2xlate === req_s2xlate
 
@@ -424,7 +437,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val s2xlate = query.s2xlate
     val onlyS2 = s2xlate === onlyStage2
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
-    val resp_hit = ptw.resp.bits.hit(vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val resp_hit = ptw.resp.bits.hit(
+      vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     result.hitFast := resp_hit && io.ptw.resp.fire && s2xlate_hit
     result.hit := GatedValidRegNext(result.hitFast)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)(ppnLen - 1, 0)
@@ -441,7 +459,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     result.s1IsLeaf := RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     result.s1IsFakePte := RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
     if (HasMptCheck) {
-      val mptPerm = Wire(new MptPermBundle(isTlbPort = true))
+      val mptPerm = Wire(new MptPermBundle)
       mptPerm.resp_apply(ptw.resp.bits.mpt.get)
       result.mptPerm.get := RegEnable(mptPerm, io.ptw.resp.fire)
     }
@@ -606,12 +624,13 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
   io.out.excp.gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
   io.out.excp.gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
 
-  val mptValid = accessInfo.mptCheckOnly
+  // MPT permissions and access faults apply to translated accesses and Bare-mode checks.
+  val mptValid = accessInfo.mptCheckEnable
   val mptPerm = io.in.mptPerm
   val mptInstf = Option.when(HasMptCheck)(!mptPerm.get.x && isInst)
   val mptWf = Option.when(HasMptCheck)(!(mptPerm.get.r && mptPerm.get.w) && isSt)
   val mptRf = Option.when(HasMptCheck)(!mptPerm.get.r && isLd)
-  val mptAf = Option.when(HasMptCheck)(mptPerm.get.af.get)
+  val mptAf = Option.when(HasMptCheck)(mptPerm.get.af)
   io.out.excp.af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
     (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
   io.out.excp.af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
@@ -657,6 +676,9 @@ class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbMod
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (premode < ModeM)
   io.resp.query.vpn := get_pn(req.vaddr)
   io.resp.query.s2xlate := getS2xlate(virt_in || req.hyperinst, csr.vsatp.mode, csr.hgatp.mode)
+  if (HasMptCheck) {
+    io.resp.query.matchMpt.get := csr.mmpt.mode =/= 0.U
+  }
   io.resp.preFault := 0.U.asTypeOf(new TlbPreFault)
   val pmm = WireInit(0.U(2.W))
 
