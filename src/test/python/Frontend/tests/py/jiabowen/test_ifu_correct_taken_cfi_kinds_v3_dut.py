@@ -102,6 +102,7 @@ def test_ifu_correct_taken_jal_jalr_ret_accumulate_in_one_run(env) -> None:
     indirect_resolves = []
     queued_indirect_resolves = {}
     jalr_requests = []
+    ras_call_end_positions = []
     pending = []
 
     def read(stem, *, pred=False):
@@ -206,8 +207,20 @@ def test_ifu_correct_taken_jal_jalr_ret_accumulate_in_one_run(env) -> None:
                 record["cycle"] = cycle
                 indirect_resolves.append(record)
 
+    def observe_ras_call(_cycle, _env):
+        def probe(name):
+            return int(env.dut.GetInternalSignal("Frontend_top.Frontend.inner_bpu." + name).value)
+
+        if probe("s3_valid") and probe("s3_prediction_attribute_rasAction") == 2:
+            start = probe("s3_startPc_dup_2_addr") << 1
+            position = probe("s3_prediction_cfiPosition")
+            pc = (start & ~0x1F) + (position << 1)
+            if len(ras_call_end_positions) < 12:
+                ras_call_end_positions.append(pc)
+
     env.register_cycle_observer(observe)
     env.register_pre_drive_cycle_observer(observe_resolve)
+    env.register_cycle_observer(observe_ras_call)
     for index in range(int(os.getenv("IFU_BIN932_MAX_CYCLES", "3000"))):
         env.step(1)
         if index % 512 == 511:
@@ -236,5 +249,19 @@ def test_ifu_correct_taken_jal_jalr_ret_accumulate_in_one_run(env) -> None:
     env.logger.info("BIN-932 final checkpoint: %s", {k: v for k, v in evidence.items() if k != "signal_paths"})
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_034"), evidence
     assert set(checkpoints) == {"jal", "jalr", "ret"} and len(checked_arch) >= 103, evidence
+    if env.reference_model_enabled:
+        assert env.ras_checker is not None
+        assert env.ras_checker.checked_count > 0, {
+            "predictions": env.ras_checker.prediction_count,
+            "calls": env.ras_checker.call_count,
+            "returns": env.ras_checker.return_count,
+            "commits": env.ras_checker.commit_count,
+            "redirects": env.ras_checker.redirect_count,
+            "unknown": env.ras_checker.unknown_count,
+            "pending": env.ras_checker.events,
+            "top": env.ras_checker.model.top(),
+        }
+        assert env.ras_checker.mismatch_count == 0
+    assert addresses["c"] + 2 in ras_call_end_positions, ras_call_end_positions
     assert not env.monitor.get_errors()
     assert not env.get_errors()

@@ -149,6 +149,7 @@ def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
 def test_reference_model_mismatches_are_non_fatal_by_default_and_strict_on_request(monkeypatch) -> None:
     dut = FakeDUTFrontend()
     dut._is_fake_frontend_dut = False
+    monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "1")
     monkeypatch.delenv("TB_REFERENCE_MODEL_STRICT", raising=False)
     default = FrontendEnv(dut, register_callbacks=False)
     assert default.reference_model_strict is False
