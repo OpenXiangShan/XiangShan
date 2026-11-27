@@ -1367,13 +1367,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       traceFromBackend.toEncoder.groups(i).bits.ilastsize,
       traceFromBackend.toEncoder.groups(i).valid
     )
-    traceToL2Top.toEncoder.groups(i).bits.iaddr := RegEnable(
+    traceToL2Top.toEncoder.groups(i).bits.iaddr := (RegEnable(
       traceFromBackend.toEncoder.groups(i).bits.iaddr,
       traceFromBackend.toEncoder.groups(i).valid
-    ) + (RegEnable(
-      traceFromBackend.toEncoder.groups(i).bits.ftqOffset.getOrElse(0.U),
+    ).asSInt + (RegEnable(
+      traceFromBackend.toEncoder.groups(i).bits.ftqOffset.get,
       traceFromBackend.toEncoder.groups(i).valid
-    ) << instOffsetBits)
+    ) << instOffsetBits)).asUInt
   }
 
   // top-down info

@@ -180,21 +180,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !in.redirect.valid){
-      // TODO: enq
       val entryHeadUop = bankHeadUop(i % bankNum)
-      robEntries(i).connectEnq(entryHeadUop)
-      val youngestEnqUop = PriorityMux(entryEnqValid.reverse, in.enq.req.map(_.bits).reverse)
-      robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
-      robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
-      robEntries(i).formerTraceBlockInPipe.iretire := entryHeadUop.formerTraceIretire
-      val formerEntryEnqValid = entryEnqValid.zip(in.enq.req).map { case (valid, req) =>
-        valid && req.bits.robIdx.isFormer
-      }
-      when(VecInit(formerEntryEnqValid).asUInt.orR) {
-        val youngestFormerUop = PriorityMux(formerEntryEnqValid.reverse, in.enq.req.map(_.bits).reverse)
-        robEntries(i).formerTraceBlockInPipe.itype := youngestFormerUop.traceBlockInPipe.itype
-        robEntries(i).formerTraceBlockInPipe.ilastsize := youngestFormerUop.traceBlockInPipe.ilastsize
-      }
+      val youngestTrace = PriorityMux(entryEnqValid.reverse, in.enq.req.map(_.bits.traceBlockInPipe).reverse)
+      robEntries(i).connectEnq(entryHeadUop, youngestTrace)
     }.elsewhen(in.redirect.valid && in.redirect.bits.robIdx.value === i.U){
       val entryPairType = robEntries(i).entryPairType
       val redirectIsFormer = in.redirect.bits.robIdx.isFormer
@@ -206,7 +194,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(downgradeToFormer) {
         robEntries(i).entryPairType := CompressType.NORMAL
         robEntries(i).noCompressReason := NoCompressReason.flushedHalf
-        robEntries(i).traceBlockInPipe := robEntries(i).formerTraceBlockInPipe
       }
     }
   }
@@ -260,9 +247,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise(
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
-  val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
+  val robDeqGroup = Reg(Vec(bankNum, new RobDeqEntryBundle))
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
-  val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
     robDeqGroup(i).connectCommitEntry(robBanksRdataThisLineUpdate(i), needUpdateCommitW(i))
@@ -309,10 +295,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
   val commitInstrCntByEntry = instrSizeCommit.toSeq
-  for (i <- 0 until CommitWidth) {
-    commitInfo(i).ftqOffset := 0.U
-    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
-  }
 
   // Per-slot copy of the full enqueue uop for debug and difftest.
   val debug_microOp = Reg(Vec(RobSize, Vec(2, new EnqRobUop)))
@@ -662,8 +644,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
 
-  // The entry-level trace block describes the youngest instruction in the
-  // surviving compressed entry, while debug/difftest keep both slots exact.
+  // Keep branch outcomes in the per-slot debug copies.
   for (wb <- branchWBs) {
     val wbIdx = wb.bits.robIdx.value
     val subIdx = slotIndex(wb.bits.robIdx)
@@ -671,10 +652,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       Itype.isNonTaken(debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype)) {
       debug_microOp(wbIdx)(subIdx).traceBlockInPipe.itype := Itype.Taken
     }
-    when(wb.valid && wb.bits.robIdx.isFormer && wb.bits.redirect.get.bits.taken &&
-      Itype.isNonTaken(robEntries(wbIdx).formerTraceBlockInPipe.itype)) {
-      robEntries(wbIdx).formerTraceBlockInPipe.itype := Itype.Taken
-    }
+  }
+
+  private def takenBranchesAt(idx: UInt): (Bool, Bool) = {
+    val hits = VecInit(branchWBs.map { wb =>
+      wb.valid && wb.bits.robIdx.value === idx && wb.bits.redirect.get.bits.taken
+    }).asUInt
+    val former = VecInit(branchWBs.map(_.bits.robIdx.isFormer)).asUInt
+    ((hits & former).orR, (hits & ~former).orR)
   }
 
   val writebackNum = PopCount(exuWBs.map(_.valid))
@@ -1051,7 +1036,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
     val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
-    out.commits.info(i) := commitInfo(i)
+    out.commits.info(i) := rawInfo(i)
+    out.commits.info(i).ftqOffset := 0.U
+    out.commits.info(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
     out.commits.robIdx(i) := deqPtrVec(i)
     val deqDebugInst = debug_microOp(deqPtrVec(i).value).head
     deqDebugInst.debug.foreach { debug =>
@@ -1088,8 +1075,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     noCommitCycleCnt := noCommitCycleCnt + 1.U
   }
   // Read the architectural ROB entry explicitly for the debug-only counters.
-  // `robDeqGroup` is a `RobCommitEntryBundle`, which intentionally no longer
-  // carries the shadow uop state used to derive these values.
+  // The dequeue group does not carry the uop state used to derive these values.
   val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
   val deqPtrFormerUopNum = deqPtrRobEntry.decodeFormerUopNum(
     deqPtrRobEntry.entryPairType,
@@ -1510,19 +1496,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
     robEntries(i).uopState := nextPackedUopState
 
-    // trace
-    val youngestSlotIsFormer = CompressType.isNORMAL(robEntries(i).entryPairType) || redirectClearsLatter
-    val taken = branchWBs.map(writeback =>
-      writeback.valid &&
-      writeback.bits.robIdx.value === i.U &&
-      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
-      writeback.bits.redirect.get.bits.taken
-    ).reduce(_ || _)
-    when(robEntries(i).valid && Itype.isNonTaken(robEntries(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      // TODO: In the future, there are two itype in trace
-      robEntries(i).traceBlockInPipe.itype := Itype.Taken
-    }
+    val (formerTaken, latterTaken) = takenBranchesAt(i.U)
+    robEntries(i).updateTrace(robEntries(i), formerTaken, latterTaken, redirectClearsLatter)
   }
 
   // begin update robBanksRdata
@@ -1589,18 +1564,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     needUpdate(i).uopState := nextPackedUopState
     needUpdateCommitW(i) := !nextPackedUopState.orR
 
-    // trace
-    val youngestSlotIsFormer = CompressType.isNORMAL(robBanksRdata(i).entryPairType) || redirectClearsLatter
-    val taken = branchWBs.map(writeback =>
-      writeback.valid &&
-      writeback.bits.robIdx.value === needUpdateRobIdx(i) &&
-      (writeback.bits.robIdx.isFormer === youngestSlotIsFormer) &&
-      writeback.bits.redirect.get.bits.taken
-    ).reduce(_ || _)
-    when(robBanksRdata(i).valid && Itype.isNonTaken(robBanksRdata(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      needUpdate(i).traceBlockInPipe.itype := Itype.Taken
-    }
+    // Forward branch outcomes on the bank read. Retirement is blocked on redirect;
+    // the stored entry supplies the downgraded type and trace metadata after recovery.
+    val (formerTaken, latterTaken) = takenBranchesAt(needUpdateRobIdx(i))
+    needUpdate(i).updateTrace(robBanksRdata(i), formerTaken, latterTaken, false.B)
   }
   robBanksRdataThisLineUpdate := VecInit(needUpdate.take(bankNum))
   robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(bankNum))
@@ -1736,29 +1703,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * trace
    */
 
-  // trace output
-  val traceValids = out.trace.traceCommitInfo.blocks.map(_.valid)
   val traceBlocks = out.trace.traceCommitInfo.blocks
-  val traceBlockInPipe = out.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
-
-  for (i <- 0 until CommitWidth) {
-    traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
-    traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
-    traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
-    traceBlockInPipe(i).iretire := iretireCommit(i)
-    traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
-    traceValids(i) := out.commits.isCommit && out.commits.commitValid(i)
-    // exception only occur in block(0).
-    if(i == 0) {
-      when(out.exception.valid){ // trace exception
-        traceBlocks(i).bits.tracePipe.itype := Mux(out.exception.bits.isInterrupt,
-          Itype.Interrupt,
-          Itype.Exception
-        )
-        traceValids(i) := true.B
-        traceBlockInPipe(i).iretire := 0.U
-      }
-    }
+  traceBlocks := VecInit(rawInfo.zipWithIndex.flatMap { case (entry, i) =>
+    entry.traceBlocks(out.commits.isCommit && out.commits.commitValid(i), iretireCommit(i), formerHalfWordsCommit(i))
+  })
+  when(out.exception.valid) {
+    traceBlocks.head.valid := true.B
+    traceBlocks.head.bits.tracePipe.itype := Mux(out.exception.bits.isInterrupt, Itype.Interrupt, Itype.Exception)
+    traceBlocks.head.bits.tracePipe.iretire := 0.U
   }
 
   /**
@@ -2602,7 +2554,7 @@ object Rob {
     val blockCommit = Input(Bool())
 
     // Trace output.
-    val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited)
+    val traceCommitInfo = new TraceBundle(hasIaddr = false, TraceCommitWidth, IretireWidthCommited)
   }
 
   class RobWfiIO extends Bundle {

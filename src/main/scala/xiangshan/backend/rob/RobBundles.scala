@@ -92,9 +92,9 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val needVTB = Bool()
 
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
-  // Preserve the former slot's exact trace metadata so a latter-slot squash
-  // can rebuild the surviving physical entry without stale metadata.
+  // Used both to split trace at retirement and to restore the surviving slot on a squash.
   val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
+  val latterTracePc = new TraceSlotPc
   val slotNeedFlushMask = UInt(2.W)
 
   // Entry-level fields continue to describe the former slot. Rob.scala keeps
@@ -177,7 +177,7 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     )
   }
 
-  def connectEnq(robEnq: EnqRobUop): Unit = {
+  def connectEnq(robEnq: EnqRobUop, youngestTrace: TracePipe): Unit = {
     this.entryPairType := robEnq.entryPairType
     this.noCompressReason := robEnq.noCompressReason
 
@@ -196,8 +196,13 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.interruptSafe := robEnq.interruptSafe
     this.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace
-    this.traceBlockInPipe := robEnq.traceBlockInPipe
-    this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
+    val paired = CompressType.isNotNORMAL(robEnq.entryPairType)
+    this.traceBlockInPipe.iretire := robEnq.traceBlockInPipe.iretire
+    this.traceBlockInPipe.itype := Mux(paired, robEnq.latterTraceItype, youngestTrace.itype)
+    this.traceBlockInPipe.ilastsize := Mux(paired, robEnq.latterTraceIlastsize, youngestTrace.ilastsize)
+    this.formerTraceBlockInPipe := Mux(paired, robEnq.traceBlockInPipe, youngestTrace)
+    this.formerTraceBlockInPipe.iretire := robEnq.formerTraceIretire
+    this.latterTracePc := robEnq.latterTracePc
     this.basicDebug.foreach(_.connectBasicDebug(robEnq))
     this.debug_fuType.foreach(_ := robEnq.fuType)
     this.debug_fuOpType.foreach(_ := robEnq.fuOpType)
@@ -224,6 +229,22 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.topdownCancelSource.foreach(_ := IQCancelSource.none)
     this.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
     this.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
+  }
+
+  // Apply the same updates to the stored entry and to data bypassed into the dequeue group.
+  def updateTrace(current: RobEntryBundle, formerTaken: Bool, latterTaken: Bool, squashLatter: Bool): Unit = {
+    val former = current.formerTraceBlockInPipe
+    val lastIsFormer = CompressType.isNORMAL(current.entryPairType) || squashLatter
+    when(squashLatter) {
+      this.traceBlockInPipe := former
+    }
+    when(current.valid && formerTaken && Itype.isNonTaken(former.itype)) {
+      this.formerTraceBlockInPipe.itype := Itype.Taken
+    }
+    val lastItype = Mux(squashLatter, former.itype, current.traceBlockInPipe.itype)
+    when(current.valid && Mux(lastIsFormer, formerTaken, latterTaken) && Itype.isNonTaken(lastItype)) {
+      this.traceBlockInPipe.itype := Itype.Taken
+    }
   }
 }
 
@@ -288,6 +309,40 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.basicDebug.foreach(_ := robEntry.basicDebug.get)
     this.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
     this.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
+  }
+}
+
+class RobDeqEntryBundle(implicit p: Parameters) extends RobCommitEntryBundle {
+  val formerTraceItype = Itype()
+  val formerTraceIlastsize = Ilastsize()
+  val latterTracePc = new TraceSlotPc
+
+  override def connectCommitEntry(robEntry: RobEntryBundle, commitW: Bool): Unit = {
+    super.connectCommitEntry(robEntry, commitW)
+    formerTraceItype := robEntry.formerTraceBlockInPipe.itype
+    formerTraceIlastsize := robEntry.formerTraceBlockInPipe.ilastsize
+    latterTracePc := robEntry.latterTracePc
+  }
+
+  def traceBlocks(commit: Bool, halfWords: UInt, formerHalfWords: UInt): Vec[Valid[TraceBlock]] = {
+    val blocks = Wire(Vec(TraceCommitWidth / CommitWidth, Valid(new TraceBlock(false, IretireWidthCommited))))
+    val first = blocks.head
+    first.valid := commit
+    first.bits.fromSlot(ftqIdx, ftqOffset, slotHeadRvcMask(0),
+      traceBlockInPipe.itype, halfWords, traceBlockInPipe.ilastsize)
+    if (EnableRobCompression) {
+      val split = CompressType.isNotNORMAL(entryPairType) && Itype.isNotNone(formerTraceItype)
+      when(split) {
+        first.bits.tracePipe.itype := formerTraceItype
+        first.bits.tracePipe.iretire := formerHalfWords
+        first.bits.tracePipe.ilastsize := formerTraceIlastsize
+      }
+      val second = blocks(1)
+      second.valid := commit && split
+      second.bits.fromSlot(latterTracePc.ftqIdx, latterTracePc.endOffset, slotHeadRvcMask(1),
+        traceBlockInPipe.itype, halfWords - formerHalfWords, traceBlockInPipe.ilastsize)
+    }
+    blocks
   }
 }
 

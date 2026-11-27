@@ -90,8 +90,6 @@ object BranchAttribute {
     def Push: UInt = (1 << pushBit).U(width.W)
     // return & call: jalr with rd=x1/x5 and rs1=x1/x5 and rs1!=rd
     def PopAndPush: UInt = ((1 << popBit) | (1 << pushBit)).U(width.W)
-
-    def apply(pop: Bool, push: Bool): UInt = push ## pop
   }
 
   def apply(branchType: UInt, rasAction: UInt, canAssert: Bool = true.B): BranchAttribute = {
@@ -328,7 +326,7 @@ class BpuCommitMeta(implicit p: Parameters) extends BpuBundle {
   val attribute: BranchAttribute = new BranchAttribute
 }
 
-class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+class BpuCommit(implicit p: Parameters) extends BpuBundle {
   val meta: BpuCommitMeta = new BpuCommitMeta
 }
 

@@ -725,6 +725,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val traceLastIsRVC = (traceLastMask & Cat(isRVCVec.reverse)).orR
     uops(i).traceBlockInPipe.ilastsize := Mux(traceLastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
     uops(i).traceBlockInPipe.itype := Mux1H(traceLastMask.asBools, traceItypeVec)
+    // The head can dispatch before the latter slot. Capture both trace boundaries at rename.
+    val latterMask = latterSlotMaskVec(i)
+    val latterHead = PriorityEncoderOH(latterMask).asBools
+    val latterTail = Reverse(PriorityEncoderOH(Reverse(latterMask)))
+    uops(i).latterTracePc.ftqIdx := Mux1H(latterHead, io.in.map(_.bits.ftqPtr))
+    uops(i).latterTracePc.endOffset := Mux1H(latterHead, io.in.map(_.bits.ftqOffset))
+    uops(i).latterTraceItype := Mux1H(latterTail.asBools, traceItypeVec)
+    uops(i).latterTraceIlastsize := Mux((latterTail & Cat(isRVCVec.reverse)).orR, Ilastsize.HalfWord, Ilastsize.Word)
   }
   /**
    * trace end

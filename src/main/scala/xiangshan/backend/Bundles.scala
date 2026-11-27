@@ -305,6 +305,9 @@ object Bundles {
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     val formerTraceIretire = UInt(IretireWidthEncoded.W)
+    val latterTracePc = new TraceSlotPc
+    val latterTraceItype = Itype()
+    val latterTraceIlastsize = Ilastsize()
     // Take snapshot at this CFI inst
     val snapshot = Bool()
     val storeSetHit = Bool() // inst has been allocated an store set
@@ -673,14 +676,12 @@ object Bundles {
     val pdest           = UInt(PhyRegIdxWidth.W)
     val pdestV0         = UInt(V0PhyRegIdxWidth.W)
     val pdestVl         = UInt(VlPhyRegIdxWidth.W)
-    val rasAction       = BranchAttribute.RasAction()
     // reg cache
     val useRegCache     = Vec(backendParams.numIntRegSrc, Bool())
     val regCacheIdx     = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val robIdx          = new RobPtr
     val dirtyFs         = Bool()
     val dirtyVs         = Bool()
-    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
 
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
@@ -1279,7 +1280,6 @@ object Bundles {
       uop.vtype          := this.vtype.getOrElse(0.U.asTypeOf(VType()))
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
-      uop.rasAction      := this.rasAction.getOrElse(0.U)
       uop
     }
   }

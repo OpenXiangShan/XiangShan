@@ -61,7 +61,6 @@ class IssueParam(
 
   val needRedirect: Boolean = exuParams.exists(_.needRedirect)
   val needIsRVC: Boolean = exuParams.exists(_.needIsRVC)
-  val needRasAction: Boolean = exuParams.exists(_.needRasAction)
   val needFlushPipe: Boolean = exuParams.exists(_.needFlushPipe)
   val needReplay: Boolean = exuParams.exists(_.needReplay)
   val needTrigger: Boolean = exuParams.exists(_.needTrigger)

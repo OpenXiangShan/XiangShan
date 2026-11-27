@@ -39,7 +39,6 @@ import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
-import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
 import xiangshan.backend.vector.{Decoder, VecIssueQueue}
@@ -369,7 +368,9 @@ class CtrlBlockImp(
   (0 until TraceGroupNum).foreach(i => {
     io.traceCoreInterface.toEncoder.groups(i).valid := trace.io.out.toEncoder.blocks(i).valid
     io.traceCoreInterface.toEncoder.groups(i).bits.iaddr := tracePcStart(i)
-    io.traceCoreInterface.toEncoder.groups(i).bits.ftqOffset.foreach(_ := trace.io.out.toEncoder.blocks(i).bits.ftqOffset.getOrElse(0.U))
+    io.traceCoreInterface.toEncoder.groups(i).bits.ftqOffset.foreach { offset =>
+      offset := trace.io.out.toEncoder.blocks(i).bits.ftqOffset.get
+    }
     io.traceCoreInterface.toEncoder.groups(i).bits.itype := trace.io.out.toEncoder.blocks(i).bits.tracePipe.itype
     io.traceCoreInterface.toEncoder.groups(i).bits.iretire := trace.io.out.toEncoder.blocks(i).bits.tracePipe.iretire
     io.traceCoreInterface.toEncoder.groups(i).bits.ilastsize := trace.io.out.toEncoder.blocks(i).bits.tracePipe.ilastsize
