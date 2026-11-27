@@ -20,7 +20,6 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
-import utility._
 import xscache.coupledL2.utils.SplittedSRAM
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
@@ -317,7 +316,7 @@ class MptCacheData(isPerms: Boolean = false)(implicit p: Parameters) extends XSB
 
 class MptCacheL0(implicit p: Parameters) extends XSBundle with MPTCacheParam {
   val cacheData = new MptCacheData(isPerms = true)
-  val tag       = new MptCacheTag(tagLen = mptL0TagLen) // , isL0 = true )
+  val tag       = UInt(mptL0TagLen.W)
 }
 
 class MptCacheReq(implicit p: Parameters) extends XSBundle with MPTCacheParam {
@@ -544,11 +543,9 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     hasSramCtl = hasSramCtl
   )) // 1clk delay from req to resp
   val l0Valid = RegInit(Vec(l0nSets, Vec(l0nWays, Bool())), 0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, Bool()))))
-  // Keep a register shadow of the SRAM-resident SDID tags so an x0/SDID MFENCE
-  // can invalidate matching entries in every set without using a PA index.
-  val l0SdidHash = RegInit(
-    Vec(l0nSets, Vec(l0nWays, UInt(hashSdidWidth.W))),
-    0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, UInt(hashSdidWidth.W))))
+  val l0Sdid = RegInit(
+    Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))),
+    0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))))
   )
 
   val mptCacheL3Replace = Module(new PLRUOH(logWays = log2Up(l3Size))).io
@@ -703,27 +700,26 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     l0Data.io.r.req.bits.apply(setIdx = idx) // .. 0 delay stagereq reg get valid at the same time
     l0Data.io.r.req.valid := pipeInputs.dataValid || pipeInputs.flushPA // read and write at the same time will not cause error, but read is invalid
 
-    val l0validReg = RegEnable(
-      l0Valid(geL0Set(stageReq.reqPA)),
-      0.U.asTypeOf(Vec(l0nWays, Bool())),
-      stageReq.dataValid || stageReq.flushPA
-    )
+    val reqSet = geL0Set(stageReq.reqPA)
+    val captureResp = stageReq.dataValid || stageReq.flushPA
+    val l0validReg = RegEnable(l0Valid(reqSet), 0.U.asTypeOf(Vec(l0nWays, Bool())), captureResp)
     when(mfenceFenceAll) {
       l0validReg := 0.U.asTypeOf(Vec(l0nWays, Bool()))
     }
-    val dataResp = RegEnable(l0Data.io.r.resp.data, stageReq.dataValid || stageReq.flushPA)
+    // Capture SDID alongside the SRAM response for the same request and set.
+    val setSdid = RegEnable(l0Sdid(reqSet), captureResp)
+    val dataResp = RegEnable(l0Data.io.r.resp.data, captureResp)
     // data avaliable at stage delay
     val setTag  = dataResp.map(_.tag)
     val setData = dataResp.map(_.cacheData) // 4 entry+tag
     // some wire
 
     // MfencePA
+    val reqTag = stageDelay.reqPA(ppnLen - 1, ppnLen - mptL0TagLen)
     val hitVecHitPA = setTag.zip(l0validReg).map { case (x, v) =>
-      x.hit(stageDelay.reqPA) && v
+      (x === reqTag) && v
     }
-    val hitVecHitSDID = setTag.zip(l0validReg).map { case (x, v) =>
-      x.hitSdid(stageDelay.sdid) && v
-    }
+    val hitVecHitSDID = setSdid.map(_ === stageDelay.sdid)
     val hitVecTemp = hitVecHitPA.zip(hitVecHitSDID).map {case (a, b) =>
       a && b
     }
@@ -737,8 +733,8 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       is("b01".U) {
         for (set <- 0 until l0nSets) {
           for (way <- 0 until l0nWays) {
-            when(l0Valid(set)(way) && l0SdidHash(set)(way) === XORFold(stageDelay.sdid,hashSdidWidth)) {
-              l0Valid(set)(way) := false.B // a litte sdid overfence, saves area & cost
+            when(l0Valid(set)(way) && l0Sdid(set)(way) === stageDelay.sdid) {
+              l0Valid(set)(way) := false.B
             }
           }
         }
@@ -949,8 +945,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   // /write data into cache 1 cycle
   val l0Wdata = Wire(new MptCacheL0()) // 0 delay, wire signal assignment
-  l0Wdata.tag.tag        := rfl0Tag
-  l0Wdata.tag.sdid       := io.csr.mmpt.sdid
+  l0Wdata.tag            := rfl0Tag
   l0Wdata.cacheData.data := io.refill.bits.refillData.data
   l0Data.io.w.req <> DontCare // default val for write channel is invalid
   l0Data.io.w.req.valid := false.B
@@ -965,7 +960,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       for (i <- 0 until l0nWays) {
         when(l0VictimWay(i) === 1.U && rfl0SetIdx === j.U) {
           l0Valid(j)(i) := true.B
-          l0SdidHash(j)(i) := XORFold(io.csr.mmpt.sdid, hashSdidWidth)
+          l0Sdid(j)(i) := io.csr.mmpt.sdid
         }
       }
     }

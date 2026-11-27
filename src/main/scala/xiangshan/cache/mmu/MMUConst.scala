@@ -119,7 +119,6 @@ trait MPTCacheParam extends HasTlbConst {
   val l0nWays = 8
   val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets) // 32-5=27
   val l0Replacer = "setplru"
-  val hashSdidWidth: Int = 3
   // hash vpn width
   val hashPpnWidth: Int = 6
   // sp
