@@ -204,7 +204,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val backendTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val triggerVa = Mux(io.dtlb.resp.fire, io.dtlb.resp.bits.triggerVa, vaddr)
 
   assert(state === s_invalid ||
     LSUOpType.amoSizeIs(_.B)(uop.fuOpType) ||
@@ -219,7 +220,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val store_hit = Wire(Vec(TriggerNum, Bool()))
   for (j <- 0 until TriggerNum) {
     store_hit(j) := !tdata(j).select && !debugMode && isNotLr && TriggerCmp(
-      vaddr,
+      triggerVa,
       tdata(j).tdata2,
       tdata(j).matchType,
       tEnableVec(j) && tdata(j).store
@@ -229,14 +230,13 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val load_hit = Wire(Vec(TriggerNum, Bool()))
   for (j <- 0 until TriggerNum) {
     load_hit(j) := !tdata(j).select && !debugMode && isNotSc && TriggerCmp(
-      vaddr,
+      triggerVa,
       tdata(j).tdata2,
       tdata(j).matchType,
       tEnableVec(j) && tdata(j).load
     )
   }
   backendTriggerHitVec := store_hit.zip(load_hit).map { case (sh, lh) => sh || lh }
-  // triggerCanFireVec will update at T+1
   TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVec, backendTriggerHitVec,
     backendTriggerTimingVec, backendTriggerChainVec)
 

@@ -763,6 +763,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.uop.exceptionVec(loadAddrMisaligned) := false.B
     replay_req(i).bits.vaddr := replay_req_vaddr
     replay_req(i).bits.fullva := replay_req_vaddr
+    replay_req(i).bits.triggerVa := replay_req_vaddr
     replay_req(i).bits.size := Mux(s1_vecReplay.isvec, s1_vecReplay.alignedType, replay_req_size)
     replay_req(i).bits.mask := Mux(
       s1_vecReplay.isvec,
