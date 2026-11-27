@@ -26,6 +26,7 @@ import top.MinimalConfig
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.cache.mmu.HasPtwConst
 
 /** Minimal standalone plugin used to verify CoreExtPlugin wiring without external accelerators. */
 class DummyCoreExtPlugin extends CoreExtPlugin {
@@ -46,6 +47,38 @@ class DummyCoreExtPlugin extends CoreExtPlugin {
       flushPipe = false,
     ),
   )
+}
+
+/** Minimal standalone plugin requesting an extra L2TLB/PTW client port. */
+class DummyTlbExtPlugin(override val name: String = "dummy-tlb-ext") extends CoreExtPlugin {
+  override def enableL2TlbPort(implicit p: Parameters): Boolean = true
+}
+
+/** Helper to inspect HasPtwConst values under a given Parameters context. */
+class PtwConstProbe(implicit val p: Parameters) extends HasPtwConst
+
+/** Harness verifying CoreExtIO.tlbPort presence and tieOffPluginOutputs behavior. */
+class CoreExtTlbTieOffHarness(implicit p: Parameters) extends Module {
+  val io = IO(new Bundle {
+    val reqValid  = Output(Bool())
+    val respReady = Output(Bool())
+  })
+
+  val extIO = Wire(new CoreExtIO(hasExec = false, hasTlbPort = true))
+  extIO.robCommit := 0.U.asTypeOf(extIO.robCommit)
+  extIO.redirect  := 0.U.asTypeOf(extIO.redirect)
+  extIO.sfence    := false.B
+  extIO.pagingEn  := false.B
+  extIO.sbIsEmpty := true.B
+  extIO.tieOffPluginOutputs()
+
+  val tlbPort = extIO.tlbPort.get
+  tlbPort.req.foreach(_.ready := true.B)
+  tlbPort.resp.valid := false.B
+  tlbPort.resp.bits  := 0.U.asTypeOf(tlbPort.resp.bits)
+
+  io.reqValid  := tlbPort.req.map(_.valid).reduce(_ || _)
+  io.respReady := tlbPort.resp.ready
 }
 
 /** Test harness combining ExtDecodeHelper and ExtProxyFu with an external responder interface. */
@@ -179,6 +212,30 @@ class CoreExtPluginSpec extends AnyFlatSpec with Matchers with ChiselSim {
       dut.io.extRespData.poke(999.U)
       dut.clock.step(1)
       dut.io.outValid.expect(false.B)
+    }
+  }
+
+  it should "scale PtwWidth with enableL2TlbPort plugins and tie off CoreExtIO.tlbPort safely" in {
+    def coreParamsOf(cfg: Parameters): Parameters =
+      cfg.alterPartial { case XSCoreParamsKey => cfg(XSTileKey).head }
+
+    val baseCfg = new MinimalConfig(1)
+    new PtwConstProbe()(coreParamsOf(baseCfg)).PtwWidth shouldBe 2
+
+    val execOnlyCfg = new WithCoreExtPlugin(new DummyCoreExtPlugin) ++ baseCfg
+    new PtwConstProbe()(coreParamsOf(execOnlyCfg)).PtwWidth shouldBe 2
+
+    val oneTlbCfg = new WithCoreExtPlugin(new DummyTlbExtPlugin("tlb-0")) ++ execOnlyCfg
+    new PtwConstProbe()(coreParamsOf(oneTlbCfg)).PtwWidth shouldBe 3
+
+    val twoTlbCfg = new WithCoreExtPlugin(new DummyTlbExtPlugin("tlb-1")) ++ oneTlbCfg
+    new PtwConstProbe()(coreParamsOf(twoTlbCfg)).PtwWidth shouldBe 4
+
+    implicit val p: Parameters = coreParamsOf(oneTlbCfg)
+    simulate(new CoreExtTlbTieOffHarness) { dut =>
+      dut.clock.step(1)
+      dut.io.reqValid.expect(false.B)
+      dut.io.respReady.expect(true.B)
     }
   }
 }

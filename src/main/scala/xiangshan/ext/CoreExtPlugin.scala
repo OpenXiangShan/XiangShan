@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.{Config, Field, Parameters}
 import xiangshan.{FuOpType, Redirect, XSBundle, XSCoreBase, XSCoreImp, XSTile, XSTileKey}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
+import xiangshan.cache.mmu.TlbPtwIO
 
 /** Request from in-core ExtProxyFu to core-level extension decoupled unit */
 class ExtExecReq(implicit p: Parameters) extends XSBundle {
@@ -71,7 +72,8 @@ class ExtRobCommitIO(implicit p: Parameters) extends XSBundle {
  * Signal directions are from the plugin's perspective.
  */
 class CoreExtIO(
-  hasExec: Boolean,
+  hasExec:    Boolean,
+  hasTlbPort: Boolean = false,
 )(implicit p: Parameters) extends XSBundle {
   val exec      = Option.when(hasExec)(Flipped(new ExtExecIO))
   val robCommit = Input(new ExtRobCommitIO)
@@ -80,10 +82,18 @@ class CoreExtIO(
   val pagingEn  = Input(Bool())
   val sbIsEmpty = Input(Bool())
   val flushSb   = Output(Bool())
+  val tlbPort   = Option.when(hasTlbPort)(new TlbPtwIO)
 
   def tieOffPluginOutputs(): Unit = {
     exec.foreach(_.tieOffResponder())
     flushSb := false.B
+    tlbPort.foreach { t =>
+      t.req.foreach { req =>
+        req.valid := false.B
+        req.bits  := 0.U.asTypeOf(req.bits)
+      }
+      t.resp.ready := true.B
+    }
   }
 }
 
@@ -105,6 +115,9 @@ trait CoreExtPlugin {
 
   /** Whether this plugin uses the in-core ExtProxyFu execution channel */
   def enableExtExec: Boolean = false
+
+  /** Whether to enable an additional L2TLB/PTW client port for this plugin */
+  def enableL2TlbPort(implicit p: Parameters): Boolean = false
 
   /** Inject instruction decode truth table rows into DecodeChannels. */
   def decodeTable(implicit p: Parameters): Seq[ExtDecodeRow] = Nil
@@ -202,11 +215,15 @@ object ExtCoreHelper {
         )
       }
 
+      var nextTlbIdx = 0
+
       extPlugins.zipWithIndex.foreach { case (plugin, idx) =>
-        val hasExec = execPluginIdxOpt.contains(idx) && core.backend.io.extExec.nonEmpty
+        val hasExec    = execPluginIdxOpt.contains(idx) && core.backend.io.extExec.nonEmpty
+        val hasTlbPort = plugin.enableL2TlbPort
 
         val extIO = Wire(new CoreExtIO(
-          hasExec = hasExec,
+          hasExec    = hasExec,
+          hasTlbPort = hasTlbPort,
         ))
         extIO.tieOffPluginOutputs()
 
@@ -217,9 +234,17 @@ object ExtCoreHelper {
         extIO.pagingEn   := extPagingEn
         extIO.sbIsEmpty  := core.memBlock.io.mem_to_ooo.sbIsEmpty
         extFlushSbs(idx) := extIO.flushSb
+        if (hasTlbPort) {
+          core.memBlock.io.extTlb(nextTlbIdx) <> extIO.tlbPort.get
+          nextTlbIdx += 1
+        }
 
         plugin.onCoreElaborated(core, extIO)
       }
+      require(
+        nextTlbIdx == core.memBlock.io.extTlb.length,
+        s"Connected $nextTlbIdx extTlb ports, expected ${core.memBlock.io.extTlb.length}",
+      )
     }
   }
 }
