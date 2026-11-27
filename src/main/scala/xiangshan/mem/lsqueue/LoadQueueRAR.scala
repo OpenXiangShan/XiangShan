@@ -137,7 +137,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
   // (e.g. "not completed" means that load instruction get the data or exception).
-  val canEnqueue = io.query.map(_.req.valid)
+  val canEnqueue = io.query.map(query => query.req.valid && !query.req.bits.isFrmMisAlignBuf)
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val hasNotWritebackedLoad = io.query.map(_.req.bits.uop.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
   val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }

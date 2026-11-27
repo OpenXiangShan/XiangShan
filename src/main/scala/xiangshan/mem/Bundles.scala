@@ -247,6 +247,7 @@ object Bundles {
     val data_valid = Bool()
     // nc: is NC access
     val is_nc = Bool()
+    val isFrmMisAlignBuf = Bool()
   }
 
   class LoadNukeQueryRespBundle(implicit p: Parameters) extends XSBundle {
