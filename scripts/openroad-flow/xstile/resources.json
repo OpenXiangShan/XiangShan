@@ -1,0 +1,156 @@
+{
+  "commit": "d7f591de",
+  "date": "2026-11-24",
+  "units": {
+    "CoupledL2": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 25.2,
+          "peak_gb": 8.3
+        },
+        "floorplan": {
+          "minutes": 13.4,
+          "peak_gb": 2.6
+        },
+        "grt": {
+          "minutes": 25.9,
+          "peak_gb": 11.0
+        },
+        "place": {
+          "minutes": 14.8,
+          "peak_gb": 7.3
+        },
+        "synth": {
+          "minutes": 0.2,
+          "peak_gb": 1.2
+        }
+      }
+    },
+    "FltRegionModule": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 1.1,
+          "peak_gb": 5.2
+        },
+        "floorplan": {
+          "minutes": 1.2,
+          "peak_gb": 1.6
+        },
+        "grt": {
+          "minutes": 9.5,
+          "peak_gb": 7.2
+        },
+        "place": {
+          "minutes": 12.7,
+          "peak_gb": 4.9
+        },
+        "synth": {
+          "minutes": 0.2,
+          "peak_gb": 1.4
+        }
+      }
+    },
+    "Frontend": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 23.8,
+          "peak_gb": 21.8
+        },
+        "floorplan": {
+          "minutes": 24.1,
+          "peak_gb": 5.4
+        },
+        "grt": {
+          "minutes": 42.4,
+          "peak_gb": 26.4
+        },
+        "place": {
+          "minutes": 48.2,
+          "peak_gb": 14.4
+        },
+        "synth": {
+          "minutes": 1.6,
+          "peak_gb": 3.0
+        }
+      }
+    },
+    "MemBlock": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 117.7,
+          "peak_gb": 28.1
+        },
+        "floorplan": {
+          "minutes": 49.2,
+          "peak_gb": 10.0
+        },
+        "grt": {
+          "minutes": 42.3,
+          "peak_gb": 36.1
+        },
+        "place": {
+          "minutes": 100.2,
+          "peak_gb": 27.0
+        },
+        "synth": {
+          "minutes": 0.7,
+          "peak_gb": 5.9
+        }
+      }
+    },
+    "VecRegionModule": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 5.7,
+          "peak_gb": 11.0
+        },
+        "floorplan": {
+          "minutes": 10.5,
+          "peak_gb": 3.9
+        },
+        "grt": {
+          "minutes": 16.8,
+          "peak_gb": 15.1
+        },
+        "place": {
+          "minutes": 30.7,
+          "peak_gb": 11.0
+        },
+        "synth": {
+          "minutes": 0.4,
+          "peak_gb": 2.1
+        }
+      }
+    },
+    "XSTile": {
+      "source": "measured",
+      "stages": {
+        "cts": {
+          "minutes": 18.5,
+          "peak_gb": 41.2
+        },
+        "floorplan": {
+          "minutes": 9.5,
+          "peak_gb": 24.3
+        },
+        "grt": {
+          "minutes": 81.0,
+          "peak_gb": 54.6
+        },
+        "place": {
+          "minutes": 196.0,
+          "peak_gb": 31.1
+        },
+        "synth": {
+          "minutes": 0.5,
+          "peak_gb": 5.4
+        }
+      }
+    }
+  }
+}

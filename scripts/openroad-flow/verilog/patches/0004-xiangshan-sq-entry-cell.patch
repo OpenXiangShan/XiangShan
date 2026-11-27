@@ -1,0 +1,716 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oyvind Harboe <oyvind.harboe@zylin.com>
+Date: Wed, 17 Sep 2026 00:00:00 +0000
+Subject: [PATCH] mem: one SqEntryCell module per physical store-queue entry
+
+PhysicalStoreQueue unrolls its per-entry logic over StoreQueuePhysicalSize
+entries -- sta stage 1 and 2 allocation, std data valid, cancel and
+dequeue, handle-finish -- and writes the entries by index from the store
+pipelines and the commit logic. As one module of 22 k lines it was the
+longest synthesis partition of the core: 56 minutes, 36 of them in abc.
+
+SqEntryCell holds one entry's data and control registers and every write
+to them, in the order the queue made them; the entry index is an input,
+so all instances are one module and synthesis maps it once. The queue
+keeps dataEntries, ctrlEntries and needCancel as read views of the
+cells; ForwardModule, DeqModule and everything else that reads them is
+unchanged. Behaviour is unchanged.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+---
+diff -ruN a/src/main/scala/xiangshan/mem/lsqueue/NewStoreQueue.scala b/src/main/scala/xiangshan/mem/lsqueue/NewStoreQueue.scala
+--- a/src/main/scala/xiangshan/mem/lsqueue/NewStoreQueue.scala
++++ b/src/main/scala/xiangshan/mem/lsqueue/NewStoreQueue.scala
+@@ -1474,8 +1474,12 @@
+   println("PhysicalStoreQueue: size:" + StoreQueuePhysicalSize)
+ 
+   // entries define
+-  val dataEntries        = Reg(Vec(StoreQueuePhysicalSize, new SQDataEntryBundle())) // no need to reset
+-  val ctrlEntries        = RegInit(VecInit(Seq.fill(StoreQueuePhysicalSize)(0.U.asTypeOf(new SQCtrlEntryBundle)))) // need to reset
++  // One SqEntryCell per entry (end of this file): the registers and every
++  // write to them live there, instanced StoreQueuePhysicalSize times as
++  // one module; these are the read views.
++  val sqEntryCells       = Seq.fill(StoreQueuePhysicalSize)(Module(new SqEntryCell))
++  val dataEntries        = VecInit(sqEntryCells.map(_.io.data))
++  val ctrlEntries        = VecInit(sqEntryCells.map(_.io.ctrl))
+ 
+   // ptr define
+   // when io.writeToSbuffer_i.fire or writeback.fire, deqPtr will move.
+@@ -1502,7 +1506,7 @@
+   val validCount         = validPtr.distanceBetween(deqPtrExt.head)
+   val virtualValidCount  = enqPtr.distanceBetween(deqPtrExt.head)
+   val allowEnqueue       = RegNext(virtualValidCount) <= StoreQueueSize.U
+-  val needCancel         = Wire(Vec(StoreQueuePhysicalSize, Bool()))
++  val needCancel         = VecInit(sqEntryCells.map(_.io.needCancel))
+ 
+   // the means of `head` is the next request that StoreQueue need to process.
+   val rdataDataEntries    = rdataPtrExt.map{ case ptr =>
+@@ -1592,233 +1596,7 @@
+   val redirectKeepRangeStart   = deqPtrExt.head.value
+   val redirectKeepRangeEnd     = virtualStoreQueueRedirect.bits.value
+ 
+-  for(i <- 0 until StoreQueuePhysicalSize) {
+-
+-    // dequeue cancel
+-    val deqCancel = VecInit(deqPtrExt.zipWithIndex.map{case (ptr, j) =>
+-      ptr.value === i.U && sqDeqCnt > j.U
+-    }).asUInt.orR
+-
+-    // Keep entries in [deqPtrExt.head, virtualStoreQueueRedirect.bits); cancel entries outside that range.
+-    val entryInRedirectKeepRange = Mux(
+-      redirectKeepRangeEnd < redirectKeepRangeStart,
+-      i.U >= redirectKeepRangeStart || i.U < redirectKeepRangeEnd,
+-      i.U >= redirectKeepRangeStart && i.U < redirectKeepRangeEnd
+-    )
+-    needCancel(i) := redirectNeedClean && !entryInRedirectKeepRange
+-
+-    val ncFinish = io.toUncacheBuffer.idResp.valid && !io.toUncacheBuffer.idResp.bits.is2lq && isPbmtNC(dataEntries(i).memoryType)
+-    val handleFinishSet = rdataPtrExt.head.value === i.U && (io.writeBack.fire || ncFinish)
+-
+-    /*================================================================================================================*/
+-    /*=============================================== sta ctrl =======================================================*/
+-    /*================================================================================================================*/
+-    /**
+-     *                                allocate entry when sta finish.
+-     *
+-     * In storeUnit stage 1, paddr is ready                --> set addrValid
+-     *                       unalign check is ready        --> set unaligned, cross16Byte
+-     * In storeUnit stage 2, PMP/PMA check result is ready --> set hasException, memoryType
+-     *                       dcache resp is ready          --> set prefetch
+-     * */
+-
+-    /*======================================== staIn [sta Stage 1] ===================================================*/
+-
+-    val staValidSetVec = VecInit(io.fromStoreUnit.storeAddrIn.map{case port =>
+-      val index        = port.bits.uop.sqIdx.value
+-      val setValid     = index === i.U && port.fire && !needCancel(i)
+-      setValid
+-    }) // one-hot select vec
+-
+-    val selectBits     = Mux1H(staValidSetVec, io.fromStoreUnit.storeAddrIn.map(_.bits))
+-
+-    val staSetValid    = staValidSetVec.reduce(_ || _)
+-    val addrValidSet   = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-      port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
+-    }.reduce(_ || _)
+-    val cross16ByteSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-      port.bits.isUnalign && port.bits.cross16Byte && staValidSetVec(j)
+-    }.reduce(_ || _)
+-    val cboSetVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-      LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
+-    }
+-    val isCboSet = cboSetVec.reduce(_ || _)
+-    val isHyperSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-      port.bits.isHyper && staValidSetVec(j)
+-    }.reduce(_ || _)
+-
+-    when(staSetValid) {
+-      ctrlEntries(i).addrValid    := addrValidSet // need hasException?
+-    }.elsewhen(deqCancel || needCancel(i)) {
+-      ctrlEntries(i).addrValid    := false.B
+-    }
+-
+-    when(staSetValid) { // no need to clean when deq or cancel, because it will be set when set addrValid
+-      ctrlEntries(i).cross16Byte  := cross16ByteSet
+-      ctrlEntries(i).isCbo        := isCboSet
+-    } // don't need to set false for low power, it will be set every instruction.
+-
+-    when(staSetValid) {
+-      ctrlEntries(i).handleFinish := false.B
+-    }.elsewhen(handleFinishSet) {
+-      ctrlEntries(i).handleFinish := true.B
+-    }
+-
+-    when(staSetValid) {
+-      connectSamePort(dataEntries(i).uop, selectBits.uop)
+-    }
+-
+-    io.fromStoreUnit.storeAddrIn.zipWithIndex.map{case (port, j) =>
+-      val index         = port.bits.uop.sqIdx.value
+-      val setValid      = cboSetVec(j)
+-      when(setValid) {
+-        dataEntries(i).cboType   := Mux1H(List(
+-          LSUOpType.isCboClean(port.bits.uop.fuOpType) -> CboType.clean,
+-          LSUOpType.isCboFlush(port.bits.uop.fuOpType) -> CboType.flush,
+-          LSUOpType.isCboInval(port.bits.uop.fuOpType) -> CboType.inval,
+-          LSUOpType.isCboZero(port.bits.uop.fuOpType) -> CboType.zero,
+-        ))
+-      }
+-    }
+-
+-    when(staSetValid) {
+-      dataEntries(i).isHyper := isHyperSet
+-    }
+-
+-    // XSError(ctrlEntries(i).addrValid && staSetValid &&
+-    //   (!selectBits.isLastRequest || !selectBits.cross16Byte), s"entry double allocate! index: ${i}\n")
+-
+-    /*================================================================================================================*/
+-    /*============================================== vector ctrl =====================================================*/
+-    /*================================================================================================================*/
+-
+-    // Todo[vector]: support vector non-continuous store
+-    // Set it always false because continuous store should not set it.
+-    ctrlEntries(i).vecInactive := false.B
+-
+-    XSError(ctrlEntries(i).vecInactive && staSetValid, s"inactive vector element allocate! index: ${i}\n")
+-
+-    if(debugEn) {
+-      val unalignWithin16BSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-        port.bits.isUnalign && !port.bits.cross16Byte && staValidSetVec(j)
+-      }.reduce(_ || _)
+-      when(staSetValid) {
+-        ctrlEntries(i).unalignWithin16Byte.foreach(_ := unalignWithin16BSet)
+-      }
+-
+-      when(staSetValid){
+-        dataEntries(i).debugUop.get := selectBits.debugUop.get
+-      }
+-    }
+-
+-    /*======================================= staInRe [sta Stage 2] ==================================================*/
+-
+-    val staReValidVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+-      RegNext(!port.bits.tlbMiss && staValidSetVec(j)) && !needCancel(i) //TODO: use valid of s1, will be remove in the future.
+-    } // at s2 stage of storeUnit
+-
+-    val staReValid = (0 until staReValidVec.length).map { j =>
+-      staReValidVec(j) && io.fromStoreUnit.storeAddrInRe(j).isLastRequest
+-    }.reduce(_ || _) // at s2 stage of storeUnit
+-
+-    val prefetchSet     = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
+-      port.cacheMiss && staReValidVec(j)
+-    }.reduce(_ || _)
+-    val hasExceptionSet = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
+-      port.hasException && staReValidVec(j)
+-    }.reduce(_ || _)
+-    val ncSet           = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
+-      port.nc && staReValidVec(j)
+-    }.reduce(_ || _)
+-    val mmioSet         = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
+-      port.mmio && staReValidVec(j)
+-    }.reduce(_ || _)
+-    val memBackTypeSet  = io.fromStoreUnit.storeAddrInRe.zipWithIndex.map { case (port, j) =>
+-      port.memBackTypeMM && staReValidVec(j)
+-    }.reduce(_ || _) // memBackTypeMM  = true.B means it is main memory region , false.B means it is IO region.
+-
+-    when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
+-      dataEntries(i).prefetch := prefetchSet
+-    }//  don't need to set false for low power, it will be set every instruction.
+-
+-    when(staSetValid) {
+-      ctrlEntries(i).waitStoreS2  := true.B
+-    }.elsewhen(staReValid) { // no need to clean when deq or cancel, because it will be set when set addrValid
+-      ctrlEntries(i).waitStoreS2  := false.B
+-    }
+-
+-    // When any valid bit is true, this entry is in stage 2 and can update exception state.
+-    when(staReValidVec.reduce(_ || _)) {
+-      ctrlEntries(i).hasException := ctrlEntries(i).hasException || hasExceptionSet
+-    }.elsewhen(deqCancel || needCancel(i)) {
+-      ctrlEntries(i).hasException := false.B
+-    }
+-
+-    when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
+-      /*
+-         cacheable:    "b000".U
+-         memoryPbmtNc: "b001".U
+-         memoryPbmtIo: "b010".U
+-         devicePbmtNc: "b101".U
+-         deviceIo:     "b111".U // device IO & pbmt device IO
+-      */
+-      dataEntries(i).memoryType := Cat(!memBackTypeSet, mmioSet, ncSet || !memBackTypeSet)
+-      /*
+-       * [NOTE]: To explain the logical operations above, the truth table is as follows:
+-       *
+-       * [NOTE]: The mmioSet means architectural MMIO. it contains (PMP/PMA).io and PBMT.io.
+-       * [NOTE]: The memBackTypeSet means PMP/PMA attributes. The signal of [memBackTypeMM] means request is main memory region.
+-       *
+-       *                                     +-----------------------------------+
+-       *                                     |                                   v
+-       *              |  memBackTypeSet | !memBackTypeSet | ncSet | mmioSet | memoryType[2] | memoryType[1] | memoryType[0] |
+-       * Cacheable    |       1         |       0         |   0   |    0    |       0       |       0       |       0       |
+-       * MemoryNC     |       1         |       0         |   1   |    0    |       0       |       0       |       1       |
+-       * MemoryPbmtIO |       1         |       0         |   0   |    1    |       0       |       1       |       0       |
+-       * DeviceNC     |       0         |       1         |   1   |    0    |       1       |       0       |       1       |
+-       * DevicePbmtIO |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
+-       * IO           |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
+-       *                                        |             |        |                            ^               ^
+-       *                                        |             |        +----------------------------+               |
+-       *                                        +----- or ----+                                                     |
+-       *                                               |                                                            |
+-       *                                               +------------------------------------------------------------+
+-       * */
+-    }//  don't need to set false for low power, it will be set every instruction.
+-
+-    XSError(!mmioSet && !memBackTypeSet && !hasExceptionSet && staReValid, s"mmio not set but memBackTypeMM is zero! ${i}\n")
+-
+-    /*================================================================================================================*/
+-    /*=============================================== std ctrl =======================================================*/
+-    /*================================================================================================================*/
+-
+-    val dataValidSet = VecInit(io.storeDataIn.map{ case port =>
+-      val index = port.bits.sqIdx.value
+-      index === i.U && port.fire && !needCancel(i)
+-    }).asUInt.orR
+-
+-    when(dataValidSet) {
+-      ctrlEntries(i).dataValid := true.B
+-    }.elsewhen(deqCancel || needCancel(i)) {
+-      ctrlEntries(i).dataValid := false.B
+-    }
+-
+-    //TODO: vector element maybe set dataValid twice because of replay uop, which will be remove in the future.
+-    // XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
+-    XSError(!ctrlEntries(i).addrValid && !ctrlEntries(i).vecInactive && deqCancel, s"double deq! index: ${i}\n")
+-
+-    // debug don't touch
+-    if(debugEn) {
+-      dontTouch(deqCancel)
+-      dontTouch(staSetValid)
+-      dontTouch(staReValid)
+-      dontTouch(prefetchSet)
+-      dontTouch(hasExceptionSet)
+-      dontTouch(ncSet)
+-      dontTouch(memBackTypeSet)
+-      dontTouch(physicalQueueUpper)
+-    }
+-  }
++  // (per-entry state: SqEntryCell)
+ 
+   /*=============================================== update ptr =======================================================*/
+ 
+@@ -1875,56 +1653,7 @@
+ 
+   XSError(deqPtrExt.head > rdataPtrExt.head, "deqPtr shouldn't exceed rdataPtr!\n")
+   XSError((deqPtrExt.head > enqPtr) && !deqPtrExt.head.isRotateBy(enqPtr),   "deqPtr shouldn't exceed enqPtr!\n")
+-  /******************************************** store pipeline write **************************************************/
+-  for (i <- 0 until StorePipelineWidth) {
+-    val storeAddrIn   = io.fromStoreUnit.storeAddrIn(i)
+-    val storeAddrInRe = io.fromStoreUnit.storeAddrInRe(i)
+-    val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
+-    val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
+-    val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
+-    val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
+-    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
+-
+-    // !isLastRequest && cross16Byte means it is first request of cross 16B unalign  --> save paddr
+-    //  isLastRequest && cross16Byte means it is second request of cross 16B unalign --> not save paddr
+-    // isLastRequest && !cross16Byte means it is normal request                       --> save paddr
+-    when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte)){
+-      // the second paddr of cross16Byte request will be write to unalign queue
+-      dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
+-      dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
+-      // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
+-      dataEntries(stWbIdx).byteMask  := Mux(
+-        isVecMemContinousOp,
+-        byteMaskFromSize,
+-        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
+-      )
+-      dataEntries(stWbIdx).size      := storeAddrIn.bits.size
+-
+-      // debug singal
+-      if(debugEn) {
+-        dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
+-      }
+-    }
+-    XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
+-    (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
+-     "ByteStart > ByteEnd! at pipeline ${i}\n")
+-  }
+-
+-  for (i <- 0 until StorePipelineWidth) {
+-    val storeDataIn   = io.storeDataIn(i)
+-    val stWbIdx       = storeDataIn.bits.sqIdx.value
+-    when(storeDataIn.fire){
+-      // if it's a cbo.zero, write zero.
+-      dataEntries(stWbIdx).data  := Mux(LSUOpType.isCboZero(storeDataIn.bits.fuOpType), 0.U, storeDataIn.bits.data)
+-
+-      // debug signal
+-      if(debugEn) {
+-        dataEntries(stWbIdx).debugVecUnalignedStart.get  := io.storeDataIn(i).bits.vecDebug.get.start
+-        dataEntries(stWbIdx).debugVecUnalignedOffset.get := io.storeDataIn(i).bits.vecDebug.get.offset
+-      }
+-    }
+-  }
+-
++  // (store pipeline writes by sqIdx: SqEntryCell)
+   /************************************************ commit logic ******************************************************/
+ 
+   /*
+@@ -1956,19 +1685,33 @@
+       }
+     } // commitVec default is false.B
+ 
+-    ctrlEntries(ptr).committed   := commitVec(i) || ctrlEntries(ptr).committed
++    // (committed: SqEntryCell)
+   }
+ 
+   val commitCount = PopCount(commitVec)
+   commitPtrExt       := commitPtrExt.map(_ + commitCount)
+ 
+-  for (i <- 0 until EnsbufferWidth) {
+-    val ptr = deqPtrExt(i).value
+-    when(sqDeqCnt > i.U) {
+-      ctrlEntries(ptr).committed := false.B
+-    }
++  // The per-entry cells: every entry sees the same store pipelines,
++  // pointers, redirect range and commit vector and picks out its own by
++  // index. The entry arrays above are the read view of their registers.
++  sqEntryCells.zipWithIndex.foreach { case (cell, i) =>
++    cell.io.idx := i.U
++    cell.io.storeAddrIn.zip(io.fromStoreUnit.storeAddrIn).foreach { case (c, s) => c.valid := s.valid; c.bits := s.bits }
++    cell.io.storeAddrInRe := io.fromStoreUnit.storeAddrInRe
++    cell.io.storeDataIn.zip(io.storeDataIn).foreach { case (c, s) => c.valid := s.valid; c.bits := s.bits }
++    cell.io.deqPtr := VecInit(deqPtrExt.map(_.value))
++    cell.io.sqDeqCnt := sqDeqCnt
++    cell.io.rdataPtrHead := rdataPtrExt.head.value
++    cell.io.writeBackFire := io.writeBack.fire
++    cell.io.ncIdRespValid := io.toUncacheBuffer.idResp.valid && !io.toUncacheBuffer.idResp.bits.is2lq
++    cell.io.redirectNeedClean := redirectNeedClean
++    cell.io.keepStart := redirectKeepRangeStart
++    cell.io.keepEnd := redirectKeepRangeEnd
++    cell.io.commitPtr := VecInit(commitPtrExt.map(_.value))
++    cell.io.commitVec := commitVec
+   }
+ 
++
+   XSError(commitPtrExt.head < deqPtrExt.head || commitPtrExt.head < rdataPtrExt.head, "pointer update error!\n")
+   XSError(commitPtrExt.head > physicalQueueUpper && !commitPtrExt.head.isRotateBy(physicalQueueUpper),
+     "commitPtr overflow!\n")
+@@ -2077,6 +1820,335 @@
+   generatePerfEvent()
+ }
+ 
++
++/** One physical store-queue entry: its SQDataEntryBundle and
++  * SQCtrlEntryBundle registers and every write to them -- the per-entry
++  * loop of PhysicalStoreQueue (sta stage 1 and 2, std, cancel, dequeue,
++  * handle-finish) exactly as it was, then the by-index writes from the
++  * store pipelines (vaddr, paddrHigh, byteMask, size, data) and the
++  * commit and dequeue updates of `committed`, in the order the queue made
++  * them. The entry index is an input, so all StoreQueuePhysicalSize
++  * instances are one module: synthesis maps it once instead of one flat
++  * body of unrolled loops, which was the longest partition of the core.
++  */
++class SqEntryCell(implicit p: Parameters) extends LSQModule {
++  private val idxWidth = log2Up(StoreQueuePhysicalSize)
++  // As PhysicalStoreQueueBase has them.
++  private val PhysicalStoreQueueCommitSize = 4
++  private val VWordOffset = log2Up(VLENB)
++  private def isPbmtNC(in: UInt): Bool = {
++    require(in.getWidth == MemoryType.width)
++    MemoryType.isPbmtNC(in)
++  }
++  val io = IO(new Bundle {
++    val idx               = Input(UInt(idxWidth.W))
++    val storeAddrIn       = Vec(StorePipelineWidth, Flipped(ValidIO(new StoreAddrIO)))
++    val storeAddrInRe     = Vec(StorePipelineWidth, Input(new StoreAddrIO))
++    val storeDataIn       = Vec(StorePipelineWidth, Flipped(ValidIO(new StoreQueueDataWrite)))
++    val deqPtr            = Vec(EnsbufferWidth, Input(UInt(idxWidth.W)))
++    val sqDeqCnt          = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
++    val rdataPtrHead      = Input(UInt(idxWidth.W))
++    val writeBackFire     = Input(Bool())
++    val ncIdRespValid     = Input(Bool()) // idResp.valid && !is2lq
++    val redirectNeedClean = Input(Bool())
++    val keepStart         = Input(UInt(idxWidth.W))
++    val keepEnd           = Input(UInt(idxWidth.W))
++    val commitPtr         = Vec(PhysicalStoreQueueCommitSize, Input(UInt(idxWidth.W)))
++    val commitVec         = Vec(PhysicalStoreQueueCommitSize, Input(Bool()))
++    val data              = Output(new SQDataEntryBundle())
++    val ctrl              = Output(new SQCtrlEntryBundle())
++    val needCancel        = Output(Bool())
++  })
++  val data = Reg(new SQDataEntryBundle()) // no need to reset
++  val ctrl = RegInit(0.U.asTypeOf(new SQCtrlEntryBundle)) // need to reset
++  io.data := data
++  io.ctrl := ctrl
++
++  // dequeue cancel
++  val deqCancel = VecInit(io.deqPtr.zipWithIndex.map{case (ptr, j) =>
++    ptr === io.idx && io.sqDeqCnt > j.U
++  }).asUInt.orR
++
++  // Keep entries in [deqPtrExt.head, virtualStoreQueueRedirect.bits); cancel entries outside that range.
++  val entryInRedirectKeepRange = Mux(
++    io.keepEnd < io.keepStart,
++    io.idx >= io.keepStart || io.idx < io.keepEnd,
++    io.idx >= io.keepStart && io.idx < io.keepEnd
++  )
++  val needCancel = io.redirectNeedClean && !entryInRedirectKeepRange
++
++  val ncFinish = io.ncIdRespValid && isPbmtNC(data.memoryType)
++  val handleFinishSet = io.rdataPtrHead === io.idx && (io.writeBackFire || ncFinish)
++
++  /*================================================================================================================*/
++  /*=============================================== sta ctrl =======================================================*/
++  /*================================================================================================================*/
++  /**
++   *                                allocate entry when sta finish.
++   *
++   * In storeUnit stage 1, paddr is ready                --> set addrValid
++   *                       unalign check is ready        --> set unaligned, cross16Byte
++   * In storeUnit stage 2, PMP/PMA check result is ready --> set hasException, memoryType
++   *                       dcache resp is ready          --> set prefetch
++   * */
++
++  /*======================================== staIn [sta Stage 1] ===================================================*/
++
++  val staValidSetVec = VecInit(io.storeAddrIn.map{case port =>
++    val index        = port.bits.uop.sqIdx.value
++    val setValid     = index === io.idx && port.fire && !needCancel
++    setValid
++  }) // one-hot select vec
++
++  val selectBits     = Mux1H(staValidSetVec, io.storeAddrIn.map(_.bits))
++
++  val staSetValid    = staValidSetVec.reduce(_ || _)
++  val addrValidSet   = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++    port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
++  }.reduce(_ || _)
++  val cross16ByteSet = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++    port.bits.isUnalign && port.bits.cross16Byte && staValidSetVec(j)
++  }.reduce(_ || _)
++  val cboSetVec = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++    LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
++  }
++  val isCboSet = cboSetVec.reduce(_ || _)
++  val isHyperSet = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++    port.bits.isHyper && staValidSetVec(j)
++  }.reduce(_ || _)
++
++  when(staSetValid) {
++    ctrl.addrValid    := addrValidSet // need hasException?
++  }.elsewhen(deqCancel || needCancel) {
++    ctrl.addrValid    := false.B
++  }
++
++  when(staSetValid) { // no need to clean when deq or cancel, because it will be set when set addrValid
++    ctrl.cross16Byte  := cross16ByteSet
++    ctrl.isCbo        := isCboSet
++  } // don't need to set false for low power, it will be set every instruction.
++
++  when(staSetValid) {
++    ctrl.handleFinish := false.B
++  }.elsewhen(handleFinishSet) {
++    ctrl.handleFinish := true.B
++  }
++
++  when(staSetValid) {
++    connectSamePort(data.uop, selectBits.uop)
++  }
++
++  io.storeAddrIn.zipWithIndex.map{case (port, j) =>
++    val index         = port.bits.uop.sqIdx.value
++    val setValid      = cboSetVec(j)
++    when(setValid) {
++      data.cboType   := Mux1H(List(
++        LSUOpType.isCboClean(port.bits.uop.fuOpType) -> CboType.clean,
++        LSUOpType.isCboFlush(port.bits.uop.fuOpType) -> CboType.flush,
++        LSUOpType.isCboInval(port.bits.uop.fuOpType) -> CboType.inval,
++        LSUOpType.isCboZero(port.bits.uop.fuOpType) -> CboType.zero,
++      ))
++    }
++  }
++
++  when(staSetValid) {
++    data.isHyper := isHyperSet
++  }
++
++  // XSError(ctrl.addrValid && staSetValid &&
++  //   (!selectBits.isLastRequest || !selectBits.cross16Byte), s"entry double allocate! index: \n")
++
++  /*================================================================================================================*/
++  /*============================================== vector ctrl =====================================================*/
++  /*================================================================================================================*/
++
++  // Todo[vector]: support vector non-continuous store
++  // Set it always false because continuous store should not set it.
++  ctrl.vecInactive := false.B
++
++  XSError(ctrl.vecInactive && staSetValid, s"inactive vector element allocate! index: \n")
++
++  if(debugEn) {
++    val unalignWithin16BSet = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++      port.bits.isUnalign && !port.bits.cross16Byte && staValidSetVec(j)
++    }.reduce(_ || _)
++    when(staSetValid) {
++      ctrl.unalignWithin16Byte.foreach(_ := unalignWithin16BSet)
++    }
++
++    when(staSetValid){
++      data.debugUop.get := selectBits.debugUop.get
++    }
++  }
++
++  /*======================================= staInRe [sta Stage 2] ==================================================*/
++
++  val staReValidVec = io.storeAddrIn.zipWithIndex.map { case (port, j) =>
++    RegNext(!port.bits.tlbMiss && staValidSetVec(j)) && !needCancel //TODO: use valid of s1, will be remove in the future.
++  } // at s2 stage of storeUnit
++
++  val staReValid = (0 until staReValidVec.length).map { j =>
++    staReValidVec(j) && io.storeAddrInRe(j).isLastRequest
++  }.reduce(_ || _) // at s2 stage of storeUnit
++
++  val prefetchSet     = io.storeAddrInRe.zipWithIndex.map { case (port, j) =>
++    port.cacheMiss && staReValidVec(j)
++  }.reduce(_ || _)
++  val hasExceptionSet = io.storeAddrInRe.zipWithIndex.map { case (port, j) =>
++    port.hasException && staReValidVec(j)
++  }.reduce(_ || _)
++  val ncSet           = io.storeAddrInRe.zipWithIndex.map { case (port, j) =>
++    port.nc && staReValidVec(j)
++  }.reduce(_ || _)
++  val mmioSet         = io.storeAddrInRe.zipWithIndex.map { case (port, j) =>
++    port.mmio && staReValidVec(j)
++  }.reduce(_ || _)
++  val memBackTypeSet  = io.storeAddrInRe.zipWithIndex.map { case (port, j) =>
++    port.memBackTypeMM && staReValidVec(j)
++  }.reduce(_ || _) // memBackTypeMM  = true.B means it is main memory region , false.B means it is IO region.
++
++  when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
++    data.prefetch := prefetchSet
++  }//  don't need to set false for low power, it will be set every instruction.
++
++  when(staSetValid) {
++    ctrl.waitStoreS2  := true.B
++  }.elsewhen(staReValid) { // no need to clean when deq or cancel, because it will be set when set addrValid
++    ctrl.waitStoreS2  := false.B
++  }
++
++  // When any valid bit is true, this entry is in stage 2 and can update exception state.
++  when(staReValidVec.reduce(_ || _)) {
++    ctrl.hasException := ctrl.hasException || hasExceptionSet
++  }.elsewhen(deqCancel || needCancel) {
++    ctrl.hasException := false.B
++  }
++
++  when(staReValid) { // no need to clean when deq or cancel, because it will be used when waitStoreS2 == false
++    /*
++       cacheable:    "b000".U
++       memoryPbmtNc: "b001".U
++       memoryPbmtIo: "b010".U
++       devicePbmtNc: "b101".U
++       deviceIo:     "b111".U // device IO & pbmt device IO
++    */
++    data.memoryType := Cat(!memBackTypeSet, mmioSet, ncSet || !memBackTypeSet)
++    /*
++     * [NOTE]: To explain the logical operations above, the truth table is as follows:
++     *
++     * [NOTE]: The mmioSet means architectural MMIO. it contains (PMP/PMA).io and PBMT.io.
++     * [NOTE]: The memBackTypeSet means PMP/PMA attributes. The signal of [memBackTypeMM] means request is main memory region.
++     *
++     *                                     +-----------------------------------+
++     *                                     |                                   v
++     *              |  memBackTypeSet | !memBackTypeSet | ncSet | mmioSet | memoryType[2] | memoryType[1] | memoryType[0] |
++     * Cacheable    |       1         |       0         |   0   |    0    |       0       |       0       |       0       |
++     * MemoryNC     |       1         |       0         |   1   |    0    |       0       |       0       |       1       |
++     * MemoryPbmtIO |       1         |       0         |   0   |    1    |       0       |       1       |       0       |
++     * DeviceNC     |       0         |       1         |   1   |    0    |       1       |       0       |       1       |
++     * DevicePbmtIO |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
++     * IO           |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
++     *                                        |             |        |                            ^               ^
++     *                                        |             |        +----------------------------+               |
++     *                                        +----- or ----+                                                     |
++     *                                               |                                                            |
++     *                                               +------------------------------------------------------------+
++     * */
++  }//  don't need to set false for low power, it will be set every instruction.
++
++  XSError(!mmioSet && !memBackTypeSet && !hasExceptionSet && staReValid, s"mmio not set but memBackTypeMM is zero! \n")
++
++  /*================================================================================================================*/
++  /*=============================================== std ctrl =======================================================*/
++  /*================================================================================================================*/
++
++  val dataValidSet = VecInit(io.storeDataIn.map{ case port =>
++    val index = port.bits.sqIdx.value
++    index === io.idx && port.fire && !needCancel
++  }).asUInt.orR
++
++  when(dataValidSet) {
++    ctrl.dataValid := true.B
++  }.elsewhen(deqCancel || needCancel) {
++    ctrl.dataValid := false.B
++  }
++
++  //TODO: vector element maybe set dataValid twice because of replay uop, which will be remove in the future.
++  // XSError(ctrl.dataValid && dataValidSet, s"[dataValid] double allocate! index: \n")
++  XSError(!ctrl.addrValid && !ctrl.vecInactive && deqCancel, s"double deq! index: \n")
++
++  // debug don't touch
++  if(debugEn) {
++    dontTouch(deqCancel)
++    dontTouch(staSetValid)
++    dontTouch(staReValid)
++    dontTouch(prefetchSet)
++    dontTouch(hasExceptionSet)
++    dontTouch(ncSet)
++    dontTouch(memBackTypeSet)
++  }
++  io.needCancel := needCancel
++
++  /******************************************** store pipeline write **************************************************/
++  for (j <- 0 until StorePipelineWidth) {
++    val storeAddrIn   = io.storeAddrIn(j)
++    val storeAddrInRe = io.storeAddrInRe(j)
++    val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
++    val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
++    val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
++    val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
++    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
++
++    // !isLastRequest && cross16Byte means it is first request of cross 16B unalign  --> save paddr
++    //  isLastRequest && cross16Byte means it is second request of cross 16B unalign --> not save paddr
++    // isLastRequest && !cross16Byte means it is normal request                       --> save paddr
++    when(storeAddrIn.fire && stWbIdx === io.idx && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte)){
++      // the second paddr of cross16Byte request will be write to unalign queue
++      data.vaddr     := storeAddrIn.bits.vaddr
++      data.paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
++      // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
++      data.byteMask  := Mux(
++        isVecMemContinousOp,
++        byteMaskFromSize,
++        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
++      )
++      data.size      := storeAddrIn.bits.size
++
++      // debug singal
++      if(debugEn) {
++        data.debugPaddr.get := storeAddrIn.bits.paddr
++      }
++    }
++    XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
++    (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
++     "ByteStart > ByteEnd! at pipeline ${j}\n")
++  }
++
++  for (j <- 0 until StorePipelineWidth) {
++    val storeDataIn   = io.storeDataIn(j)
++    val stWbIdx       = storeDataIn.bits.sqIdx.value
++    when(storeDataIn.fire && stWbIdx === io.idx){
++      // if it's a cbo.zero, write zero.
++      data.data  := Mux(LSUOpType.isCboZero(storeDataIn.bits.fuOpType), 0.U, storeDataIn.bits.data)
++
++      // debug signal
++      if(debugEn) {
++        data.debugVecUnalignedStart.get  := io.storeDataIn(j).bits.vecDebug.get.start
++        data.debugVecUnalignedOffset.get := io.storeDataIn(j).bits.vecDebug.get.offset
++      }
++    }
++  }
++
++  /*********************************************** commit / dequeue ***************************************************/
++  val commitHit = VecInit(io.commitPtr.map(_ === io.idx))
++  when(commitHit.asUInt.orR) {
++    ctrl.committed := Mux1H(commitHit, io.commitVec) || ctrl.committed
++  }
++  when(deqCancel) {
++    ctrl.committed := false.B
++  }
++}
++
+ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
+   private val PhysicalQueueSize = StoreQueuePhysicalSize
+   private val MultipleSize = StoreQueueMultiple

@@ -1,0 +1,255 @@
+grt: global_route -unguided_only routes only the nets without guides
+
+global_route -unguided_only keeps the global route guides of every net
+that has them, as they are in the database, with the edge resources they
+use, and routes only the nets that have none, around them. A net whose
+guides do not cover its pins is routed too (GRT-0304). The guides of the
+nets it routed are written; the others are left as they were read.
+
+A top level whose blocks were dissolved into it after their own global
+route (patch 0171) keeps every block's routes and routes only what it
+built itself, its clock tree, instead of routing the whole design again:
+stock grt restores guides only when every net has them (haveDbGuides)
+and otherwise reroutes everything.
+
+FastRoute only; with -use_cugr it stops (GRT-0338). GRT-0339 reports how
+many nets kept their guides and how many were routed.
+
+Test: unguided_only (gcd, five nets' guides cleared and routed again,
+every other net's guides unchanged; a second run reroutes nothing).
+
+Carried by bazel-orfs for //tools/carve; not upstreamed. Retires on a
+//:bump onto an OpenROAD that carries it.
+diff --git a/openroad/grt/README.md b/openroad/grt/README.md
+index b90aa64..0d3a276 100644
+--- a/openroad/grt/README.md
++++ b/openroad/grt/README.md
+@@ -32,6 +32,7 @@ global_route
+     [-verbose]
+     [-start_incremental]
+     [-end_incremental]
++    [-unguided_only]
+     [-use_cugr]
+     [-resistance_aware]
+     [-res_aware_nets_percentage percent]
+@@ -53,6 +54,7 @@ global_route
+ | `-verbose` | This flag enables the full reporting of the global routing. |
+ | `-start_incremental` | This flag initializes the GRT listener to get the net modified. The default is false. |
+ | `-end_incremental` | This flag run incremental GRT with the nets modified. The default is false. |
++| `-unguided_only` | Keep the guides of every net that has them, with the resources they use, and route only the nets without guides. Nets whose guides were removed, or that were added since, are routed around the others. Not available with `-use_cugr`. The default is false. |
+ | `-use_cugr` | This flag run GRT using CUGR as the router solver. NOTE: this is not ready for production. |
+ | `-resistance_aware` | This flag enables resistance-aware layer assignment and 3D routing. NOTE: this is not ready for production. |
+ | `-res_aware_nets_percentage` | Set the percentage of resistance-aware nets (e.g. `-res_aware_nets_percentage 100` (for 100%)). The default value is `15` with resistance-aware enabled and `0` otherwise, and the allowed values are floats between `[0, 100]`. |
+diff --git a/openroad/grt/include/grt/GlobalRouter.h b/openroad/grt/include/grt/GlobalRouter.h
+index 1365545..55b2a69 100644
+--- a/openroad/grt/include/grt/GlobalRouter.h
++++ b/openroad/grt/include/grt/GlobalRouter.h
+@@ -219,6 +219,7 @@ class GlobalRouter
+   void endIncremental(bool save_guides = false);
+   void reportIncrementalCongestion();
+   void globalRoute(bool save_guides = false);
++  void globalRouteUnguided(bool save_guides = false);
+   void saveCongestion();
+   NetRouteMap& getRoutes();
+   NetRouteMap getPartialRoutes();
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index 7bfd2c5..9e7f3f4 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -926,6 +926,63 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
+   return total_diodes_count_;
+ }
+ 
++// Every net with guides keeps them and holds its edges; only the nets
++// without guides are routed. A top level whose blocks were dissolved into
++// it this way routes its new clock tree without rerouting the blocks.
++void GlobalRouter::globalRouteUnguided(bool save_guides)
++{
++  clear();
++  block_ = db_->getChip()->getBlock();
++  ensureEngineSelected();
++  if (use_cugr_) {
++    logger_->error(GRT, 338, "-unguided_only routes with FastRoute, not CUGR.");
++  }
++
++  int min_layer, max_layer;
++  getMinMaxLayer(min_layer, max_layer);
++  std::vector<Net*> nets = initFastRoute(min_layer, max_layer);
++  fastroute_->clearNetsToRoute();
++  std::vector<Net*> unguided;
++  int restored = 0;
++  for (Net* net : nets) {
++    odb::dbNet* db_net = net->getDbNet();
++    net->setRestoreRouteFromGuides(true);
++    if (loadRoutingFromDBGuides(db_net)) {
++      restored++;
++      continue;
++    }
++    net->setRestoreRouteFromGuides(false);
++    makeFastrouteNet(net);
++    unguided.push_back(net);
++  }
++  fastroute_->initAuxVar();
++  logger_->info(GRT,
++                339,
++                "Kept the guides of {} nets, routing {} nets without guides.",
++                restored,
++                unguided.size());
++
++  computeInitialSteinerWirelengths(unguided);
++  try {
++    NetRouteMap routes = findRouting(unguided, min_layer, max_layer);
++    mergeResults(routes);
++  } catch (...) {
++    updateDbCongestion();
++    saveCongestion();
++    throw;
++  }
++  // the guides kept are left as they were read
++  finishGlobalRouting(false);
++  if (save_guides) {
++    std::vector<odb::dbNet*> routed;
++    routed.reserve(unguided.size());
++    for (Net* net : unguided) {
++      routed.push_back(net->getDbNet());
++    }
++    saveGuides(routed);
++  }
++}
++
+ NetRouteMap GlobalRouter::findRouting(std::vector<Net*>& nets,
+                                       int min_routing_layer,
+                                       int max_routing_layer)
+diff --git a/openroad/grt/src/GlobalRouter.i b/openroad/grt/src/GlobalRouter.i
+index 27fbe6f..9abb4b1 100644
+--- a/openroad/grt/src/GlobalRouter.i
++++ b/openroad/grt/src/GlobalRouter.i
+@@ -254,6 +254,14 @@ global_route()
+   getGlobalRouter()->globalRoute(true);
+ }
+ 
++void
++global_route_unguided()
++{
++  const int num_threads = ord::OpenRoad::openRoad()->getThreadCount();
++  getGlobalRouter()->setNumThreads(num_threads);
++  getGlobalRouter()->globalRouteUnguided(true);
++}
++
+ std::vector<int>
+ route_layer_lengths(odb::dbNet* db_net)
+ {
+diff --git a/openroad/grt/src/GlobalRouter.tcl b/openroad/grt/src/GlobalRouter.tcl
+index 88978d3..f8cb9a0 100644
+--- a/openroad/grt/src/GlobalRouter.tcl
++++ b/openroad/grt/src/GlobalRouter.tcl
+@@ -155,6 +155,7 @@ sta::define_cmd_args "global_route" {[-guide_file out_file] \
+                                   [-verbose] \
+                                   [-start_incremental] \
+                                   [-end_incremental] \
++                                  [-unguided_only] \
+                                   [-use_cugr] \
+                                   [-resistance_aware] \
+                                   [-infinite_cap]
+@@ -168,7 +169,7 @@ proc global_route { args } {
+           -skip_large_fanout_nets -snapshot_batched_width -backing_file
+          } \
+     flags {-allow_congestion -resistance_aware -infinite_cap -verbose -start_incremental \
+-          -end_incremental -use_cugr -no_incremental}
++          -end_incremental -unguided_only -use_cugr -no_incremental}
+ 
+   sta::check_argc_eq0 "global_route" $args
+ 
+@@ -282,6 +283,8 @@ proc global_route { args } {
+     grt::start_incremental
+   } elseif { $end_incremental } {
+     grt::end_incremental
++  } elseif { [info exists flags(-unguided_only)] } {
++    grt::global_route_unguided
+   } else {
+     grt::global_route
+   }
+diff --git a/openroad/grt/test/BUILD b/openroad/grt/test/BUILD
+index f6ad511..bbe183d 100644
+--- a/openroad/grt/test/BUILD
++++ b/openroad/grt/test/BUILD
+@@ -249,6 +249,13 @@ regression_test(
+     data = [":test_resources"],
+ )
+ 
++regression_test(
++    name = "unguided_only",
++    check_log = False,
++    check_passfail = True,
++    data = [":test_resources"],
++)
++
+ regression_test(
+     name = "congested_routes_are_reported",
+     check_log = False,
+diff --git a/openroad/grt/test/unguided_only.tcl b/openroad/grt/test/unguided_only.tcl
+new file mode 100644
+index 0000000..194ef88
+--- /dev/null
++++ b/openroad/grt/test/unguided_only.tcl
+@@ -0,0 +1,60 @@
++# global_route -unguided_only keeps every net's guides and routes only
++# the nets that have none
++source "helpers.tcl"
++read_lef Nangate45/Nangate45.lef
++read_def gcd.def
++
++global_route
++
++proc guides_of { net } {
++  set boxes {}
++  foreach g [$net getGuides] {
++    set b [$g getBox]
++    lappend boxes "[[$g getLayer] getName] [$b xMin] [$b yMin] [$b xMax] [$b yMax]"
++  }
++  return [lsort $boxes]
++}
++
++proc changed_nets { before } {
++  set changed 0
++  foreach net [[ord::get_db_block] getNets] {
++    if { [guides_of $net] ne [dict get $before [$net getName]] } {
++      incr changed
++    }
++  }
++  return $changed
++}
++
++set block [ord::get_db_block]
++set cleared {}
++foreach name {clk _000_ _001_ _002_ {resp_msg[0]}} {
++  set net [$block findNet $name]
++  $net clearGuides
++  lappend cleared $net
++}
++set before {}
++foreach net [$block getNets] {
++  dict set before [$net getName] [guides_of $net]
++}
++
++global_route -unguided_only
++
++foreach net $cleared {
++  check "[$net getName] has guides again" {
++    expr { [llength [$net getGuides]] > 0 }
++  } 1
++}
++check "only the cleared nets have new guides" {
++  changed_nets $before
++} [llength $cleared]
++
++set before {}
++foreach net [$block getNets] {
++  dict set before [$net getName] [guides_of $net]
++}
++global_route -unguided_only
++check "with every net guided, nothing is rerouted" {
++  changed_nets $before
++} 0
++
++exit_summary

@@ -1,0 +1,2 @@
+# Optional OpenROAD physical-design and synthesis PPA flow (README.md).
+exports_files(["openroad.MODULE.bazel"])

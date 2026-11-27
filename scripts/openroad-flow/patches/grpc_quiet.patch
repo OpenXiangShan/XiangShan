@@ -1,0 +1,38 @@
+--- MODULE.bazel
++++ MODULE.bazel
+@@ -43,35 +43,0 @@
+-
+-bazel_dep(name = "rules_python", version = "0.37.1")
+-
+-PYTHON_VERSIONS = [
+-    "3.9",
+-    "3.10",
+-    "3.11",
+-    "3.12",
+-    "3.13",
+-]
+-
+-python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+-
+-[
+-    python.toolchain(
+-        is_default = python_version == PYTHON_VERSIONS[-1],
+-        python_version = python_version,
+-    )
+-    for python_version in PYTHON_VERSIONS
+-]
+-
+-pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+-
+-[
+-    pip.parse(
+-        hub_name = "grpc_python_dependencies",
+-        python_version = python_version,
+-        requirements_lock = "//:requirements.bazel.txt",
+-    )
+-    for python_version in PYTHON_VERSIONS
+-]
+-
+-use_repo(pip, "grpc_python_dependencies")
+-
+-bazel_dep(name = "cython", version = "3.0.11-1")

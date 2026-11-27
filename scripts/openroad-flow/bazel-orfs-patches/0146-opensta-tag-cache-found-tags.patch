@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 26 Oct 2026 17:54:56 +0100
+Subject: [PATCH] search: a thread caches a tag it finds, not only one it makes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Search::findTag looks a tag up in the visiting thread's tag cache
+first and in the shared tag_set_ under tag_lock_ only on a miss, but
+only a tag the thread made itself went into its cache. A tag another
+thread made was looked up under tag_lock_ every time this thread met
+it again. On a 64 x 256 register file's write_timing_model at 48
+threads (OpenROAD#11999), futex syscalls and the kernel's queued spin
+lock were over half of the samples, with Search::findTag and
+Search::mutateTag the first STA frames above them.
+
+A tag found in tag_set_ now goes into the thread's cache too. The
+cache is the visitor copy's, which lives for one parallel visit, and
+tags are deleted only on the main thread between visits.
+
+A cache hit also deleted nothing when findTag owned the states it was
+given; it deletes them now, as the tag_set_ hit below it does.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ search/Search.cc | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/openroad/sta/search/Search.cc b/openroad/sta/search/Search.cc
+index d7ca420..8df4654 100644
+--- a/openroad/sta/search/Search.cc
++++ b/openroad/sta/search/Search.cc
+@@ -3016,12 +3016,19 @@ Search::findTag(Scene *scene,
+             states, false);
+   if (tag_cache) {
+     Tag *tag = findKey(*tag_cache, &probe);
+-    if (tag)
++    if (tag) {
++      if (own_states)
++        delete states;
+       return tag;
++    }
+   }
+ 
+   LockGuard lock(tag_lock_);
+   Tag *tag = findKey(*tag_set_, &probe);
++  if (tag && tag_cache)
++    // Another thread made it: cache it here too, or every lookup of it
++    // from this thread takes tag_lock_.
++    tag_cache->insert(tag);
+   if (tag == nullptr) {
+     // Make rise/fall versions of the tag to avoid tag_set lookups when the
+     // only change is the rise/fall edge.
+-- 
+2.53.0
+

@@ -1,0 +1,1078 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 16 Nov 2026 11:47:02 +0100
+Subject: [PATCH] gpl: a routability phase whose minimum is its first pass ends
+ on it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A routability pass measures the congestion of one placement, and the
+phase keeps the minimum: revertToMinCongestion() puts back the sizes,
+target density, fillers and net weights of the pass that measured the
+least. When the phase ended by going back to it (GPL-0053, GPL-0054,
+GPL-0091, GPL-0097), runRoutability() put the cells on the routability
+snapshot, taken on the way down at overflow 0.60, and the placement
+descended again from there with the minimum's sizes. No pass measured
+the congestion of that descent: the phase ended on a placement nobody
+measured, and the replay cannot reproduce the one that was (the
+timing-driven iterations and the density penalty's one-shot change are
+spent, and it starts with the snapshot's momentum).
+
+A minimum at pass 1 means no inflation helped. What a pass that finds
+nothing to fix produces (GPL-0090) is the right ending then: the
+placement it measured, its sizes, and on from there. Since a settle wait
+still open at the target overflow ends there and runs its pass
+(GPL-0124), that is what XiangShan's XSTile parent does: pass 1
+measured 1.1637 on the placement that had converged at iteration 521
+(overflow 0.0894),
+passes 2 to 4 at overflow 0.30 read 1.94, 1.35 and 1.21, and GPL-0054
+went back to the snapshot of iteration 380. The new descent converged
+at iteration 914 with congestion 1.3611 and HPWL 60.3 M um, against
+1.1363 and 56.1 M for a run with no pass.
+
+runRoutability() now saves a second snapshot just before pass 1: each
+region's placement and Nesterov state, with the overflow and HPWL
+updateNextIter() measured on it (NesterovBase::saveFirstPassSnapshot(),
+and IoPinBase's pins with it), and the loop's momentum and wirelength
+coefficients. It is kept parallel to the gcells through filler cuts and
+restores, as the routability snapshot is, and released when the phase
+ends. RouteBase records the pass that measured the minimum
+(getMinRcPass()). When the phase ends by going back to its minimum and
+that is pass 1, the cells go back to the second snapshot instead
+(GPL-0125), with the overflow measured there, which is therefore not
+stale: at or below the target overflow the placement converges on it in
+the same iteration, and above it the descent goes on from it. The
+density goes back onto the look-ahead (SLP) coordinates, not the
+coordinates: nesterovUpdateCoordinates() puts it there, and the
+overflow, HPWL and RUDY pass 1 measured were read there. So the phase
+ends exactly on what pass 1 measured; on the coordinates, medium01's
+bins read an overflow of 0.1028 against the 0.0999 restored, above its
+target of 0.10.
+
+What changes, and what does not:
+
+- Only a placement whose routability phase ends by going back to a
+  minimum at pass 1. That includes a phase that ends on pass 1 itself
+  (GPL-0053 or GPL-0097 there): it stays on the placement pass 1
+  measured instead of going back to the snapshot.
+- A phase with no pass, one that meets the congestion target (GPL-0090)
+  and one whose minimum is a later pass are as before, and so is a
+  divergence recovery (GPL-0112), which goes back to the routability
+  snapshot on purpose. Every phase with a pass pays for a copy of four
+  vectors per region, from pass 1 to the end of the phase.
+- A minimum at a later pass k still goes on from the routability
+  snapshot, with pass k's sizes. Keeping pass k's placement as well
+  would change placements where the passes help, and is not done here.
+
+Tests, in routability_minimum_test, on gcd, driving the real controller
+in the main loop's order. Between passes the test places every gcell,
+fillers included, on a lattice of the pass's own, with the look-ahead
+coordinates one site right of the coordinates and the density on them,
+and gives each pass its own gradients, step length, density penalty and
+HPWL:
+
+- FirstPassMinimumAtTargetEndsOnItsPlacement: pass 1 at the target
+  overflow, run by GPL-0124, then three passes that read worse. The
+  density sees the cells on pass 1's look-ahead coordinates, every gcell
+  and the region have the Nesterov state of pass 1, the cells have its
+  sizes, overflow and HPWL, RUDY on them at pass 1's wire width reads
+  pass 1's congestion, and the placement converges in that iteration.
+  Without the change every cell is on the snapshot, the overflow is
+  stale and it does not converge.
+- FirstPassMinimumAboveTargetGoesOnFromItsPlacement: the same with
+  pass 1 at overflow 0.27. The state is pass 1's, the overflow is pass
+  1's and not stale, and the momentum and wirelength coefficients are
+  pass 1's. Without the change they are the snapshot's.
+- RevertToMinimumTest: a minimum at a later pass goes on from the
+  routability snapshot's Nesterov state. It holds without the change;
+  it states its scope.
+
+The first two fail with the density on the coordinates instead of the
+look-ahead coordinates, and with any one of the snapshot's members
+(look-ahead coordinates, gradients, density penalty, step length, HPWL)
+not restored, with the fillers' entries not kept through a cut and a
+restore, and the third with the pass 1 condition dropped.
+
+routability_first_pass_minimum places medium01 three times from the
+def's placement: without routability, and with -routability_driven at a
+target of 0.5 and -routability_check_overflow 0.10 and 0.30, where pass
+1 runs at the target overflow and above it. No pass improves on the
+first, and both routability runs end on the placement of the run
+without the phase, instance by instance (HPWL 375,495.09 um, final
+congestion 0.7418). Without this change, and with the density on the
+coordinates, the run at 0.10 ends elsewhere and the test fails. About
+30 s with one thread.
+
+No other gpl regression ends on a first-pass minimum: the logs of
+simple01-rd to simple04-rd (compared), upf_aes, place_ios_rd,
+place_ios_td and congestion_inflation_default are byte-identical to
+those of the change before this one.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/ioPinBase.cpp                |  15 +
+ openroad/gpl/src/ioPinBase.h                  |   5 +
+ openroad/gpl/src/nesterovBase.cpp             | 110 +++++-
+ openroad/gpl/src/nesterovBase.h               |  30 ++
+ openroad/gpl/src/nesterovPlace.cpp            |  68 +++-
+ openroad/gpl/src/nesterovPlace.h              |  12 +
+ openroad/gpl/src/routeBase.cpp                |   1 +
+ openroad/gpl/src/routeBase.h                  |   4 +
+ openroad/gpl/test/BUILD                       |  15 +-
+ .../test/routability_first_pass_minimum.tcl   |  45 +++
+ .../gpl/test/routability_minimum_test.cpp     | 334 +++++++++++++++++-
+ 11 files changed, 625 insertions(+), 14 deletions(-)
+ create mode 100644 openroad/gpl/test/routability_first_pass_minimum.tcl
+
+diff --git a/openroad/gpl/src/ioPinBase.cpp b/openroad/gpl/src/ioPinBase.cpp
+index 418977f..fc17e89 100644
+--- a/openroad/gpl/src/ioPinBase.cpp
++++ b/openroad/gpl/src/ioPinBase.cpp
+@@ -221,6 +221,21 @@ void IoPinBase::revertToSnapshot()
+   cur_ = snapshot_;
+ }
+ 
++void IoPinBase::saveFirstPassSnapshot()
++{
++  first_pass_snapshot_ = cur_;
++}
++
++void IoPinBase::revertToFirstPassSnapshot()
++{
++  cur_ = first_pass_snapshot_;
++}
++
++void IoPinBase::releaseFirstPassSnapshot()
++{
++  first_pass_snapshot_ = std::vector<FloatPoint>();
++}
++
+ // A 2D up: region names a position on the define_pin_shape_pattern grid, so
+ // the pin must be written on that grid's layer with that grid's pin size.
+ void IoPinBase::pickTopLayerGrid()
+diff --git a/openroad/gpl/src/ioPinBase.h b/openroad/gpl/src/ioPinBase.h
+index 14f61c7..e9e8d49 100644
+--- a/openroad/gpl/src/ioPinBase.h
++++ b/openroad/gpl/src/ioPinBase.h
+@@ -56,6 +56,10 @@ class IoPinBase
+   void placeGPins(Iterate iterate);
+   void saveSnapshot();
+   void revertToSnapshot();
++  // NesterovBase's first-pass snapshot, for the pins.
++  void saveFirstPassSnapshot();
++  void revertToFirstPassSnapshot();
++  void releaseFirstPassSnapshot();
+   // GPin addresses change when NesterovBaseCommon::fixPointers() runs.
+   void refreshGPins();
+   void updateDb();
+@@ -186,6 +190,7 @@ class IoPinBase
+   std::vector<FloatPoint> cur_;
+   std::vector<FloatPoint> next_;
+   std::vector<FloatPoint> snapshot_;
++  std::vector<FloatPoint> first_pass_snapshot_;
+ 
+   // Locus
+   std::vector<PerimSegment> free_segments_;
+diff --git a/openroad/gpl/src/nesterovBase.cpp b/openroad/gpl/src/nesterovBase.cpp
+index ecfd7f6..8ceeb9b 100644
+--- a/openroad/gpl/src/nesterovBase.cpp
++++ b/openroad/gpl/src/nesterovBase.cpp
+@@ -4272,6 +4272,83 @@ bool NesterovBase::revertToSnapshot()
+   return true;
+ }
+ 
++void NesterovBase::saveFirstPassSnapshot()
++{
++  if (isConverged_) {
++    return;
++  }
++  pullSlpFromDevice();
++
++  first_pass_snapshot_.saved = true;
++  first_pass_snapshot_.coordi = curCoordi_;
++  first_pass_snapshot_.slp_coordi = curSLPCoordi_;
++  first_pass_snapshot_.slp_sum_grads = curSLPSumGrads_;
++  first_pass_snapshot_.prev_slp_sum_grads = prevSLPSumGrads_;
++  first_pass_snapshot_.density_penalty = densityPenalty_;
++  first_pass_snapshot_.step_length = stepLength_;
++  first_pass_snapshot_.sum_overflow = sum_overflow_;
++  first_pass_snapshot_.sum_overflow_unscaled = sum_overflow_unscaled_;
++  first_pass_snapshot_.prev_hpwl = prev_hpwl_;
++  if (io_) {
++    io_->saveFirstPassSnapshot();
++  }
++}
++
++void NesterovBase::revertToFirstPassSnapshot()
++{
++  if (isConverged_ || !first_pass_snapshot_.saved) {
++    return;
++  }
++  pullCoordsFromDevice();
++  curCoordi_ = first_pass_snapshot_.coordi;
++  curSLPCoordi_ = first_pass_snapshot_.slp_coordi;
++  curSLPSumGrads_ = first_pass_snapshot_.slp_sum_grads;
++  prevSLPSumGrads_ = first_pass_snapshot_.prev_slp_sum_grads;
++  densityPenalty_ = first_pass_snapshot_.density_penalty;
++  stepLength_ = first_pass_snapshot_.step_length;
++  if (io_) {
++    io_->revertToFirstPassSnapshot();
++  }
++
++  // The loop measures a placement on its look-ahead coordinates:
++  // nesterovUpdateCoordinates() puts the density there, and the overflow, the
++  // HPWL and RUDY restored with this snapshot were read on them.
++  updateGCellDensityCenterLocation(curSLPCoordi_);
++  updateDensityFieldBin();
++
++#ifdef ENABLE_GPU
++  if (nb_device_ctx_) {
++    nb_device_ctx_->syncCoordsToDevice(curSLPCoordi_,
++                                       prevSLPCoordi_,
++                                       curCoordi_,
++                                       curSLPSumGrads_,
++                                       prevSLPSumGrads_);
++    commitCoordsToDeviceState(SlpSlot::Cur);
++    host_coords_fresh_ = true;
++  }
++#endif
++
++  isDiverged_ = false;
++  prev_reported_hpwl_ = 0;
++  prev_reported_overflow_unscaled_ = 0;
++
++  // Unlike the routability snapshot, this one holds what was measured on its
++  // placement, so the overflow describes the placement as it now is.
++  sum_overflow_ = first_pass_snapshot_.sum_overflow;
++  sum_overflow_unscaled_ = first_pass_snapshot_.sum_overflow_unscaled;
++  prev_hpwl_ = first_pass_snapshot_.prev_hpwl;
++  is_overflow_stale_ = false;
++}
++
++void NesterovBase::releaseFirstPassSnapshot()
++{
++  if (io_) {
++    io_->releaseFirstPassSnapshot();
++  }
++  // Assigning an empty snapshot frees the vectors' storage.
++  first_pass_snapshot_ = FirstPassSnapshot{};
++}
++
+ void NesterovBaseCommon::moveGCell(odb::dbInst* db_inst)
+ {
+   auto it = db_inst_to_nbc_index_map_.find(db_inst);
+@@ -4660,6 +4737,9 @@ void NesterovBase::cutFillerCells(int64_t inflation_area)
+        --i) {
+     if (nb_gcells_[i]->isFiller()) {
+       const GCell& removed = fillerStor_[nb_gcells_[i].getStorageIndex()];
++      const auto first_pass = [&](const std::vector<FloatPoint>& slot) {
++        return first_pass_snapshot_.saved ? slot[i] : FloatPoint();
++      };
+       removed_fillers_.push_back(RemovedFillerState{
+           .gcell = removed,
+           .curSLPCoordi = curSLPCoordi_[i],
+@@ -4684,7 +4764,14 @@ void NesterovBase::cutFillerCells(int64_t inflation_area)
+           .snapshotCoordi = snapshotCoordi_[i],
+           .snapshotSLPCoordi = snapshotSLPCoordi_[i],
+           .snapshotSLPSumGrads = snapshotSLPSumGrads_[i],
+-          .snapshotPrevSLPSumGrads = snapshotPrevSLPSumGrads_[i]});
++          .snapshotPrevSLPSumGrads = snapshotPrevSLPSumGrads_[i],
++
++          .firstPassCoordi = first_pass(first_pass_snapshot_.coordi),
++          .firstPassSLPCoordi = first_pass(first_pass_snapshot_.slp_coordi),
++          .firstPassSLPSumGrads
++          = first_pass(first_pass_snapshot_.slp_sum_grads),
++          .firstPassPrevSLPSumGrads
++          = first_pass(first_pass_snapshot_.prev_slp_sum_grads)});
+ 
+       destroyFillerGCell(i);
+       availableFillerArea -= single_filler_area;
+@@ -4866,6 +4953,14 @@ void NesterovBase::restoreRemovedFillers()
+     snapshotSLPSumGrads_[idx] = filler.snapshotSLPSumGrads;
+     snapshotPrevSLPSumGrads_[idx] = filler.snapshotPrevSLPSumGrads;
+ 
++    if (first_pass_snapshot_.saved) {
++      first_pass_snapshot_.coordi[idx] = filler.firstPassCoordi;
++      first_pass_snapshot_.slp_coordi[idx] = filler.firstPassSLPCoordi;
++      first_pass_snapshot_.slp_sum_grads[idx] = filler.firstPassSLPSumGrads;
++      first_pass_snapshot_.prev_slp_sum_grads[idx]
++          = filler.firstPassPrevSLPSumGrads;
++    }
++
+     totalFillerArea_ += getFillerCellArea();
+   }
+ 
+@@ -5192,6 +5287,13 @@ void NesterovBase::swapAndPopParallelVectors(size_t remove_index,
+     swapAndPop(snapshotSLPSumGrads_, remove_index, last_index);
+     swapAndPop(snapshotPrevSLPSumGrads_, remove_index, last_index);
+   }
++  if (first_pass_snapshot_.saved) {
++    swapAndPop(first_pass_snapshot_.coordi, remove_index, last_index);
++    swapAndPop(first_pass_snapshot_.slp_coordi, remove_index, last_index);
++    swapAndPop(first_pass_snapshot_.slp_sum_grads, remove_index, last_index);
++    swapAndPop(
++        first_pass_snapshot_.prev_slp_sum_grads, remove_index, last_index);
++  }
+   swapAndPop(curSLPCoordi_, remove_index, last_index);
+   swapAndPop(curSLPWireLengthGrads_, remove_index, last_index);
+   swapAndPop(curSLPDensityGrads_, remove_index, last_index);
+@@ -5257,6 +5359,12 @@ void NesterovBase::appendParallelVectors()
+     snapshotSLPSumGrads_.emplace_back();
+     snapshotPrevSLPSumGrads_.emplace_back();
+   }
++  if (first_pass_snapshot_.saved) {
++    first_pass_snapshot_.coordi.emplace_back();
++    first_pass_snapshot_.slp_coordi.emplace_back();
++    first_pass_snapshot_.slp_sum_grads.emplace_back();
++    first_pass_snapshot_.prev_slp_sum_grads.emplace_back();
++  }
+   curSLPCoordi_.emplace_back();
+   curSLPWireLengthGrads_.emplace_back();
+   curSLPDensityGrads_.emplace_back();
+diff --git a/openroad/gpl/src/nesterovBase.h b/openroad/gpl/src/nesterovBase.h
+index dd39182..b0168a8 100644
+--- a/openroad/gpl/src/nesterovBase.h
++++ b/openroad/gpl/src/nesterovBase.h
+@@ -1297,6 +1297,14 @@ class NesterovBase
+   void saveSnapshot();
+   bool revertToSnapshot();
+ 
++  // The placement the first routability pass measures, saved just before it
++  // and kept beside the routability snapshot until the routability phase
++  // ends. Reverting to it puts back what the pass measured on it as well, so
++  // the overflow is not stale afterwards.
++  void saveFirstPassSnapshot();
++  void revertToFirstPassSnapshot();
++  void releaseFirstPassSnapshot();
++
+   // GPU device-resident density path: the hot loop no longer syncs coords
+   // (or host GCell density centers) every iteration. Cold-path consumers
+   // (snapshot save/revert, updateDb, routability filler cut/restore) call
+@@ -1477,6 +1485,10 @@ class NesterovBase
+     FloatPoint snapshotSLPCoordi;
+     FloatPoint snapshotSLPSumGrads;
+     FloatPoint snapshotPrevSLPSumGrads;
++    FloatPoint firstPassCoordi;
++    FloatPoint firstPassSLPCoordi;
++    FloatPoint firstPassSLPSumGrads;
++    FloatPoint firstPassPrevSLPSumGrads;
+   };
+ 
+   std::vector<RemovedFillerState> removed_fillers_;
+@@ -1538,6 +1550,24 @@ class NesterovBase
+   float snapshotDensityPenalty_ = 0;
+   float snapshotStepLength_ = 0;
+ 
++  // The first-pass snapshot, with what updateNextIter() measured on that
++  // placement. While saved, the vectors are parallel to nb_gcells_ like the
++  // routability snapshot's; otherwise they are empty.
++  struct FirstPassSnapshot
++  {
++    bool saved = false;
++    std::vector<FloatPoint> coordi;
++    std::vector<FloatPoint> slp_coordi;
++    std::vector<FloatPoint> slp_sum_grads;
++    std::vector<FloatPoint> prev_slp_sum_grads;
++    float density_penalty = 0;
++    float step_length = 0;
++    float sum_overflow = 0;
++    float sum_overflow_unscaled = 0;
++    int64_t prev_hpwl = 0;
++  };
++  FirstPassSnapshot first_pass_snapshot_;
++
+   // For destroying elements in parallel vectors
+   void swapAndPop(std::vector<FloatPoint>& vec,
+                   size_t remove_index,
+diff --git a/openroad/gpl/src/nesterovPlace.cpp b/openroad/gpl/src/nesterovPlace.cpp
+index 076b14e..2be7108 100644
+--- a/openroad/gpl/src/nesterovPlace.cpp
++++ b/openroad/gpl/src/nesterovPlace.cpp
+@@ -747,6 +747,7 @@ bool NesterovPlace::tryRoutabilityDivergeRecovery(float& curA)
+ 
+   if (is_last_attempt) {
+     is_routability_need_ = false;
++    releaseFirstPassSnapshot();
+   }
+ 
+   log_->warn(GPL,
+@@ -1053,6 +1054,10 @@ void NesterovPlace::runRoutability(int iter,
+     // GRT and RUDY read the IO pins from the db
+     getTopLevelNB()->updateDbIoPins();
+ 
++    if (rb_->getRevertCount() == 0) {
++      saveFirstPassSnapshot(curA);
++    }
++
+     // recover the densityPenalty values
+     // if further routability-driven is needed
+     std::pair<bool, bool> result
+@@ -1073,8 +1078,16 @@ void NesterovPlace::runRoutability(int iter,
+       graphics_->addRoutabilityIter(iter, isRevertInitNeeded);
+     }
+ 
+-    // if routability is needed
+-    if (is_routability_need_ || isRevertInitNeeded) {
++    // The minimum is a set of sizes and the placement a pass measured with
++    // them, and revertToMinCongestion() has put back the sizes. When that
++    // pass was the first, its placement was kept and goes back with them: no
++    // other placement has the congestion the phase is ending on.
++    const bool ends_on_first_pass = !is_routability_need_ && isRevertInitNeeded
++                                    && rb_->getMinRcPass() == 1
++                                    && is_first_pass_snapshot_saved_;
++    if (ends_on_first_pass) {
++      revertToFirstPassSnapshot(curA);
++    } else if (is_routability_need_ || isRevertInitNeeded) {
+       // revert back the current density penality
+       curA = route_snapshot_a_;
+       wireLengthCoefX_ = route_snapshot_wl_coef_x_;
+@@ -1103,6 +1116,14 @@ void NesterovPlace::runRoutability(int iter,
+                  "routing congestion, could not reach target.");
+     }
+ 
++    if (ends_on_first_pass) {
++      log_->info(GPL,
++                 125,
++                 "Routability ended on the placement of pass 1, which "
++                 "measured the minimum congestion, at overflow {:.4f}.",
++                 average_overflow_unscaled_);
++    }
++
+     if (!is_routability_need_ && !isRevertInitNeeded) {
+       log_->info(GPL,
+                  90,
+@@ -1116,10 +1137,52 @@ void NesterovPlace::runRoutability(int iter,
+         graphics_->gifEnd(routability_gif_key_);
+         routability_gif_key_ = -1;
+       }
++      releaseFirstPassSnapshot();
+     }
+   }
+ }
+ 
++void NesterovPlace::saveFirstPassSnapshot(const float curA)
++{
++  first_pass_a_ = curA;
++  first_pass_wl_coef_x_ = wireLengthCoefX_;
++  first_pass_wl_coef_y_ = wireLengthCoefY_;
++  for (auto& nb : nbVec_) {
++    nb->saveFirstPassSnapshot();
++  }
++  is_first_pass_snapshot_saved_ = true;
++}
++
++void NesterovPlace::revertToFirstPassSnapshot(float& curA)
++{
++  curA = first_pass_a_;
++  wireLengthCoefX_ = first_pass_wl_coef_x_;
++  wireLengthCoefY_ = first_pass_wl_coef_y_;
++  nbc_->updateWireLengthForceWA(wireLengthCoefX_, wireLengthCoefY_);
++
++  // Each region's overflow comes back with its placement; the average is
++  // taken as updateNextIter() takes it.
++  float sum_overflow = 0;
++  float sum_overflow_unscaled = 0;
++  for (auto& nb : nbVec_) {
++    nb->revertToFirstPassSnapshot();
++    nb->resetMinSumOverflow();
++    sum_overflow += nb->getSumOverflow();
++    sum_overflow_unscaled += nb->getSumOverflowUnscaled();
++  }
++  average_overflow_ = sum_overflow / nbVec_.size();
++  average_overflow_unscaled_ = sum_overflow_unscaled / nbVec_.size();
++  overflow_update_is_stale_ = false;
++}
++
++void NesterovPlace::releaseFirstPassSnapshot()
++{
++  for (auto& nb : nbVec_) {
++    nb->releaseFirstPassSnapshot();
++  }
++  is_first_pass_snapshot_saved_ = false;
++}
++
+ // Every region has to have settled: routability acts on one congestion map
+ // covering all of them.
+ bool NesterovPlace::isPlacementSettled() const
+@@ -1386,6 +1449,7 @@ PlaceResult NesterovPlace::doNesterovPlace(int start_iter)
+   route_snapshot_wl_coef_x_ = 0;
+   route_snapshot_wl_coef_y_ = 0;
+   routability_diverge_attempt_count_ = 0;
++  releaseFirstPassSnapshot();
+ 
+   // divergence snapshot info
+   is_diverge_snapshot_saved_ = false;
+diff --git a/openroad/gpl/src/nesterovPlace.h b/openroad/gpl/src/nesterovPlace.h
+index 676883e..43fa413 100644
+--- a/openroad/gpl/src/nesterovPlace.h
++++ b/openroad/gpl/src/nesterovPlace.h
+@@ -150,6 +150,11 @@ class NesterovPlace
+   // a different inflation in place. Returns false when no attempt is left or
+   // there is no routability snapshot to go to.
+   bool tryRoutabilityDivergeRecovery(float& curA);
++  // The first routability pass's placement, with the state the Nesterov loop
++  // had on it, kept until the routability phase ends.
++  void saveFirstPassSnapshot(float curA);
++  void revertToFirstPassSnapshot(float& curA);
++  void releaseFirstPassSnapshot();
+   // True when the per-iteration cell displacement has come off its peak in
+   // every region, i.e. the placement is close to where it is going.
+   bool isPlacementSettled() const;
+@@ -236,6 +241,13 @@ class NesterovPlace
+   float route_snapshot_wl_coef_x_ = 0;
+   float route_snapshot_wl_coef_y_ = 0;
+ 
++  // A routability phase whose minimum congestion is its first pass's ends on
++  // that pass's placement.
++  bool is_first_pass_snapshot_saved_ = false;
++  float first_pass_a_ = 0;
++  float first_pass_wl_coef_x_ = 0;
++  float first_pass_wl_coef_y_ = 0;
++
+   // Two attempts because there are two inflation states to try: min
+   // congestion with routability on, then the same with it off.
+   static constexpr int kMaxRoutabilityDivergeAttempts = 2;
+diff --git a/openroad/gpl/src/routeBase.cpp b/openroad/gpl/src/routeBase.cpp
+index e1db0e1..886e282 100644
+--- a/openroad/gpl/src/routeBase.cpp
++++ b/openroad/gpl/src/routeBase.cpp
+@@ -1058,6 +1058,7 @@ std::pair<bool, bool> RouteBase::routability(
+                "minimum.",
+                minRc_);
+     minRc_ = curRc;
++    min_rc_pass_ = revert_count_;
+     min_RC_violated_cnt_ = 0;
+     for (int i = 0; i < nbVec_.size(); i++) {
+       minRcTargetDensity_[i] = nbVec_[i]->getTargetDensity();
+diff --git a/openroad/gpl/src/routeBase.h b/openroad/gpl/src/routeBase.h
+index 5b77c46..da8d926 100644
+--- a/openroad/gpl/src/routeBase.h
++++ b/openroad/gpl/src/routeBase.h
+@@ -195,6 +195,9 @@ class RouteBase
+   double getTotalRudyOverflow() const { return total_route_overflow_; }
+ 
+   bool isMinRc() const { return is_min_rc_; }
++  // The pass, counted from 1, that measured the minimum congestion; 0 before
++  // the first pass.
++  int getMinRcPass() const { return min_rc_pass_; }
+ 
+   // first: is Routability Need
+   // second: reverting procedure need in NesterovPlace
+@@ -236,6 +239,7 @@ class RouteBase
+   int actionable_tiles_count_ = 0;
+   double total_route_overflow_ = 0.0;
+   bool is_min_rc_ = false;
++  int min_rc_pass_ = 0;
+ 
+   // if solutions are not improved at all,
+   // needs to revert back to have the minimized RC values.
+diff --git a/openroad/gpl/test/BUILD b/openroad/gpl/test/BUILD
+index 631410b..3317172 100644
+--- a/openroad/gpl/test/BUILD
++++ b/openroad/gpl/test/BUILD
+@@ -49,6 +49,11 @@ PASSFAIL_TESTS = [
+     "place_ios_td",
+ ]
+ 
++# Pass/fail regressions that place a medium design: tens of seconds.
++MEDIUM_PASSFAIL_TESTS = [
++    "routability_first_pass_minimum",
++]
++
+ # Longer-running regression tests. These are
+ # tagged "manual" so they are excluded from the default `bazel test //...`
+ # wildcard and must be requested explicitly, e.g. via the :large_tests suite.
+@@ -102,7 +107,7 @@ filegroup(
+         ["**/*"],
+         exclude = [
+             test + "." + ext
+-            for test in ALL_TESTS + LARGE_TESTS + GPU_TESTS
++            for test in ALL_TESTS + MEDIUM_PASSFAIL_TESTS + LARGE_TESTS + GPU_TESTS
+             for ext in [
+                 "tcl",
+                 "py",
+@@ -118,6 +123,14 @@ filegroup(
+     data = [":test_resources"],
+ ) for test_name in ALL_TESTS]
+ 
++[regression_test(
++    name = test_name,
++    size = "medium",
++    check_log = False,
++    check_passfail = True,
++    data = [":test_resources"],
++) for test_name in MEDIUM_PASSFAIL_TESTS]
++
+ [regression_test(
+     name = test_name,
+     size = "enormous",
+diff --git a/openroad/gpl/test/routability_first_pass_minimum.tcl b/openroad/gpl/test/routability_first_pass_minimum.tcl
+new file mode 100644
+index 0000000..5fbf532
+--- /dev/null
++++ b/openroad/gpl/test/routability_first_pass_minimum.tcl
+@@ -0,0 +1,45 @@
++# A routability phase whose minimum is its first pass ends on the placement
++# that pass measured, with the Nesterov state the loop had there: no inflation
++# helped, so the placement is the one a run without the phase ends on. That
++# holds whether pass 1 ran at the target overflow, where the loop converges on
++# it, or above it, where the descent goes on from it. medium01's congestion
++# stays above a target of 0.5 and no pass improves on the first by enough
++# (GPL-0054).
++source helpers.tcl
++read_lef ./nangate45.lef
++read_def ./medium01.def
++
++set block [ord::get_db_block]
++set initial {}
++foreach inst [$block getInsts] {
++  lappend initial $inst [$inst getLocation] [$inst getPlacementStatus]
++}
++
++# Places medium01 from the def's placement; returns every instance's location.
++proc place { log_var args } {
++  upvar 1 $log_var log
++  foreach {inst location status} $::initial {
++    $inst setLocation {*}$location
++    $inst setPlacementStatus $status
++  }
++  tee -quiet -variable log "global_placement -density 0.8 $args"
++  set locations {}
++  foreach inst [$::block getInsts] {
++    lappend locations [$inst getName] {*}[$inst getLocation]
++  }
++  return $locations
++}
++
++set without_phase [place log]
++foreach overflow {0.10 0.30} {
++  set placement [place log -routability_driven \
++    -routability_target_rc_metric 0.5 \
++    -routability_check_overflow $overflow]
++  if { $placement ne $without_phase } {
++    error "at overflow $overflow the placement is not the one without the phase"
++  }
++  if { [string first GPL-0125 $log] < 0 } {
++    error "at overflow $overflow the phase did not end on pass 1 (GPL-0125)"
++  }
++}
++puts pass
+diff --git a/openroad/gpl/test/routability_minimum_test.cpp b/openroad/gpl/test/routability_minimum_test.cpp
+index 1e235cb..fbd2c53 100644
+--- a/openroad/gpl/test/routability_minimum_test.cpp
++++ b/openroad/gpl/test/routability_minimum_test.cpp
+@@ -1,11 +1,14 @@
+ // SPDX-License-Identifier: BSD-3-Clause
+ // Copyright (c) 2026, The OpenROAD Authors
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
++#include <map>
+ #include <memory>
+ #include <string>
++#include <string_view>
+ #include <vector>
+ 
+ #include "gpl/Replace.h"
+@@ -43,6 +46,31 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+   static constexpr int kColumns = 17;
+   static constexpr int kSiteWidth = 380;
+   static constexpr int kRowHeight = 2800;
++  // The look-ahead coordinates are this many sites right of the coordinates,
++  // so that a test can tell which of the two the cells are on.
++  static constexpr int kSlpShift = 1;
++
++  // A gcell's Nesterov state: its coordinates, its look-ahead (SLP)
++  // coordinates and the gradients the next step starts from.
++  struct CellState
++  {
++    float x;
++    float y;
++    float slp_x;
++    float slp_y;
++    float grad_x;
++    float grad_y;
++    float prev_grad_x;
++    float prev_grad_y;
++    auto operator<=>(const CellState&) const = default;
++  };
++
++  // The Nesterov state of the region as a whole.
++  struct RegionState
++  {
++    float density_penalty;
++    float step_length;
++  };
+ 
+   RoutabilityMinimumTest() : IntegratedFixture(Technology::kNangate45, "") {}
+ 
+@@ -92,8 +120,13 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+ 
+   NesterovBase& nb() const { return *nb_vec_.front(); }
+ 
+-  // Puts every standard cell on the lattice shifted by `shift` sites, as the
+-  // Nesterov steps between two passes would have moved them.
++  // Puts every gcell on the lattice shifted by `shift` sites, as the Nesterov
++  // steps between two passes would have moved them: the standard cells in a
++  // block, the fillers in a row below it. Each cell's look-ahead (SLP)
++  // coordinates are kSlpShift sites right of its coordinates, and the density
++  // is on them, where nesterovUpdateCoordinates() puts it: the loop measures
++  // the overflow, the HPWL and RUDY there. The gradients, the step length, the
++  // density penalty and the HPWL the loop measured are the shift's own.
+   void placeCells(const int shift)
+   {
+     NesterovBase& region = nb();
+@@ -101,19 +134,36 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+     const int x0
+         = core.xMin() + core.dx() / 2 - (kColumns / 2) * 3 * kSiteWidth;
+     const int y0 = core.yMin() + 2 * kRowHeight + kRowHeight / 2;
++    const int filler_x0 = core.xMin() + 16 * kSiteWidth;
++    const int filler_y = core.yMin() + kRowHeight;
++    const float value = 10.0f + shift;
+     int index = 0;
++    int filler_index = 0;
+     for (size_t i = 0; i < region.nb_gcells_.size(); ++i) {
+-      if (!region.nb_gcells_[i]->isStdInstance()) {
++      FloatPoint coordi;
++      if (region.nb_gcells_[i]->isStdInstance()) {
++        coordi = FloatPoint(
++            x0 + (index % kColumns) * 3 * kSiteWidth + shift * kSiteWidth,
++            y0 + (index / kColumns) * kRowHeight);
++        ++index;
++      } else if (region.nb_gcells_[i]->isFiller()) {
++        coordi = FloatPoint(
++            filler_x0 + filler_index * 3 * kSiteWidth + shift * kSiteWidth,
++            filler_y);
++        ++filler_index;
++      } else {
+         continue;
+       }
+-      const FloatPoint center(
+-          x0 + (index % kColumns) * 3 * kSiteWidth + shift * kSiteWidth,
+-          y0 + (index / kColumns) * kRowHeight);
+-      region.curCoordi_[i] = center;
+-      region.curSLPCoordi_[i] = center;
+-      ++index;
++      region.curCoordi_[i] = coordi;
++      region.curSLPCoordi_[i]
++          = FloatPoint(coordi.x + kSlpShift * kSiteWidth, coordi.y);
++      region.curSLPSumGrads_[i] = FloatPoint(value, 2 * value);
++      region.prevSLPSumGrads_[i] = FloatPoint(3 * value, 4 * value);
+     }
+-    region.updateGCellDensityCenterLocation(region.curCoordi_);
++    region.densityPenalty_ = 1e-4f * value;
++    region.stepLength_ = 0.5f * value;
++    region.prev_hpwl_ = 1000000 * static_cast<int64_t>(value);
++    region.updateGCellDensityCenterLocation(region.curSLPCoordi_);
+     region.updateDensityFieldBin();
+   }
+ 
+@@ -163,6 +213,91 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+ 
+   bool routabilityNeeded() const { return np_->is_routability_need_; }
+ 
++  // True when the last RUDY average, computed by a pass or at convergence, is
++  // below the congestion target. A pass that finds it so does not revert.
++  bool congestionTargetMet() const
++  {
++    return rb_->getRudyAverage() < rb_->rbVars_.targetRC;
++  }
++  // True when the overflow, the regions' or their average, was not measured
++  // on the placement as it is.
++  bool overflowStale() const
++  {
++    bool stale = np_->overflow_update_is_stale_;
++    for (const auto& region : nb_vec_) {
++      stale |= region->is_overflow_stale_;
++    }
++    return stale;
++  }
++
++  // The fillers have no names; perGCell() keys them by this and their rank.
++  static constexpr std::string_view kFiller = "filler ";
++
++  // `read(i)` of every gcell: the standard cells by name, the fillers by their
++  // rank in sorted order, so that two sets of fillers compare as sets. Fillers
++  // cut and restored come back in another order.
++  template <typename T, typename Read>
++  std::map<std::string, T> perGCell(const Read& read) const
++  {
++    const NesterovBase& region = nb();
++    std::map<std::string, T> result;
++    std::vector<T> fillers;
++    for (size_t i = 0; i < region.nb_gcells_.size(); ++i) {
++      const GCellHandle& cell = region.nb_gcells_[i];
++      if (cell->isStdInstance()) {
++        result[cell->getName()] = read(i);
++      } else if (cell->isFiller()) {
++        fillers.push_back(read(i));
++      }
++    }
++    std::ranges::sort(fillers);
++    for (size_t rank = 0; rank < fillers.size(); ++rank) {
++      result[std::string(kFiller) + std::to_string(rank)] = fillers[rank];
++    }
++    return result;
++  }
++
++  // Where the density sees each gcell.
++  std::map<std::string, odb::Point> centers() const
++  {
++    return perGCell<odb::Point>([this](const size_t i) {
++      const GCellHandle& cell = nb().nb_gcells_[i];
++      return odb::Point(cell->dCx(), cell->dCy());
++    });
++  }
++
++  std::map<std::string, CellState> cellStates() const
++  {
++    return perGCell<CellState>([this](const size_t i) {
++      const NesterovBase& region = nb();
++      return CellState{.x = region.curCoordi_[i].x,
++                       .y = region.curCoordi_[i].y,
++                       .slp_x = region.curSLPCoordi_[i].x,
++                       .slp_y = region.curSLPCoordi_[i].y,
++                       .grad_x = region.curSLPSumGrads_[i].x,
++                       .grad_y = region.curSLPSumGrads_[i].y,
++                       .prev_grad_x = region.prevSLPSumGrads_[i].x,
++                       .prev_grad_y = region.prevSLPSumGrads_[i].y};
++    });
++  }
++
++  RegionState regionState() const
++  {
++    return {.density_penalty = nb().densityPenalty_,
++            .step_length = nb().stepLength_};
++  }
++
++  std::map<std::string, odb::Point> sizes() const
++  {
++    std::map<std::string, odb::Point> result;
++    for (const auto& cell : nb().getGCells()) {
++      if (cell->isStdInstance()) {
++        result[cell->getName()] = {cell->dx(), cell->dy()};
++      }
++    }
++    return result;
++  }
++
+   int64_t cellAreaSum() const
+   {
+     int64_t area = 0;
+@@ -174,6 +309,80 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+     return area;
+   }
+ 
++  // How many cells differ from `expected`, in centers(), sizes() or
++  // cellStates(), counting a cell found in only one of the two.
++  template <typename T>
++  static int countDiffering(const std::map<std::string, T>& actual,
++                            const std::map<std::string, T>& expected)
++  {
++    int differing = 0;
++    for (const auto& [name, value] : expected) {
++      const auto it = actual.find(name);
++      if (it == actual.end() || it->second != value) {
++        ++differing;
++      }
++    }
++    for (const auto& [name, value] : actual) {
++      if (!expected.contains(name)) {
++        ++differing;
++      }
++    }
++    return differing;
++  }
++
++  template <typename T>
++  static std::map<std::string, T> withoutFillers(std::map<std::string, T> map)
++  {
++    std::erase_if(map, [](const auto& entry) {
++      return entry.first.starts_with(kFiller);
++    });
++    return map;
++  }
++
++  void expectRegionState(const RegionState& region) const
++  {
++    EXPECT_FLOAT_EQ(nb().densityPenalty_, region.density_penalty);
++    EXPECT_FLOAT_EQ(nb().stepLength_, region.step_length);
++  }
++
++  // Every gcell, fillers included, has its Nesterov state in `cells`, no
++  // other gcell is there, and the region has `region`'s.
++  void expectNesterovState(const std::map<std::string, CellState>& cells,
++                           const RegionState& region) const
++  {
++    EXPECT_EQ(countDiffering(cellStates(), cells), 0)
++        << "every cell must have the coordinates, look-ahead coordinates and "
++           "gradients the loop had there";
++    expectRegionState(region);
++  }
++
++  void setWireLengthCoef(const float x, const float y)
++  {
++    np_->wireLengthCoefX_ = x;
++    np_->wireLengthCoefY_ = y;
++  }
++
++  // Runs passes 2 to 4 on placements of their own, settled at the gate's
++  // overflow and reading worse than kWidth: three passes without an
++  // improvement, so pass 4 ends the phase on its minimum (GPL-0054). The
++  // Nesterov state differs from pass to pass. Returns whether the placement
++  // converged on pass 4's iteration.
++  bool runPassesWithoutImprovement(float& current_a)
++  {
++    bool converged = false;
++    for (int pass = 2; pass <= 4; ++pass) {
++      placeCells(2 * pass);
++      measure(options_.routabilityCheckOverflow);
++      setDisplacementRatio(0.0f);
++      setWireLengthCoef(2.0f * pass, 3.0f * pass);
++      current_a = 10.0f * pass;
++      converged = runIteration(2 * kWidth, current_a);
++      EXPECT_EQ(passes_, pass) << "every iteration must run a pass";
++      EXPECT_FALSE(rb_->isMinRc());
++    }
++    return converged;
++  }
++
+   PlaceOptions options_;
+   std::shared_ptr<PlacerBaseCommon> pbc_;
+   std::shared_ptr<NesterovBaseCommon> nbc_;
+@@ -185,6 +394,103 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+   int passes_ = 0;
+ };
+ 
++// The minimum is a measurement, of one placement with one set of sizes. A
++// phase whose minimum is its first pass, taken at the target overflow, ends
++// on what that pass measured: its placement, its sizes and its overflow, and
++// the placement converges on the iteration the phase ends.
++TEST_F(RoutabilityMinimumTest, FirstPassMinimumAtTargetEndsOnItsPlacement)
++{
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  // At the target overflow with the cells still moving: the settle wait that
++  // opens ends by convergence (GPL-0124), and pass 1 runs on this placement.
++  placeCells(0);
++  const auto first_pass_centers = centers();
++  const auto first_pass_cells = cellStates();
++  const RegionState first_pass_region = regionState();
++  const int64_t first_pass_hpwl = nb().getIterHpwl();
++  const auto first_pass_sizes = sizes();
++  const float first_pass_overflow = options_.overflow - 0.01f;
++  measure(first_pass_overflow);
++  setDisplacementRatio(1.0f);
++  logger_.teeStringBegin();
++  ASSERT_FALSE(runIteration(kWidth, current_a));
++  ASSERT_EQ(passes_, 1);
++  ASSERT_TRUE(rb_->isMinRc());
++  ASSERT_TRUE(routabilityNeeded());
++  const float first_pass_rc = rb_->getRudyAverage();
++
++  const bool converged = runPassesWithoutImprovement(current_a);
++  const std::string log = logger_.teeStringEnd();
++  ASSERT_FALSE(routabilityNeeded());
++  ASSERT_NE(log.find("GPL-0124"), std::string::npos);
++  ASSERT_NE(log.find("GPL-0054"), std::string::npos);
++  EXPECT_NE(log.find("GPL-0125"), std::string::npos);
++
++  EXPECT_EQ(countDiffering(centers(), first_pass_centers), 0)
++      << "the density must see the cells where pass 1 measured them, on its "
++         "look-ahead coordinates";
++  expectNesterovState(first_pass_cells, first_pass_region);
++  EXPECT_EQ(countDiffering(sizes(), first_pass_sizes), 0)
++      << "the cells must have the sizes pass 1 measured them with";
++  EXPECT_FLOAT_EQ(nb().getSumOverflowUnscaled(), first_pass_overflow);
++  EXPECT_EQ(nb().getIterHpwl(), first_pass_hpwl);
++  EXPECT_TRUE(converged)
++      << "the placement pass 1 measured at the target overflow must converge";
++
++  // The congestion of the placement the phase ended on, at pass 1's wire
++  // width, is the minimum pass 1 measured.
++  grt_.getRudy()->setWireWidth(kWidth);
++  rb_->calculateRudyTiles();
++  rb_->updateRudyAverage(false);
++  EXPECT_FLOAT_EQ(rb_->getRudyAverage(), first_pass_rc);
++}
++
++// Above the target overflow, a phase whose minimum is its first pass goes on
++// from that pass's placement, with the overflow measured there and the
++// Nesterov state the loop had there, not from the routability snapshot.
++TEST_F(RoutabilityMinimumTest,
++       FirstPassMinimumAboveTargetGoesOnFromItsPlacement)
++{
++  makePlacer();
++  float current_a = 1.0f;
++  ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++
++  placeCells(0);
++  const auto first_pass_centers = centers();
++  const auto first_pass_cells = cellStates();
++  const RegionState first_pass_region = regionState();
++  const int64_t first_pass_hpwl = nb().getIterHpwl();
++  const float first_pass_overflow = 0.9f * options_.routabilityCheckOverflow;
++  measure(first_pass_overflow);
++  setDisplacementRatio(0.0f);
++  setWireLengthCoef(1.5f, 1.25f);
++  current_a = 7.0f;
++  ASSERT_FALSE(runIteration(kWidth, current_a));
++  ASSERT_EQ(passes_, 1);
++  ASSERT_TRUE(rb_->isMinRc());
++  ASSERT_TRUE(routabilityNeeded());
++
++  const bool converged = runPassesWithoutImprovement(current_a);
++  ASSERT_FALSE(routabilityNeeded());
++  ASSERT_FALSE(congestionTargetMet())
++      << "the phase must end by going back to its minimum";
++
++  EXPECT_EQ(countDiffering(centers(), first_pass_centers), 0)
++      << "the density must see the cells where pass 1 measured them, on its "
++         "look-ahead coordinates";
++  expectNesterovState(first_pass_cells, first_pass_region);
++  EXPECT_FLOAT_EQ(np_->getAverageOverflow(), first_pass_overflow);
++  EXPECT_EQ(nb().getIterHpwl(), first_pass_hpwl);
++  EXPECT_FALSE(overflowStale());
++  EXPECT_FLOAT_EQ(current_a, 7.0f);
++  EXPECT_FLOAT_EQ(np_->getWireLengthCoefX(), 1.5f);
++  EXPECT_FLOAT_EQ(np_->getWireLengthCoefY(), 1.25f);
++  EXPECT_FALSE(converged);
++}
++
+ // The ways a routability phase ends by going back to its minimum, with the
+ // minimum at a later pass than the first.
+ enum class Ending
+@@ -220,6 +526,8 @@ TEST_P(RevertToMinimumTest, MeasuresOverflowOnTheCellsAsTheyAre)
+   makePlacer();
+   float current_a = 1.0f;
+   ASSERT_NO_FATAL_FAILURE(saveRoutabilitySnapshot(current_a));
++  const auto snapshot_cells = withoutFillers(cellStates());
++  const RegionState snapshot_region = regionState();
+ 
+   constexpr int kMaxPasses = 20;
+   int64_t min_area = 0;
+@@ -259,6 +567,12 @@ TEST_P(RevertToMinimumTest, MeasuresOverflowOnTheCellsAsTheyAre)
+       region.getCurrentSumOverflowUnscaled(iter_),
+       region.getOverflowAreaUnscaled() / static_cast<float>(cellAreaSum()))
+       << "the overflow must be a fraction of the cells' area as they are";
++  // Only a first-pass minimum ends on its pass's placement; a later one goes
++  // on from the routability snapshot. Its fillers are the ones the minimum's
++  // sizes leave, which the snapshot was not taken with.
++  EXPECT_EQ(countDiffering(withoutFillers(cellStates()), snapshot_cells), 0)
++      << "the cells must go on from the routability snapshot";
++  expectRegionState(snapshot_region);
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(Endings,
+-- 
+2.53.0
+

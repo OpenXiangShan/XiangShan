@@ -1,0 +1,256 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oyvind Harboe <oyvind.harboe@zylin.com>
+Date: Wed, 17 Sep 2026 00:00:00 +0000
+Subject: [PATCH] frontend: the Ftq's four queues as register-file modules
+
+Ftq keeps its predictions and the BPU's redirect, resolve and commit
+metadata in four Reg(Vec(FtqSize, ...)) arrays, written once at the
+BPU's pointer and read by index: 64 words of 56, 194, 564 and 10 bits.
+Synthesised, that is 53 kbit of flops behind 64:1 read muxes inside the
+Ftq module, a 93 k line partition and one of the longest of the core's
+synthesis; placed, a dense block the legaliser has to spread.
+
+Each is now a RegVecFile: a small module holding the same Reg(Vec) with
+explicit write (wen, addr, data) and read (addr -> data) ports, named
+(FtqEntryQueue, FtqMetaQueueRedirect, FtqMetaQueueResolve,
+FtqMetaQueueCommit) so a physical flow can replace it by a register-file
+macro from its module name while simulation keeps the behavioural
+model. Semantics are unchanged: a write port is the caller's
+`when(cond) { vec(idx) := value }`, in port order, and a read port is
+`vec(idx)`. The perf queue, which the design says should not exist in
+hardware and which is read whole, is left as it was.
+
+A read port is `vec(idx)` only when `read` is called outside any
+`when`: under one, its address is a conditional connection, idle()'s 0
+wherever the condition is false, a mux ahead of the read that
+`vec(idx)` does not have. `read` stops there, and the BPU train's meta
+is read ahead of the `when` that captures it.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+---
+diff -ruN a/src/main/scala/utils/RegVecFile.scala b/src/main/scala/utils/RegVecFile.scala
+--- a/src/main/scala/utils/RegVecFile.scala
++++ b/src/main/scala/utils/RegVecFile.scala
+@@ -0,0 +1,84 @@
++package utils
++
++import chisel3._
++import chisel3.util._
++
++/** A Reg(Vec) with its ports made explicit.
++  *
++  * Storage and semantics are those of `Reg(Vec(numEntries, gen))` with
++  * writes by index and reads by index: a write port's `wen`, `addr`,
++  * `data` are the `when(cond) { vec(idx) := value }` of the caller, in
++  * port order, so a later port wins a same-address write the way a
++  * later `:=` does; a read port is `vec(idx)`. What changes is that the
++  * array is a module of its own, named `name`, so a physical flow can
++  * replace it by a register-file macro while simulation keeps this
++  * behavioural model.
++  *
++  * Drive every port once with `idle()` after instantiation. `write` then
++  * overrides under the caller's own `when`, as `vec(idx) := value` does.
++  * `read` is called outside any `when`, where `vec(idx)` reads: under
++  * one, the port's address would be idle()'s 0 wherever the `when`'s
++  * condition is false, a mux ahead of the read that `vec(idx)` does not
++  * have, so `read` stops there.
++  */
++class RegVecFileReadPort(addrWidth: Int, dataWidth: Int) extends Bundle {
++  val addr = Input(UInt(addrWidth.W))
++  val data = Output(UInt(dataWidth.W))
++}
++
++class RegVecFileWritePort(addrWidth: Int, dataWidth: Int) extends Bundle {
++  val wen  = Input(Bool())
++  val addr = Input(UInt(addrWidth.W))
++  val data = Input(UInt(dataWidth.W))
++}
++
++class RegVecFile[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, name: String)
++    extends Module {
++  override def desiredName: String = name
++
++  val addrWidth: Int = log2Up(numEntries)
++  val dataWidth: Int = gen.getWidth
++
++  val io = IO(new Bundle {
++    val readPorts  = Vec(numRead, new RegVecFileReadPort(addrWidth, dataWidth))
++    val writePorts = Vec(numWrite, new RegVecFileWritePort(addrWidth, dataWidth))
++  })
++
++  private val mem = Reg(Vec(numEntries, UInt(dataWidth.W)))
++
++  io.writePorts.foreach { w =>
++    when(w.wen) {
++      mem(w.addr) := w.data
++    }
++  }
++  io.readPorts.foreach { r =>
++    r.data := mem(r.addr)
++  }
++
++  /** Every port driven, nothing written: the caller's connections override. */
++  def idle(): Unit = {
++    io.readPorts.foreach(_.addr := 0.U)
++    io.writePorts.foreach { w =>
++      w.wen  := false.B
++      w.addr := 0.U
++      w.data := 0.U
++    }
++  }
++
++  /** Read port `i` at `addr`, as `gen`; outside any `when` (see above). */
++  def read(i: Int, addr: UInt): T = {
++    require(
++      when.cond.litToBooleanOption.contains(true),
++      s"$desiredName.read($i) under a when: call it outside, a read port is vec(idx)"
++    )
++    io.readPorts(i).addr := addr
++    io.readPorts(i).data.asTypeOf(gen)
++  }
++
++  /** Write port `i`: `data` to `addr`, under the caller's `when`. */
++  def write(i: Int, addr: UInt, data: T): Unit = {
++    io.writePorts(i).wen  := true.B
++    io.writePorts(i).addr := addr
++    io.writePorts(i).data := data.asUInt
++  }
++}
+diff -ruN a/src/main/scala/xiangshan/frontend/ftq/Ftq.scala b/src/main/scala/xiangshan/frontend/ftq/Ftq.scala
+--- a/src/main/scala/xiangshan/frontend/ftq/Ftq.scala
++++ b/src/main/scala/xiangshan/frontend/ftq/Ftq.scala
+@@ -33,6 +33,7 @@
+ import utility.XSPerfRolling
+ import utility.XSPerfSeqAccumulate
+ import utility.XSPerfSeqRolling
++import utils.RegVecFile
+ import xiangshan.RedirectLevel
+ import xiangshan.TopDownCounters
+ import xiangshan.backend.CtrlToFtqIO
+@@ -108,14 +109,27 @@
+   private def passedPnr(ptr: FtqPtr): Bool = pnrPtr > ptr
+ 
+   // entryQueue stores predictions made by BPU.
+-  private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
++  // The four queues are register files with explicit ports (RegVecFile):
++  // one write at the BPU's pointer, reads by index. Same storage and the
++  // same last-connect write semantics as the Reg(Vec) they replace; the
++  // module boundary is what lets a physical flow hand each to a
++  // register-file generator instead of synthesising 64:1 read muxes.
++  private val entryQueue =
++    Module(new RegVecFile(new FtqEntry, FtqSize, numRead = 4, numWrite = 1, "FtqEntryQueue"))
+ 
+   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
+-  private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
++  private val metaQueueRedirect =
++    Module(new RegVecFile(new BpuRedirectMeta, FtqSize, numRead = 2, numWrite = 1, "FtqMetaQueueRedirect"))
+ 
+   // metaQueue stores information needed to train BPU.
+-  private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
+-  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
++  private val metaQueueResolve =
++    Module(new RegVecFile(new BpuResolveMeta, FtqSize, numRead = 1, numWrite = 1, "FtqMetaQueueResolve"))
++  private val metaQueueCommit =
++    Module(new RegVecFile(new BpuCommitMeta, FtqSize, numRead = 1, numWrite = 1, "FtqMetaQueueCommit"))
++  entryQueue.idle()
++  metaQueueRedirect.idle()
++  metaQueueResolve.idle()
++  metaQueueCommit.idle()
+ 
+   // resolveQueue caches branch resolve information from backend.
+   private val resolveQueue = Module(new ResolveQueue)
+@@ -128,7 +142,7 @@
+ 
+   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+ 
+-  private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
++  private val specTopAddr = metaQueueRedirect.read(0, io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
+   private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
+     io.fromIfu.wbRedirect,
+     specTopAddr,
+@@ -208,17 +222,19 @@
+   }
+ 
+   when((prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
+-    entryQueue(predictionPtr.value).startPc     := prediction.bits.startPc
+-    entryQueue(predictionPtr.value).taken       := prediction.bits.taken
+-    entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
++    val entry = Wire(new FtqEntry)
++    entry.startPc     := prediction.bits.startPc
++    entry.taken       := prediction.bits.taken
++    entry.endPosition := prediction.bits.endPosition
++    entryQueue.write(0, predictionPtr.value, entry)
+   }
+ 
+   private val s3PerfQueue = WireInit(perfQueue)
+   when(io.fromBpu.meta.valid) {
+     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
+-    metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
+-    metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
+-    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
++    metaQueueRedirect.write(0, s3BpuPtr, io.fromBpu.meta.bits.redirectMeta)
++    metaQueueResolve.write(0, s3BpuPtr, io.fromBpu.meta.bits.resolveMeta)
++    metaQueueCommit.write(0, s3BpuPtr, io.fromBpu.meta.bits.commitMeta)
+ 
+     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
+     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
+@@ -279,8 +295,8 @@
+   // --------------------------------------------------------------------------------
+ 
+   private val prefetchReq = VecInit(
+-    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue(pfPtr(0).value)),
+-    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue(pfPtr(1).value))
++    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue.read(0, pfPtr(0).value)),
++    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue.read(1, pfPtr(1).value))
+   )
+ 
+   private val canTwoPrefetch =
+@@ -319,8 +335,8 @@
+   // --------------------------------------------------------------------------------
+ 
+   private val fetchReq = VecInit(
+-    Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(0).value)),
+-    Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(1).value))
++    Wire(new FtqFetchReq).fromFtqEntry(entryQueue.read(2, fetchPtr(0).value)),
++    Wire(new FtqFetchReq).fromFtqEntry(entryQueue.read(3, fetchPtr(1).value))
+   )
+ 
+   // as in 2-prefetch, the second fetch block must have passed the point of no return
+@@ -381,7 +397,7 @@
+   io.toBpu.redirect.bits.target    := redirect.bits.target
+   io.toBpu.redirect.bits.taken     := redirect.bits.taken
+   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
+-  io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
++  io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect.read(1, redirectFtqIdxInAdvance.value))
+   io.toBpu.redirectFromIFU         := ifuRedirect.valid
+ 
+   resolveQueue.io.backendRedirect    := backendRedirect.valid
+@@ -409,6 +425,10 @@
+     VecInit(trainBranches.map(b => b.valid && b.bits.mispredict))
+   )
+ 
++  // Read ahead of the when that captures it: a read port is vec(idx)
++  // only outside a when (RegVecFile.read).
++  private val trainMeta = metaQueueResolve.read(0, resolveQueue.io.bpuTrain.bits.ftqIdx.value)
++
+   when(flushTrainCache) {
+     trainCache.valid := false.B
+   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
+@@ -420,7 +440,7 @@
+       RegNext(backendRedirect.valid) && resolveQueue.io.bpuTrain.bits.ftqIdx > RegNext(backendRedirect.bits.ftqIdx)
+ 
+     trainCache.valid     := !needFlush
+-    trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
++    trainCache.bits.meta := trainMeta
+     trainCache.bits.startPcVec.foreach { dup =>
+       dup.zipWithIndex.foreach { case (startPc, i) =>
+         if (i == 0)
+@@ -508,7 +528,7 @@
+   commitQueue.io.backendCommit := io.fromBackend.callRetCommit
+ 
+   io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
+-  io.toBpu.commit.bits.meta                 := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
++  io.toBpu.commit.bits.meta                 := metaQueueCommit.read(0, commitQueue.io.bpuTrain.bits.ftqPtr.value)
+   io.toBpu.commit.bits.attribute.branchType := DontCare
+   io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
+ 

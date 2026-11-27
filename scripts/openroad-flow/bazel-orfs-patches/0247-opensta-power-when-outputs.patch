@@ -1,0 +1,509 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Fri, 20 Nov 2026 18:56:42 +0100
+Subject: [PATCH] power: a when condition's combinational outputs as functions
+ of the inputs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Power::findLeakagePower weighs each state dependent leakage group by
+the duty of its when condition, found from a BDD with one variable per
+pin, each weighted by its own pin's duty as if independent of the
+others. Libraries that write the states over the inputs and the output,
+"A * !Y" and "!A * Y" for an inverter, then weigh the states d^2 and
+(1 - d)^2 instead of d and 1 - d: half the leakage at the default duty
+of 0.5. asap7's INV, BUF, AO, AOI, OA and OAI cells, among others, are
+written this way. Input internal power groups with such conditions
+(asap7's AO/OA families) have the same error.
+
+The combinational outputs a when condition names are now replaced by
+their functions of the inputs (Cudd_bddCompose) before the duty is
+found, for leakage, input internal power and the when of output
+internal power. An output of a sequential cell or clock gate is state
+and keeps its own duty, and a condition naming any port other than an
+input or such an output is evaluated as before; conditions over inputs
+only are unchanged.
+
+power_when_output checks an inverter's leakage at duty d against
+d * L(A=1) + (1 - d) * L(A=0) for d in {0, 0.1, 0.5, 0.9, 1}, an input
+internal power condition naming the output, and that a NAND2's input
+states and a flop's D and QN states are weighted as before.
+
+asap7 RVT FF, one instance, report_power before -> after, leakage in
+pW (input duty 0.1 / 0.5 / 0.9):
+
+  INVx1     37.28 / 16.31 / 16.21 -> 43.15 / 32.62 / 22.08
+  BUFx2     57.27 / 43.49 / 85.37 -> 72.93 / 86.98 / 101.03
+  AOI21xp5  52.19 / 18.58 / 14.99 -> 60.57 / 40.40 / 16.66
+  OAI21xp5  64.94 / 34.07 / 24.10 -> 66.90 / 59.75 / 32.27
+
+AOI21xp5 and OAI21xp5 internal power moves +0.2% to +0.7%; XOR2xp5,
+NAND2xp5, ICGx1 and TIEHIx1 are unchanged, and so is every other
+OpenSTA regression.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ power/Power.cc                   |  73 ++++++++++-
+ power/Power.hh                   |  10 ++
+ power/test/CMakeLists.txt        |   1 +
+ power/test/power_when_output.lib | 200 +++++++++++++++++++++++++++++++
+ power/test/power_when_output.ok  |  16 +++
+ power/test/power_when_output.tcl |  49 ++++++++
+ power/test/power_when_output.v   |   9 ++
+ 7 files changed, 353 insertions(+), 5 deletions(-)
+ create mode 100644 power/test/power_when_output.lib
+ create mode 100644 power/test/power_when_output.ok
+ create mode 100644 power/test/power_when_output.tcl
+ create mode 100644 power/test/power_when_output.v
+
+diff --git a/openroad/sta/power/Power.cc b/openroad/sta/power/Power.cc
+index 96581c6..8e570a4 100644
+--- a/openroad/sta/power/Power.cc
++++ b/openroad/sta/power/Power.cc
+@@ -846,7 +846,9 @@ Power::evalDiffDuty(FuncExpr *expr,
+   Cudd_Ref(diff);
+   // Weight state dependent internal power groups by P(when).
+   if (when) {
+-    DdNode *when_bdd = bdd_.funcBdd(when);
++    DdNode *when_bdd = whenOutputsBdd(when);
++    if (when_bdd == nullptr)
++      when_bdd = bdd_.funcBdd(when);
+     DdNode *diff_when = Cudd_bddAnd(bdd_.cuddMgr(), diff, when_bdd);
+     Cudd_Ref(diff_when);
+     Cudd_RecursiveDeref(bdd_.cuddMgr(), when_bdd);
+@@ -861,6 +863,68 @@ Power::evalDiffDuty(FuncExpr *expr,
+   return duty;
+ }
+ 
++float
++Power::evalWhenDuty(FuncExpr *when,
++                    const Instance *inst)
++{
++  DdNode *bdd = whenOutputsBdd(when);
++  if (bdd == nullptr)
++    return evalActivity(when, inst).duty();
++  float duty = evalBddDuty(bdd, inst);
++  Cudd_RecursiveDeref(bdd_.cuddMgr(), bdd);
++  bdd_.clearVarMap();
++  return duty;
++}
++
++// A combinational output is a function of the inputs, not a variable
++// independent of them: weighting the Y of an inverter's "A * !Y" by
++// its own duty finds d^2 instead of d.
++DdNode *
++Power::whenOutputsBdd(const FuncExpr *when)
++{
++  LibertyPortSet when_ports = when->ports();
++  LibertyPortSeq outputs;
++  for (LibertyPort *port : sortByName(&when_ports)) {
++    if (isCombinationalOutput(port))
++      outputs.push_back(port);
++    else if (!port->direction()->isInput())
++      return nullptr;
++  }
++  if (outputs.empty())
++    return nullptr;
++  DdManager *cudd_mgr = bdd_.cuddMgr();
++  DdNode *bdd = bdd_.funcBdd(when);
++  for (LibertyPort *output : outputs) {
++    unsigned var_index = Cudd_NodeReadIndex(bdd_.findNode(output));
++    DdNode *func_bdd = bdd_.funcBdd(output->function());
++    DdNode *composed = Cudd_bddCompose(cudd_mgr, bdd, func_bdd, var_index);
++    Cudd_Ref(composed);
++    Cudd_RecursiveDeref(cudd_mgr, func_bdd);
++    Cudd_RecursiveDeref(cudd_mgr, bdd);
++    bdd = composed;
++  }
++  return bdd;
++}
++
++bool
++Power::isCombinationalOutput(const LibertyPort *port) const
++{
++  const LibertyCell *cell = port->libertyCell();
++  const FuncExpr *func = port->function();
++  if (port->direction()->isOutput()
++      && func
++      && port->tristateEnable() == nullptr
++      && !cell->isSequential()
++      && !cell->isClockGate()) {
++    for (const LibertyPort *func_port : func->ports()) {
++      if (!func_port->direction()->isInput())
++        return false;
++    }
++    return true;
++  }
++  return false;
++}
++
+ // As suggested by
+ // https://stackoverflow.com/questions/63326728/cudd-printminterm-accessing-the-individual-minterms-in-the-sum-of-products
+ float
+@@ -1466,7 +1530,7 @@ Power::findInputInternalPower(const Pin *pin,
+         FuncExpr *when = pwr->when();
+         // Weight each group by P(when).
+         if (when)
+-          duty = evalActivity(when, inst).duty();
++          duty = evalWhenDuty(when, inst);
+         float port_internal = energy * duty * activity.density();
+         debugPrint(debug_, "power", 2, " {} {}  {:.2f}  {:.2f} {:9.2e} {:9.2e} {}",
+                    port->name(), when ? when->to_string() : "",
+@@ -1620,7 +1684,7 @@ Power::findInputDuty(const Instance *inst,
+         return duty;
+       }
+       else if (when)
+-        return evalActivity(when, inst).duty();
++        return evalWhenDuty(when, inst);
+       else if (scene_->mode()->clkNetwork()->isClock(from_vertex->pin()))
+         return 0.5;
+       return 0.5;
+@@ -1740,8 +1804,7 @@ Power::findLeakagePower(const Instance *inst,
+           sum.cond_true_exists = true;
+         }
+         else {
+-          PwrActivity cond_activity = evalActivity(when, inst);
+-          float cond_duty = cond_activity.duty();
++          float cond_duty = evalWhenDuty(when, inst);
+           debugPrint(debug_, "power", 2, "leakage {} {} {} {:.3e} * {:.2f}",
+                      cell->name(),
+                      pg_name,
+diff --git a/openroad/sta/power/Power.hh b/openroad/sta/power/Power.hh
+index 0a4d817..0d49615 100644
+--- a/openroad/sta/power/Power.hh
++++ b/openroad/sta/power/Power.hh
+@@ -244,6 +244,16 @@ protected:
+                      LibertyPort *from_port,
+                      FuncExpr *when,
+                      const Instance *inst);
++  // Duty of a leakage or internal power when condition.
++  float evalWhenDuty(FuncExpr *when,
++                     const Instance *inst);
++  // BDD of when with the combinational outputs it names replaced by
++  // their functions of the inputs, or nullptr when it names none or
++  // names any other kind of port than an input.
++  DdNode *whenOutputsBdd(const FuncExpr *when);
++  // An output whose function names inputs only, of a cell with no
++  // state.
++  bool isCombinationalOutput(const LibertyPort *port) const;
+   bool evalBddChangeDensity(DdNode *bdd,
+                             const Instance *inst,
+                             // Return value.
+diff --git a/openroad/sta/power/test/CMakeLists.txt b/openroad/sta/power/test/CMakeLists.txt
+index 3468b4f..19270ca 100644
+--- a/openroad/sta/power/test/CMakeLists.txt
++++ b/openroad/sta/power/test/CMakeLists.txt
+@@ -13,6 +13,7 @@ sta_module_tests("power"
+     enable_flop
+     scene_clk
+     tie_when
++    when_output
+ )
+ 
+ add_subdirectory(cpp)
+diff --git a/openroad/sta/power/test/power_when_output.lib b/openroad/sta/power/test/power_when_output.lib
+new file mode 100644
+index 0000000..0a12cbc
+--- /dev/null
++++ b/openroad/sta/power/test/power_when_output.lib
+@@ -0,0 +1,200 @@
++library (power_when_output) {
++  delay_model : table_lookup;
++  time_unit : "1ns";
++  voltage_unit : "1V";
++  current_unit : "1mA";
++  leakage_power_unit : "1nW";
++  capacitive_load_unit (1,ff);
++  pulling_resistance_unit : "1kohm";
++  nom_process : 1.0;
++  nom_temperature : 25.0;
++  nom_voltage : 1.1;
++  default_operating_conditions : typical;
++  operating_conditions (typical) {
++    process : 1.0;
++    temperature : 25.0;
++    voltage : 1.1;
++  }
++
++  /* Leakage states written over the input and the output, as many
++     libraries write them. Y is !A, so "A * !Y" is A. The unconditional
++     value applies only when no state is given. */
++  cell (INV_W) {
++    leakage_power () {
++      when : "A * !Y";
++      value : 1.0;
++    }
++    leakage_power () {
++      when : "!A * Y";
++      value : 3.0;
++    }
++    leakage_power () {
++      value : 2.0;
++    }
++    pin (A) {
++      direction : input;
++      capacitance : 1.0;
++    }
++    pin (Y) {
++      direction : output;
++      function : "!A";
++      timing () {
++        related_pin : "A";
++        timing_sense : negative_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++    }
++  }
++
++  /* Leakage states written over the inputs only. */
++  cell (NAND2_W) {
++    leakage_power () {
++      when : "!A * !B";
++      value : 1.0;
++    }
++    leakage_power () {
++      when : "!A * B";
++      value : 2.0;
++    }
++    leakage_power () {
++      when : "A * !B";
++      value : 3.0;
++    }
++    leakage_power () {
++      when : "A * B";
++      value : 4.0;
++    }
++    pin (A) {
++      direction : input;
++      capacitance : 1.0;
++    }
++    pin (B) {
++      direction : input;
++      capacitance : 1.0;
++    }
++    pin (Y) {
++      direction : output;
++      function : "!(A * B)";
++      timing () {
++        related_pin : "A";
++        timing_sense : negative_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++      timing () {
++        related_pin : "B";
++        timing_sense : negative_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++    }
++  }
++
++  /* B's internal power when A1 and A2 hold Y high, written with Y. */
++  cell (AO21_W) {
++    pin (A1) {
++      direction : input;
++      capacitance : 1.0;
++    }
++    pin (A2) {
++      direction : input;
++      capacitance : 1.0;
++    }
++    pin (B) {
++      direction : input;
++      capacitance : 1.0;
++      internal_power () {
++        when : "A1 * A2 * Y";
++        rise_power (scalar) { values ("1.0"); }
++        fall_power (scalar) { values ("1.0"); }
++      }
++    }
++    pin (Y) {
++      direction : output;
++      function : "(A1 * A2) + B";
++      timing () {
++        related_pin : "A1";
++        timing_sense : positive_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++      timing () {
++        related_pin : "A2";
++        timing_sense : positive_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++      timing () {
++        related_pin : "B";
++        timing_sense : positive_unate;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++    }
++  }
++
++  /* Leakage states over the data input and the state output QN. QN is
++     the flop's state, not a function of D, and keeps its own duty. */
++  cell (DFF_W) {
++    ff (IQ, IQN) {
++      next_state : "D";
++      clocked_on : "CK";
++    }
++    leakage_power () {
++      when : "D * QN";
++      value : 1.0;
++    }
++    leakage_power () {
++      when : "D * !QN";
++      value : 2.0;
++    }
++    leakage_power () {
++      when : "!D * QN";
++      value : 3.0;
++    }
++    leakage_power () {
++      when : "!D * !QN";
++      value : 4.0;
++    }
++    pin (D) {
++      direction : input;
++      capacitance : 1.0;
++      timing () {
++        related_pin : "CK";
++        timing_type : setup_rising;
++        rise_constraint (scalar) { values ("0.01"); }
++        fall_constraint (scalar) { values ("0.01"); }
++      }
++    }
++    pin (CK) {
++      direction : input;
++      capacitance : 1.0;
++      clock : true;
++    }
++    pin (QN) {
++      direction : output;
++      function : "IQN";
++      timing () {
++        related_pin : "CK";
++        timing_type : rising_edge;
++        cell_rise (scalar) { values ("0.05"); }
++        cell_fall (scalar) { values ("0.05"); }
++        rise_transition (scalar) { values ("0.02"); }
++        fall_transition (scalar) { values ("0.02"); }
++      }
++    }
++  }
++}
+diff --git a/openroad/sta/power/test/power_when_output.ok b/openroad/sta/power/test/power_when_output.ok
+new file mode 100644
+index 0000000..bcbb1e8
+--- /dev/null
++++ b/openroad/sta/power/test/power_when_output.ok
+@@ -0,0 +1,16 @@
++u_inv duty 0 leakage 3.000000e-09 expected 3.000000e-09 ok
++u_nand duty 0 leakage 1.500000e-09 expected 1.500000e-09 ok
++u_ao duty 0 internal 0.000000e+00 expected 0.000000e+00 ok
++u_inv duty 0.1 leakage 2.800000e-09 expected 2.800000e-09 ok
++u_nand duty 0.1 leakage 1.700000e-09 expected 1.700000e-09 ok
++u_ao duty 0.1 internal 1.000000e-09 expected 1.000000e-09 ok
++u_inv duty 0.5 leakage 2.000000e-09 expected 2.000000e-09 ok
++u_nand duty 0.5 leakage 2.500000e-09 expected 2.500000e-09 ok
++u_ao duty 0.5 internal 2.500000e-08 expected 2.500000e-08 ok
++u_inv duty 0.9 leakage 1.200000e-09 expected 1.200000e-09 ok
++u_nand duty 0.9 leakage 3.300000e-09 expected 3.300000e-09 ok
++u_ao duty 0.9 internal 8.100000e-08 expected 8.100000e-08 ok
++u_inv duty 1 leakage 1.000000e-09 expected 1.000000e-09 ok
++u_nand duty 1 leakage 3.500000e-09 expected 3.500000e-09 ok
++u_ao duty 1 internal 1.000000e-07 expected 1.000000e-07 ok
++u_ff leakage 2.700000e-09 expected 2.700000e-09 ok
+diff --git a/openroad/sta/power/test/power_when_output.tcl b/openroad/sta/power/test/power_when_output.tcl
+new file mode 100644
+index 0000000..ffa1820
+--- /dev/null
++++ b/openroad/sta/power/test/power_when_output.tcl
+@@ -0,0 +1,49 @@
++# Leakage and internal power when conditions that name a combinational
++# output. The output is a function of the inputs, so u_inv's leakage at
++# input duty d is d * L(A=1) + (1 - d) * L(A=0), and u_ao's "A1 * A2 * Y"
++# holds with probability P(A1) * P(A2). Conditions over inputs only
++# (u_nand) and over a flop's state (u_ff) are evaluated as before.
++read_liberty power_when_output.lib
++read_verilog power_when_output.v
++link_design top
++create_clock -name clk -period 10 [get_ports clk]
++set_input_delay 0 -clock clk [delete_from_list [all_inputs] [get_ports clk]]
++
++proc check { what reported expected } {
++  if { abs($reported - $expected) <= 1e-6 * abs($expected) + 1e-15 } {
++    set result "ok"
++  } else {
++    set result "wrong"
++  }
++  puts [format "%s %.6e expected %.6e %s" $what $reported $expected $result]
++}
++
++proc inst_power { inst } {
++  return [sta::instance_power [get_cells $inst] [sta::cmd_scene]]
++}
++
++set_power_activity -input_ports b -density 0.1 -duty 0.5
++set_power_activity -input_ports d -density 0.1 -duty 0.3
++foreach duty {0 0.1 0.5 0.9 1} {
++  set_power_activity -input_ports {a c} -density 0 -duty $duty
++  lassign [inst_power u_inv] internal switching leakage
++  check "u_inv duty $duty leakage" $leakage \
++    [expr ($duty * 1.0 + (1.0 - $duty) * 3.0) * 1e-9]
++  lassign [inst_power u_nand] internal switching leakage
++  set db 0.5
++  check "u_nand duty $duty leakage" $leakage \
++    [expr ((1 - $duty) * (1 - $db) * 1.0 + (1 - $duty) * $db * 2.0 \
++             + $duty * (1 - $db) * 3.0 + $duty * $db * 4.0) * 1e-9]
++  # 1 fJ per B transition, 0.1 transitions/ns.
++  lassign [inst_power u_ao] internal
++  check "u_ao duty $duty internal" $internal \
++    [expr 1e-15 * 0.1e9 * $duty * $duty]
++}
++# QN is the state D was clocked into, so its duty is 1 - P(D) and it is
++# independent of D's present value.
++lassign [inst_power u_ff] internal switching leakage
++set dd 0.3
++set dqn [expr 1 - $dd]
++check "u_ff leakage" $leakage \
++  [expr ($dd * $dqn * 1.0 + $dd * (1 - $dqn) * 2.0 \
++           + (1 - $dd) * $dqn * 3.0 + (1 - $dd) * (1 - $dqn) * 4.0) * 1e-9]
+diff --git a/openroad/sta/power/test/power_when_output.v b/openroad/sta/power/test/power_when_output.v
+new file mode 100644
+index 0000000..523de0e
+--- /dev/null
++++ b/openroad/sta/power/test/power_when_output.v
+@@ -0,0 +1,9 @@
++module top (clk, a, b, c, d, y1, y2, y3, q);
++  input clk, a, b, c, d;
++  output y1, y2, y3, q;
++
++  INV_W u_inv (.A(a), .Y(y1));
++  NAND2_W u_nand (.A(a), .B(b), .Y(y2));
++  AO21_W u_ao (.A1(a), .A2(c), .B(b), .Y(y3));
++  DFF_W u_ff (.CK(clk), .D(d), .QN(q));
++endmodule
+-- 
+2.53.0
+

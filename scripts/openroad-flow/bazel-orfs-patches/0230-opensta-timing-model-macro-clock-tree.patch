@@ -1,0 +1,242 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] write_timing_model: a macro sink's clock tree path includes
+ its own tree
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The model's min/max_clock_tree_path is the earliest/latest clock latency
+at a register inside the block. ClkLatency::findClkDelays chooses that
+sink on its latency, which for a hard macro is the arrival at its clock
+pin plus the macro's own clock tree (its min/max_clock_tree_path), but
+makeClkTreePaths wrote the arrival at the pin alone. When a macro is the
+extreme sink, the model lost the macro's tree: the bound it set could
+fall on the wrong side of the other one.
+
+On XiangShan's VecRegionModule (bazel-orfs), a VfRegFile macro inside it
+was the latest sink: 216.3 ps to its clock pin plus 363.8 ps inside it,
+580.1 ps; the model wrote max_clock_tree_path 216.3 against a min of
+501.1. A parent's CTS balances a macro by its max_clock_tree_path; with
+that figure 364 ps short, the parent's CTS clocked the block 245 ps late. With an earlier
+VfRegFile pin the same macro was the earliest sink, and the min came out
+170.9 instead of 486.7.
+
+The model now writes the latency the sink was chosen on, less the source
+latency: the pin arrival plus lib_clk_delay. Where no macro is the
+extreme sink, lib_clk_delay is 0 and the model is unchanged.
+
+search_timing_model_clktree_macro fails without the change (max 0.000
+below min 0.031: the macro sits on the clock port) and passes with it
+(max 0.400/0.420, the macro's own tree).
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ search/MakeTimingModel.cc                     |  7 +-
+ .../search_timing_model_clktree_macro.lib     | 71 +++++++++++++++++++
+ .../test/search_timing_model_clktree_macro.ok |  4 ++
+ .../search_timing_model_clktree_macro.tcl     | 60 ++++++++++++++++
+ .../test/search_timing_model_clktree_macro.v  | 13 ++++
+ 5 files changed, 154 insertions(+), 1 deletion(-)
+ create mode 100644 search/test/search_timing_model_clktree_macro.lib
+ create mode 100644 search/test/search_timing_model_clktree_macro.ok
+ create mode 100644 search/test/search_timing_model_clktree_macro.tcl
+ create mode 100644 search/test/search_timing_model_clktree_macro.v
+
+diff --git a/openroad/sta/search/MakeTimingModel.cc b/openroad/sta/search/MakeTimingModel.cc
+index c219065..02b1ccb 100644
+--- a/openroad/sta/search/MakeTimingModel.cc
++++ b/openroad/sta/search/MakeTimingModel.cc
+@@ -714,7 +714,12 @@ MakeTimingModel::makeClkTreePaths(LibertyPort *lib_port,
+     delays.delay(clk_rf, end_rf, min_max, insertion, delay, lib_clk_delay, latency,
+                  clk_path, exists);
+     if (exists) {
+-      TimingModel *model = makeGateModelScalar(delay, end_rf);
++      // findClkDelays chose this sink on its latency, which for a macro
++      // with its own clock tree is the arrival at its clock pin plus that
++      // tree (lib_clk_delay). The model's clock tree path is that sum; the
++      // pin arrival alone can fall below the other bound (max below min).
++      Delay tree_delay = delaySum(delay, lib_clk_delay, sta_);
++      TimingModel *model = makeGateModelScalar(tree_delay, end_rf);
+       if (attrs == nullptr)
+         attrs = std::make_shared<TimingArcAttrs>();
+       attrs->setModel(end_rf, model);
+diff --git a/openroad/sta/search/test/search_timing_model_clktree_macro.lib b/openroad/sta/search/test/search_timing_model_clktree_macro.lib
+new file mode 100644
+index 0000000..6be60e4
+--- /dev/null
++++ b/openroad/sta/search/test/search_timing_model_clktree_macro.lib
+@@ -0,0 +1,71 @@
++/* A hard macro with its own clock tree, as write_timing_model writes one:
++   its registers sit 0.30-0.31 ns (min) and 0.40-0.42 ns (max) behind
++   its clock pin. Used by search_timing_model_clktree_macro.tcl. */
++library (search_timing_model_clktree_macro) {
++  delay_model : table_lookup;
++  time_unit : "1ns";
++  voltage_unit : "1V";
++  current_unit : "1mA";
++  capacitive_load_unit (1,ff);
++  pulling_resistance_unit : "1kohm";
++  input_threshold_pct_rise : 50;
++  input_threshold_pct_fall : 50;
++  output_threshold_pct_rise : 50;
++  output_threshold_pct_fall : 50;
++  slew_lower_threshold_pct_rise : 10;
++  slew_lower_threshold_pct_fall : 10;
++  slew_upper_threshold_pct_rise : 90;
++  slew_upper_threshold_pct_fall : 90;
++  nom_process : 1.0;
++  nom_temperature : 25.0;
++  nom_voltage : 1.1;
++
++  cell (clktree_macro) {
++    area : 100;
++    is_macro_cell : true;
++    pin (CLK) {
++      direction : input;
++      clock : true;
++      capacitance : 1.0;
++      timing () {
++        timing_sense : positive_unate;
++        timing_type : min_clock_tree_path;
++        cell_rise (scalar) { values ("0.30"); }
++        cell_fall (scalar) { values ("0.31"); }
++      }
++      timing () {
++        timing_sense : positive_unate;
++        timing_type : max_clock_tree_path;
++        cell_rise (scalar) { values ("0.40"); }
++        cell_fall (scalar) { values ("0.42"); }
++      }
++    }
++    pin (D) {
++      direction : input;
++      capacitance : 1.0;
++      timing () {
++        related_pin : "CLK";
++        timing_type : setup_rising;
++        rise_constraint (scalar) { values ("0.05"); }
++        fall_constraint (scalar) { values ("0.05"); }
++      }
++      timing () {
++        related_pin : "CLK";
++        timing_type : hold_rising;
++        rise_constraint (scalar) { values ("0.02"); }
++        fall_constraint (scalar) { values ("0.02"); }
++      }
++    }
++    pin (Q) {
++      direction : output;
++      timing () {
++        related_pin : "CLK";
++        timing_type : rising_edge;
++        cell_rise (scalar) { values ("0.50"); }
++        cell_fall (scalar) { values ("0.50"); }
++        rise_transition (scalar) { values ("0.05"); }
++        fall_transition (scalar) { values ("0.05"); }
++      }
++    }
++  }
++}
+diff --git a/openroad/sta/search/test/search_timing_model_clktree_macro.ok b/openroad/sta/search/test/search_timing_model_clktree_macro.ok
+new file mode 100644
+index 0000000..2fe8333
+--- /dev/null
++++ b/openroad/sta/search/test/search_timing_model_clktree_macro.ok
+@@ -0,0 +1,4 @@
++ok: max_clock_tree_path is not below min_clock_tree_path
++ok: max_clock_tree_path rise is the macro's pin arrival plus its 0.40 ns tree
++ok: max_clock_tree_path fall is the macro's pin arrival plus its 0.42 ns tree
++ok: min_clock_tree_path rise is the earliest flop's clock arrival
+diff --git a/openroad/sta/search/test/search_timing_model_clktree_macro.tcl b/openroad/sta/search/test/search_timing_model_clktree_macro.tcl
+new file mode 100644
+index 0000000..070b017
+--- /dev/null
++++ b/openroad/sta/search/test/search_timing_model_clktree_macro.tcl
+@@ -0,0 +1,60 @@
++# write_timing_model's clock tree arcs when a clock sink is a hard macro
++# with its own clock tree (min/max_clock_tree_path on its clock pin).
++#
++# The model's max_clock_tree_path is the latest clock arrival at a
++# register inside the block, its min_clock_tree_path the earliest. A
++# macro's registers sit its own clock tree behind its clock pin, so the
++# macro's latency is the arrival at its pin plus that tree; ClkLatency
++# chooses the extreme sinks on that sum. Here the macro's registers are
++# the latest sinks (pin + 0.40/0.42 ns) and the flops behind the clock
++# buffer the earliest, so the model's max is the macro's pin arrival plus
++# 0.40/0.42 and lies above its min.
++source ../../test/helpers.tcl
++
++proc clk_tree_path { lib_file type } {
++  set in [open $lib_file r]
++  set text [read $in]
++  close $in
++  set re {timing_type : TYPE_clock_tree_path;\s*cell_rise\(scalar\) \{\s*values\("([^"]+)"\);\s*\}\s*cell_fall\(scalar\) \{\s*values\("([^"]+)"\);}
++  if { ![regexp [string map [list TYPE $type] $re] $text ignore rise fall] } {
++    error "no ${type}_clock_tree_path in $lib_file"
++  }
++  return [list $rise $fall]
++}
++
++proc check { what ok } {
++  if { !$ok } {
++    error "FAIL: $what"
++  }
++  puts "ok: $what"
++}
++
++read_liberty ../../test/nangate45/Nangate45_typ.lib
++read_liberty search_timing_model_clktree_macro.lib
++read_verilog search_timing_model_clktree_macro.v
++link_design clktree_macro_top
++
++create_clock -name clk -period 10 [get_ports clk]
++set_propagated_clock [get_clocks clk]
++set_input_delay -clock clk 1.0 [get_ports in1]
++set_output_delay -clock clk 1.0 [get_ports out1]
++set_input_transition 0.05 [all_inputs]
++
++set model [make_result_file search_timing_model_clktree_macro_model.lib]
++write_timing_model -library_name clktree_macro_model \
++  -cell_name clktree_macro_top $model
++
++lassign [clk_tree_path $model min] min_rise min_fall
++lassign [clk_tree_path $model max] max_rise max_fall
++set mac_rise [get_property [get_pins mac/CLK] arrival_max_rise]
++set mac_fall [get_property [get_pins mac/CLK] arrival_max_fall]
++set ff_rise [get_property [get_pins ff1/CK] arrival_min_rise]
++
++check "max_clock_tree_path is not below min_clock_tree_path" \
++  [expr { $max_rise >= $min_rise && $max_fall >= $min_fall }]
++check "max_clock_tree_path rise is the macro's pin arrival plus its 0.40 ns tree" \
++  [expr { abs($max_rise - ($mac_rise + 0.40)) < 1e-3 }]
++check "max_clock_tree_path fall is the macro's pin arrival plus its 0.42 ns tree" \
++  [expr { abs($max_fall - (($mac_fall - 5.0) + 0.42)) < 1e-3 }]
++check "min_clock_tree_path rise is the earliest flop's clock arrival" \
++  [expr { abs($min_rise - $ff_rise) < 1e-3 }]
+diff --git a/openroad/sta/search/test/search_timing_model_clktree_macro.v b/openroad/sta/search/test/search_timing_model_clktree_macro.v
+new file mode 100644
+index 0000000..608e0d8
+--- /dev/null
++++ b/openroad/sta/search/test/search_timing_model_clktree_macro.v
+@@ -0,0 +1,13 @@
++// Two registers behind a clock buffer and a hard macro on the clock port
++// itself: the macro's pin is the earliest clock sink, its registers (the
++// pin plus the macro's own clock tree) the latest.
++module clktree_macro_top (clk, in1, out1);
++  input clk, in1;
++  output out1;
++  wire clk_buf, n1, n2;
++
++  BUF_X1 ckbuf (.A(clk), .Z(clk_buf));
++  DFF_X1 ff1 (.D(in1), .CK(clk_buf), .Q(n1));
++  clktree_macro mac (.CLK(clk), .D(n1), .Q(n2));
++  DFF_X1 ff2 (.D(n2), .CK(clk_buf), .Q(out1));
++endmodule
+-- 
+2.53.0
+

@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: store the maze's search directions in a byte
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+directions_3D_ holds one of seven directions per GCell and layer, in an
+enum class with the default int underlying type: 4 bytes where 1 does.
+On a 34 M GCell x 9 layer die that is about 0.9 GB less.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/include/DataType.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openroad/grt/src/fastroute/include/DataType.h b/openroad/grt/src/fastroute/include/DataType.h
+index ae2772d..397287c 100644
+--- a/openroad/grt/src/fastroute/include/DataType.h
++++ b/openroad/grt/src/fastroute/include/DataType.h
+@@ -30,7 +30,7 @@ enum class RouteType
+ 
+ std::ostream& operator<<(std::ostream& os, const RouteType& type);
+ 
+-enum class Direction
++enum class Direction : uint8_t
+ {
+   North,
+   East,
+-- 
+2.53.0
+

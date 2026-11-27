@@ -1,0 +1,147 @@
+yosys: test proc_rom's ROM names alone and after earlier ROMs
+
+The test for yosys-0003: a module gets the same ROM names alone and
+after a module whose ROMs are created first, and a taken name is
+skipped.
+
+--- /dev/null
++++ b/tests/proc/proc_rom_names.ys
+@@ -0,0 +1,138 @@
++# proc_rom numbers a ROM within its module: the same module gets the same
++# names alone and after a module whose ROMs are created first.
++
++read_verilog <<EOT
++module lut(input [3:0] a, output reg [7:0] d);
++always @*
++	case (a)
++		4'h0: d = 8'h12;
++		4'h1: d = 8'h34;
++		4'h2: d = 8'h56;
++		4'h3: d = 8'h78;
++		4'h4: d = 8'h9a;
++		4'h5: d = 8'hbc;
++		4'h6: d = 8'hde;
++		4'h7: d = 8'hff;
++		4'h8: d = 8'h61;
++		4'h9: d = 8'h49;
++		4'ha: d = 8'h36;
++		4'hb: d = 8'h81;
++		4'hc: d = 8'h8c;
++		4'hd: d = 8'ha9;
++		4'he: d = 8'h99;
++		4'hf: d = 8'h51;
++	endcase
++endmodule
++EOT
++proc
++select -assert-count 1 lut/m:*
++select -assert-count 1 lut/m:$auto$proc_rom$0
++select -assert-count 1 lut/w:$auto$proc_rom$0$rdata
++select -assert-count 1 lut/c:$auto$proc_rom$0$rd t:$memrd_v2 %i
++select -assert-count 1 lut/c:$auto$proc_rom$0$init t:$meminit %i
++
++design -reset
++
++read_verilog <<EOT
++module early(input [3:0] a, output reg [7:0] p, output reg [7:0] q);
++always @*
++	case (a)
++		4'h0: p = 8'h21;
++		4'h1: p = 8'h43;
++		4'h2: p = 8'h65;
++		4'h3: p = 8'h87;
++		4'h4: p = 8'ha9;
++		4'h5: p = 8'hcb;
++		4'h6: p = 8'hed;
++		4'h7: p = 8'hff;
++		4'h8: p = 8'h16;
++		4'h9: p = 8'h94;
++		4'ha: p = 8'h63;
++		4'hb: p = 8'h18;
++		4'hc: p = 8'hc8;
++		4'hd: p = 8'h9a;
++		4'he: p = 8'h99;
++		4'hf: p = 8'h15;
++	endcase
++always @*
++	case (a)
++		4'h0: q = 8'h01;
++		4'h1: q = 8'h02;
++		4'h2: q = 8'h03;
++		4'h3: q = 8'h04;
++		4'h4: q = 8'h05;
++		4'h5: q = 8'h06;
++		4'h6: q = 8'h07;
++		4'h7: q = 8'h08;
++		4'h8: q = 8'h09;
++		4'h9: q = 8'h0a;
++		4'ha: q = 8'h0b;
++		4'hb: q = 8'h0c;
++		4'hc: q = 8'h0d;
++		4'hd: q = 8'h0e;
++		4'he: q = 8'h0f;
++		4'hf: q = 8'h10;
++	endcase
++endmodule
++
++module lut(input [3:0] a, output reg [7:0] d);
++always @*
++	case (a)
++		4'h0: d = 8'h12;
++		4'h1: d = 8'h34;
++		4'h2: d = 8'h56;
++		4'h3: d = 8'h78;
++		4'h4: d = 8'h9a;
++		4'h5: d = 8'hbc;
++		4'h6: d = 8'hde;
++		4'h7: d = 8'hff;
++		4'h8: d = 8'h61;
++		4'h9: d = 8'h49;
++		4'ha: d = 8'h36;
++		4'hb: d = 8'h81;
++		4'hc: d = 8'h8c;
++		4'hd: d = 8'ha9;
++		4'he: d = 8'h99;
++		4'hf: d = 8'h51;
++	endcase
++endmodule
++EOT
++proc
++select -assert-count 1 lut/m:*
++select -assert-count 1 lut/m:$auto$proc_rom$0
++select -assert-count 1 lut/w:$auto$proc_rom$0$rdata
++select -assert-count 1 lut/c:$auto$proc_rom$0$rd t:$memrd_v2 %i
++select -assert-count 1 lut/c:$auto$proc_rom$0$init t:$meminit %i
++select -assert-count 2 early/m:*
++select -assert-count 1 early/m:$auto$proc_rom$0
++select -assert-count 1 early/m:$auto$proc_rom$1
++
++design -reset
++
++# A name already taken in the module is skipped.
++read_verilog <<EOT
++module lut(input [3:0] a, output reg [7:0] d);
++always @*
++	case (a)
++		4'h0: d = 8'h12;
++		4'h1: d = 8'h34;
++		4'h2: d = 8'h56;
++		4'h3: d = 8'h78;
++		4'h4: d = 8'h9a;
++		4'h5: d = 8'hbc;
++		4'h6: d = 8'hde;
++		4'h7: d = 8'hff;
++		4'h8: d = 8'h61;
++		4'h9: d = 8'h49;
++		4'ha: d = 8'h36;
++		4'hb: d = 8'h81;
++		4'hc: d = 8'h8c;
++		4'hd: d = 8'ha9;
++		4'he: d = 8'h99;
++		4'hf: d = 8'h51;
++	endcase
++endmodule
++EOT
++add -wire $auto$proc_rom$0$rdata 1 lut
++proc
++select -assert-count 1 lut/m:$auto$proc_rom$1

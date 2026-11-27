@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 26 Oct 2026 18:58:53 +0100
+Subject: [PATCH] search: filteredEndpoints asks isEndpoint on every thread
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Search::filteredEndpoints asked isEndpoint of every vertex a filtered
+search reached, on the main thread. isEndpoint follows the vertex's
+fanin and fanout edges through the search predicate and the constant
+simulation, and write_timing_model asks for the endpoints of every
+input edge's search, so the main thread spent 1.5 s of an 8.1 s
+write_timing_model at 32 threads there (OpenROAD#11999).
+
+With more than one thread the vertices are now dispatched in chunks,
+each thread writing whether its vertices are endpoints, and the
+endpoints are gathered after finishTasks in filtered_arrivals_'s order,
+so the sequence returned is the same. isEndpoint reads the graph, the
+constraints and the simulation, as the arrival search's threads do.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ search/Search.cc | 28 +++++++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/openroad/sta/search/Search.cc b/openroad/sta/search/Search.cc
+index 9c434f6..e2c189b 100644
+--- a/openroad/sta/search/Search.cc
++++ b/openroad/sta/search/Search.cc
+@@ -40,6 +40,7 @@
+ #include "DataCheck.hh"
+ #include "Debug.hh"
+ #include "Delay.hh"
++#include "DispatchQueue.hh"
+ #include "ExceptionPath.hh"
+ #include "Fuzzy.hh"
+ #include "GatedClk.hh"
+@@ -691,9 +692,30 @@ VertexSeq
+ Search::filteredEndpoints()
+ {
+   VertexSeq ends;
+-  for (Vertex *vertex : filtered_arrivals_) {
+-    if (isEndpoint(vertex))
+-      ends.push_back(vertex);
++  if (thread_count_ == 1) {
++    for (Vertex *vertex : filtered_arrivals_) {
++      if (isEndpoint(vertex))
++        ends.push_back(vertex);
++    }
++  }
++  else {
++    // isEndpoint on every thread, the endpoints gathered in
++    // filtered_arrivals_'s order.
++    VertexSeq vertices(filtered_arrivals_.begin(), filtered_arrivals_.end());
++    std::vector<char> is_end(vertices.size());
++    constexpr size_t chunk_size = 256;
++    for (size_t from = 0; from < vertices.size(); from += chunk_size) {
++      size_t to = std::min(from + chunk_size, vertices.size());
++      dispatch_queue_->dispatch([this, &vertices, &is_end, from, to](size_t) {
++        for (size_t i = from; i < to; i++)
++          is_end[i] = isEndpoint(vertices[i]);
++      });
++    }
++    dispatch_queue_->finishTasks();
++    for (size_t i = 0; i < vertices.size(); i++) {
++      if (is_end[i])
++        ends.push_back(vertices[i]);
++    }
+   }
+   return ends;
+ }
+-- 
+2.53.0
+

@@ -382,3 +382,8 @@ bug-report.tar.gz
 # Python virtual environment
 .venv/
 venv/
+
+# Optional Bazel build outputs and local settings (scripts/openroad-flow/README.md)
+/.bazel/
+/user.bazelrc
+!/scripts/openroad-flow/xstile/gpl_driven_logs/*.log

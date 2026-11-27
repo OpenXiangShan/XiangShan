@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 26 Oct 2026 17:54:56 +0100
+Subject: [PATCH] search: a thread caches the tag groups it finds
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Search::findTagGroup took tag_group_lock_ for every lookup, from
+Search::setVertexArrivals at every vertex whose arrivals changed, so
+threads in the arrival search serialised on it (OpenROAD#11999).
+
+ArrivalVisitor's copies, one per thread of a parallel visit, now keep
+the tag groups they find, and findTagGroup takes the lock only for a
+group the thread has not seen. A copy lives for one visitParallel;
+tag groups are deleted only on the main thread, after it
+(deleteUnusedTagGroups, deleteFilterTagGroups), so a cached group
+cannot be stale. The visitor the main thread uses has no cache and
+looks up as before.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD whose OpenSTA carries it.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ include/sta/Search.hh | 10 ++++++++--
+ search/Search.cc      | 25 +++++++++++++++++++------
+ 2 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/openroad/sta/include/sta/Search.hh b/openroad/sta/include/sta/Search.hh
+index 8ee36f6..19a106b 100644
+--- a/openroad/sta/include/sta/Search.hh
++++ b/openroad/sta/include/sta/Search.hh
+@@ -266,7 +266,8 @@ public:
+                        const Mode *mode,
+                        TagGroupBldr *tag_bldr);
+   void setVertexArrivals(Vertex *vertex,
+-                         TagGroupBldr *tag_bldr);
++                         TagGroupBldr *tag_bldr,
++                         TagGroupSet *tag_group_cache = nullptr);
+   void tnsInvalid(Vertex *vertex);
+   [[nodiscard]] bool arrivalsChanged(Vertex *vertex,
+                                      TagGroupBldr *tag_bldr);
+@@ -543,7 +544,8 @@ protected:
+   void deletePaths();
+   // Delete with incremental tns/wns update.
+   void deletePathsIncr(Vertex *vertex);
+-  TagGroup *findTagGroup(TagGroupBldr *tag_bldr);
++  TagGroup *findTagGroup(TagGroupBldr *tag_bldr,
++                         TagGroupSet *tag_group_cache);
+   void deleteFilterTags();
+   void deleteFilterTagGroups();
+   void deleteFilterClkInfos();
+@@ -805,6 +807,10 @@ protected:
+   bool clks_only_;
+   TagGroupBldr *tag_bldr_;
+   TagGroupBldr *tag_bldr_no_crpr_;
++  // Tag groups this thread has found, so that it takes tag_group_lock_
++  // only for a group it has not seen. Copies made for a parallel visit
++  // have one; tag groups are not deleted while they live.
++  TagGroupSet *tag_group_cache_;
+   SearchPred *search_adj_;
+   bool crpr_active_;
+   bool has_fanin_one_;
+diff --git a/openroad/sta/search/Search.cc b/openroad/sta/search/Search.cc
+index 8df4654..b9da573 100644
+--- a/openroad/sta/search/Search.cc
++++ b/openroad/sta/search/Search.cc
+@@ -1079,14 +1079,16 @@ Search::findArrivalsSeed()
+ ////////////////////////////////////////////////////////////////
+ 
+ ArrivalVisitor::ArrivalVisitor(const StaState *sta) :
+-  PathVisitor(nullptr, false, sta)
++  PathVisitor(nullptr, false, sta),
++  tag_group_cache_(nullptr)
+ {
+   init0();
+   init(true, false, nullptr);
+ }
+ 
+ ArrivalVisitor::ArrivalVisitor(const ArrivalVisitor &arrival_visitor) :
+-  PathVisitor(arrival_visitor.pred_, true, &arrival_visitor)
++  PathVisitor(arrival_visitor.pred_, true, &arrival_visitor),
++  tag_group_cache_(new TagGroupSet(128))
+ {
+   init0();
+   init(arrival_visitor.always_to_endpoints_,
+@@ -1130,6 +1132,7 @@ ArrivalVisitor::~ArrivalVisitor()
+ {
+   delete tag_bldr_;
+   delete tag_bldr_no_crpr_;
++  delete tag_group_cache_;
+   delete search_adj_;
+ }
+ 
+@@ -1195,7 +1198,7 @@ ArrivalVisitor::visit(Vertex *vertex,
+   }
+   if (arrivals_changed) {
+     debugPrint(debug_, "search", 4, "arrivals changed");
+-    search_->setVertexArrivals(vertex, tag_bldr_);
++    search_->setVertexArrivals(vertex, tag_bldr_, tag_group_cache_);
+     search_->tnsInvalid(vertex);
+     constrainedRequiredsInvalid(vertex, is_clk);
+   }
+@@ -2768,9 +2771,16 @@ Search::mutateTag(Tag *from_tag,
+ }
+ 
+ TagGroup *
+-Search::findTagGroup(TagGroupBldr *tag_bldr)
++Search::findTagGroup(TagGroupBldr *tag_bldr,
++                     TagGroupSet *tag_group_cache)
+ {
+   TagGroup probe(tag_bldr, this);
++  if (tag_group_cache) {
++    TagGroup *tag_group = findKey(*tag_group_cache, &probe);
++    if (tag_group)
++      return tag_group;
++  }
++
+   LockGuard lock(tag_group_lock_);
+   TagGroup *tag_group = findKey(*tag_group_set_, &probe);
+   if (tag_group == nullptr) {
+@@ -2799,19 +2809,22 @@ Search::findTagGroup(TagGroupBldr *tag_bldr)
+     if (tag_group_next_ > tag_group_index_max)
+       report_->critical(1510, "max tag group index exceeded");
+   }
++  if (tag_group_cache)
++    tag_group_cache->insert(tag_group);
+   return tag_group;
+ }
+ 
+ void
+ Search::setVertexArrivals(Vertex *vertex,
+-                          TagGroupBldr *tag_bldr)
++                          TagGroupBldr *tag_bldr,
++                          TagGroupSet *tag_group_cache)
+ {
+   if (tag_bldr->empty())
+     deletePathsIncr(vertex);
+   else {
+     TagGroup *prev_tag_group = tagGroup(vertex);
+     Path *prev_paths = vertex->paths();
+-    TagGroup *tag_group = findTagGroup(tag_bldr);
++    TagGroup *tag_group = findTagGroup(tag_bldr, tag_group_cache);
+     if (tag_group == prev_tag_group) {
+       tag_bldr->copyPaths(tag_group, prev_paths);
+       requiredInvalid(vertex);
+-- 
+2.53.0
+

@@ -1,0 +1,191 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(default_visibility = ["//:__subpackages__"])
+
+# The array front end: in each module below, the per-entry logic XiangShan
+# writes as loops over its entries is found (entries.py) and extracted as
+# one entry cell instanced per entry (extract.py), so synthesis maps the
+# cell once; substitute.py puts the extractions back into the surgered
+# core. MemBlock's parts and the parent read the result
+# (xiangshan.bzl, XS_EXTRACTED). Each extraction is proven equal to the
+# module it came from by <top>_check_test, with a negative control
+# (<top>_control_test) that must come out different. The study behind it,
+# with its A/B flows, is bazel-orfs's
+# test/coremark_joule/designs/asap7/xiangshan/arrays (README.md there).
+
+# The RTL every module is extracted from: the surgered core XSTile's flows
+# read, so an extracted module has the ports its parent instances.
+SURGERED = "//scripts/openroad-flow/xstile/surgery:xiangshan_surgered"
+
+# The modules extracted and put back into the core.
+INTEGRATED = [
+    "LoadQueueRAR",
+    "LoadQueueReplay",
+    "PhysicalStoreQueue",
+    "Rob",
+    "TLBFA_1",
+    "VirtualStoreQueue",
+]
+
+# RenameBuffer and VTypeBuffer stay modules of their own, as the plan keeps
+# them: its macro placement names the register file inside RenameBuffer
+# by that path (rob/rab/renameBuffer), which flattening would rename.
+BLACKBOXES = {
+    "Rob": [
+        "RenameBuffer",
+        "RobEntryFile",
+        "VTypeBuffer",
+    ],
+}
+
+py_library(
+    name = "dryrun_lib",
+    srcs = ["dryrun.py"],
+    imports = ["."],
+)
+
+# One module after proc and nothing else, as yosys JSON: what entries.py
+# reads. No opt: it folds each entry's index constant differently
+# (x == 0 becomes !x), and the entries would no longer look alike.
+py_binary(
+    name = "proc_json",
+    srcs = ["proc_json.py"],
+    deps = [":dryrun_lib"],
+)
+
+[
+    genrule(
+        name = top + "_proc_json",
+        srcs = [SURGERED],
+        outs = [top + "_proc.json"],
+        cmd = "$(execpath :proc_json) $(execpath @yosys) $(execpath @sv-elab//src/yosys_plugin:slang.so) " +
+              "$(location %s) %s $@ %s" % (
+                  SURGERED,
+                  top,
+                  ",".join(BLACKBOXES.get(top, [])),
+              ),
+        tags = ["manual"],
+        tools = [
+            ":proc_json",
+            "@sv-elab//src/yosys_plugin:slang.so",
+            "@yosys",
+        ],
+    )
+    for top in INTEGRATED
+]
+
+py_library(
+    name = "entries_lib",
+    srcs = ["entries.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "extract",
+    srcs = ["extract.py"],
+    deps = [":entries_lib"],
+)
+
+[
+    genrule(
+        name = top + "_extracted",
+        srcs = [":%s_proc.json" % top],
+        outs = [
+            top + "_extracted.v",
+            top + "_extracted.json",
+            top + "_extracted.json.renames",
+        ],
+        cmd = "$(execpath :extract) $(location :%s_proc.json) %s $(location %s_extracted.json) && " % (top, top, top) +
+              "$(execpath @yosys) -q -p 'read_json $(location %s_extracted.json); hierarchy -top %s; " % (top, top) +
+              # an async load of a constant is an async reset: the flow maps
+              # the one and not the other
+              "opt_dff; write_verilog -noattr $(location %s_extracted.v)'" % top,
+        tags = ["manual"],
+        tools = [
+            ":extract",
+            "@yosys",
+        ],
+    )
+    for top in INTEGRATED
+]
+
+py_binary(
+    name = "substitute",
+    srcs = ["substitute.py"],
+)
+
+genrule(
+    name = "xiangshan_extracted",
+    srcs = [SURGERED] + [":%s_extracted.v" % top for top in INTEGRATED],
+    outs = ["xiangshan_extracted.sv"],
+    cmd = "$(execpath :substitute) $(location %s) $@ %s" % (
+        SURGERED,
+        " ".join(["$(location :%s_extracted.v)" % top for top in INTEGRATED]),
+    ),
+    tags = ["manual"],
+    tools = [":substitute"],
+)
+
+# The extraction's proof as a test (check.py: registers and blackboxes
+# cut, a miter, ABC's iprove; not yosys's equiv_* passes, which are too
+# slow), and the negative control, one register's D-mux swapped, which
+# must come out different. Manual: it needs XiangShan elaborated; the
+# Rob's takes over half an hour.
+[
+    py_test(
+        name = "%s_%s_test" % (top, kind),
+        timeout = "eternal" if top == "Rob" else "long",
+        srcs = ["check.py"],
+        args = [
+            "$(rootpath @yosys)",
+            "$(rootpath :%s_proc.json)" % top,
+            "$(rootpath :%s_extracted.json)" % top,
+            top,
+        ] + (["mutate"] if kind == "control" else []),
+        data = [
+            ":%s_extracted.json" % top,
+            ":%s_extracted.json.renames" % top,
+            ":%s_proc.json" % top,
+            # yosys-abc, which check.py runs, comes in yosys's runfiles
+            "@yosys",
+        ],
+        main = "check.py",
+        tags = ["manual"],
+        deps = [":entries_lib"],
+    )
+    for top in INTEGRATED
+    for kind in [
+        "check",
+        "control",
+    ]
+]
+
+# The front end end to end on an 8-entry CAM small enough to read: its
+# entries found, the index decoded once, the match left in the cell, a
+# blackbox kept, the extraction proven equal and the control different,
+# and the entry cell's slang copies folded onto one module. Seconds.
+py_test(
+    name = "features_test",
+    srcs = ["features_test.py"],
+    args = [
+        "$(rootpath @yosys)",
+        "$(rootpath @sv-elab//src/yosys_plugin:slang.so)",
+        "$(rootpath //scripts/openroad-flow/xstile:fold_entries.tcl)",
+    ],
+    data = [
+        "check.py",
+        "dryrun.py",
+        "entries.py",
+        "extract.py",
+        "proc_json.py",
+        "//scripts/openroad-flow/xstile:fold_entries.tcl",
+        "@sv-elab//src/yosys_plugin:slang.so",
+        "@yosys",
+    ],
+)
+
+py_test(
+    name = "substitute_test",
+    srcs = ["substitute_test.py"],
+    data = ["substitute.py"],
+)

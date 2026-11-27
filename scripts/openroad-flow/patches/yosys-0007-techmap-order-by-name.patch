@@ -1,0 +1,48 @@
+yosys: techmap maps cells in the order of their names' characters
+
+techmap_module() put a module's cells in a TopoSort ordered by
+IdString::compare_ptr_by_name, that is by IdString::operator<, which
+compares interning indices. The indices depend on which names the rest
+of the design holds or held: the same module, synthesized on its own or
+inside its design, or after another module was freed, got its cells
+mapped in another order. The order reaches the output: the cells are
+reinserted into the module in that order, which later passes iterate,
+and techmap's own autoidx-based names ($techmap<n>, NEW_ID wires) are
+handed out in it. Two flows that give a module byte-identical RTLIL
+before techmap gave it different netlists after.
+
+The TopoSort now orders cells by IdString::lt_by_name, the name's
+characters, as techmap already orders its templates (sort_by_id_str).
+
+Upstream candidate for YosysHQ/yosys; not filed. Carried by bazel-orfs
+as yosys-0007 with its test, yosys-0008. Retires at the bump onto a
+BCR yosys that orders techmap's cells by name.
+
+--- a/passes/techmap/techmap.cc
++++ b/passes/techmap/techmap.cc
+@@ -39,6 +39,16 @@
+ USING_YOSYS_NAMESPACE
+ PRIVATE_NAMESPACE_BEGIN
+ 
++// Cells are mapped in this order and the order reaches the autoidx-based
++// names techmap gives, so it is by the name's characters: IdString's
++// operator< compares interning indices, which depend on the names the rest
++// of the design holds or held.
++struct CompareCellByNameStr {
++	bool operator()(const RTLIL::Cell *a, const RTLIL::Cell *b) const {
++		return a->name.lt_by_name(b->name);
++	}
++};
++
+ void apply_prefix(IdString prefix, IdString &id)
+ {
+ 	if (id[0] == '\\')
+@@ -424,7 +434,7 @@
+ 		SigMap sigmap(module);
+ 		FfInitVals initvals(&sigmap, module);
+ 
+-		TopoSort<RTLIL::Cell*, IdString::compare_ptr_by_name<RTLIL::Cell>> cells;
++		TopoSort<RTLIL::Cell*, CompareCellByNameStr> cells;
+ 		dict<RTLIL::Cell*, pool<RTLIL::SigBit>> cell_to_inbit;
+ 		dict<RTLIL::SigBit, pool<RTLIL::Cell*>> outbit_to_cell;
+ 

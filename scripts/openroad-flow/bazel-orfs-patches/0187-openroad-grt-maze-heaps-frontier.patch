@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: let the maze heaps grow to the frontier
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+src_heap_2D_/dest_heap_2D_ and src_heap_3D_/dest_heap_3D_ were resized
+to a pointer per GCell (and per layer) when the grid was set up, but
+setupHeap()/setupHeap3D() clear them and push the search frontier only:
+the up-front size was capacity nothing used, 16 bytes per GCell and
+layer, about 5 GB on a 34 M GCell x 9 layer die. They now grow as the
+maze needs; the heaps' contents and order are the same.
+
+Upstream's MinHeap3D indexes a position table by GCell and layer, so
+src_heap_3D_ keeps its up-front size; the 2D heaps and the 3D
+destination list grow to the frontier.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/src/FastRoute.cpp | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index ce64c62..285bf9e 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -358,9 +358,10 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   int64 total_size = static_cast<int64>(y_grid_) * x_range_;
+   pop_heap2_2D_.resize(total_size, false);
+ 
+-  total_size = static_cast<int64>(y_grid_) * x_grid_;
+-  src_heap_2D_.resize(total_size);
+-  dest_heap_2D_.resize(total_size);
++  // The heaps hold the search frontier only: setupHeap() clears them and
++  // they grow as the maze needs, rather than to a GCell each up front.
++  src_heap_2D_.clear();
++  dest_heap_2D_.clear();
+ 
+   d1_2D_.resize(boost::extents[y_range_][x_range_]);
+   d2_2D_.resize(boost::extents[y_range_][x_range_]);
+@@ -374,9 +375,10 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   total_size = static_cast<int64>(y_grid_) * x_grid_ * num_layers_;
+   pop_heap2_3D_.assign(total_size, 0);
+ 
+-  // allocate memory for priority queue
++  // The 3D maze's position table is indexed by GCell and layer; its
++  // entries and the destination list grow to the frontier.
+   src_heap_3D_.resize(total_size);
+-  dest_heap_3D_.resize(total_size);
++  dest_heap_3D_.clear();
+ 
+   d1_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+   path_len_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+-- 
+2.53.0
+

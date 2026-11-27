@@ -1,0 +1,10 @@
+      360 |   0.6503 |  4.758433e+07 |   +2.36% |  1.53e-08 |
+[INFO GPL-0100] Timing-driven iteration 1/2, virtual: true.
+[INFO GPL-0101]    Iter: 366, overflow: 0.632, keep resizer changes at: 0, HPWL: 48247427159
+      470 |   0.1999 |  5.368795e+07 |   +0.47% |  5.94e-07 |
+[INFO GPL-0100] Timing-driven iteration 2/2, virtual: true.
+[INFO GPL-0101]    Iter: 473, overflow: 0.194, keep resizer changes at: 0, HPWL: 53689685216
+      520 |   0.1052 |  5.449744e+07 |   +1.82% |  2.17e-06 |
+      521 |   0.0997 |  5.610924e+07 |          |  2.01e-06 |
+[INFO GPL-1001] Global placement finished at iteration 521
+[INFO GPL-1017] Routability mode iteration count: 62

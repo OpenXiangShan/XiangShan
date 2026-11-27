@@ -1,0 +1,157 @@
+# XSTile on ASAP7: the planned hierarchical flow (README.md).
+#
+# The flows are manual and run by hand; `bazelisk build //...` builds only
+# the small tests beside them.
+
+load("@bazel-orfs//:openroad.bzl", "odb_debug", "orfs_schedule")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":plan/plan.bzl", "PLAN")
+load(":xiangshan.bzl", "xiangshan_flow")
+
+package(default_visibility = ["//:__subpackages__"])
+
+exports_files([
+    "constraints.sdc",
+    "fold_entries.tcl",
+    "legalize_out_of_blocks.tcl",
+    "plan/plan.bzl",
+    "plan/plan.json",
+    "xs_icg.ys",
+    "xs_icg_map.v",
+] + glob(["*.regfile"]))
+
+# The planned parent: the blocks the macro selection tables named, each a
+# real flow at the outline plan_floorplan.py drew with its pins on one
+# side, the parent at the planned die. plan/ is generated (bazel-orfs's
+# .claude/skills/macro-selection/SKILL.md, step 3) and copied here as
+# bazel-orfs ran it; regenerate it, never edit it. Its input,
+# plan/plan.json, needs pin_partners.txt from probe_pin_partners.tcl on
+# XSTile_synth_odb_debug, which is not checked in (README.md, "Things to
+# fix").
+xiangshan_flow(
+    name = "XSTile",
+    plan = PLAN,
+)
+
+# A period counts only when global placement ran timing- and
+# routability-driven, and neither pass says so in the exit status when it
+# does not run. A part whose global placement log shows no timing-driven
+# iteration (GPL-0100) or no routability-mode iteration (GPL-1017) fails
+# here, in the wave that placed it (gpl_driven.sh).
+GPL_DRIVEN_PARTS = sorted(PLAN["macros"].keys()) + ["XSTile"]
+
+[
+    filegroup(
+        name = "%s_3_3_place_gp.log" % part,
+        srcs = [":%s_place" % part],
+        output_group = "3_3_place_gp.log",
+        tags = ["manual"],
+    )
+    for part in GPL_DRIVEN_PARTS
+]
+
+[
+    genrule(
+        name = "%s_gpl_driven" % part,
+        srcs = [":%s_3_3_place_gp.log" % part],
+        outs = ["%s_gpl_driven.txt" % part],
+        cmd = "$(execpath :gpl_driven.sh) %s $< $@" % part,
+        tags = ["manual"],
+        tools = [":gpl_driven.sh"],
+    )
+    for part in GPL_DRIVEN_PARTS
+]
+
+sh_test(
+    name = "gpl_driven_test",
+    size = "small",
+    srcs = ["gpl_driven_test.sh"],
+    args = [
+        "$(rootpath :gpl_driven.sh)",
+        "$(rootpath gpl_driven_logs/parent.log)",
+        "$(rootpath gpl_driven_logs/no_routability.log)",
+        "$(rootpath gpl_driven_logs/no_timing.log)",
+    ],
+    data = [
+        "gpl_driven.sh",
+        "gpl_driven_logs/no_routability.log",
+        "gpl_driven_logs/no_timing.log",
+        "gpl_driven_logs/parent.log",
+    ],
+)
+
+# The blocks and the parent, scheduled to the memory there is (bazel-orfs's
+# docs/schedule.md): each block through grt with its abstract, its KPI and
+# its placement-driver gate, in waves that fit free memory, then the
+# parent alone. resources.json beside this file is the record it plans
+# from and refreshes.
+#
+#   bazelisk run //scripts/openroad-flow/xstile:build -- --plan-only
+#   bazelisk run //scripts/openroad-flow/xstile:build
+orfs_schedule(
+    name = "build",
+    macros = {
+        block: [
+            ":%s_kpi" % block,
+            ":%s_generate_abstract" % block,
+            ":%s_gpl_driven" % block,
+        ]
+        for block in sorted(PLAN["macros"].keys())
+    },
+    parent = {"XSTile": [
+        ":XSTile_kpi",
+        ":XSTile_gpl_driven",
+    ]},
+    tags = ["manual"],
+)
+
+# Checkpoints to ask questions of in a persistent OpenROAD session (the
+# odb-debug skill), and the web viewer:
+#
+#   bazelisk run //scripts/openroad-flow/xstile:XSTile_grt_odb_debug
+[
+    odb_debug(
+        name = "XSTile_%s_odb_debug" % stage,
+        src = ":XSTile_" + stage,
+        tags = ["manual"],
+    )
+    for stage in [
+        "synth",
+        "place",
+        "cts",
+        "grt",
+    ]
+]
+
+[
+    odb_debug(
+        name = "%s_%s_odb_debug" % (block, stage),
+        src = ":%s_%s" % (block, stage),
+        tags = ["manual"],
+    )
+    for block in PLAN["macros"].keys()
+    for stage in [
+        "synth",
+        "place",
+        "grt",
+    ]
+]
+
+# Constants on the ports of the modules this plan keeps (blocks, kept
+# modules, generated register files): what firtool left and yosys cannot
+# fold across a kept boundary. The discovery step of the surgery
+# (surgery/): its result is how manifest.json's rounds were written.
+genrule(
+    name = "XSTile_boundary_constants",
+    srcs = [
+        "//scripts/openroad-flow/verilog:xiangshan_flat",
+        "plan/plan.json",
+        "plan/plan.bzl",
+    ],
+    outs = ["XSTile_boundary_constants.json"],
+    cmd = "$(execpath @bazel-orfs//tools/boundary_constants) " +
+          "$(location //scripts/openroad-flow/verilog:xiangshan_flat) --top XSTile " +
+          "--plan $(location plan/plan.json) --plan-bzl $(location plan/plan.bzl) --out $@",
+    tags = ["manual"],
+    tools = ["@bazel-orfs//tools/boundary_constants"],
+)

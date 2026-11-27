@@ -1,0 +1,126 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 1/5] grt: allocate the 3D maze's work arrays only while it
+ runs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The 3D maze's distances, parents, directions and edges per GCell and
+layer, about 23 bytes per GCell and layer, were allocated with the grid
+and kept for the whole run, though only mazeRouteMSMDOrder3D and the
+functions it calls use them. They are now allocated before the two
+mazeRouteMSMDOrder3D calls and freed after, so they are gone when the
+routes are converted and saved, which is where global route peaks: on
+a 34 M GCell x 9 layer die about 7 GB less at the peak, measured before
+upstream's MinHeap3D, whose position table per GCell and layer is now
+allocated and freed with the arrays.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ .../grt/src/fastroute/include/FastRoute.h     |  2 ++
+ openroad/grt/src/fastroute/src/FastRoute.cpp  | 36 ++++++++++++++++---
+ openroad/grt/src/fastroute/src/maze3D.cpp     |  1 +
+ 3 files changed, 34 insertions(+), 5 deletions(-)
+
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index 5bbf8f7..e646615 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -243,6 +243,8 @@ class FastRouteCore
+   void setEdgeCapacity(int x1, int y1, int x2, int y2, int layer, int capacity);
+   int getDbNetLayerEdgeCost(odb::dbNet* db_net, int layer);
+   void initEdgesCapacityPerLayer();
++  void allocateMaze3D();
++  void freeMaze3D();
+   // Backs the routing grid with a file at path; empty for memory only.
+   void setBackingFile(const std::string& path) { backing_file_ = path; }
+   void setNumAdjustments(int nAdjustments);
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index 22b3bbe..97234f0 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -367,24 +367,48 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   d1_2D_.resize(boost::extents[y_range_][x_range_]);
+   d2_2D_.resize(boost::extents[y_range_][x_range_]);
+ 
+-  // maze3D variables
++  // maze3D variables, allocated only while the 3D maze runs
++  // (allocateMaze3D).
+   grid_hv_ = x_grid_ * y_grid_;
++  dest_heap_3D_.clear();
++}
++
++// The 3D maze's per-GCell and layer work arrays are needed only while
++// mazeRouteMSMDOrder3D runs.
++void FastRouteCore::allocateMaze3D()
++{
++  if (d1_3D_.shape()[0] == static_cast<size_t>(num_layers_)
++      && d1_3D_.shape()[1] == static_cast<size_t>(y_grid_)
++      && d1_3D_.shape()[2] == static_cast<size_t>(x_grid_)) {
++    return;
++  }
+   directions_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+   corr_edge_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+   pr_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+ 
+-  total_size = static_cast<int64>(y_grid_) * x_grid_ * num_layers_;
++  const int64 total_size = static_cast<int64>(y_grid_) * x_grid_ * num_layers_;
+   pop_heap2_3D_.assign(total_size, 0);
+ 
+-  // The 3D maze's position table is indexed by GCell and layer; its
+-  // entries and the destination list grow to the frontier.
++  // The position table is indexed by GCell and layer; the entries and the
++  // destination list grow to the frontier.
+   src_heap_3D_.resize(total_size);
+-  dest_heap_3D_.clear();
+ 
+   d1_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+   path_len_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+ }
+ 
++void FastRouteCore::freeMaze3D()
++{
++  directions_3D_.resize(boost::extents[0][0][0]);
++  corr_edge_3D_.resize(boost::extents[0][0][0]);
++  pr_3D_.resize(boost::extents[0][0][0]);
++  pop_heap2_3D_ = std::vector<uint8_t>();
++  d1_3D_.resize(boost::extents[0][0][0]);
++  path_len_3D_.resize(boost::extents[0][0][0]);
++  src_heap_3D_ = MinHeap3D();
++  dest_heap_3D_ = std::vector<int>();
++}
++
+ void FastRouteCore::addVCapacity(int16_t verticalCapacity, int layer)
+ {
+   v_capacity_3D_[layer - 1] = verticalCapacity;
+@@ -2842,8 +2866,10 @@ NetRouteMap FastRouteCore::run()
+         short_edge_len = BIG_INT;
+       }
+ 
++      allocateMaze3D();
+       mazeRouteMSMDOrder3D(enlarge_, 0, long_edge_len);
+       mazeRouteMSMDOrder3D(enlarge_, 0, short_edge_len);
++      freeMaze3D();
+     }
+ 
+     // Disable estimate parasitics for grt incremental steps with
+diff --git a/openroad/grt/src/fastroute/src/maze3D.cpp b/openroad/grt/src/fastroute/src/maze3D.cpp
+index efecf2d..bfbed0c 100644
+--- a/openroad/grt/src/fastroute/src/maze3D.cpp
++++ b/openroad/grt/src/fastroute/src/maze3D.cpp
+@@ -644,6 +644,7 @@ void FastRouteCore::mazeRouteMSMDOrder3D(int expand,
+                                          int ripupTHlb,
+                                          int ripupTHub)
+ {
++  allocateMaze3D();
+   for (int i = 0; i < y_grid_; i++) {
+     for (int j = 0; j < x_grid_; j++) {
+       in_region_[i][j] = false;
+-- 
+2.53.0
+

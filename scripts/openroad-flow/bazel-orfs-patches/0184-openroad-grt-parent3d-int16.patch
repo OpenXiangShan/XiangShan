@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: store the 3D maze's parents in 16 bit coordinates
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+pr_3D_ holds the parent of every GCell and layer during 3D maze routing
+as an int16 layer and two int coordinates, 12 bytes. Grid coordinates
+are int16 everywhere else in FastRoute (TreeNode, the 2D parents), so
+the parent fits in 6 bytes. On a 34 M GCell x 9 layer die that is about
+1.8 GB less.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/include/FastRoute.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index 302bfdb..989caeb 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -75,7 +75,7 @@ struct DebugSetting
+ struct parent3D
+ {
+   int16_t layer;
+-  int x, y;
++  int16_t x, y;  // grid coordinates are int16_t, as in TreeNode
+ };
+ 
+ class MinHeap3D
+-- 
+2.53.0
+

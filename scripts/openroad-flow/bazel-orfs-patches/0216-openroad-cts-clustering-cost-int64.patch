@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Tue, 10 Nov 2026 14:00:00 +0100
+Subject: [PATCH] cts: clustering's min-cost flow costs are int64_t
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Clustering::minCostFlow costs a sink-to-mean arc at the distance to the
+power of the clustering power (4) and keeps the arc while that is below
+INT_MAX, so a cost reaches 2^31 - 1. LEMON's network simplex ran with int
+costs and starts the node potentials at half the cost type's range plus
+one, 2^30 for int. A reduced cost, an arc's cost plus the potential of
+one end minus the other, could then lie outside int and wrap: an arc that
+raises the cost looked like one that lowers it, and the simplex took it.
+
+On a large hierarchical design (XiangShan's XSTile parent, in
+bazel-orfs), CTS never returned: H-tree level 5 of a clock net with 6,663
+sinks after sink clustering, one 394-sink refinement. Replayed alone,
+that min-cost flow did not return in 20 s with int costs: 4.3e9 reduced
+cost comparisons, 1.0e8 of them decided otherwise than in exact
+arithmetic. With exact arithmetic and int's 2^30, or with int64_t costs,
+it returns in under a millisecond with the same flow. Halving its costs
+to below 2^30 makes int return that flow too.
+
+The costs are now int64_t and the potentials start at 2^62; no sum of
+costs a potential collects comes near the type's range. The arcs and
+their costs are the same. What else changes is that artificial cost:
+with int, routing a sink whose cheapest augmenting path costs more than
+2^30 (one arc, or a chain that moves other sinks between the means) was
+dearer than leaving its unit on the artificial arc, and Kmeans's
+nearest-cluster fallback placed the sink instead; now the flow routes it.
+Where no such path exists and nothing wraps, the flow is the same.
+
+Six of cts's regression goldens change for that reason and are not
+updated here: array, array_ins_delay, array_max_wl (and
+array_max_wl.defok), array_no_blockages, array_repair_clock_nets and
+max_wl_two_sinks. In array: 904 clock buffers instead of 906, average
+sink wire length 4,274.45 um instead of 4,227.48 um.
+
+Cluster.CostsNearIntMaxDoNotWrap fails without the change (sinks 3 and 4
+swap means; the wrap alone does it, exact arithmetic with int's 2^30
+gives the right answer) and passes with it.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/cts/src/Clustering.cpp   | 10 +++++++--
+ openroad/cts/test/cts_unittest.cc | 37 +++++++++++++++++++++++++++++++
+ 2 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/openroad/cts/src/Clustering.cpp b/openroad/cts/src/Clustering.cpp
+index 67484e6..b112c81 100644
+--- a/openroad/cts/src/Clustering.cpp
++++ b/openroad/cts/src/Clustering.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <cfloat>
+ #include <cmath>
++#include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <ctime>
+@@ -332,7 +333,12 @@ void Clustering::minCostFlow(const std::vector<std::pair<float, float>>& means,
+              countArcs(graph));
+ 
+   // formulate min-cost flow
+-  ListDigraph::ArcMap<int> edge_cost(graph), edge_capacity(graph);
++  // The costs are int64_t: an arc costs up to INT_MAX, and the network
++  // simplex starts node potentials at half the cost type's range. With int
++  // costs a reduced cost could fall outside int and wrap; the simplex then
++  // took arcs that raise the cost, and could cycle forever.
++  ListDigraph::ArcMap<int64_t> edge_cost(graph);
++  ListDigraph::ArcMap<int> edge_capacity(graph);
+   for (auto& edge : src_sink_edges) {
+     edge_capacity[edge] = 1;
+   }
+@@ -363,7 +369,7 @@ void Clustering::minCostFlow(const std::vector<std::pair<float, float>>& means,
+     debugPrint(logger_, CTS, "clustering", 2, " cap = ", edge_capacity[it]);
+   }
+ 
+-  NetworkSimplex<ListDigraph, int, int> flow(graph);
++  NetworkSimplex<ListDigraph, int, int64_t> flow(graph);
+   flow.costMap(edge_cost);
+   flow.upperMap(edge_capacity);
+   flow.stSupply(src, target, means.size() * cap + remaining);
+diff --git a/openroad/cts/test/cts_unittest.cc b/openroad/cts/test/cts_unittest.cc
+index 9b96731..3422919 100644
+--- a/openroad/cts/test/cts_unittest.cc
++++ b/openroad/cts/test/cts_unittest.cc
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: BSD-3-Clause
+ // Copyright (c) 2023-2025, The OpenROAD Authors
+ 
++#include <algorithm>
+ #include <utility>
+ #include <vector>
+ 
+@@ -72,6 +73,42 @@ TEST(Cluster, BranchingPointIsDisabledIfNoBranchesAreProvided)
+   EXPECT_NE(means_without_branching[0].first, means_with_branching[0].first);
+ }
+ 
++// Three sinks next to each mean and room for three in each cluster: each
++// sink joins the mean it is next to. A sink's cost to a mean is the
++// distance to the fourth power, up to INT_MAX: up to 2.1e9 to the far mean
++// here. LEMON's network simplex starts node potentials at half the cost
++// type's range, 2^30 for int; with int costs a reduced cost fell outside
++// int and wrapped, the simplex took arcs that raise the cost, and sinks 3
++// and 4 swapped means. On a large design it never returned.
++TEST(Cluster, CostsNearIntMaxDoNotWrap)
++{
++  utl::Logger logger;
++  CKMeans::Clustering clustering(/*sinks=*/{{6.0, -10.1},
++                                            {201.8, -25.1},
++                                            {-7.9, -18.5},
++                                            {22.5, -1.5},
++                                            {198.3, 4.3},
++                                            {202.4, 2.2}},
++                                 &logger);
++  std::vector<std::pair<float, float>> means = {{0, 0}, {188.4, 0}};
++  // One assignment to these means, no further iterations.
++  clustering.iterKmeans(/*iter=*/1,
++                        /*n=*/2,
++                        /*cap=*/3,
++                        /*max=*/0,
++                        /*power=*/4,
++                        means);
++
++  std::vector<std::vector<unsigned>> clusters;
++  clustering.getClusters(clusters);
++  ASSERT_EQ(clusters.size(), 2);
++  for (auto& cluster : clusters) {
++    std::sort(cluster.begin(), cluster.end());
++  }
++  EXPECT_EQ(clusters[0], (std::vector<unsigned>{0, 2, 3}));
++  EXPECT_EQ(clusters[1], (std::vector<unsigned>{1, 4, 5}));
++}
++
+ // Check that we avoid a divide-by-zero error when the region has
+ // zero height.
+ TEST(SinkClusteringTest, ZeroHeightRegion)
+-- 
+2.53.0
+

@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: size the maze arrays to the grid
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The maze's distance, parent and region arrays were allocated on a square
+of the grid's longer side, and on at least 1000 x 1000 GCells: on a
+377 x 542 x 9 grid, d1_3D_, d2_3D_ and path_len_3D_ took 108 MB where
+22 MB covers every GCell, and an elongated die paid for the square.
+Every access is clamped to the grid and the index arithmetic uses
+x_range_ as the row stride, so the arrays are now x_grid_ x y_grid_.
+
+cost_hvh_test_ is indexed along x like cost_hvh_, but was sized by
+y_range_, which only held on a square; it is now sized by x_range_.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/src/FastRoute.cpp | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index c5fa9aa..ce64c62 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -321,12 +321,8 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   y_grid_ = y;
+   num_layers_ = nLayers;
+   layer_directions_.resize(num_layers_);
+-  if (std::max(x_grid_, y_grid_) >= 1000) {
+-    x_range_ = std::max(x_grid_, y_grid_);
+-  } else {
+-    x_range_ = 1000;
+-  }
+-  y_range_ = x_range_;
++  x_range_ = x_grid_;
++  y_range_ = y_grid_;
+ 
+   v_capacity_3D_.resize(num_layers_);
+   h_capacity_3D_.resize(num_layers_);
+@@ -354,7 +350,7 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
+   cost_lr_.resize(y_range_);   // Left and right boundary cost
+   cost_tb_.resize(x_range_);   // Top and bottom boundary cost
+ 
+-  cost_hvh_test_.resize(y_range_);  // Vertical first Z
++  cost_hvh_test_.resize(x_range_);  // Horizontal first Z
+   cost_v_test_.resize(x_range_);    // Vertical segment cost
+   cost_tb_test_.resize(x_range_);   // Top and bottom boundary cost
+ 
+-- 
+2.53.0
+

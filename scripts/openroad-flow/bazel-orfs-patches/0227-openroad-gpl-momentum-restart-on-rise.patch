@@ -1,0 +1,664 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 16 Nov 2026 22:33:21 +0100
+Subject: [PATCH 2/2] gpl: restart Nesterov momentum where the HPWL rises near
+ the end
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The momentum coefficient c_k = (a_k - 1) / a_(k+1) is about 1 - 3/(k+2):
+0.994 by iteration 500. It is restarted after a non-virtual
+timing-driven repair (GPL-0111), whose objective has changed, and on
+divergence recovery, and nowhere else, while the density penalty under
+it changes every iteration. Late in a long descent nothing damps the
+motion: on a large design the fillers, which only the density moves,
+speed up and take the cells with them, and the HPWL rises over the last
+iterations of the placement.
+
+XiangShan's XSTile parent, global_placement -skip_io (2.1 M movable
+instances, target density 0.3, 2048 x 2048 bins), measured per
+iteration with an instrumented build that has neither this change nor
+the one before it, and places as the build without instrumentation
+does: from iteration 540 to the stop at 554 the motion of all gcells
+grows 31 times and the instances' 3.8 times, the fillers first, and the
+step length 1.6 times; the HPWL rises 30 % at the iterate and 47 % at
+the look-ahead, and the run ends at 98.5 M um. The first iteration
+whose HPWL rose by more than the controller's reference is 545: 1.9 %,
+with the density penalty controller at its floor (phiCoef 0.95) and the
+overflow at 0.1575. Ways of restarting the momentum on the same
+placement, each a switch in that build unless said otherwise:
+
+- once, where the overflow first reaches 0.2 (iteration 521): the
+  momentum regrows, 0 to 0.965 in 80 iterations, and the burst starts
+  again before the target: 51.0 M um. The same once below 0.195
+  (iteration 523), built as a change on top of the change before this
+  one, not a switch: 58.2 M, the HPWL up 18 % in the last 13
+  iterations.
+- when the step points against the gradient (O'Donoghue and Candes'
+  gradient restart): it never fires; the burst runs along the gradient.
+  98.5 M, as without.
+- on an iteration whose HPWL rose with the overflow at or below 0.2,
+  the rule of this change: one restart, on iteration 545, then a calm
+  descent to the target at 612, 48.2 M um; 47.86 M at 615 with a second
+  switch that ends on the iterate, as the change before this one does,
+  though without its window. The switch restarted before the
+  convergence test and without the guards below.
+
+This change itself, on top of the one before it, in bazel-orfs on the
+same design's cached floorplan: -skip_io restarts once, on iteration
+546 (overflow 0.1575, phiCoef 0.95), and ends at 47.86 M um at 615.
+The timing- and routability-driven placement after it restarts once,
+on iteration 516 (overflow 0.1347); the restart ends a routability
+settle wait on the next iteration, pass 1 measures there, the phase
+ends on pass 1's placement (GPL-0125), and the descent from it
+converges at 844 with 32.3 M um, against 60.3 M without either change.
+With no momentum step after a restart the cells draw together, 27 to
+35 % of the HPWL within 5 to 9 iterations, and spread back to the
+target with the HPWL nearly flat.
+
+A regrowth that rises by less than the reference on every iteration is
+not restarted. After the single restart at iteration 521 above, the
+HPWL at the iterate rose 4.5 % from iteration 588 to 603 with phiCoef
+between 1.0005 and 1.04: this change, run alongside it, would not have
+fired once. With this change's rule as the switch, the descent after
+its one restart came down to the target without another rise by the
+reference, and ended 0.5 % above the lowest of its table rows (one
+every 10 iterations) after the restart.
+
+On a synthetic design of 1 M cells (utilization 0.145, target density
+0.3, 67 % fixed macros, 2048 x 2048 bins) the cells run away from
+overflow 0.11 (HPWL 134.3 M um at iteration 888, 164.8 M at 909, the
+overflow stalling); the same rule as a switch, with the level at 0.3,
+restarts once, after iteration 895, and the run converges at 896 with
+134.5 M.
+
+NesterovPlace::restartMomentumOnRise() restarts the momentum (curA = 1,
+as the repair's restart does, so the next iteration takes no momentum
+step) on any iteration whose unscaled overflow is at or below 0.2 and
+whose density penalty controller has measured a rise: phiCoef below 1,
+which it is when the HPWL rose by more than referenceHpwl since the last
+iteration. It logs GPL-0126 with the iteration, the overflow and
+phiCoef. There is no once-per-descent flag: a descent that builds its
+momentum up again and rises by the reference again restarts again.
+Every restart is on an iteration whose HPWL rose by more than the
+reference; it adds no iteration and reverts nothing, so the iteration
+limit bounds the loop as before. Consecutive restarts are possible,
+when an iteration with no momentum step still rises, and keep the
+descent a plain gradient descent while they last, with the controller
+lowering the penalty in each.
+
+0.2 is where checkDivergence() starts to read a rising HPWL as a
+divergence (GPL-0323). It is below the routability check overflow (0.3
+by default): a descent between routability passes gets there only while
+a pass waits for its cells to settle (GPL-0099), and a restart there
+usually ends the wait on the next iteration (GPL-0103), as a non-virtual
+repair's restart already does. Not the lowest timing-driven overflow:
+the repairs are not what makes the motion run away, and a list of
+overflows a user sets should not move it.
+
+What else owns an iteration:
+- A non-virtual timing-driven repair on it restarts the momentum itself;
+  that restart (GPL-0111) is the only one and the only log line.
+- A routability pass on it may revert the placement whose HPWL was
+  measured (GPL-0087, -0089, -0125) or change its cells' sizes; no
+  restart, the next iteration measures its own rise.
+- A divergence revert (GPL-0112, -0998) skips the rest of the iteration
+  and restarts the momentum itself.
+- The restart comes after the convergence test: an iteration on which
+  the placement converges, on its iterate or not, never restarts.
+- Several regions: each region's phiCoef reads the HPWL of the whole
+  design; the lowest phiCoef of the regions still descending counts. A
+  region that has converged no longer moves, and its phiCoef does not
+  count.
+- Incremental placement: nothing is kept between doNesterovPlace()
+  calls.
+- GPU: curA is the host's and phiCoef is measured on the host on both
+  paths, as for the repair's restart; the GPU tests were not run.
+
+Of gpl's tests (84 logs), 82 are identical to the change before this
+one alone, the large tests included, and the other two differ by their
+new cases: none of the 116 placements in them restarts. That follows from
+their size, and says nothing about a larger design: the reference is
+the larger of 446,000,000 DBU and 1 % of the initial HPWL, 4.4 % of
+large01's final HPWL (5.1 M um at 2,000 DBU per um) in one iteration,
+so no test design rises by it near its end. On XSTile it is 0.9 % of
+the final HPWL. The larger the design, the smaller the rise, as a
+fraction of its HPWL, that restarts, until 1 % of the initial HPWL
+takes over from the floor.
+
+Tests:
+- end_of_descent_test MomentumRestartsWhereTheHpwlRises: gcd from the
+  core's center with a reference of 5,000 DBU, so that its rises
+  register; 21 restarts, three of them on consecutive iterations,
+  exactly on the iterations at or below 0.2 whose penalty fell; a twin
+  stopped on the first restart has 316 look-aheads off their iterates,
+  one stopped on the next iteration none. The run converges.
+- end_of_descent_test MomentumRunsOnWithoutARise: gcd with the default
+  reference, below 0.2 from iteration 316 to 355 with no rise: no
+  GPL-0126, and the look-aheads are still apart (315) on the iteration
+  after 316 and on the last.
+- end_of_descent_test MomentumRestartsOnlyOnARiseNearTheEnd: the
+  decision for overflows 0.5 to 0.05 and phiCoef 0.95 to 1.04, and none
+  with a repair restarting, a routability pass, or only a converged
+  region's phiCoef.
+- routability_minimum_test MomentumRestartStandsAsideOnAPassIteration:
+  a routability-driven descent of gcd with its passes at overflow 0.2,
+  RUDY reading congestion and the 5,000 DBU reference: six passes, each
+  reverting, five of them on an iteration whose HPWL rose; no restart
+  on a pass's iteration, 17 after the phase, converged at 9,076.
+Without the restart the first, the third and the fourth fail (the
+fourth: no restart in the descent); restarting at every iteration at or
+below 0.2 fails the first three, and the change before this one's two;
+once per descent, the first and the third; with the restart logged but
+curA not reset, the first and the third; without the overflow level,
+the first and the third; without the repair guard or with a converged
+region's phiCoef read, the third; without the routability pass guard,
+the third and the fourth (a restart on six passes' iterations); with
+the call site never reporting a pass, the fourth. The repair guard is
+tested on the decision only: no test design rises near its end with a
+non-virtual repair.
+
+Carried in bazel-orfs, not upstreamed; retires with the //:bump onto an
+OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/gpl/src/nesterovPlace.cpp            |  50 ++++
+ openroad/gpl/src/nesterovPlace.h              |  22 ++
+ openroad/gpl/test/end_of_descent_test.cpp     | 232 +++++++++++++++++-
+ .../gpl/test/routability_minimum_test.cpp     |  81 ++++++
+ 4 files changed, 384 insertions(+), 1 deletion(-)
+
+diff --git a/openroad/gpl/src/nesterovPlace.cpp b/openroad/gpl/src/nesterovPlace.cpp
+index 3a1b7ab..29d9d2c 100644
+--- a/openroad/gpl/src/nesterovPlace.cpp
++++ b/openroad/gpl/src/nesterovPlace.cpp
+@@ -643,6 +643,51 @@ void NesterovPlace::runTimingDriven(int iter,
+   }
+ }
+ 
++void NesterovPlace::restartMomentumOnRise(const int iter,
++                                          const bool after_routability_pass,
++                                          float& curA)
++{
++  // Late in a long descent the momentum coefficient is about 0.997 and
++  // nothing damps the motion, while the density penalty under it changes
++  // every iteration. On a large design the fillers, which only the density
++  // moves, can speed up and take the cells with them: the HPWL rises over
++  // the last iterations of the placement. The density penalty controller
++  // reads each such iteration: phiCoef is below 1 when the HPWL rose by more
++  // than referenceHpwl since the last one, and the penalty is lowered. The
++  // momentum is restarted there, as after a non-virtual timing-driven
++  // repair, so that the next iteration takes no momentum step. A descent
++  // whose HPWL never rises that fast is left as it is; one that builds its
++  // momentum up again and rises again restarts again.
++  //
++  // A non-virtual repair on this iteration restarts the momentum itself
++  // (GPL-0111), and that is the only restart. A routability pass on this
++  // iteration may have reverted the placement whose HPWL was measured, or
++  // changed its cells' sizes; the next iteration measures its own. A region
++  // that has converged no longer moves, and its phiCoef may be an earlier
++  // iteration's: it does not count.
++  if (reset_nesterov_momentum_ || after_routability_pass
++      || average_overflow_unscaled_ > kRestartOnRiseOverflow) {
++    return;
++  }
++  float phi_coef = 1.0f;
++  for (const auto& nb : nbVec_) {
++    if (!nb->isConverged()) {
++      phi_coef = std::min(phi_coef, nb->getStoredPhiCoef());
++    }
++  }
++  if (phi_coef >= 1.0f) {
++    return;
++  }
++  curA = 1.0;
++  log_->info(GPL,
++             126,
++             "Restarting Nesterov momentum at iter = {}: HPWL rose at "
++             "overflow {:.4f}, phiCoef {:.4f}.",
++             iter + 1,
++             average_overflow_unscaled_,
++             phi_coef);
++}
++
+ // Evaluate every gradient at curSLP on the repaired
+ // netlist, in the same order as init().
+ void NesterovPlace::refreshCurGradients()
+@@ -1602,6 +1647,7 @@ PlaceResult NesterovPlace::doNesterovPlace(int start_iter)
+                         routability_driven_revert_count,
+                         timing_driven_count);
+ 
++    const int routability_passes = routability_driven_revert_count;
+     runRoutability(nesterov_iter,
+                    timing_driven_count,
+                    routability_driven_dir,
+@@ -1612,6 +1658,10 @@ PlaceResult NesterovPlace::doNesterovPlace(int start_iter)
+       stop = PlaceStop::kConverged;
+       break;
+     }
++
++    restartMomentumOnRise(nesterov_iter,
++                          routability_driven_revert_count != routability_passes,
++                          curA);
+   }
+ 
+   // Unlike a divergence, running out of iterations says nothing about the
+diff --git a/openroad/gpl/src/nesterovPlace.h b/openroad/gpl/src/nesterovPlace.h
+index 43fa413..62cbf4e 100644
+--- a/openroad/gpl/src/nesterovPlace.h
++++ b/openroad/gpl/src/nesterovPlace.h
+@@ -109,6 +109,7 @@ class NesterovPlace
+  private:
+   friend class TimingRepairIntegrationTest;
+   friend class RoutabilityMinimumTest;
++  friend class EndOfDescentTest;
+ 
+   void updateIterGraphics(int iter,
+                           const std::string& reports_dir,
+@@ -126,6 +127,13 @@ class NesterovPlace
+   // Re-evaluate every GCell's current gradient at curSLP, so that the next
+   // step length estimate compares gradients of the same objective.
+   void refreshCurGradients();
++  // Restarts the momentum on an iteration whose HPWL rose by more than the
++  // density penalty controller's reference (phiCoef below 1), once the
++  // overflow is at or below kRestartOnRiseOverflow, unless a timing-driven
++  // repair is restarting it or a routability pass ran on the iteration.
++  void restartMomentumOnRise(int iter,
++                             bool after_routability_pass,
++                             float& curA);
+   enum class DivergeAction
+   {
+     kNone,
+@@ -280,6 +288,20 @@ class NesterovPlace
+   // trajectory into the changed objective and diverge the placement.
+   bool reset_nesterov_momentum_ = false;
+ 
++  // The overflow at or below which an HPWL rise restarts the momentum
++  // (restartMomentumOnRise()). Above it the cells are spreading, the HPWL
++  // rises because they spread, and the controller easing the penalty is the
++  // whole response. 0.2 is where checkDivergence() starts to read a rising
++  // HPWL as a divergence (GPL-0323). It is below the routability check
++  // overflow (0.3 by default), so a descent between routability passes gets
++  // there only while a pass waits for its cells to settle (GPL-0099); a
++  // restart then usually ends the wait on the next iteration (GPL-0103), as
++  // a non-virtual repair's restart does. A constant, not the lowest
++  // timing-driven overflow (timingNetWeightOverflows): the repairs are not
++  // what makes the motion run away, and a list of overflows a user sets
++  // should not move it.
++  static constexpr float kRestartOnRiseOverflow = 0.2f;
++
+   std::string divergeMsg_;
+   int divergeCode_ = 0;
+ 
+diff --git a/openroad/gpl/test/end_of_descent_test.cpp b/openroad/gpl/test/end_of_descent_test.cpp
+index 5fe0508..70fd6d6 100644
+--- a/openroad/gpl/test/end_of_descent_test.cpp
++++ b/openroad/gpl/test/end_of_descent_test.cpp
+@@ -4,7 +4,8 @@
+ // How global placement's Nesterov descent ends.
+ //
+ // It ends on Nesterov's iterate, not on the look-ahead point one momentum
+-// step past it.
++// step past it, and near its end it restarts its momentum on an iteration
++// whose wirelength rose.
+ //
+ // Each iteration takes a gradient step from the look-ahead v_k to the
+ // iterate u_(k+1), then extrapolates the look-ahead
+@@ -183,6 +184,75 @@ class EndOfDescentTest : public tst::Fixture
+     return apart;
+   }
+ 
++  // At or below it an HPWL rise restarts the momentum.
++  static constexpr float kRestartOverflow
++      = NesterovPlace::kRestartOnRiseOverflow;
++
++  // The iterations, as the trace numbers them, on which the momentum was
++  // restarted for an HPWL rise (GPL-0126 says "iter = " the next one).
++  static std::vector<int> restartIterations(const std::string& log)
++  {
++    static const std::string kRestart
++        = "GPL-0126] Restarting Nesterov momentum at iter = ";
++    std::vector<int> iterations;
++    for (size_t at = log.find(kRestart); at != std::string::npos;
++         at = log.find(kRestart, at + 1)) {
++      iterations.push_back(std::stoi(log.substr(at + kRestart.size())) - 1);
++    }
++    return iterations;
++  }
++
++  // The iterations of a trace that came down to the restart overflow and
++  // whose HPWL rose by more than the controller's reference: the controller
++  // lowered the density penalty (phiCoef below 1). The last row, on which
++  // the placement converged, has no next one to read the penalty from.
++  static std::vector<int> risesNearTheEnd(const PlaceResult& result)
++  {
++    std::vector<int> iterations;
++    for (size_t i = 0; i + 1 < result.trace.size(); ++i) {
++      if (result.trace[i].overflow <= kRestartOverflow
++          && result.trace[i + 1].density_penalty
++                 < result.trace[i].density_penalty) {
++        iterations.push_back(result.trace[i].iteration);
++      }
++    }
++    return iterations;
++  }
++
++  // The state an iteration's restart decision reads, as the loop leaves it
++  // after measuring a placement: nothing restarting the momentum, the
++  // region still descending.
++  static void startIteration(Placer& placer)
++  {
++    placer.np->reset_nesterov_momentum_ = false;
++    placer.nb().isConverged_ = false;
++  }
++
++  // A non-virtual timing-driven repair on this iteration has asked for the
++  // momentum restart.
++  static void setRepairRestarting(Placer& placer)
++  {
++    placer.np->reset_nesterov_momentum_ = true;
++  }
++
++  static void setConverged(Placer& placer) { placer.nb().isConverged_ = true; }
++
++  // Whether an iteration that measured `overflow`, with the density penalty
++  // controller at `phi_coef`, restarts the momentum.
++  static bool restartsAt(Placer& placer,
++                         const int iter,
++                         const float overflow,
++                         const float phi_coef,
++                         const bool after_routability_pass = false)
++  {
++    NesterovPlace& np = *placer.np;
++    np.average_overflow_unscaled_ = overflow;
++    placer.nb().phiCoef_ = phi_coef;
++    float cur_a = 2.0f;
++    np.restartMomentumOnRise(iter, after_routability_pass, cur_a);
++    return cur_a == 1.0f;
++  }
++
+   PlaceOptions options_;
+   PlaceResult twin_result_;
+ };
+@@ -247,4 +317,164 @@ TEST_F(EndOfDescentTest, TraceEndsOnTheIterate)
+       << look_ahead_hpwl << ")";
+ }
+ 
++// Near the end of a descent an iteration whose HPWL rose by more than the
++// density penalty controller's reference restarts the momentum, and only
++// such an iteration: the next one takes no momentum step. Late in a long
++// descent the momentum coefficient is about 0.997 and nothing else damps
++// the motion: on large designs the fillers, then the cells, run away and
++// the HPWL rises over the last iterations without it. The restart is not
++// once per descent: as the momentum builds up again and the HPWL rises
++// again, it restarts again.
++//
++// gcd's HPWL grows by at most about 12,000 DBU an iteration on the way
++// down (6,000 below overflow 0.2), far below the default reference
++// (446,000,000 DBU at least), so the reference is 5,000 DBU here. That also
++// eases the penalty earlier in the descent and makes it several times
++// longer; what is tested is where it restarts.
++TEST_F(EndOfDescentTest, MomentumRestartsWhereTheHpwlRises)
++{
++  options_.referenceHpwl = 5000;
++  const std::unique_ptr<Placer> run = makePlacer(options_);
++  ASSERT_NE(run, nullptr);
++  logger_.redirectStringBegin();
++  const PlaceResult result = run->np->doNesterovPlace();
++  const std::string log = logger_.redirectStringEnd();
++  ASSERT_EQ(result.stop, PlaceStop::kConverged);
++
++  const std::vector<int> rises = risesNearTheEnd(result);
++  ASSERT_GE(rises.size(), 2) << "the descent must rise near its end, twice";
++  const std::vector<int> restarts = restartIterations(log);
++  EXPECT_EQ(restarts, rises)
++      << "the momentum must restart on every rise near the end, and only "
++         "there";
++
++  bool restarted_again = false;
++  for (size_t i = 1; i < restarts.size(); ++i) {
++    restarted_again |= restarts[i] > restarts[i - 1] + 1;
++  }
++  EXPECT_TRUE(restarted_again)
++      << "a rise after the momentum has built up again must restart it again";
++
++  ASSERT_FALSE(restarts.empty());
++  const int restart = restarts.front();
++  ASSERT_LT(restart + 1, result.final_iteration);
++  const std::unique_ptr<Placer> before = runTwin(restart);
++  ASSERT_NE(before, nullptr);
++  ASSERT_GT(lookAheadsApart(*before), 0)
++      << "the descent must carry momentum up to the restart";
++  const std::unique_ptr<Placer> after = runTwin(restart + 1);
++  ASSERT_NE(after, nullptr);
++  EXPECT_EQ(lookAheadsApart(*after), 0)
++      << "the iteration after the restart must take no momentum step";
++}
++
++// A descent whose HPWL never rises that fast keeps its momentum to the end,
++// as it did before the restart existed: gcd with the default reference,
++// whose density penalty grows on every iteration down to the target.
++TEST_F(EndOfDescentTest, MomentumRunsOnWithoutARise)
++{
++  const std::unique_ptr<Placer> run = makePlacer(options_);
++  ASSERT_NE(run, nullptr);
++  logger_.redirectStringBegin();
++  const PlaceResult result = run->np->doNesterovPlace();
++  const std::string log = logger_.redirectStringEnd();
++  ASSERT_EQ(result.stop, PlaceStop::kConverged);
++
++  int near_the_end = -1;
++  for (const PlaceIteration& row : result.trace) {
++    if (row.overflow <= kRestartOverflow) {
++      near_the_end = row.iteration;
++      break;
++    }
++  }
++  ASSERT_GE(near_the_end, 0);
++  ASSERT_GT(result.final_iteration - near_the_end, 10)
++      << "the descent must spend a while below the restart overflow";
++  ASSERT_TRUE(risesNearTheEnd(result).empty())
++      << "this descent must not rise near its end";
++
++  EXPECT_TRUE(restartIterations(log).empty());
++  EXPECT_EQ(log.find("GPL-0126"), std::string::npos);
++
++  // The iteration after the descent came down to the restart overflow, and
++  // the last one, still take their momentum steps.
++  for (const int iteration : {near_the_end + 1, result.final_iteration}) {
++    const std::unique_ptr<Placer> twin = runTwin(iteration);
++    ASSERT_NE(twin, nullptr);
++    EXPECT_GT(lookAheadsApart(*twin), 0)
++        << "the momentum must not be restarted at iteration " << iteration;
++  }
++}
++
++// The restart decision, one iteration at a time: at or below the restart
++// overflow, on an HPWL rise (phiCoef below 1), and not when something else
++// owns the iteration. A non-virtual timing-driven repair on it restarts the
++// momentum itself, and its GPL-0111 is the only restart and the only log
++// line; a routability pass on it has reverted or inflated the placement
++// the rise was measured on (routability_minimum_test runs that in a
++// descent); and a region that has converged no longer moves.
++TEST_F(EndOfDescentTest, MomentumRestartsOnlyOnARiseNearTheEnd)
++{
++  const std::unique_ptr<Placer> placer = makePlacer(options_);
++  ASSERT_NE(placer, nullptr);
++
++  struct Case
++  {
++    float overflow;
++    float phi_coef;
++    const char* logged;  // nullptr: no restart
++  };
++  const std::vector<Case> cases = {
++      {0.5f, 0.95f, nullptr},
++      {0.21f, 0.95f, nullptr},
++      {0.2f, 0.95f, "overflow 0.2000, phiCoef 0.9500."},
++      {0.15f, 0.999f, "overflow 0.1500, phiCoef 0.9990."},
++      {0.1f, 1.0f, nullptr},
++      {0.1f, 1.04f, nullptr},
++      {0.05f, 0.97f, "overflow 0.0500, phiCoef 0.9700."},
++  };
++  int iter = 300;
++  for (const Case& c : cases) {
++    startIteration(*placer);
++    logger_.redirectStringBegin();
++    const bool restarted = restartsAt(*placer, iter, c.overflow, c.phi_coef);
++    const std::string log = logger_.redirectStringEnd();
++    EXPECT_EQ(restarted, c.logged != nullptr)
++        << "overflow " << c.overflow << ", phiCoef " << c.phi_coef;
++    if (c.logged != nullptr) {
++      EXPECT_NE(
++          log.find("GPL-0126] Restarting Nesterov momentum at iter = "
++                   + std::to_string(iter + 1) + ": HPWL rose at " + c.logged),
++          std::string::npos)
++          << log;
++    } else {
++      EXPECT_EQ(log.find("GPL-0126"), std::string::npos) << log;
++    }
++    ++iter;
++  }
++
++  startIteration(*placer);
++  setRepairRestarting(*placer);
++  logger_.redirectStringBegin();
++  EXPECT_FALSE(restartsAt(*placer, iter, 0.1f, 0.95f))
++      << "a non-virtual repair restarts the momentum on this iteration";
++  EXPECT_EQ(logger_.redirectStringEnd().find("GPL-0126"), std::string::npos);
++
++  startIteration(*placer);
++  EXPECT_FALSE(restartsAt(*placer,
++                          iter,
++                          0.1f,
++                          0.95f,
++                          /* after_routability_pass = */ true))
++      << "a routability pass has reverted or inflated the placement";
++
++  startIteration(*placer);
++  setConverged(*placer);
++  EXPECT_FALSE(restartsAt(*placer, iter, 0.1f, 0.95f))
++      << "a converged region no longer moves: its phiCoef does not count";
++
++  startIteration(*placer);
++  EXPECT_TRUE(restartsAt(*placer, iter, 0.1f, 0.95f));
++}
++
+ }  // namespace gpl
+diff --git a/openroad/gpl/test/routability_minimum_test.cpp b/openroad/gpl/test/routability_minimum_test.cpp
+index f211c97..1f464ac 100644
+--- a/openroad/gpl/test/routability_minimum_test.cpp
++++ b/openroad/gpl/test/routability_minimum_test.cpp
+@@ -7,6 +7,7 @@
+ #include <cstdint>
+ #include <map>
+ #include <memory>
++#include <sstream>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+@@ -24,6 +25,7 @@
+ #include "openroad/gpl/src/point.h"
+ #include "openroad/gpl/src/routeBase.h"
+ #include "tst/IntegratedFixture.h"
++#include "utl/Logger.h"
+ 
+ namespace gpl {
+ 
+@@ -49,6 +51,9 @@ class RoutabilityMinimumTest : public tst::IntegratedFixture
+   // The look-ahead coordinates are this many sites right of the coordinates,
+   // so that a test can tell which of the two the cells are on.
+   static constexpr int kSlpShift = 1;
++  // At or below it an HPWL rise restarts the momentum.
++  static constexpr float kRestartOverflow
++      = NesterovPlace::kRestartOnRiseOverflow;
+ 
+   // A gcell's Nesterov state: its coordinates, its look-ahead (SLP)
+   // coordinates and the gradients the next step starts from.
+@@ -703,4 +708,80 @@ INSTANTIATE_TEST_SUITE_P(Endings,
+                          ::testing::Values(Ending::kNoImprovement,
+                                            Ending::kBudgetSpent));
+ 
++// A routability pass owns the iteration it runs on: it may revert the
++// placement whose HPWL the iteration measured, or resize its cells, so the
++// momentum restart on an HPWL rise (NesterovPlace::restartMomentumOnRise())
++// stands aside there, and the next iteration measures its own rise. A whole
++// routability-driven descent of gcd, from the core's center: the passes
++// gated at the restart overflow, so that each runs where a rise restarts the
++// momentum; RUDY reading the placements as congested, so that the phase
++// runs several passes and reverts to the snapshot after each; a reference
++// of 5,000 DBU, so that gcd's rises register (end_of_descent_test explains
++// it); and a target density of 0.9 with an inflation budget of 9 %, which
++// leave the inflated cells room to come back down to the gate. A descent
++// that stalls above the routability check overflow does not end: those
++// iterations do not count toward the iteration limit.
++TEST_F(RoutabilityMinimumTest, MomentumRestartStandsAsideOnAPassIteration)
++{
++  options_.routabilityCheckOverflow = kRestartOverflow;
++  options_.referenceHpwl = 5000;
++  options_.density = 0.9f;
++  options_.routabilityMaxInflationTotal = 0.09f;
++  makePlacer();
++  grt_.getRudy()->setWireWidth(2 * kWidth);
++  // Each iteration's measurement opens with PreviousHPWL and reads PhiCoef,
++  // the density penalty controller's reading of the HPWL change, and the
++  // overflow; a pass (GPL-0040) and a restart (GPL-0126) come later in the
++  // same iteration.
++  logger_.setDebugLevel(utl::GPL, "updateNextIter", 1);
++  logger_.redirectStringBegin();
++  const PlaceResult result = np_->doNesterovPlace();
++  const std::string log = logger_.redirectStringEnd();
++  logger_.setDebugLevel(utl::GPL, "updateNextIter", 0);
++  ASSERT_EQ(result.stop, PlaceStop::kConverged);
++
++  struct Iteration
++  {
++    float phi_coef = 1.0f;
++    float overflow = 1.0f;
++    bool pass = false;
++    bool restart = false;
++  };
++  std::vector<Iteration> iterations;
++  std::istringstream lines(log);
++  for (std::string line; std::getline(lines, line);) {
++    if (line.find("PreviousHPWL: ") != std::string::npos) {
++      iterations.emplace_back();
++    } else if (iterations.empty()) {
++      continue;
++    } else if (const size_t at = line.find("PhiCoef: ");
++               at != std::string::npos) {
++      iterations.back().phi_coef = std::stof(line.substr(at + 9));
++    } else if (const size_t at = line.find("] Overflow: ");
++               at != std::string::npos) {
++      iterations.back().overflow = std::stof(line.substr(at + 12));
++    } else if (line.find("GPL-0040]") != std::string::npos) {
++      iterations.back().pass = true;
++    } else if (line.find("GPL-0126]") != std::string::npos) {
++      iterations.back().restart = true;
++    }
++  }
++
++  int rising_passes = 0;
++  int restarts = 0;
++  for (size_t i = 0; i < iterations.size(); ++i) {
++    const Iteration& iteration = iterations[i];
++    rising_passes += iteration.pass && iteration.phi_coef < 1.0f
++                     && iteration.overflow <= kRestartOverflow;
++    restarts += iteration.restart;
++    EXPECT_FALSE(iteration.pass && iteration.restart)
++        << "iteration " << i << ": a routability pass ran on it, and the "
++        << "momentum must not be restarted there";
++  }
++  ASSERT_GT(rising_passes, 0)
++      << "a pass must run on an iteration whose HPWL rose at or below the "
++         "restart overflow, or the test says nothing about the pass";
++  EXPECT_GT(restarts, 0) << "the restart must be live in this descent";
++}
++
+ }  // namespace gpl
+-- 
+2.53.0
+

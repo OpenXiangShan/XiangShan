@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH 3/5] grt: free the blocked intervals once they are applied
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+findObstructions, findInstancesObstructions and findNetsObstructions
+collect, per partly blocked edge and layer, the intervals obstructions
+block; initBlockedIntervals turns them into capacity adjustments. Nothing
+reads them after that: a release recomputes from the capacity, and the
+next initialization starts from clear(). They were kept to the end of
+the run, an interval set per edge, on a large die several GB.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/src/fastroute/src/FastRoute.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index 9ae09a4..c9f1ce9 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -1043,6 +1043,11 @@ void FastRouteCore::initBlockedIntervals(std::vector<int>& track_space)
+       addAdjustment(x, y, x + 1, y, layer, edge_cap, true);
+     }
+   }
++
++  // The intervals are applied as the adjustments above and read nowhere
++  // else; on a large die they hold an interval set per blocked edge.
++  decltype(vertical_blocked_intervals_)().swap(vertical_blocked_intervals_);
++  decltype(horizontal_blocked_intervals_)().swap(horizontal_blocked_intervals_);
+ }
+ 
+ int FastRouteCore::getAvailableResources(int x1,
+-- 
+2.53.0
+

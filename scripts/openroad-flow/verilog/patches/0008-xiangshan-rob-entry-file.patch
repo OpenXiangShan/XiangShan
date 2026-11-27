@@ -1,0 +1,340 @@
+From e2e2296a2a5705e03559358eebab3c52a35660e1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Date: Mon, 21 Sep 2026 07:05:33 +0200
+Subject: [PATCH] rob: the entry payload as a register-file module, the cell
+ keeps its state
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The fields connectEnq writes once at enqueue and the commit path reads
+through the banks (fflagsWen, commitType, ftqIdx, ftqOffset, isRVC,
+needVTB, isHls, rfWen, fpWen, dirtyVs) move out of every RobEntryCell
+into RobEntryFile, a utils.RegVecFile with RenameWidth write ports at
+the allocate pointers and one read port per bank and line, so a physical
+flow can replace it by a generated register-file macro from the module
+name while simulation keeps the behavioural model. The cell keeps the
+read-modify-write state (valid, uopNum, realDestSize, fflags, vxsat,
+needFlush, the trace bits) and the enqueue-time bits it writes even under
+a redirect (mmio, vls, interrupt_safe), and its shared bus carries only
+what it still reads of an enqueuing uop instead of the whole EnqRobUop.
+Same registers, same write conditions, same read timing.
+
+Carried by the bazel-orfs CoreMark/Joule study; not upstreamed.
+
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ .../scala/xiangshan/backend/rob/Rob.scala     |  80 +++++++++--
+ .../xiangshan/backend/rob/RobBundles.scala    | 135 ++++++++++++++++++
+ 2 files changed, 201 insertions(+), 14 deletions(-)
+
+diff --git a/src/main/scala/xiangshan/backend/rob/Rob.scala b/src/main/scala/xiangshan/backend/rob/Rob.scala
+index 2d797dd4b..6d41ce698 100644
+--- a/src/main/scala/xiangshan/backend/rob/Rob.scala
++++ b/src/main/scala/xiangshan/backend/rob/Rob.scala
+@@ -180,7 +180,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+   val robEntryCells = Seq.fill(RobSize)(Module(new RobEntryCell(
+     exuWBs.length, exceptionWBs.length, fflagsWBs.length, vxsatWBs.length, branchWBs.length,
+     io.writebackNums.head.bits.getWidth)))
+-  val robEntries = VecInit(robEntryCells.map(_.io.entry.asTypeOf(new RobEntryBundle)))
++  // A cell keeps the entry's read-modify-write state (RobEntryStateBundle);
++  // the fields written once at enqueue and read at commit and walk live in
++  // RobEntryFile, a register file with RenameWidth write ports at the
++  // allocate pointers and one read port per bank and line, so a physical
++  // flow can hand them to a register-file generator instead of holding
++  // them as flops in every cell. robEntries is the read view of the cells'
++  // state; the payload is read through the bank ports below.
++  val robEntries = VecInit(robEntryCells.map(_.io.entry.asTypeOf(new RobEntryStateBundle)))
++  val robEntryFile = Module(new RegVecFile(new RobEntryPayloadBundle, RobSize,
++    numRead = 2 * bankNum, numWrite = RenameWidth, "RobEntryFile"))
++  robEntryFile.idle()
+   // pointers
+   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
+   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
+@@ -210,7 +220,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+   io.enq.resp := allocatePtrVec
+   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
+   val timer = GTimer()
+-  // (enqueue per entry: RobEntryCell)
++  // (enqueue per entry: RobEntryCell; the payload here, under the cell's
++  // condition for connectEnq: an accepted first uop, no redirect this cycle)
++  for (i <- 0 until RenameWidth) {
++    when(canEnqueue(i) && !io.redirect.valid) {
++      val payload = Wire(new RobEntryPayloadBundle)
++      payload.connectEnq(io.enq.req(i).bits)
++      robEntryFile.write(i, allocatePtrVec(i).value, payload)
++    }
++  }
+   // robBanks0 include robidx : 0 8 16 24 32 ...
+   val robBanks = VecInit((0 until bankNum).map(i => VecInit(robEntries.zipWithIndex.filter(_._2 % bankNum == i).map(_._1))))
+   // each Bank has 20 Entries, read addr is one hot
+@@ -226,13 +244,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+   val highDeqPtrNextLine = Mux(highDeqPtrThisLine === highDeqPtrMax, 0.U, highDeqPtrThisLine + 1.U)
+   val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrThisLine, i.U(bankNumWidth.W))))
+   val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrNextLine, i.U(bankNumWidth.W))))
+-  // robBanks read
+-  val robBanksRdataThisLine = VecInit(robBanks.map{ case bank =>
+-    Mux1H(robBanksRaddrThisLine, bank)
++  // robBanks read: the state through the one-hot select over the cells,
++  // the payload through the entry file's read ports at the same entry
++  // (bank b, row r is entry r * bankNum + b; the next line is row r + 1,
++  // wrapping, which is what the shifted bank selected)
++  val robBanksRowThisLine = OHToUInt(robBanksRaddrThisLine)
++  val robBanksRowNextLine = Mux(robBanksRowThisLine === (eachBankEntrieNum - 1).U, 0.U, robBanksRowThisLine + 1.U)
++  val robBanksRdataThisLine = VecInit(robBanks.zipWithIndex.map{ case (bank, b) =>
++    assembleEntry(Mux1H(robBanksRaddrThisLine, bank),
++      robEntryFile.read(b, Cat(robBanksRowThisLine, b.U(bankNumWidth.W))))
+   })
+-  val robBanksRdataNextLine = VecInit(robBanks.map{ case bank =>
++  val robBanksRdataNextLine = VecInit(robBanks.zipWithIndex.map{ case (bank, b) =>
+     val shiftBank = bank.drop(1) :+ bank(0)
+-    Mux1H(robBanksRaddrThisLine, shiftBank)
++    assembleEntry(Mux1H(robBanksRaddrThisLine, shiftBank),
++      robEntryFile.read(bankNum + b, Cat(robBanksRowNextLine, b.U(bankNumWidth.W))))
+   })
+   val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
+   val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
+@@ -1109,7 +1134,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+   val robEntryCellIn = Wire(new RobEntryCellIn(
+     exuWBs.length, exceptionWBs.length, fflagsWBs.length, vxsatWBs.length, branchWBs.length,
+     io.writebackNums.head.bits.getWidth))
+-  robEntryCellIn.enq.zip(io.enq.req).foreach { case (c, req) => c.valid := req.valid; c.bits := req.bits }
++  robEntryCellIn.enq.zip(io.enq.req).foreach { case (c, req) =>
++    c.valid := req.valid
++    c.bits.firstUop := req.bits.firstUop
++    c.bits.robIdx := req.bits.robIdx.value
++    c.bits.needEnqRab := req.bits.needEnqRab
++    c.bits.numWB := req.bits.numWB
++    c.bits.vlsInstr := req.bits.vlsInstr
++    // flushPipe needFlush but not exception (connectEnq)
++    c.bits.needFlush := req.bits.hasException || req.bits.flushPipe
++    c.bits.traceBlockInPipe := req.bits.traceBlockInPipe
++  }
+   robEntryCellIn.enqCanAccept := io.enq.canAccept
+   robEntryCellIn.allocatePtr := VecInit(allocatePtrVec.map(_.value))
+   robEntryCellIn.allowInterrupt := allowInterruptVec
+@@ -1384,7 +1419,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+     XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
+   )
+   XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
+-  def getPerfDebugInfo(uop: RobEntryBundle): PerfDebugInfo = {
++  def getPerfDebugInfo(uop: RobEntryStateBundle): PerfDebugInfo = {
+     uop.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
+   }
+   val dispatchLatency = commitDebugUop.map(uop => getPerfDebugInfo(uop).dispatchTime - getPerfDebugInfo(uop).renameTime)
+@@ -1897,9 +1932,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
+   * hierarchical linker's cost is pins times instances; 352 x 443 was
+   * eighteen minutes of link_design for the Rob block.
+   */
++/** What a RobEntryCell needs of an enqueuing uop: the payload it does not
++  * keep (RobEntryFile does) is left out, so the shared bus carries a few
++  * dozen bits per port instead of the whole EnqRobUop.
++  */
++class RobEntryCellEnq(implicit p: Parameters) extends XSBundle {
++  val firstUop = Bool()
++  val robIdx = UInt(log2Up(RobSize).W)
++  val needEnqRab = Bool()
++  val numWB = NumWB()
++  val vlsInstr = Bool()
++  val needFlush = Bool()
++  val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
++}
++
+ class RobEntryCellIn(numExuWb: Int, numExcWb: Int, numFflagsWb: Int, numVxsatWb: Int, numBranchWb: Int, wbNumWidth: Int)(implicit p: Parameters, params: BackendParams) extends XSBundle {
+   private val idxWidth = log2Up(RobSize)
+-  val enq = Vec(RenameWidth, ValidIO(new EnqRobUop))
++  val enq = Vec(RenameWidth, ValidIO(new RobEntryCellEnq))
+   val enqCanAccept = Bool()
+   val allocatePtr = Vec(RenameWidth, UInt(idxWidth.W))
+   val allowInterrupt = Vec(RenameWidth, Bool())
+@@ -1950,11 +1999,11 @@ class RobEntryCell(numExuWb: Int, numExcWb: Int, numFflagsWb: Int, numVxsatWb: I
+   val io = IO(new Bundle {
+     val idx = Input(UInt(idxWidth.W))
+     val in = Input(UInt((new RobEntryCellIn(numExuWb, numExcWb, numFflagsWb, numVxsatWb, numBranchWb, wbNumWidth)).getWidth.W))
+-    val entry = Output(UInt((new RobEntryBundle).getWidth.W))
++    val entry = Output(UInt((new RobEntryStateBundle).getWidth.W))
+   })
+   private val in = io.in.asTypeOf(new RobEntryCellIn(numExuWb, numExcWb, numFflagsWb, numVxsatWb, numBranchWb, wbNumWidth))
+ 
+-  val entry = RegInit((new RobEntryBundle).Lit(_.valid -> false.B))
++  val entry = RegInit((new RobEntryStateBundle).Lit(_.valid -> false.B))
+   io.entry := entry.asUInt
+ 
+   // enqueue
+@@ -1963,7 +2012,10 @@ class RobEntryCell(numExuWb: Int, numExcWb: Int, numFflagsWb: Int, numVxsatWb: I
+   val enqHit = enqOH.asUInt.orR
+   assert(PopCount(enqOH) < 2.U, "robEntries enqOH is not one hot")
+   when(enqHit && !in.redirectValid) {
+-    connectEnq(entry, Mux1H(enqOH, in.enq.map(_.bits)))
++    // connectEnq's share of the state; the rest of connectEnq is RobEntryFile's
++    val enqBits = Mux1H(enqOH, in.enq.map(_.bits))
++    entry.needFlush := enqBits.needFlush
++    entry.traceBlockInPipe := enqBits.traceBlockInPipe
+   }
+   when(enqHit) {
+     entry.mmio := false.B
+@@ -1988,7 +2040,7 @@ class RobEntryCell(numExuWb: Int, numExcWb: Int, numFflagsWb: Int, numVxsatWb: I
+   // writebacked state
+   val uopEnqValidSeq = in.enq.map(req => in.enqCanAccept && req.valid)
+   val instEnqValidSeq = in.enq.map(req => in.enqCanAccept && req.valid && req.bits.firstUop)
+-  val robIdxMatchSeq = in.enq.map(_.bits.robIdx.value === io.idx)
++  val robIdxMatchSeq = in.enq.map(_.bits.robIdx === io.idx)
+   val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+   val instCanEnqSeq = instEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+   val instCanEnqFlag = Cat(instCanEnqSeq).orR
+diff --git a/src/main/scala/xiangshan/backend/rob/RobBundles.scala b/src/main/scala/xiangshan/backend/rob/RobBundles.scala
+index e58e8ab8b..ff5867ec3 100644
+--- a/src/main/scala/xiangshan/backend/rob/RobBundles.scala
++++ b/src/main/scala/xiangshan/backend/rob/RobBundles.scala
+@@ -117,6 +117,85 @@ object RobBundles extends HasCircularQueuePtrHelper {
+ 
+   }
+ 
++  /** The part of an entry written once, at enqueue, and read at commit and
++    * walk through the bank ports: a register file (RobEntryFile, a
++    * utils.RegVecFile) instead of a field in every RobEntryCell. The fields
++    * connectEnq assigns from the enqueue uop and never touches again.
++    */
++  class RobEntryPayloadBundle(implicit p: Parameters) extends XSBundle {
++    val fflagsWen = Bool()
++    val commitType = CommitType()
++    val ftqIdx = new FtqPtr
++    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
++    val isRVC = Bool()
++    val needVTB = Bool()
++    val isHls = Bool()
++    val rfWen = Bool()
++    val fpWen = Bool()
++    val dirtyVs = Bool()
++
++    def connectEnq(robEnq: EnqRobUop): Unit = {
++      fflagsWen := robEnq.fflagsWen
++      commitType := robEnq.commitType
++      ftqIdx := robEnq.ftqPtr
++      ftqOffset := robEnq.ftqOffset
++      isRVC := robEnq.isRVC
++      // needVTB will be asserted by the first uop, so set it false here
++      needVTB := robEnq.isVset
++      isHls := robEnq.isHls
++      rfWen := robEnq.rfWen
++      fpWen := robEnq.dirtyFs
++      dirtyVs := robEnq.dirtyVs
++    }
++  }
++
++  /** The part of an entry that is read, modified and written after enqueue:
++    * the valid state machine, the writeback count, the flags, the flush
++    * and trace bits, and the enqueue-time bits the cell writes even under
++    * a redirect (mmio, vls, interrupt_safe). This is the RobEntryCell's
++    * register; the debug-only options ride along as in RobEntryBundle.
++    */
++  class RobEntryStateBundle(implicit p: Parameters) extends XSBundle {
++    val vls = Bool()
++    val interrupt_safe = Bool()
++    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
++    val valid = Bool()
++    val fflags = UInt(5.W)
++    val mmio = Bool()
++    val vxsat = Bool()
++    val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
++    val uopNum = UInt(log2Up(MaxUopSize * 2 + 1).W)
++    val needFlush = Bool()
++    val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
++    val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
++    val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
++    val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
++    val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(2.W))
++    val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
++    val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
++    val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr )
++    val debug_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr )
++    val debug_rfWen      = OptionWrapper(backendParams.debugEn, Bool() )
++    val debug_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum() )
++    val debug_sim_trig   = OptionWrapper(backendParams.debugEn, Bool() )
++    val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool() )
++    val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool() )
++    val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType() )
++    val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
++    val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
++    val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
++    val topdownIdealIssue  = OptionWrapper(backendParams.debugEn, Bool())
++    val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
++    val topdownLastIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
++    val topdownRobHeadTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
++    val topdownIdealIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
++    val topdownCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
++    val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
++    val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
++    def isWritebacked: Bool = !uopNum.orR
++    def isUopWritebacked: Bool = !uopNum.orR
++  }
++
+   class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
+     val walk_v = Bool()
+     val commit_v = Bool()
+@@ -152,6 +231,62 @@ object RobBundles extends HasCircularQueuePtrHelper {
+     val dirtyVs = Bool()
+   }
+ 
++  /** A whole entry as the commit path reads it: the cell's state and the
++    * entry file's payload, field by field (the debug options from the
++    * state, where the cell keeps them).
++    */
++  def assembleEntry(state: RobEntryStateBundle, payload: RobEntryPayloadBundle)(implicit p: Parameters): RobEntryBundle = {
++    val e = Wire(new RobEntryBundle)
++    e := DontCare
++    e.vls := state.vls
++    e.interrupt_safe := state.interrupt_safe
++    e.traceBlockInPipe := state.traceBlockInPipe
++    e.valid := state.valid
++    e.fflags := state.fflags
++    e.mmio := state.mmio
++    e.vxsat := state.vxsat
++    e.realDestSize := state.realDestSize
++    e.uopNum := state.uopNum
++    e.needFlush := state.needFlush
++    e.fflagsWen := payload.fflagsWen
++    e.commitType := payload.commitType
++    e.ftqIdx := payload.ftqIdx
++    e.ftqOffset := payload.ftqOffset
++    e.isRVC := payload.isRVC
++    e.needVTB := payload.needVTB
++    e.isHls := payload.isHls
++    e.rfWen := payload.rfWen
++    e.fpWen := payload.fpWen
++    e.dirtyVs := payload.dirtyVs
++    e.debug_pc.foreach(_ := state.debug_pc.get)
++    e.debug_instr.foreach(_ := state.debug_instr.get)
++    e.basicDebug.foreach(_ := state.basicDebug.get)
++    e.debug_fuType.foreach(_ := state.debug_fuType.get)
++    e.debug_fusionNum.foreach(_ := state.debug_fusionNum.get)
++    e.debug_fuOpType.foreach(_ := state.debug_fuOpType.get)
++    e.perfDebugInfo.foreach(_ := state.perfDebugInfo.get)
++    e.debug_lqIdx.foreach(_ := state.debug_lqIdx.get)
++    e.debug_sqIdx.foreach(_ := state.debug_sqIdx.get)
++    e.debug_rfWen.foreach(_ := state.debug_rfWen.get)
++    e.debug_seqNum.foreach(_ := state.debug_seqNum.get)
++    e.debug_sim_trig.foreach(_ := state.debug_sim_trig.get)
++    e.debug_vecWen.foreach(_ := state.debug_vecWen.get)
++    e.debug_v0Wen.foreach(_ := state.debug_v0Wen.get)
++    e.debug_commitType.foreach(_ := state.debug_commitType.get)
++    e.topdownIssued.foreach(_ := state.topdownIssued.get)
++    e.topdownCanceled.foreach(_ := state.topdownCanceled.get)
++    e.topdownRobHead.foreach(_ := state.topdownRobHead.get)
++    e.topdownIdealIssue.foreach(_ := state.topdownIdealIssue.get)
++    e.topdownIssueTime.foreach(_ := state.topdownIssueTime.get)
++    e.topdownLastIssueTime.foreach(_ := state.topdownLastIssueTime.get)
++    e.topdownRobHeadTime.foreach(_ := state.topdownRobHeadTime.get)
++    e.topdownIdealIssueTime.foreach(_ := state.topdownIdealIssueTime.get)
++    e.topdownCancelSource.foreach(_ := state.topdownCancelSource.get)
++    e.topdownCancelTimeVec.foreach(_ := state.topdownCancelTimeVec.get)
++    e.topdownCancelTimeFixVec.foreach(_ := state.topdownCancelTimeFixVec.get)
++    e
++  }
++
+   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
+     robEntry.fflagsWen := robEnq.fflagsWen
+     robEntry.commitType := robEnq.commitType
+-- 
+2.53.0
+

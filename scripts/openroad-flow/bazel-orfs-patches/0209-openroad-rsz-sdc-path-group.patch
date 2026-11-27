@@ -1,0 +1,307 @@
+rsz: repair_timing -path_group takes a group the SDC defines
+
+-path_group knew only reg2reg, in2reg, reg2out, in2out and gated_clock;
+any other name warned (RSZ-0227) and repaired every path. A group made
+with group_path, a path group through a set of nets for instance, could
+not scope repair.
+
+A name that is not one of the five but names a group the SDC defines is
+taken as is: an endpoint is repaired when it has a path in that group,
+and its group slack is the worst of those paths, as for the built-in
+groups, without their structural endpoint classification.
+
+The flattened Top (bazel-orfs tools/carve/top_level.tcl) repairs its
+crossing group, the paths through the nets between two macros, so that
+repair never works on a macro's own paths. OpenSTA's
+Sdc::deleteNetBefore keeps that group sound when repair deletes one of
+its nets.
+
+repair_timing_path_group7: a group -through one net is repaired, its
+worst slack improving; a net named in a group_path -through is destroyed
+through OpenDB, as a resizer move does, and write_sdc no longer names it. CRIT_VT_SWAP still
+works on the fanin cone of the group's endpoints that some startpoint
+reaches, as for the built-in groups.
+
+Not upstreamed. Carried in bazel-orfs; retires on the //:bump onto an
+OpenROAD that has it.
+
+diff --git a/openroad/rsz/src/PathGroupFilter.cc b/openroad/rsz/src/PathGroupFilter.cc
+index 0b52197..7452836 100644
+--- a/openroad/rsz/src/PathGroupFilter.cc
++++ b/openroad/rsz/src/PathGroupFilter.cc
+@@ -45,6 +45,7 @@ StartpointKind groupStartpointKind(const PathGroupType type)
+     case PathGroupType::kReg2Out:
+       return StartpointKind::kRegister;
+     case PathGroupType::kGatedClock:
++    case PathGroupType::kUser:
+     case PathGroupType::kNone:
+       break;
+   }
+@@ -61,6 +62,7 @@ EndpointKind groupEndpointKind(const PathGroupType type)
+       return EndpointKind::kGatedClockEnable;
+     case PathGroupType::kReg2Reg:
+     case PathGroupType::kIn2Reg:
++    case PathGroupType::kUser:
+     case PathGroupType::kNone:
+       break;
+   }
+@@ -101,6 +103,7 @@ std::string_view staPathGroupName(const PathGroupType type)
+       return "in2out";
+     case PathGroupType::kGatedClock:
+       return sta::PathGroups::gatedClkGroupName();
++    case PathGroupType::kUser:
+     case PathGroupType::kNone:
+       break;
+   }
+@@ -234,6 +237,12 @@ std::string resolvePathGroupName(Resizer* resizer, const char* name)
+ {
+   const std::string group_name = name != nullptr ? name : "";
+   const PathGroupType type = findPathGroupType(group_name);
++  sta::dbSta* sta = resizer->sta();
++  if (type == PathGroupType::kNone && !group_name.empty()
++      && sta->isPathGroupName(group_name, sta->cmdSdc())) {
++    // A group the SDC defines: OpenSTA decides which paths are in it.
++    return group_name;
++  }
+   if (type == PathGroupType::kNone) {
+     std::string valid;
+     for (const std::string_view path_group_name : pathGroupNames()) {
+@@ -252,7 +261,6 @@ std::string resolvePathGroupName(Resizer* resizer, const char* name)
+     return "";
+   }
+ 
+-  sta::dbSta* sta = resizer->sta();
+   if (!sta->isPathGroupName(staPathGroupName(type), sta->cmdSdc())) {
+     makePathGroup(resizer, group_name, type);
+   }
+@@ -264,8 +272,13 @@ PathGroupFilter::PathGroupFilter(Resizer* resizer)
+       network_(resizer->network()),
+       sdc_(resizer->sta()->cmdSdc()),
+       logger_(resizer->logger()),
+-      type_(findPathGroupType(resizer->pathGroup()))
++      type_(findPathGroupType(resizer->pathGroup())),
++      name_(resizer->pathGroup())
+ {
++  if (type_ == PathGroupType::kNone && !name_.empty()
++      && sta_->isPathGroupName(name_, sdc_)) {
++    type_ = PathGroupType::kUser;
++  }
+   if (enabled()) {
+     // Endpoint classification asks whether pins are on the clock network.
+     sta_->ensureClkNetwork(sta_->cmdMode());
+@@ -335,14 +348,14 @@ bool PathGroupFilter::endpointInGroup(sta::Vertex* endpoint,
+   // Structural: a primary output ends *2out, a clock gate enable ends
+   // gated_clock, a register/latch data pin ends *2reg.
+   const EndpointKind kind = endpointKind(endpoint);
+-  if (kind != groupEndpointKind(type_)) {
++  if (type_ != PathGroupType::kUser && kind != groupEndpointKind(type_)) {
+     debugPrint(logger_,
+                utl::RSZ,
+                "path_group",
+                2,
+                "{} rejected from {}: endpoint is {}",
+                network_->pathName(endpoint->pin()),
+-               staPathGroupName(type_),
++               groupName(),
+                endpointKindName(kind));
+     return false;
+   }
+@@ -358,7 +371,7 @@ bool PathGroupFilter::endpointInGroup(sta::Vertex* endpoint,
+                2,
+                "{} rejected from {}: no path in group",
+                network_->pathName(endpoint->pin()),
+-               staPathGroupName(type_));
++               groupName());
+     return false;
+   }
+   debugPrint(logger_,
+@@ -367,7 +380,7 @@ bool PathGroupFilter::endpointInGroup(sta::Vertex* endpoint,
+              2,
+              "{} kept in {}: group slack {} (endpoint slack {})",
+              network_->pathName(endpoint->pin()),
+-             staPathGroupName(type_),
++             groupName(),
+              sta::delayAsString(*slack, 4, sta_),
+              sta::delayAsString(sta_->slack(endpoint, min_max), 4, sta_));
+   return true;
+@@ -415,7 +428,7 @@ PathGroupFilter::GroupSlacks PathGroupFilter::groupEndpointSlacks(
+   }
+ 
+   const bool setup = min_max == sta::MinMax::max();
+-  sta::StringSeq group_names{std::string(staPathGroupName(type_))};
++  sta::StringSeq group_names{std::string(groupName())};
+   // No `to` filter: one unfiltered query returns the whole group.
+   const sta::PathEndSeq ends = sta_->findPathEnds(
+       /*from=*/nullptr,
+@@ -477,7 +490,7 @@ sta::PathEnd* PathGroupFilter::worstGroupEnd(sta::Vertex* endpoint,
+                                                sdc_);
+ 
+   const bool setup = min_max == sta::MinMax::max();
+-  sta::StringSeq group_names{std::string(staPathGroupName(type_))};
++  sta::StringSeq group_names{std::string(groupName())};
+   const sta::PathEndSeq ends = sta_->findPathEnds(
+       /*from=*/nullptr,
+       /*thrus=*/nullptr,
+@@ -504,6 +517,12 @@ sta::PathEnd* PathGroupFilter::worstGroupEnd(sta::Vertex* endpoint,
+   return ends.empty() ? nullptr : ends[0];
+ }
+ 
++std::string_view PathGroupFilter::groupName() const
++{
++  return type_ == PathGroupType::kUser ? std::string_view(name_)
++                                       : staPathGroupName(type_);
++}
++
+ bool PathGroupFilter::startpointInGroup(sta::Vertex* startpoint) const
+ {
+   if (!enabled()) {
+diff --git a/openroad/rsz/src/PathGroupFilter.hh b/openroad/rsz/src/PathGroupFilter.hh
+index 014a589..1a5c23b 100644
+--- a/openroad/rsz/src/PathGroupFilter.hh
++++ b/openroad/rsz/src/PathGroupFilter.hh
+@@ -38,7 +38,10 @@ enum class PathGroupType
+   kIn2Reg,
+   kReg2Out,
+   kIn2Out,
+-  kGatedClock
++  kGatedClock,
++  // A group the SDC defines (group_path), by its name: a path is in it when
++  // OpenSTA puts it there, whatever its ends.
++  kUser
+ };
+ 
+ // What a path ends at.  A clock gate enable is neither a register data pin nor
+@@ -153,12 +156,15 @@ class PathGroupFilter
+   bool isPrimaryOutput(const sta::Pin* pin) const;
+   bool isGatedClockEnable(const sta::Vertex* vertex) const;
+   EndpointKind endpointKind(const sta::Vertex* endpoint) const;
++  // The name OpenSTA knows the selected group by.
++  std::string_view groupName() const;
+ 
+   sta::Sta* sta_;
+   sta::Network* network_;
+   sta::Sdc* sdc_;
+   utl::Logger* logger_;
+   PathGroupType type_;
++  std::string name_;
+ };
+ 
+ }  // namespace rsz
+diff --git a/openroad/rsz/test/BUILD b/openroad/rsz/test/BUILD
+index d0bdf7e..33b7eb8 100644
+--- a/openroad/rsz/test/BUILD
++++ b/openroad/rsz/test/BUILD
+@@ -202,6 +202,7 @@ TESTS = [
+     "repair_timing_path_group4",
+     "repair_timing_path_group5",
+     "repair_timing_path_group6",
++    "repair_timing_path_group7",
+     "repair_slew1",
+     "repair_slew10",
+     "repair_slew11",
+diff --git a/openroad/rsz/test/repair_timing_path_group7.ok b/openroad/rsz/test/repair_timing_path_group7.ok
+new file mode 100644
+index 0000000..8cfca3e
+--- /dev/null
++++ b/openroad/rsz/test/repair_timing_path_group7.ok
+@@ -0,0 +1,30 @@
++[INFO ODB-0227] LEF file: asap7/asap7_tech_1x_201209.lef, created 30 layers, 9 vias
++[INFO ODB-0227] LEF file: asap7/asap7sc7p5t_28_R_1x_220121a.lef, created 212 library cells
++[INFO ODB-0394] Duplicate site asap7sc7p5t in asap7sc7p5t_28_L_1x_220121a already seen in asap7sc7p5t_28_R_1x_220121a
++[INFO ODB-0227] LEF file: asap7/asap7sc7p5t_28_L_1x_220121a.lef, created 212 library cells
++[INFO ODB-0394] Duplicate site asap7sc7p5t in asap7sc7p5t_28_SL_1x_220121a already seen in asap7sc7p5t_28_R_1x_220121a
++[INFO ODB-0227] LEF file: asap7/asap7sc7p5t_28_SL_1x_220121a.lef, created 212 library cells
++[INFO ODB-0128] Design: gcd
++[INFO ODB-0130]     Created 54 pins.
++[INFO ODB-0131]     Created 470 components and 2159 component-terminals.
++[INFO ODB-0133]     Created 416 nets and 1216 connections.
++group through _015_
++violating endpoints: 83 in all, 36 in the group (wns -93.530)
++[INFO RSZ-0100] Repair move sequence: UnbufferMove VtSwapMove SizeUpMove SwapPinsMove BufferMove CloneMove SplitLoadMove 
++[INFO RSZ-0094] Found 36 endpoints with setup violations.
++[INFO RSZ-0099] Repairing 36 out of 36 (100.00%) violating endpoints...
++   Iter   | Removed | Resized | Inserted | Cloned |  Pin  |   Area   |    WNS   |    TNS     |  Viol  |  Worst
++          | Buffers |  Gates  | Buffers  |  Gates | Swaps |          |          |            | Endpts | Endpoint
++------------------------------------------------------------------------------------------------------------------------------
++       0* |       0 |       0 |        0 |      0 |     0 |    +0.0% |  -93.530 |    -2475.5 |     36 | dpath.a_reg.out\[7\]$_DFFE_PP_/D
++     221* |       0 |      35 |        9 |      2 |     4 |    +3.1% |  -10.165 |     -193.2 |     36 | dpath.a_reg.out\[3\]$_DFFE_PP_/D
++    final |       0 |     138 |        9 |      2 |     7 |    +3.2% |   -9.769 |     -155.5 |     27 | dpath.b_reg.out\[3\]$_DFFE_PP_/D
++------------------------------------------------------------------------------------------------------------------------------
++[INFO RSZ-0040] Inserted 9 buffers.
++[INFO RSZ-0051] Resized 138 instances: 11 up, 0 up match, 0 down, 127 VT
++[INFO RSZ-0043] Swapped pins on 7 instances.
++[INFO RSZ-0049] Cloned 2 instances.
++[WARNING RSZ-0062] Unable to repair all setup violations.
++group after: 27 violating, wns -9.769, improved: 1
++net still there: 0
++doomed_group names a net: 0
+diff --git a/openroad/rsz/test/repair_timing_path_group7.tcl b/openroad/rsz/test/repair_timing_path_group7.tcl
+new file mode 100644
+index 0000000..02dbcff
+--- /dev/null
++++ b/openroad/rsz/test/repair_timing_path_group7.tcl
+@@ -0,0 +1,64 @@
++# repair_timing -path_group takes a group the SDC defines (group_path): it
++# repairs the group's violating endpoints, judged by the group's slack. A
++# net a group runs -through can be deleted without leaving the group
++# pointing at it.
++source "helpers.tcl"
++source asap7/asap7.vars
++foreach vt {RVT LVT SLVT} {
++  read_liberty asap7/asap7sc7p5t_AO_${vt}_FF_nldm_211120.lib.gz
++  read_liberty asap7/asap7sc7p5t_INVBUF_${vt}_FF_nldm_220122.lib.gz
++  read_liberty asap7/asap7sc7p5t_OA_${vt}_FF_nldm_211120.lib.gz
++  read_liberty asap7/asap7sc7p5t_SIMPLE_${vt}_FF_nldm_211120.lib.gz
++  read_liberty asap7/asap7sc7p5t_SEQ_${vt}_FF_nldm_220123.lib
++}
++read_lef asap7/asap7_tech_1x_201209.lef
++read_lef asap7/asap7sc7p5t_28_R_1x_220121a.lef
++read_lef asap7/asap7sc7p5t_28_L_1x_220121a.lef
++read_lef asap7/asap7sc7p5t_28_SL_1x_220121a.lef
++read_def gcd_asap7_placed.def
++
++create_clock -name core_clock -period 180 [get_ports clk]
++set_input_delay -clock core_clock 20 [all_inputs -no_clocks]
++set_output_delay -clock core_clock 20 [all_outputs]
++source asap7/setRC.tcl
++estimate_parasitics -placement
++
++# The group: paths through the worst path's register output net.
++set worst [find_timing_paths -path_delay max -group_path_count 1]
++set start_pin [get_property [get_property $worst startpoint] full_name]
++set thru_net [get_nets -of_objects [get_pins $start_pin]]
++puts "group through [get_full_name $thru_net]"
++group_path -name thru -through $thru_net
++
++proc group_violations { } {
++  set ends [find_timing_paths -path_group thru -path_delay max \
++              -group_path_count 1000 -endpoint_path_count 1 -unique_paths_to_endpoint \
++              -slack_max 0]
++  set wns 0
++  foreach end $ends { set wns [expr { min($wns, [get_property $end slack]) }] }
++  return [list [llength $ends] [format %.3f $wns]]
++}
++lassign [group_violations] n_before wns_before
++set all_before [llength [find_timing_paths -path_delay max -group_path_count 1000 \
++                           -endpoint_path_count 1 -unique_paths_to_endpoint -slack_max 0]]
++puts "violating endpoints: $all_before in all, $n_before in the group (wns $wns_before)"
++repair_timing -setup -path_group thru
++lassign [group_violations] n_after wns_after
++puts "group after: $n_after violating, wns $wns_after, improved: [expr { $wns_after > $wns_before }]"
++
++# A net a group runs -through is deleted, as a resizer move deletes one
++# (through OpenDB's net destroy): the group no longer names it.
++set doomed [odb::dbNet_create [ord::get_db_block] doomed]
++group_path -name doomed_group -through [get_nets doomed]
++odb::dbNet_destroy $doomed
++puts "net still there: [llength [get_nets -quiet doomed]]"
++set sdc [make_result_file repair_timing_path_group7.sdc]
++write_sdc -no_timestamp $sdc
++set f [open $sdc]
++set text [read $f]
++close $f
++# The group's statement, up to the next command, if the group is left:
++# no net in it.
++set group ""
++regexp {group_path -name doomed_group[^\n]*(\\\n[^\n]*)*} $text group
++puts "doomed_group names a net: [regexp {get_nets} $group]"

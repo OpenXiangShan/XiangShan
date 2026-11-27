@@ -1,0 +1,335 @@
+# XiangShan's Verilog generation:
+# - Unpatched DefaultConfig / MinimalConfig targets (`xiangshan_default_*`,
+#   `xiangshan_minimal_*`) compile directly against root `//:xiangshan`.
+# - The XSTile physical flow's targets (`xiangshan_flat`, `xiangshan_sv`)
+#   apply the flow-only structural patches (`patches/*.patch`) hermetically
+#   via `patched_srcjar`, never modifying the checkout.
+
+load("@rules_chisel//chisel:defs.bzl", "chisel_binary", "chisel_library")
+load("@rules_chisel//verilog:defs.bzl", "verilog_directory", "verilog_single_file_library")
+load(":clock_gate.bzl", "CLOCK_GATE_OPTS")
+load(":patched_srcs.bzl", "patched_srcjar")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "ClockGate.sv",
+    "espresso.BUILD.bazel",
+] + glob(["patches/*.patch"]))
+
+SCALACOPTS = [
+    "-Ymacro-annotations",
+    "-Xcheckinit:false",
+]
+
+# --- Unpatched generators (root //:verilog, //:verilog_minimal, //:ppa) ----
+[
+    chisel_binary(
+        name = "synth_generator" + suffix,
+        srcs = ["src/FlowGenerator.scala"],
+        jvm_flags = [
+            "-Xmx24g",
+            "-Xss256m",
+        ],
+        main_class = main_class,
+        resource_strip_prefix = "scripts/openroad-flow/verilog/resources",
+        resources = ["resources/gitStatus"],
+        scalacopts = ["-Xcheckinit:false"],
+        deps = [
+            "//:rocket_chip",
+            "//:rocket_chip_macros",
+            "//:utility",
+            "//:xiangshan",
+            "//:xscache",
+        ],
+    )
+    for suffix, main_class in [
+        ("_default", "openroadflow.SynthDefaultGenerator"),
+        ("_minimal", "openroadflow.SynthMinimalGenerator"),
+    ]
+]
+
+[
+    genrule(
+        name = "xiangshan" + suffix + "_fir",
+        outs = ["xiangshan" + suffix + ".fir"],
+        cmd = " ".join([
+            "FIRTOOL_DIR=$$(dirname $$(realpath $(execpath @chisel_firtool//:bin/firtool)));",
+            "ESPRESSO_DIR=$$(dirname $$(realpath $(execpath @espresso//:bin/espresso)));",
+            "PATH=$$ESPRESSO_DIR:$$FIRTOOL_DIR:$$PATH",
+            "CHISEL_FIRTOOL_PATH=$$FIRTOOL_DIR",
+            "$(execpath :synth_generator" + suffix + ")",
+            "--default-layer-specialization=disable",
+            "--mlir-print-debuginfo",
+            "-o $@",
+        ]),
+        tags = ["manual"],
+        tools = [
+            ":synth_generator" + suffix,
+            "@chisel_firtool//:bin/firtool",
+            "@espresso//:bin/espresso",
+        ],
+    )
+    for suffix in [
+        "_default",
+        "_minimal",
+    ]
+]
+
+[
+    verilog_directory(
+        name = "xiangshan" + suffix + "_sv",
+        srcs = [":xiangshan" + suffix + "_fir"],
+        opts = [
+            "--disable-all-randomization",
+            "--lowering-options=disallowPackedArrays,disallowLocalVariables,noAlwaysComb,locationInfoStyle=wrapInAtSquareBracket",
+        ],
+        tags = ["manual"],
+    )
+    for suffix in [
+        "_default",
+        "_minimal",
+    ]
+]
+
+# --- Flow-patched generators (for //scripts/openroad-flow/xstile) ----------
+patched_srcjar(
+    name = "utility_patched_srcjar",
+    patches = ["patches/0010-utility-clockgate-circt-intrinsic.patch"],
+    srcs = ["//:utility_scala_srcs"],
+    strip_prefix = "utility",
+)
+
+chisel_library(
+    name = "utility_patched",
+    srcs = [":utility_patched_srcjar"],
+    scalacopts = SCALACOPTS,
+    exports = ["//:rocket_chip"],
+    deps = [
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "zhujiang_patched",
+    srcs = ["//:zhujiang_scala_srcs"],
+    scalacopts = SCALACOPTS,
+    exports = ["//:rocket_chip"],
+    deps = [
+        ":utility_patched",
+        "//:difftest",
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "xscache_patched",
+    srcs = ["//:xscache_scala_srcs"],
+    scalacopts = SCALACOPTS,
+    exports = ["//:rocket_chip"],
+    deps = [
+        ":utility_patched",
+        ":zhujiang_patched",
+        "//:openncb",
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "@xs_maven//:com_github_scopt_scopt_2_13",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "chiselaia_patched",
+    srcs = ["//:chiselaia_scala_srcs"],
+    scalacopts = SCALACOPTS,
+    exports = ["//:rocket_chip"],
+    deps = [
+        ":utility_patched",
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+chisel_library(
+    name = "chiseliopmp_patched",
+    srcs = ["//:chiseliopmp_scala_srcs"],
+    scalacopts = SCALACOPTS,
+    exports = ["//:rocket_chip"],
+    deps = [
+        ":utility_patched",
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+    ],
+)
+
+patched_srcjar(
+    name = "xiangshan_patched_srcjar",
+    patches = [
+        "patches/0002-xiangshan-ftq-queues-as-register-files.patch",
+        "patches/0003-xiangshan-rob-entry-cell.patch",
+        "patches/0004-xiangshan-sq-entry-cell.patch",
+        "patches/0005-xiangshan-rename-buffer-file.patch",
+        "patches/0006-xiangshan-sq-forward-pipe.patch",
+        "patches/0007-xiangshan-rob-cell-packed-ports.patch",
+        "patches/0008-xiangshan-rob-entry-file.patch",
+        "patches/0011-xiangshan-runahead-checkpoint-id-debug-only.patch",
+    ],
+    srcs = ["//:xiangshan_scala_srcs"],
+)
+
+chisel_library(
+    name = "xiangshan_patched",
+    srcs = [":xiangshan_patched_srcjar"],
+    resource_strip_prefix = "src/main/resources",
+    resources = ["//:xiangshan_resources"],
+    scalacopts = SCALACOPTS,
+    deps = [
+        ":chiselaia_patched",
+        ":chiseliopmp_patched",
+        ":utility_patched",
+        ":xscache_patched",
+        ":zhujiang_patched",
+        "//:difftest",
+        "//:macros",
+        "//:openncb",
+        "//:rocket_chip",
+        "//:rocket_chip_macros",
+        "//:yunsuan",
+        "@xs_maven//:com_chuusai_shapeless_2_13",
+        "@xs_maven//:com_github_scopt_scopt_2_13",
+        "@xs_maven//:com_lihaoyi_os_lib_2_13",
+        "@xs_maven//:com_lihaoyi_sourcecode_2_13",
+        "@xs_maven//:io_circe_circe_core_2_13",
+        "@xs_maven//:io_circe_circe_generic_2_13",
+        "@xs_maven//:io_circe_circe_generic_extras_2_13",
+        "@xs_maven//:io_circe_circe_parser_2_13",
+        "@xs_maven//:io_circe_circe_yaml_2_13",
+        "@xs_maven//:io_circe_circe_yaml_common_2_13",
+        "@xs_maven//:org_scalactic_scalactic_2_13",
+        "@xs_maven//:org_scalatest_scalatest_compatible",
+        "@xs_maven//:org_scalatest_scalatest_core_2_13",
+        "@xs_maven//:org_scalatest_scalatest_flatspec_2_13",
+        "@xs_maven//:org_scalatest_scalatest_matchers_core_2_13",
+        "@xs_maven//:org_scalatest_scalatest_mustmatchers_2_13",
+        "@xs_maven//:org_scalatest_scalatest_shouldmatchers_2_13",
+        "@xs_maven//:org_typelevel_cats_core_2_13",
+    ],
+)
+
+[
+    chisel_binary(
+        name = "generator" + suffix,
+        srcs = ["src/FlowGenerator.scala"],
+        jvm_flags = [
+            "-Xmx24g",
+            "-Xss256m",
+        ],
+        main_class = "openroadflow.FlowGenerator" + main_suffix,
+        resource_strip_prefix = "scripts/openroad-flow/verilog/resources",
+        resources = ["resources/gitStatus"],
+        scalacopts = ["-Xcheckinit:false"],
+        deps = [
+            ":utility_patched",
+            ":xiangshan_patched",
+            ":xscache_patched",
+            "//:rocket_chip",
+            "//:rocket_chip_macros",
+        ],
+    )
+    for suffix, main_suffix in [
+        ("", ""),
+        ("_minimal", "Minimal"),
+    ]
+]
+
+[
+    genrule(
+        name = "xiangshan_fir" + suffix,
+        outs = ["xiangshan_fir" + suffix + ".fir"],
+        cmd = " ".join([
+            "FIRTOOL_DIR=$$(dirname $$(realpath $(execpath @chisel_firtool//:bin/firtool)));",
+            "ESPRESSO_DIR=$$(dirname $$(realpath $(execpath @espresso//:bin/espresso)));",
+            "PATH=$$ESPRESSO_DIR:$$FIRTOOL_DIR:$$PATH",
+            "CHISEL_FIRTOOL_PATH=$$FIRTOOL_DIR",
+            "$(execpath :generator" + suffix + ")",
+            "--default-layer-specialization=disable",
+            "-o $@",
+        ]),
+        tags = ["manual"],
+        tools = [
+            ":generator" + suffix,
+            "@chisel_firtool//:bin/firtool",
+            "@espresso//:bin/espresso",
+        ],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+[
+    verilog_directory(
+        name = "xiangshan_sv" + suffix,
+        srcs = [":xiangshan_fir" + suffix],
+        opts = [
+            "--disable-all-randomization",
+            "--lowering-options=disallowPackedArrays,disallowLocalVariables,noAlwaysComb",
+        ] + CLOCK_GATE_OPTS,
+        tags = ["manual"],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+[
+    verilog_single_file_library(
+        name = "xiangshan_concat" + suffix,
+        srcs = [
+            ":xiangshan_sv" + suffix,
+            "ClockGate.sv",
+        ],
+        tags = ["manual"],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+[
+    genrule(
+        name = "xiangshan_flat" + suffix,
+        srcs = [":xiangshan_concat" + suffix],
+        outs = ["xiangshan_flat" + suffix + ".sv"],
+        cmd = "grep -hvF '`include' $(location :xiangshan_concat" + suffix + ") > $@ || true",
+        tags = ["manual"],
+    )
+    for suffix in [
+        "",
+        "_minimal",
+    ]
+]
+
+[
+    genrule(
+        name = module + "_ports",
+        srcs = [":xiangshan_sv"],
+        outs = [module + "_ports.txt"],
+        cmd = "sed -n '/^module " + module + "/,/^  );/p' " +
+              "$(location :xiangshan_sv)/" + module + ".sv > $@",
+        tags = ["manual"],
+    )
+    for module in [
+        "XSTop",
+        "XSTile",
+    ]
+]

@@ -1,0 +1,118 @@
+web: a slack histogram bar drills down with the histogram's filters
+
+Clicking a bar asked for the paths in its slack range across every path
+group and clock, so a reg2reg histogram listed in2reg, reg2out and
+unclocked port paths too. The request now carries the selected path
+groups and clock; getReport passes the groups to findPathEnds and keeps
+the path ends on that clock.
+
+Carried by bazel-orfs; not upstreamed. Retires on a
+//:bump onto an OpenROAD that carries it.
+diff --git a/openroad/web/src/charts-widget.js b/openroad/web/src/charts-widget.js
+index fe66f94..ddd84ab 100644
+--- a/openroad/web/src/charts-widget.js
++++ b/openroad/web/src/charts-widget.js
+@@ -814,12 +814,20 @@ export class ChartsWidget {
+         if (!bar || bar.count === 0) return;
+ 
+         const tab = this._currentTab;
++        // the histogram's own filters, so a bar lists the paths it counted
+         const reportOptions = {
+             max_paths: 50,
+             slack_min: bar.lower,
+             slack_max: bar.upper,
+             unconstrained: false,
+         };
++        const groups = Array.from(
++            this._pathGroupSelect.selectedOptions, (o) => o.value)
++            .filter(Boolean);
++        if (groups.length > 0) reportOptions.path_groups = groups;
++        if (this._clockSelect.value) {
++            reportOptions.clock_name = this._clockSelect.value;
++        }
+         try {
+             const resp = await withBusyCursor(
+                 () => this._app.websocketManager.request({
+diff --git a/openroad/web/src/request_handler.cpp b/openroad/web/src/request_handler.cpp
+index 46df809..c971d51 100644
+--- a/openroad/web/src/request_handler.cpp
++++ b/openroad/web/src/request_handler.cpp
+@@ -5502,6 +5502,12 @@ static std::vector<TimingPathSummary> requestedReport(
+     const boost::json::object& json,
+     const int max_paths)
+ {
++  std::vector<std::string> path_groups;
++  if (auto* v = json.if_contains("path_groups")) {
++    for (const auto& e : v->as_array()) {
++      path_groups.emplace_back(e.as_string());
++    }
++  }
+   return report.getReport(
+       json.at("is_setup").as_bool(),
+       max_paths,
+@@ -5509,7 +5515,9 @@ static std::vector<TimingPathSummary> requestedReport(
+           json, "slack_min", -std::numeric_limits<float>::max())),
+       static_cast<float>(
+           jsonOr<double>(json, "slack_max", std::numeric_limits<float>::max())),
+-      jsonOr(json, "unconstrained", false));
++      jsonOr(json, "unconstrained", false),
++      path_groups,
++      jsonOr<std::string>(json, "clock_name", ""));
+ }
+ 
+ WebSocketResponse TimingHandler::handleTimingReport(const WebSocketRequest& req)
+diff --git a/openroad/web/src/timing_report.cpp b/openroad/web/src/timing_report.cpp
+index 23e33f2..ffff7df 100644
+--- a/openroad/web/src/timing_report.cpp
++++ b/openroad/web/src/timing_report.cpp
+@@ -177,7 +177,9 @@ std::vector<TimingPathSummary> TimingReport::getReport(
+     int max_paths,
+     float slack_min,
+     float slack_max,
+-    bool include_unconstrained) const
++    bool include_unconstrained,
++    const std::vector<std::string>& path_groups,
++    const std::string& clock_name) const
+ {
+   std::vector<TimingPathSummary> result;
+   if (!sta_) {
+@@ -196,7 +198,13 @@ std::vector<TimingPathSummary> TimingReport::getReport(
+ 
+   sta::Search* search = sta_->search();
+   sta::SceneSeq scenes = sta_->scenes();
+-  sta::StringSeq group_names;
++  // the histogram's filters: its path groups, and the clock its paths end
++  // on, so a bar drills down to the paths it counted
++  sta::StringSeq group_names(path_groups.begin(), path_groups.end());
++  const sta::Clock* clk = nullptr;
++  if (!clock_name.empty()) {
++    clk = sta_->cmdSdc()->findClock(clock_name);
++  }
+   sta::PathEndSeq path_ends = search->findPathEnds(
+       /*from*/ nullptr,
+       /*thrus*/ nullptr,
+@@ -220,6 +228,9 @@ std::vector<TimingPathSummary> TimingReport::getReport(
+       /*clk_gating_hold*/ false);
+ 
+   for (auto& path_end : path_ends) {
++    if (clk && path_end->targetClk(sta_) != clk) {
++      continue;
++    }
+     TimingPathSummary summary;
+ 
+     sta::Path* path = path_end->path();
+diff --git a/openroad/web/src/timing_report.h b/openroad/web/src/timing_report.h
+index 2ca1672..be85ea3 100644
+--- a/openroad/web/src/timing_report.h
++++ b/openroad/web/src/timing_report.h
+@@ -167,7 +167,9 @@ class TimingReport
+       int max_paths = 100,
+       float slack_min = -std::numeric_limits<float>::max(),
+       float slack_max = std::numeric_limits<float>::max(),
+-      bool include_unconstrained = false) const;
++      bool include_unconstrained = false,
++      const std::vector<std::string>& path_groups = {},
++      const std::string& clock_name = "") const;
+ 
+   // `path_groups` (optional) requests a per-group stacked breakdown: when it
+   // has entries, `result.series` is populated over the shared bin edges and the

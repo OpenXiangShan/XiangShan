@@ -1,0 +1,621 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=98yvind=20Harboe?= <oyvind.harboe@zylin.com>
+Subject: [PATCH] grt: global_route -backing_file backs the routing grid with a
+ file
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A large design's routing grid can need more memory than the machine has:
+on a 34 M GCell x 9 layer die global route peaks well above 100 GB, and
+it runs only where swap was set up for it, failing hours in where it
+was not.
+
+global_route -backing_file <file> reserves a file for the grid's 2D and
+3D edges and its capacity per layer when the grid is set up, and maps
+those arrays there; the kernel then pages them to the file instead of to
+swap. The reservation (posix_fallocate) fails at once when the disk
+cannot hold the grid, and the file is unlinked as soon as it exists, so
+it leaves nothing behind. The arrays keep their addresses and contents:
+the routes are the same as without it. Without -backing_file nothing
+changes.
+
+gcd_backing_file routes gcd with a backing file and expects gcd's guides.
+
+Carried in bazel-orfs for OpenROAD#12075, not upstreamed; retires with
+the //:bump onto an OpenROAD that has it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Øyvind Harboe <oyvind.harboe@zylin.com>
+---
+ openroad/grt/BUILD                            |   2 +
+ openroad/grt/README.md                        |   2 +
+ openroad/grt/include/grt/GlobalRouter.h       |   2 +
+ openroad/grt/src/GlobalRouter.cpp             |   7 +
+ openroad/grt/src/GlobalRouter.i               |   6 +
+ openroad/grt/src/GlobalRouter.tcl             |   9 +-
+ .../grt/src/fastroute/include/FastRoute.h     |   5 +
+ .../grt/src/fastroute/include/FileBacking.h   |  54 ++++++++
+ openroad/grt/src/fastroute/include/Graph2D.h  |   6 +
+ openroad/grt/src/fastroute/src/FastRoute.cpp  |  18 +++
+ .../grt/src/fastroute/src/FileBacking.cpp     | 123 ++++++++++++++++++
+ openroad/grt/src/fastroute/src/graph2d.cpp    |  25 ++++
+ openroad/grt/test/BUILD                       |   1 +
+ openroad/grt/test/gcd_backing_file.ok         |  68 ++++++++++
+ openroad/grt/test/gcd_backing_file.tcl        |  12 ++
+ 15 files changed, 339 insertions(+), 1 deletion(-)
+ create mode 100644 openroad/grt/src/fastroute/include/FileBacking.h
+ create mode 100644 openroad/grt/src/fastroute/src/FileBacking.cpp
+ create mode 100644 openroad/grt/test/gcd_backing_file.ok
+ create mode 100644 openroad/grt/test/gcd_backing_file.tcl
+
+diff --git a/openroad/grt/BUILD b/openroad/grt/BUILD
+index b6552df..83ae4d5 100644
+--- a/openroad/grt/BUILD
++++ b/openroad/grt/BUILD
+@@ -60,6 +60,7 @@ cc_library(
+     name = "fastroute",
+     srcs = [
+         "src/fastroute/src/FastRoute.cpp",
++        "src/fastroute/src/FileBacking.cpp",
+         "src/fastroute/src/RSMT.cpp",
+         "src/fastroute/src/RipUp.cpp",
+         "src/fastroute/src/graph2d.cpp",
+@@ -70,6 +71,7 @@ cc_library(
+     ],
+     hdrs = [
+         "src/fastroute/include/FastRoute.h",
++        "src/fastroute/include/FileBacking.h",
+         "src/fastroute/include/Graph2D.h",
+         "src/fastroute/include/Overflow.h",
+     ],
+diff --git a/openroad/grt/README.md b/openroad/grt/README.md
+index 0bac740..810c6ae 100644
+--- a/openroad/grt/README.md
++++ b/openroad/grt/README.md
+@@ -27,6 +27,7 @@ global_route
+     [-skip_large_fanout_nets fanout]
+     [-allow_congestion]
+     [-snapshot_batched_width width]
++    [-backing_file file]
+     [-verbose]
+     [-start_incremental]
+     [-end_incremental]
+@@ -56,6 +57,7 @@ global_route
+ | `-res_aware_nets_percentage` | Set the percentage of resistance-aware nets (e.g. `-res_aware_nets_percentage 100` (for 100%)). The default value is `15` with resistance-aware enabled and `0` otherwise, and the allowed values are floats between `[0, 100]`. |
+ | `-infinite_cap` | Enables "infinite" gcell capacity for testing purpose. NOTE: this is not recommended for production flows. |
+ | `-snapshot_batched_width` | Set the semantic width of snapshot-batched routing (max batches per wave). The default is `0`, preserving the non-batched behavior. Set a positive integer to enable batched routing; allowed values are integers `[1, MAX_INT]`. Execution width still follows `set_thread_count`. NOTE: this is not recommended for production flows; it is intended for exploration and research projects. |
++| `-backing_file` | Back the routing grid (the 2D and 3D edges and the capacity per layer) with a file at this path instead of memory alone, so the kernel pages it to the file rather than to swap. The file is reserved for the whole grid when the grid is set up, which fails at once if the disk cannot hold it, and is removed as soon as it is created. The routes are the same as without it. |
+ 
+ ### Set Routing Layers
+ 
+diff --git a/openroad/grt/include/grt/GlobalRouter.h b/openroad/grt/include/grt/GlobalRouter.h
+index 15af3b0..823154b 100644
+--- a/openroad/grt/include/grt/GlobalRouter.h
++++ b/openroad/grt/include/grt/GlobalRouter.h
+@@ -160,6 +160,7 @@ class GlobalRouter
+   void setCUGRViaDemand(bool enabled);
+   void setResAwareNetsPercentage(float percentage);
+   void setSnapshotBatchedWidth(int snapshot_batched_width);
++  void setBackingFile(const std::string& path);
+   int getSnapshotBatchedWidth() const;
+   int getSnapshotBatchCount() const;
+   bool isResistanceAware() { return resistance_aware_; };
+@@ -650,6 +651,7 @@ class GlobalRouter
+   bool allow_congestion_;
+   bool resistance_aware_{false};
+   int snapshot_batched_width_{0};
++  std::string backing_file_;
+   int num_threads_;
+   std::vector<int> vertical_capacities_;
+   std::vector<int> horizontal_capacities_;
+diff --git a/openroad/grt/src/GlobalRouter.cpp b/openroad/grt/src/GlobalRouter.cpp
+index f88db75..b5b0cf8 100644
+--- a/openroad/grt/src/GlobalRouter.cpp
++++ b/openroad/grt/src/GlobalRouter.cpp
+@@ -127,6 +127,12 @@ void GlobalRouter::setSnapshotBatchedWidth(int snapshot_batched_width)
+   fastroute_->setSnapshotBatchedWidth(snapshot_batched_width_);
+ }
+ 
++void GlobalRouter::setBackingFile(const std::string& path)
++{
++  backing_file_ = path;
++  fastroute_->setBackingFile(backing_file_);
++}
++
+ int GlobalRouter::getSnapshotBatchedWidth() const
+ {
+   return fastroute_->getSnapshotBatchedWidth();
+@@ -3192,6 +3198,7 @@ void GlobalRouter::configFastRoute()
+   fastroute_->setCongestionReportIterStep(congestion_report_iter_step_);
+   fastroute_->setResistanceAware(resistance_aware_);
+   fastroute_->setSnapshotBatchedWidth(snapshot_batched_width_);
++  fastroute_->setBackingFile(backing_file_);
+ 
+   if (congestion_file_name_ != nullptr) {
+     fastroute_->setCongestionReportFile(congestion_file_name_);
+diff --git a/openroad/grt/src/GlobalRouter.i b/openroad/grt/src/GlobalRouter.i
+index 13c7fad..e75ccab 100644
+--- a/openroad/grt/src/GlobalRouter.i
++++ b/openroad/grt/src/GlobalRouter.i
+@@ -155,6 +155,12 @@ set_snapshot_batched_width(int snapshot_batched_width)
+   getGlobalRouter()->setSnapshotBatchedWidth(snapshot_batched_width);
+ }
+ 
++void
++set_backing_file(const char* path)
++{
++  getGlobalRouter()->setBackingFile(path);
++}
++
+ int
+ get_snapshot_batched_width()
+ {
+diff --git a/openroad/grt/src/GlobalRouter.tcl b/openroad/grt/src/GlobalRouter.tcl
+index e5d82b8..8581b7e 100644
+--- a/openroad/grt/src/GlobalRouter.tcl
++++ b/openroad/grt/src/GlobalRouter.tcl
+@@ -150,6 +150,7 @@ sta::define_cmd_args "global_route" {[-guide_file out_file] \
+                                   [-skip_large_fanout_nets fanout] \
+                                   [-allow_congestion] \
+                                   [-snapshot_batched_width width] \
++                                  [-backing_file file] \
+                                   [-verbose] \
+                                   [-start_incremental] \
+                                   [-end_incremental] \
+@@ -163,7 +164,7 @@ proc global_route { args } {
+     keys {-guide_file -congestion_iterations -congestion_report_file \
+           -grid_origin -critical_nets_percentage -res_aware_nets_percentage \
+           -congestion_report_iter_step \
+-          -skip_large_fanout_nets -snapshot_batched_width
++          -skip_large_fanout_nets -snapshot_batched_width -backing_file
+          } \
+     flags {-allow_congestion -resistance_aware -infinite_cap -verbose -start_incremental \
+           -end_incremental -use_cugr}
+@@ -260,6 +261,12 @@ proc global_route { args } {
+   }
+   grt::set_snapshot_batched_width $snapshot_batched_width
+ 
++  if { [info exists keys(-backing_file)] } {
++    grt::set_backing_file $keys(-backing_file)
++  } else {
++    grt::set_backing_file ""
++  }
++
+   set infinite_cap [info exists flags(-infinite_cap)]
+   grt::set_infinite_cap $infinite_cap
+ 
+diff --git a/openroad/grt/src/fastroute/include/FastRoute.h b/openroad/grt/src/fastroute/include/FastRoute.h
+index 989caeb..5bbf8f7 100644
+--- a/openroad/grt/src/fastroute/include/FastRoute.h
++++ b/openroad/grt/src/fastroute/include/FastRoute.h
+@@ -16,6 +16,7 @@
+ #include <vector>
+ 
+ #include "DataType.h"
++#include "FileBacking.h"
+ #include "Graph2D.h"
+ #include "Overflow.h"
+ #include "boost/functional/hash.hpp"
+@@ -242,6 +243,8 @@ class FastRouteCore
+   void setEdgeCapacity(int x1, int y1, int x2, int y2, int layer, int capacity);
+   int getDbNetLayerEdgeCost(odb::dbNet* db_net, int layer);
+   void initEdgesCapacityPerLayer();
++  // Backs the routing grid with a file at path; empty for memory only.
++  void setBackingFile(const std::string& path) { backing_file_ = path; }
+   void setNumAdjustments(int nAdjustments);
+   void addAdjustment(int x1,
+                      int y1,
+@@ -1061,6 +1064,8 @@ class FastRouteCore
+   bool snapshot_batch_disabled_for_run_ = false;
+   bool snapshot_cleanup_active_ = false;
+   bool has_non_soft_ndr_nets_ = false;
++  std::string backing_file_;
++  FileBacking backing_;
+   int detour_penalty_;
+ };
+ 
+diff --git a/openroad/grt/src/fastroute/include/FileBacking.h b/openroad/grt/src/fastroute/include/FileBacking.h
+new file mode 100644
+index 0000000..eb5d248
+--- /dev/null
++++ b/openroad/grt/src/fastroute/include/FileBacking.h
+@@ -0,0 +1,54 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#pragma once
++
++#include <cstddef>
++#include <string>
++#include <vector>
++
++#include "utl/Logger.h"
++
++namespace grt {
++
++// Backs arrays already allocated with a file: the page-aligned interior of
++// each is copied to the file and mapped there, shared, at the same address,
++// so an array keeps its type, address and contents while the kernel pages
++// it to the file rather than to swap. The whole file is reserved up front,
++// so a disk that cannot hold it fails when the grid is set up, not when a
++// page is first written back. The file is unlinked once reserved and leaves
++// nothing behind.
++class FileBacking
++{
++ public:
++  FileBacking() = default;
++  FileBacking(const FileBacking&) = delete;
++  FileBacking& operator=(const FileBacking&) = delete;
++  ~FileBacking() { release(); }
++
++  void reserve(utl::Logger* logger, const std::string& path, size_t bytes);
++  // Maps the page-aligned interior of [data, data + bytes) to the file.
++  void map(utl::Logger* logger, void* data, size_t bytes);
++  // Before the arrays are freed or reallocated: each range becomes a
++  // private copy-on-write mapping of its contents in the file, so the
++  // allocator can reuse the addresses as ordinary memory and nothing more
++  // is written to the file.
++  void release();
++
++  static size_t pageSlack();
++
++ private:
++  struct Range
++  {
++    char* data;
++    size_t len;
++    size_t offset;
++  };
++
++  int fd_ = -1;
++  size_t size_ = 0;
++  size_t offset_ = 0;
++  std::vector<Range> ranges_;
++};
++
++}  // namespace grt
+diff --git a/openroad/grt/src/fastroute/include/Graph2D.h b/openroad/grt/src/fastroute/include/Graph2D.h
+index d1a2749..6943770 100644
+--- a/openroad/grt/src/fastroute/include/Graph2D.h
++++ b/openroad/grt/src/fastroute/include/Graph2D.h
+@@ -15,6 +15,7 @@
+ #include <vector>
+ 
+ #include "DataType.h"
++#include "FileBacking.h"
+ #include "Overflow.h"
+ #include "boost/multi_array.hpp"
+ #include "utl/Logger.h"
+@@ -119,6 +120,11 @@ class Graph2D
+   void updateUsageV(int x, const Interval& yi, FrNet* net, int usage);
+   void updateUsageV(int x, int y, FrNet* net, int usage);
+   void initCap3D();
++  // Maps the edges, and the capacity per layer once initCap3D allocated it,
++  // to a backing file; bytes the backing needs for both.
++  void mapEdges(FileBacking& backing, utl::Logger* logger);
++  void mapCap3D(FileBacking& backing, utl::Logger* logger);
++  static size_t backingBytes(int x_grid, int y_grid, int num_layers);
+   void updateCap3D(int x,
+                    int y,
+                    int layer,
+diff --git a/openroad/grt/src/fastroute/src/FastRoute.cpp b/openroad/grt/src/fastroute/src/FastRoute.cpp
+index 285bf9e..22b3bbe 100644
+--- a/openroad/grt/src/fastroute/src/FastRoute.cpp
++++ b/openroad/grt/src/fastroute/src/FastRoute.cpp
+@@ -143,6 +143,7 @@ FastRouteCore::~FastRouteCore()
+ 
+ void FastRouteCore::clear()
+ {
++  backing_.release();
+   clearNets();
+ 
+   num_adjust_ = 0;
+@@ -546,13 +547,29 @@ void FastRouteCore::clearNDRnets()
+ void FastRouteCore::initEdges()
+ {
+   // allocate memory and initialize for edges
++  backing_.release();
+   graph2d_.init(x_grid_, y_grid_, num_layers_, logger_);
+ 
+   init3DEdges();
++
++  if (!backing_file_.empty()) {
++    const size_t cells_3d
++        = static_cast<size_t>(num_layers_) * y_grid_ * x_grid_;
++    backing_.reserve(logger_,
++                     backing_file_,
++                     Graph2D::backingBytes(x_grid_, y_grid_, num_layers_)
++                         + 2 * cells_3d * sizeof(Edge3D)
++                         + 2 * FileBacking::pageSlack());
++    graph2d_.mapEdges(backing_, logger_);
++    backing_.map(logger_, h_edges_3D_.data(), cells_3d * sizeof(Edge3D));
++    backing_.map(logger_, v_edges_3D_.data(), cells_3d * sizeof(Edge3D));
++  }
+ }
+ 
+ void FastRouteCore::init3DEdges()
+ {
++  // The 3D edges are reallocated: what was mapped becomes ordinary memory.
++  backing_.release();
+   invalidateOverflow3D();
+   v_edges_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+   h_edges_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+@@ -691,6 +708,7 @@ void FastRouteCore::setEdgeCapacity(int x1,
+ void FastRouteCore::initEdgesCapacityPerLayer()
+ {
+   graph2d_.initCap3D();
++  graph2d_.mapCap3D(backing_, logger_);
+ 
+   for (int y = 0; y < y_grid_; y++) {
+     for (int x = 0; x < x_grid_; x++) {
+diff --git a/openroad/grt/src/fastroute/src/FileBacking.cpp b/openroad/grt/src/fastroute/src/FileBacking.cpp
+new file mode 100644
+index 0000000..ca999b3
+--- /dev/null
++++ b/openroad/grt/src/fastroute/src/FileBacking.cpp
+@@ -0,0 +1,123 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2026, The OpenROAD Authors
++
++#include "FileBacking.h"
++
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++#include <cerrno>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <string>
++
++#include "utl/Logger.h"
++
++namespace grt {
++
++void FileBacking::reserve(utl::Logger* logger,
++                          const std::string& path,
++                          size_t bytes)
++{
++  release();
++  fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
++  if (fd_ < 0) {
++    logger->error(utl::GRT,
++                  1255,
++                  "Cannot create the backing file {}: {}.",
++                  path,
++                  strerror(errno));
++  }
++  unlink(path.c_str());
++  const int err = posix_fallocate(fd_, 0, static_cast<off_t>(bytes));
++  if (err != 0) {
++    close(fd_);
++    fd_ = -1;
++    logger->error(utl::GRT,
++                  1256,
++                  "Cannot reserve {:.1f} MB for the routing grid in {}: {}.",
++                  bytes / 1e6,
++                  path,
++                  strerror(err));
++  }
++  size_ = bytes;
++  offset_ = 0;
++  logger->info(utl::GRT,
++               1257,
++               "Routing grid backed by a file of {:.1f} MB.",
++               bytes / 1e6);
++}
++
++void FileBacking::map(utl::Logger* logger, void* data, size_t bytes)
++{
++  if (fd_ < 0 || bytes == 0) {
++    return;
++  }
++  const uintptr_t page = sysconf(_SC_PAGESIZE);
++  const uintptr_t begin
++      = (reinterpret_cast<uintptr_t>(data) + page - 1) & ~(page - 1);
++  const uintptr_t end
++      = (reinterpret_cast<uintptr_t>(data) + bytes) & ~(page - 1);
++  if (end <= begin) {
++    return;
++  }
++  const size_t len = end - begin;
++  if (offset_ + len > size_) {
++    logger->error(utl::GRT,
++                  1258,
++                  "The backing file of {} bytes has no room for {} more.",
++                  size_,
++                  len);
++  }
++  char* p = reinterpret_cast<char*>(begin);
++  size_t done = 0;
++  while (done < len) {
++    const ssize_t n = pwrite(fd_, p + done, len - done, offset_ + done);
++    if (n <= 0) {
++      logger->error(utl::GRT,
++                    1259,
++                    "Cannot write the backing file: {}.",
++                    strerror(errno));
++    }
++    done += n;
++  }
++  if (mmap(p,
++           len,
++           PROT_READ | PROT_WRITE,
++           MAP_SHARED | MAP_FIXED,
++           fd_,
++           static_cast<off_t>(offset_))
++      == MAP_FAILED) {
++    logger->error(
++        utl::GRT, 1260, "Cannot map the backing file: {}.", strerror(errno));
++  }
++  ranges_.push_back({p, len, offset_});
++  offset_ += len;
++}
++
++void FileBacking::release()
++{
++  if (fd_ < 0) {
++    return;
++  }
++  for (const Range& range : ranges_) {
++    mmap(range.data,
++         range.len,
++         PROT_READ | PROT_WRITE,
++         MAP_PRIVATE | MAP_FIXED,
++         fd_,
++         static_cast<off_t>(range.offset));
++  }
++  ranges_.clear();
++  close(fd_);
++  fd_ = -1;
++}
++
++size_t FileBacking::pageSlack()
++{
++  return 2 * sysconf(_SC_PAGESIZE);
++}
++
++}  // namespace grt
+diff --git a/openroad/grt/src/fastroute/src/graph2d.cpp b/openroad/grt/src/fastroute/src/graph2d.cpp
+index 442b0bc..87c9c52 100644
+--- a/openroad/grt/src/fastroute/src/graph2d.cpp
++++ b/openroad/grt/src/fastroute/src/graph2d.cpp
+@@ -1353,4 +1353,29 @@ void Graph2D::resetNDRCap()
+   ndr_debit_.clear();
+ }
+ 
++void Graph2D::mapEdges(FileBacking& backing, utl::Logger* logger)
++{
++  backing.map(logger, h_edges_.data(), h_edges_.num_elements() * sizeof(Edge));
++  backing.map(logger, v_edges_.data(), v_edges_.num_elements() * sizeof(Edge));
++}
++
++void Graph2D::mapCap3D(FileBacking& backing, utl::Logger* logger)
++{
++  backing.map(
++      logger, h_cap_3D_.data(), h_cap_3D_.num_elements() * sizeof(uint16_t));
++  backing.map(
++      logger, v_cap_3D_.data(), v_cap_3D_.num_elements() * sizeof(uint16_t));
++}
++
++size_t Graph2D::backingBytes(const int x_grid,
++                             const int y_grid,
++                             const int num_layers)
++{
++  const size_t cells = static_cast<size_t>(x_grid) * y_grid;
++  const size_t edges = static_cast<size_t>(x_grid - 1) * y_grid
++                       + static_cast<size_t>(x_grid) * (y_grid - 1);
++  return edges * sizeof(Edge) + 2 * cells * num_layers * sizeof(uint16_t)
++         + 4 * FileBacking::pageSlack();
++}
++
+ }  // namespace grt
+diff --git a/openroad/grt/test/BUILD b/openroad/grt/test/BUILD
+index fe2b1e4..1084522 100644
+--- a/openroad/grt/test/BUILD
++++ b/openroad/grt/test/BUILD
+@@ -43,6 +43,7 @@ TESTS = [
+     "est_rc_spef_pin_cap",
+     "estimate_path_resistance",
+     "gcd",
++    "gcd_backing_file",
+     "gcd_cugr",
+     "gcd_flute",
+     "global_route_above_max_layer_cugr",
+diff --git a/openroad/grt/test/gcd_backing_file.ok b/openroad/grt/test/gcd_backing_file.ok
+new file mode 100644
+index 0000000..635c56c
+--- /dev/null
++++ b/openroad/grt/test/gcd_backing_file.ok
+@@ -0,0 +1,68 @@
++[INFO ODB-0227] LEF file: Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
++[INFO ODB-0128] Design: gcd
++[INFO ODB-0130]     Created 54 pins.
++[INFO ODB-0131]     Created 676 components and 2850 component-terminals.
++[INFO ODB-0133]     Created 579 nets and 1498 connections.
++[WARNING GRT-0300] Timing is not available, setting critical nets percentage to 0.
++[INFO GRT-0020] Min routing layer: metal2
++[INFO GRT-0021] Max routing layer: metal10
++[INFO GRT-0022] Global adjustment: 0%
++[INFO GRT-0023] Grid origin: (0, 0)
++[INFO GRT-0088] Layer metal1  Track-Pitch = 0.1400  line-2-Via Pitch: 0.1350
++[INFO GRT-0088] Layer metal2  Track-Pitch = 0.1900  line-2-Via Pitch: 0.1400
++[INFO GRT-0088] Layer metal3  Track-Pitch = 0.1400  line-2-Via Pitch: 0.1400
++[INFO GRT-0088] Layer metal4  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal5  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal6  Track-Pitch = 0.2800  line-2-Via Pitch: 0.2800
++[INFO GRT-0088] Layer metal7  Track-Pitch = 0.8000  line-2-Via Pitch: 0.8000
++[INFO GRT-0088] Layer metal8  Track-Pitch = 0.8000  line-2-Via Pitch: 0.8000
++[INFO GRT-0088] Layer metal9  Track-Pitch = 1.6000  line-2-Via Pitch: 1.6000
++[INFO GRT-0088] Layer metal10 Track-Pitch = 1.6000  line-2-Via Pitch: 1.6000
++[INFO GRT-1257] Routing grid backed by a file of 0.4 MB.
++[INFO GRT-0003] Macros: 0
++[INFO GRT-0004] Blockages: 0
++[INFO GRT-0019] Found 0 clock nets.
++[INFO GRT-0001] Minimum degree: 2
++[INFO GRT-0002] Maximum degree: 36
++
++[INFO GRT-0053] Routing resources analysis:
++          Routing      Original      Derated      Resource
++Layer     Direction    Resources     Resources    Reduction (%)
++---------------------------------------------------------------
++metal1     Horizontal          0             0          0.00%
++metal2     Vertical        17918         17918          0.00%
++metal3     Horizontal      24480         24480          0.00%
++metal4     Vertical        12172         12172          0.00%
++metal5     Horizontal      12240         12240          0.00%
++metal6     Vertical        12172         12172          0.00%
++metal7     Horizontal       4284          4284          0.00%
++metal8     Vertical         4284          4284          0.00%
++metal9     Horizontal       2142          2142          0.00%
++metal10    Vertical         2142          2142          0.00%
++---------------------------------------------------------------
++
++[INFO GRT-0197] Via related to pin nodes: 2686
++[INFO GRT-0198] Via related Steiner nodes: 44
++[INFO GRT-0199] Via filling finished.
++[INFO GRT-0111] Final number of vias: 3503
++[INFO GRT-0112] Final usage 3D: 13033
++
++[INFO GRT-0096] Final congestion report:
++Layer         Resource        Demand        Usage (%)    Max H / Max V / Total Congestion
++---------------------------------------------------------------------------------------
++metal1               0             0            0.00%             0 /  0 /  0
++metal2           17918          1172            6.54%             0 /  0 /  0
++metal3           24480          1212            4.95%             0 /  0 /  0
++metal4           12172            41            0.34%             0 /  0 /  0
++metal5           12240            51            0.42%             0 /  0 /  0
++metal6           12172            48            0.39%             0 /  0 /  0
++metal7            4284             0            0.00%             0 /  0 /  0
++metal8            4284             0            0.00%             0 /  0 /  0
++metal9            2142             0            0.00%             0 /  0 /  0
++metal10           2142             0            0.00%             0 /  0 /  0
++---------------------------------------------------------------------------------------
++Total            91834          2524            2.75%             0 /  0 /  0
++
++[INFO GRT-0018] Total wirelength: 10767 um
++[INFO GRT-0014] Routed nets: 563
++No differences found.
+diff --git a/openroad/grt/test/gcd_backing_file.tcl b/openroad/grt/test/gcd_backing_file.tcl
+new file mode 100644
+index 0000000..85b6a4a
+--- /dev/null
++++ b/openroad/grt/test/gcd_backing_file.tcl
+@@ -0,0 +1,12 @@
++# gcd_nangate45 routed with the grid backed by a file: the same guides as gcd
++source "helpers.tcl"
++read_lef "Nangate45/Nangate45.lef"
++read_def "gcd.def"
++
++set guide_file [make_result_file gcd_backing_file.guide]
++
++global_route -verbose -backing_file [make_result_file gcd_backing_file.grid]
++
++write_guides $guide_file
++
++diff_files gcd.guideok $guide_file
+-- 
+2.53.0
+
