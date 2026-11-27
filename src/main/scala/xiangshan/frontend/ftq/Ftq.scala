@@ -230,6 +230,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
     s3PerfQueue(s3BpuPtr).mispredict := false.B
+    s3PerfQueue(s3BpuPtr).ifuRedirected := false.B
+  }
+  when(ifuRedirect.valid) {
+    s3PerfQueue(ifuRedirect.bits.ftqIdx.value).ifuRedirected := true.B
   }
 
   // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
@@ -536,7 +540,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   perf_backendRedirectBranchInfo.mispredict  := backendRedirect.bits.isMisPred
   perf_backendRedirectBranchInfo.debug_realCfiPc.foreach(_ := DontCare)
   private val perf_backendRedirectBlame = BlameBpuSource(
-    backendRedirect.valid,
+    backendRedirect.valid && !perfQueue(backendRedirect.bits.ftqIdx.value).ifuRedirected,
     redirectPerfMeta,
     perf_backendRedirectBranchInfo
   )
@@ -722,7 +726,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "commit_branch_mispredicts_reason",
     perf_commitHasMispredict,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
-      perf_commitHasMispredict,
+      perf_commitHasMispredict && !commitPerfMeta.ifuRedirected,
       commitPerfMeta.bpuPerf,
       commitPerfMeta.mispredictBranchInfo
     ))
@@ -731,7 +735,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "commit_conditional_branch_mispredicts_reason",
     perf_commitHasMispredictConditional,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
-      perf_commitHasMispredictConditional,
+      perf_commitHasMispredictConditional && !commitPerfMeta.ifuRedirected,
       commitPerfMeta.bpuPerf,
       commitPerfMeta.mispredictBranchInfo
     ))
