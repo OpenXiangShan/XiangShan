@@ -218,7 +218,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
     ftqIdx + 1.U
   )
 
-  val debug_runahead_checkpoint_id = UInt(64.W)
+  val debug_runahead_checkpoint_id = Option.when(backendParams.debugEn)(UInt(64.W))
   val debugIsCtrl = Bool()
   val debugIsMemVio = Bool()
 
