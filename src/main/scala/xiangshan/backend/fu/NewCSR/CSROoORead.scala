@@ -37,7 +37,16 @@ object CSROoORead {
     CSRs.hip,
     CSRs.hvip,
     CSRs.mvip,
-  )
+    // Counters change on their own: read out of order, a minstret read behind a divide chain returned 1 instead of
+    // at least 6 (a read must count every older instruction). Keep them in order (wait for older instructions).
+    CSRs.minstret,
+    CSRs.instret,
+    CSRs.mcycle,
+    CSRs.cycle,
+    CSRs.time,
+  ) ++
+    (CSRs.mhpmcounter3 to CSRs.mhpmcounter31) ++
+    (CSRs.hpmcounter3 to CSRs.hpmcounter31)
   val blockBackwardCsrReadList = List(
     CSRs.mireg,
     CSRs.sireg,
