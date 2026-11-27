@@ -36,6 +36,8 @@ import xiangshan.cache.mmu._
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).VirtualLoadQueueSize
 ){
+  private val bankSize = p(XSCoreParamsKey).VirtualLoadQueueSize / 2
+
   def addWrapCircles(v: UInt): LqPtr = {
     val ptr = Wire(new LqPtr)
     if (isPow2(entries)) {
@@ -57,6 +59,14 @@ class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   }
 
   def isRotateBy[T <: LqPtr](right: T): Bool = (this.flag ^ right.flag) && this.value === right.value
+
+  def threadId: UInt = Mux(value >= bankSize.U, 1.U, 0.U)
+
+  def belongsToThread(tid: UInt): Bool = Mux(tid === 0.U,
+    this.value < bankSize.U,
+    this.value >= bankSize.U)
+
+  def isAfterInThread(right: LqPtr): Bool = (this.flag ^ right.flag) ^ (this.value > right.value)
 }
 
 object LqPtr {
@@ -65,6 +75,28 @@ object LqPtr {
     ptr.flag := f
     ptr.value := v
     ptr
+  }
+}
+
+class LqLocalPtr(implicit p: Parameters) extends CircularQueuePtr[LqLocalPtr](
+  p => p(XSCoreParamsKey).VirtualLoadQueueSize / 2
+) {
+  def addWrapCircles(v: UInt): LqLocalPtr = this + v
+}
+
+object LqLocalPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LqLocalPtr = {
+    val ptr = Wire(new LqLocalPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
+
+object LqGlobalPtr {
+  def fromLocal(tid: UInt, ptr: LqLocalPtr)(implicit p: Parameters): LqPtr = {
+    val bankSize = p(XSCoreParamsKey).VirtualLoadQueueSize / 2
+    LqPtr(ptr.flag, ptr.value + Mux(tid === 0.U, 0.U, bankSize.U))
   }
 }
 
@@ -141,8 +173,10 @@ trait HasLoadHelper { this: XSModule =>
 
 class LqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
+  val canAcceptByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(Bool())))
   val sqCanAccept = Input(Bool())
   val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
+  val tid = Input(Vec(LSQEnqWidth, UInt(1.W)))
   val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
   val resp = Vec(LSQEnqWidth, Output(new LqPtr))
 }
@@ -203,8 +237,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val exceptionInfo = ValidIO(new MemExceptionInfo())
     val lqFull = Output(Bool())
     val lqDeq = ValidIO(UInt(log2Up(CommitWidth + 1).W))
+    val lqDeqByThread = OptionWrapper(EnableSMT2,
+      Vec(SMT2ThreadCount, ValidIO(UInt(log2Up(CommitWidth + 1).W))))
     val lqRedirect = ValidIO(new LqPtr)
+    val lqRedirectByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, ValidIO(new LqPtr)))
     val lqRecoverStall = Output(Bool())
+    val lqRecoverStallByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(Bool())))
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
@@ -212,11 +250,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val lqEmpty = Output(Bool())
+    val lqEmptyByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(Bool())))
 
     // mdp train io
     val mdpTrain        = ValidIO(new Redirect)
 
     val lqDeqPtr = Output(new LqPtr)
+    val lqDeqPtrByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(new LqPtr)))
 
     val rarValidCount = Output(UInt())
 
@@ -259,6 +299,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.lqRecoverStall<> io.lqRecoverStall
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
+  if (EnableSMT2) {
+    virtualLoadQueue.io.lqDeqByThread.get <> io.lqDeqByThread.get
+    virtualLoadQueue.io.lqRedirectByThread.get <> io.lqRedirectByThread.get
+    virtualLoadQueue.io.lqRecoverStallByThread.get <> io.lqRecoverStallByThread.get
+    virtualLoadQueue.io.lqEmptyByThread.get <> io.lqEmptyByThread.get
+    virtualLoadQueue.io.ldWbPtrByThread.get <> io.lqDeqPtrByThread.get
+  }
 
   /**
    * Load uncache buffer

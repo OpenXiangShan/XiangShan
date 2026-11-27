@@ -292,9 +292,14 @@ class ToLsqEnqCtrl(hasStore: Boolean, hasLoad: Boolean) (implicit p: Parameters)
 
   val sqDeq              = OptionWrapper(hasStore, ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)))
   val lqDeq              = OptionWrapper(hasLoad, ValidIO(UInt(log2Up(CommitWidth + 1).W)))
+  val lqDeqByThread      = OptionWrapper(hasLoad && EnableSMT2,
+    Vec(SMT2ThreadCount, ValidIO(UInt(log2Up(CommitWidth + 1).W))))
   val lqRedirectPtr      = OptionWrapper(hasLoad, ValidIO(new LqPtr))
+  val lqRedirectPtrByThread = OptionWrapper(hasLoad && EnableSMT2, Vec(SMT2ThreadCount, ValidIO(new LqPtr)))
   val sqRedirectPtr      = OptionWrapper(hasStore, ValidIO(new SqPtr))
   val lqRecoverStall     = OptionWrapper(hasLoad, Bool())
+  val lqRecoverStallByThread = OptionWrapper(hasLoad && EnableSMT2, Vec(SMT2ThreadCount, Bool()))
+  val lqCanAcceptByThread = OptionWrapper(hasLoad && EnableSMT2, Vec(SMT2ThreadCount, Bool()))
   val sqRecoverStall     = OptionWrapper(hasStore, Bool())
 }
 

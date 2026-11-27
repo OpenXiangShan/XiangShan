@@ -585,10 +585,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val lsqCanAccept = Wire(Bool())
   val lsqRecoverStall = Wire(Bool())
   for (i <- 0 until RenameWidth){
+    val laneLsqCanAccept = if (EnableSMT2) {
+      io.toLsqEnqCtrl.lsqEnqIO.canAcceptByThread.get(if (i >= RenameWidth / 2) 1 else 0)
+    } else {
+      lsqCanAccept
+    }
     // update valid logic
-    fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
+    fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && laneLsqCanAccept &&
       !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
-    fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && !lsqRecoverStall
+    fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && laneLsqCanAccept && !lsqRecoverStall
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(
       SrcType.isVp(fromRename(i).bits.srcType(numRegSrcVf - 1)) && ignoreOldVdVec(i),

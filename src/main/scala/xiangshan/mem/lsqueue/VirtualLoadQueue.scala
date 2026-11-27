@@ -46,14 +46,20 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
+    val ldWbPtrByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(new LqPtr)))
     // global
     val lqFull      = Output(Bool())
     val lqEmpty     = Output(Bool())
     // to dispatch
     val lqDeq       = ValidIO(UInt(log2Up(CommitWidth + 1).W))
+    val lqDeqByThread = OptionWrapper(EnableSMT2,
+      Vec(SMT2ThreadCount, ValidIO(UInt(log2Up(CommitWidth + 1).W))))
     // tolsqEnqCtrl
     val lqRedirect  = ValidIO(new LqPtr)
+    val lqRedirectByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, ValidIO(new LqPtr)))
     val lqRecoverStall = Output(Bool())
+    val lqRecoverStallByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(Bool())))
+    val lqEmptyByThread = OptionWrapper(EnableSMT2, Vec(SMT2ThreadCount, Output(Bool())))
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -91,6 +97,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val allowEnqueue = enqPtrExt.head >= deqPtr
   val canEnqueue = io.enq.req.map(_.valid)
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
+  val requestTid = io.enq.req.zip(io.enq.tid).map { case (req, tid) =>
+    Mux(EnableSMT2.B && req.valid, tid, 0.U)
+  }
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     robIdx(i).needFlush(io.redirect) && allocated(i)
   })))
@@ -156,6 +165,110 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lqRecoverStall = io.redirect.valid || lastCycleRedirect.valid || lastLastCycleRedirect.valid
   io.lqRecoverStall := RegNext(lqRecoverStall) // means loadqueue haven't pending redirect
 
+  val allowEnqueueByThread = if (EnableSMT2) Some(Wire(Vec(SMT2ThreadCount, Bool()))) else None
+  val smt2EnqResp = if (EnableSMT2) Some(Wire(Vec(LSQEnqWidth, new LqPtr))) else None
+
+  if (EnableSMT2) {
+    // Independent control state for the two 60-entry LoadQueue views. The existing
+    // single-thread control above remains unchanged.
+    val enqPtrT0 = RegInit(0.U.asTypeOf(new LqLocalPtr))
+    val enqPtrT1 = RegInit(0.U.asTypeOf(new LqLocalPtr))
+    val deqPtrT0 = Wire(new LqLocalPtr)
+    val deqPtrT1 = Wire(new LqLocalPtr)
+    val deqPtrT0Next = Wire(new LqLocalPtr)
+    val deqPtrT1Next = Wire(new LqLocalPtr)
+
+    val flowByThread = (0 until SMT2ThreadCount).map { tid =>
+      vLoadFlow.zip(requestTid).map { case (flow, reqTid) => Mux(reqTid === tid.U, flow, 0.U) }
+    }
+    val enqNumberByThread = flowByThread.map(_.reduce(_ +& _))
+    for (i <- 0 until LSQEnqWidth) {
+      val tid = requestTid(i)
+      val tidIdx = if (i >= LSQEnqWidth / 2) 1 else 0
+      val prefix = flowByThread(tidIdx).take(i + 1).reduce(_ +& _)
+      val localPtr = if (tidIdx == 0) enqPtrT0.addWrapCircles(prefix) else enqPtrT1.addWrapCircles(prefix)
+      smt2EnqResp.get(i) := LqGlobalPtr.fromLocal(tid, localPtr)
+    }
+
+    val cancelByThread = (0 until SMT2ThreadCount).map { tid =>
+      val bank = tid
+      VecInit((0 until VirtualLoadQueueBankSize).map { index =>
+        lastNeedCancel(bank * VirtualLoadQueueBankSize + index)
+      })
+    }
+    val enqCancelByThread = (0 until SMT2ThreadCount).map { tid =>
+      RegNext(enqCancelNum.zip(requestTid).map { case (num, reqTid) => Mux(reqTid === tid.U, num, 0.U) }.reduce(_ +& _))
+    }
+    val redirectCancelCountByThread = (0 until SMT2ThreadCount).map { tid =>
+      val existing = PopCount(cancelByThread(tid))
+      RegEnable(existing + enqCancelByThread(tid), 0.U, lastCycleRedirect.valid)
+    }
+
+    when(lastLastCycleRedirect.valid) {
+      enqPtrT0 := enqPtrT0 - redirectCancelCountByThread(0)
+      enqPtrT1 := enqPtrT1 - redirectCancelCountByThread(1)
+    }.otherwise {
+      enqPtrT0 := enqPtrT0 + enqNumberByThread(0)
+      enqPtrT1 := enqPtrT1 + enqNumberByThread(1)
+    }
+
+    def countCommittedThread(bank: Int, base: LqLocalPtr, enq: LqLocalPtr): UInt = {
+      val lookup = VecInit((0 until DeqPtrMoveStride).map(i => base.addWrapCircles(i.U)))
+      val entryValid = VecInit(lookup.map { ptr =>
+        allocated(bank)(ptr.value) && committed(bank)(ptr.value) && ptr =/= enq
+      })
+      val redirectCancel = VecInit(lookup.map(ptr => needCancel((bank * VirtualLoadQueueBankSize).U + ptr.value)))
+      val countMask = Wire(UInt(DeqPtrMoveStride.W))
+      countMask := entryValid.asUInt & (~redirectCancel.asUInt).asUInt
+      PopCount(PriorityEncoderOH(~countMask) - 1.U)
+    }
+
+    val commitCountByThread = VecInit((0 until SMT2ThreadCount).map { tid =>
+      countCommittedThread(tid, Mux(tid.U === 0.U, deqPtrT0, deqPtrT1), Mux(tid.U === 0.U, enqPtrT0, enqPtrT1))
+    })
+    val lastCommitCountByThread = VecInit(commitCountByThread.map(GatedRegNext(_)))
+
+    deqPtrT0Next := deqPtrT0 + lastCommitCountByThread(0)
+    deqPtrT1Next := deqPtrT1 + lastCommitCountByThread(1)
+    deqPtrT0 := RegEnable(deqPtrT0Next, 0.U.asTypeOf(new LqLocalPtr), lastCommitCountByThread(0).orR)
+    deqPtrT1 := RegEnable(deqPtrT1Next, 0.U.asTypeOf(new LqLocalPtr), lastCommitCountByThread(1).orR)
+
+    val validCountByThread = VecInit((0 until SMT2ThreadCount).map { tid =>
+      distanceBetween(Mux(tid.U === 0.U, enqPtrT0, enqPtrT1), Mux(tid.U === 0.U, deqPtrT0, deqPtrT1))
+    })
+    allowEnqueueByThread.get.zipWithIndex.foreach { case (allow, tid) =>
+      val enqPtr = if (tid == 0) enqPtrT0 else enqPtrT1
+      val deqPtr = if (tid == 0) deqPtrT0 else deqPtrT1
+      allow := enqPtr >= deqPtr && validCountByThread(tid) +& enqNumberByThread(tid) <= VirtualLoadQueueBankSize.U
+    }
+    io.enq.canAcceptByThread.get := allowEnqueueByThread.get
+    io.lqEmptyByThread.get.zip(validCountByThread).foreach { case (empty, count) => empty := RegNext(count === 0.U) }
+    io.lqDeqByThread.get.zip(lastCommitCountByThread).foreach { case (deq, count) =>
+      deq.bits := GatedRegNext(count)
+      deq.valid := RegNext(count.orR)
+    }
+
+    val redirectThread = Mux(io.redirect.bits.robIdx.value >= (RobSize / 2).U, 1.U, 0.U)
+    val redirectPtrByThread = (0 until SMT2ThreadCount).map { tid =>
+      RegEnable(LqGlobalPtr.fromLocal(tid.U, Mux(tid.U === 0.U, enqPtrT0, enqPtrT1)),
+        lastLastCycleRedirect.valid && redirectThread === tid.U)
+    }
+    io.lqRedirectByThread.get.zip(redirectPtrByThread).zipWithIndex.foreach { case ((redirect, ptr), tid) =>
+      redirect.valid := RegNext(lastLastCycleRedirect.valid && redirectThread === tid.U)
+      redirect.bits := ptr
+    }
+
+    val currentRecoverStall = (0 until SMT2ThreadCount).map { tid =>
+      (io.redirect.valid && redirectThread === tid.U) ||
+      (lastCycleRedirect.valid && redirectThread === tid.U) ||
+      (lastLastCycleRedirect.valid && redirectThread === tid.U)
+    }
+    io.lqRecoverStallByThread.get.zip(currentRecoverStall).foreach { case (stall, value) => stall := RegNext(value) }
+    io.ldWbPtrByThread.get.zip((0 until SMT2ThreadCount).map { tid =>
+      LqGlobalPtr.fromLocal(tid.U, Mux(tid.U === 0.U, deqPtrT0, deqPtrT1))
+    }).foreach { case (ptr, value) => ptr := value }
+  }
+
   XSError((enqPtrExt.head < deqPtr) &&
   !(enqPtrExt.head.value === deqPtr.value && enqPtrExt.head.flag ^ deqPtr.flag), s"deqPtr exceed enqptr\n")
 
@@ -165,19 +278,53 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
    * Currently, VirtualLoadQueue only allows enqueue when #emptyEntries > EnqWidth
    * Dynamic enq based on numLsElem number
    */
-  io.enq.canAccept := allowEnqueue
+  io.enq.canAccept := (if (EnableSMT2) {
+    allowEnqueueByThread.get.reduce(_ && _)
+  } else {
+    allowEnqueue
+  })
   val enqLowBound = io.enq.req.map(_.bits.lqIdx)
   val enqUpBound  = io.enq.req.map(x => x.bits.lqIdx + x.bits.numLsElem)
   val enqCrossLoop = enqLowBound.zip(enqUpBound).map{case (low, up) => low.flag =/= up.flag}
+  val smt2LowBound = if (EnableSMT2) {
+    Some(io.enq.req.zip(requestTid).map { case (req, tid) =>
+      Mux(tid === 0.U, req.bits.lqIdx.value, req.bits.lqIdx.value - VirtualLoadQueueBankSize.U)
+    })
+  } else {
+    None
+  }
+  val smt2UpBound = if (EnableSMT2) {
+    Some(io.enq.req.zip(smt2LowBound.get).map { case (req, low) => low +& req.bits.numLsElem })
+  } else {
+    None
+  }
+  val smt2CrossLoop = if (EnableSMT2) {
+    Some(smt2UpBound.get.map(_ >= VirtualLoadQueueBankSize.U))
+  } else {
+    None
+  }
 
   for(i <- 0 until VirtualLoadQueueSize) {
     val entryCanEnqSeq = (0 until io.enq.req.length).map { j =>
-      val entryHitBound = Mux(
-        enqCrossLoop(j),
-        enqLowBound(j).value <= i.U || i.U < enqUpBound(j).value,
-        enqLowBound(j).value <= i.U && i.U < enqUpBound(j).value
-      )
-      canEnqueue(j) && !enqCancel(j) && entryHitBound
+      if (EnableSMT2) {
+        val bankMatches = requestTid(j) === (i / VirtualLoadQueueBankSize).U
+        val localIndex = (i % VirtualLoadQueueBankSize).U
+        val localStart = smt2LowBound.get(j)
+        val localEnd = Mux(smt2CrossLoop.get(j),
+          smt2UpBound.get(j) - VirtualLoadQueueBankSize.U,
+          smt2UpBound.get(j))
+        val localHit = Mux(smt2CrossLoop.get(j),
+          localIndex >= localStart || localIndex < localEnd,
+          localIndex >= localStart && localIndex < localEnd)
+        canEnqueue(j) && !enqCancel(j) && allowEnqueueByThread.get(requestTid(j)) && bankMatches && localHit
+      } else {
+        val entryHitBound = Mux(
+          enqCrossLoop(j),
+          enqLowBound(j).value <= i.U || i.U < enqUpBound(j).value,
+          enqLowBound(j).value <= i.U && i.U < enqUpBound(j).value
+        )
+        canEnqueue(j) && !enqCancel(j) && entryHitBound
+      }
     }
     val entryCanEnq = entryCanEnqSeq.reduce(_ || _)
     val selectBits = ParallelPriorityMux(entryCanEnqSeq, io.enq.req.map(_.bits))
@@ -194,7 +341,11 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until io.enq.req.length) {
-    val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
+    val lqIdx = if (EnableSMT2) {
+      smt2EnqResp.get(i)
+    } else {
+      enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
+    }
     val index = io.enq.req(i).bits.lqIdx
     XSError(canEnqueue(i) && !enqCancel(i) && (!io.enq.canAccept || !io.enq.sqCanAccept), s"must accept $i\n")
     XSError(canEnqueue(i) && !enqCancel(i) && index.value =/= lqIdx.value, s"must be the same entry $i\n")

@@ -805,6 +805,12 @@ class CtrlBlockImp(
   lsqEnqCtrl.io.sqRedirectPtr := io.fromMemToLsqEnqCtrl.sqRedirectPtr.get
   lsqEnqCtrl.io.lqRecoverStall := io.fromMemToLsqEnqCtrl.lqRecoverStall.get
   lsqEnqCtrl.io.sqRecoverStall := io.fromMemToLsqEnqCtrl.sqRecoverStall.get
+  if (EnableSMT2) {
+    lsqEnqCtrl.io.lqDeqByThread.get := io.fromMemToLsqEnqCtrl.lqDeqByThread.get
+    lsqEnqCtrl.io.lqRedirectPtrByThread.get := io.fromMemToLsqEnqCtrl.lqRedirectPtrByThread.get
+    lsqEnqCtrl.io.lqRecoverStallByThread.get := io.fromMemToLsqEnqCtrl.lqRecoverStallByThread.get
+    lsqEnqCtrl.io.lqCanAcceptByThread.get := io.fromMemToLsqEnqCtrl.lqCanAcceptByThread.get
+  }
 
   dispatch.io.fromLsqEnqCtrl.lsqHeadPtr := lsqEnqCtrl.io.toDispatch
   dispatch.io.fromLsqEnqCtrl.lqStall.foreach(_ := lsqEnqCtrl.io.lqStall.get)

@@ -58,6 +58,7 @@ class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
 
 class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
+  val canAcceptByThread = OptionWrapper(EnableSMT2, Output(Vec(SMT2ThreadCount, Bool())))
   val recoverStall = Output(Bool())
   val needAlloc = Vec(LSQEnqWidth, Input(UInt(2.W)))
   val req       = Vec(LSQEnqWidth, Flipped(ValidIO(new Bundle {
@@ -168,6 +169,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   // LSQ: send out canAccept when both load queue and store queue are ready
   // Dispatch: send instructions to LSQ only when they are ready
   io.enq.canAccept := loadQueue.io.enq.canAccept && storeQueue.io.enq.canAccept
+  if (EnableSMT2) {
+    io.enq.canAcceptByThread.get := VecInit(loadQueue.io.enq.canAcceptByThread.get.map(_ && storeQueue.io.enq.canAccept))
+  }
   io.enq.recoverStall := false.B // do not used here
   io.lqCanAccept := loadQueue.io.enq.canAccept
   io.sqCanAccept := storeQueue.io.enq.canAccept
@@ -177,6 +181,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
+    loadQueue.io.enq.tid(i)            := (if (i >= LSQEnqWidth / 2) 1.U else 0.U)
     loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
     loadQueue.io.enq.req(i).bits       := io.enq.req(i).bits.uop
     loadQueue.io.enq.req(i).bits.sqIdx := storeQueue.io.enq.resp(i).physicalQueuePtr
@@ -261,8 +266,16 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   io.mdpTrain                      := loadQueue.io.mdpTrain
 
   io.toLsqEnqCtrl.lqRedirectPtr.foreach(_ := loadQueue.io.lqRedirect)
+  if (EnableSMT2) {
+    io.toLsqEnqCtrl.lqRedirectPtrByThread.get := loadQueue.io.lqRedirectByThread.get
+    io.toLsqEnqCtrl.lqDeqByThread.get := loadQueue.io.lqDeqByThread.get
+    io.toLsqEnqCtrl.lqRecoverStallByThread.get := loadQueue.io.lqRecoverStallByThread.get
+  }
   io.toLsqEnqCtrl.lqDeq.foreach(_ := loadQueue.io.lqDeq)
   io.toLsqEnqCtrl.lqRecoverStall.foreach(_ := loadQueue.io.lqRecoverStall)
+  if (EnableSMT2) {
+    io.toLsqEnqCtrl.lqCanAcceptByThread.get := loadQueue.io.enq.canAcceptByThread.get
+  }
 
   io.issuePtrExt := storeQueue.io.toLoadQueue.stAddrReadySqPtr
 
@@ -354,14 +367,20 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val fromDispatch = new LsqEnqIO
     // from `memBlock.io.lqDeq
     val lqDeq = Flipped(ValidIO(UInt(log2Up(CommitWidth + 1).W)))
+    val lqDeqByThread = OptionWrapper(EnableSMT2,
+      Flipped(Vec(SMT2ThreadCount, ValidIO(UInt(log2Up(CommitWidth + 1).W)))))
     // from `memBlock.io.sqDeq`
     val sqDeq = Flipped(ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)))
     // from/tp lsq
     val lqRedirectPtr = Flipped(ValidIO(new LqPtr))
+    val lqRedirectPtrByThread = OptionWrapper(EnableSMT2, Flipped(Vec(SMT2ThreadCount, ValidIO(new LqPtr))))
     val sqRedirectPtr = Flipped(ValidIO(new SqPtr))
     val toDispatch = Output(new LSIdx)
+    val toDispatchLqPtrByThread = OptionWrapper(EnableSMT2, Output(Vec(SMT2ThreadCount, new LqPtr)))
     val enqLsq = Flipped(new LsqEnqIO)
     val lqRecoverStall = Input(Bool())
+    val lqRecoverStallByThread = OptionWrapper(EnableSMT2, Input(Vec(SMT2ThreadCount, Bool())))
+    val lqCanAcceptByThread = OptionWrapper(EnableSMT2, Input(Vec(SMT2ThreadCount, Bool())))
     val sqRecoverStall = Input(Bool())
     // for topdown
     val lqStall = OptionWrapper(backendParams.debugEn, Output(Bool()))
@@ -380,6 +399,12 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val sqHeadPtr = RegInit(0.U.asTypeOf(new SqPtr))
   val lqTailPtr = RegInit(0.U.asTypeOf(new LqPtr))
   val sqTailPtr = RegInit(0.U.asTypeOf(new SqPtr))
+  val lqHeadPtrT0 = if (EnableSMT2) Some(RegInit(0.U.asTypeOf(new LqLocalPtr))) else None
+  val lqHeadPtrT1 = if (EnableSMT2) Some(RegInit(0.U.asTypeOf(new LqLocalPtr))) else None
+  val lqTailPtrT0 = if (EnableSMT2) Some(RegInit(0.U.asTypeOf(new LqLocalPtr))) else None
+  val lqTailPtrT1 = if (EnableSMT2) Some(RegInit(0.U.asTypeOf(new LqLocalPtr))) else None
+  val waitLqRecoverT0 = if (EnableSMT2) Some(RegInit(false.B)) else None
+  val waitLqRecoverT1 = if (EnableSMT2) Some(RegInit(false.B)) else None
 
   val state = RegInit(State.idle)
   val stateNext = WireInit(state)
@@ -404,6 +429,22 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   XSError(!io.lqRecoverStall && io.lqRedirectPtr.valid, "loadQueue's timing of recover and stall error.\n")
   XSError(!io.sqRecoverStall && io.sqRedirectPtr.valid, "storeQueue's timing of recover and stall error.\n")
 
+  if (EnableSMT2) {
+    val redirectThread = Mux(io.redirect.bits.robIdx.value >= (RobSize / 2).U, 1.U, 0.U)
+    val redirectPtrByThread = io.lqRedirectPtrByThread.get
+    val recoverStallByThread = io.lqRecoverStallByThread.get
+    val threadWait = Seq(waitLqRecoverT0.get, waitLqRecoverT1.get)
+    for (tid <- 0 until SMT2ThreadCount) {
+      when(RegNext(io.redirect.valid && redirectThread === tid.U)) {
+        threadWait(tid) := true.B
+      }.elsewhen(threadWait(tid) && !recoverStallByThread(tid) && !io.sqRecoverStall) {
+        threadWait(tid) := false.B
+      }
+    }
+    io.fromDispatch.recoverStall := RegNext(threadWait.reduce(_ || _) ||
+      redirectPtrByThread.map(_.valid).reduce(_ || _) || io.sqRedirectPtr.valid)
+  }
+
   // rename pre-calculate sqPtr/lqPtr
   val numLsElem = io.fromRename.req.map(_.bits.num)
   val needEnqLoadQueue = VecInit(io.fromRename.req.map(x => x.valid && (FuType.isLoad(x.bits.fuType) || FuType.isVNonsegLoad(x.bits.fuType))))
@@ -419,12 +460,37 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val lqAllocNumber = loadQueueElem.reduce(_ +& _)
   val sqAllocNumber = storeQueueElem.reduce(_ +& _)
 
+  val renameTid = (0 until LSQEnqWidth).map { i =>
+    (if (EnableSMT2 && i >= LSQEnqWidth / 2) 1.U else 0.U)
+  }
+  val loadElemByThread = (0 until SMT2ThreadCount).map { tid =>
+    loadQueueElem.zip(renameTid).map { case (elem, reqTid) => Mux(reqTid === tid.U, elem, 0.U) }
+  }
+  val loadPopCountByThread = (0 until SMT2ThreadCount).map { tid =>
+    0.U +: loadElemByThread(tid).zipWithIndex.map { case (_, i) => loadElemByThread(tid).take(i + 1).reduce(_ +& _) }
+  }
+  val lqAllocNumberByThread = loadElemByThread.map(_.reduce(_ +& _))
+
   io.toDispatch.lqIdx := lqHeadPtr
   io.toDispatch.sqIdx := sqHeadPtr
+  io.toDispatchLqPtrByThread.foreach { ptrs =>
+    ptrs(0) := LqGlobalPtr.fromLocal(0.U, lqHeadPtrT0.get)
+    ptrs(1) := LqGlobalPtr.fromLocal(1.U, lqHeadPtrT1.get)
+  }
 
   for ((resp, i) <- io.fromRename.respStartPtr.zipWithIndex) { // start ptr calculate
     val lqOffset = loadFlowPopCount(i)
-    resp.lqIdx := lqTailPtr.addWrapCircles(lqOffset)
+    if (EnableSMT2) {
+      val tidIdx = if (i >= LSQEnqWidth / 2) 1 else 0
+      val tid = tidIdx.U
+      val offset = loadPopCountByThread(tidIdx)(i)
+      val localPtr = Mux(tid === 1.U,
+        lqTailPtrT1.get.addWrapCircles(offset),
+        lqTailPtrT0.get.addWrapCircles(offset))
+      resp.lqIdx := LqGlobalPtr.fromLocal(tid, localPtr)
+    } else {
+      resp.lqIdx := lqTailPtr.addWrapCircles(lqOffset)
+    }
     val sqOffset = storeFlowPopCount(i)
     resp.sqIdx := sqTailPtr + sqOffset
   }
@@ -432,7 +498,17 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   for ((resp, i) <- io.fromRename.respEndPtr.zipWithIndex) { // end ptr calculate
     if(i == io.fromRename.respEndPtr.length - 1) {
       val lqOffset = loadFlowPopCount(i)
-      resp.lqIdx := lqTailPtr.addWrapCircles(lqOffset + loadQueueElem(i))
+      if (EnableSMT2) {
+        val tidIdx = if (i >= LSQEnqWidth / 2) 1 else 0
+        val tid = tidIdx.U
+        val offset = loadPopCountByThread(tidIdx)(i)
+        val localPtr = Mux(tid === 1.U,
+          lqTailPtrT1.get.addWrapCircles(offset + loadQueueElem(i)),
+          lqTailPtrT0.get.addWrapCircles(offset + loadQueueElem(i)))
+        resp.lqIdx := LqGlobalPtr.fromLocal(tid, localPtr)
+      } else {
+        resp.lqIdx := lqTailPtr.addWrapCircles(lqOffset + loadQueueElem(i))
+      }
       val sqOffset = storeFlowPopCount(i)
       resp.sqIdx := sqTailPtr + sqOffset + storeQueueElem(i)
     }
@@ -442,7 +518,11 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.fromRename.canAccept := state === State.idle
+  io.fromRename.canAccept := state === State.idle && (if (EnableSMT2) {
+    !waitLqRecoverT0.get && !waitLqRecoverT1.get
+  } else {
+    true.B
+  })
 
   // How to update ptr:
   // (1) by default, updated according to commit
@@ -471,16 +551,39 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   lqHeadPtr := lqHeadPtr + lqDeq
   sqHeadPtr := sqHeadPtr + sqDeq
 
+  if (EnableSMT2) {
+    val redirectT0 = io.lqRedirectPtrByThread.get(0)
+    val redirectT1 = io.lqRedirectPtrByThread.get(1)
+    lqTailPtrT0.get := Mux(redirectT0.valid,
+      LqLocalPtr(redirectT0.bits.flag, redirectT0.bits.value),
+      Mux(io.redirect.valid, lqTailPtrT0.get, lqTailPtrT0.get.addWrapCircles(lqAllocNumberByThread(0))))
+    lqTailPtrT1.get := Mux(redirectT1.valid,
+      LqLocalPtr(redirectT1.bits.flag, redirectT1.bits.value - VirtualLoadQueueBankSize.U),
+      Mux(io.redirect.valid, lqTailPtrT1.get, lqTailPtrT1.get.addWrapCircles(lqAllocNumberByThread(1))))
+    lqHeadPtrT0.get := lqHeadPtrT0.get + Mux(io.lqDeqByThread.get(0).valid, io.lqDeqByThread.get(0).bits, 0.U)
+    lqHeadPtrT1.get := lqHeadPtrT1.get + Mux(io.lqDeqByThread.get(1).valid, io.lqDeqByThread.get(1).bits, 0.U)
+  }
+
   XSError(io.lqRedirectPtr.valid && io.lqRedirectPtr.bits < lqHeadPtr && !lqHeadPtr.isRotateBy(io.lqRedirectPtr.bits),
     s"loadQueue redirect error!\n")
   XSError(io.sqRedirectPtr.valid && io.sqRedirectPtr.bits < sqHeadPtr && !sqHeadPtr.isRotateBy(io.sqRedirectPtr.bits),
     s"storeQueue redirect error!\n")
 
   // dispatch logic
-  val lqCanAccept = lqTailPtr >= lqHeadPtr && state === State.idle
+  val lqCanAccept = (if (EnableSMT2) {
+    lqTailPtrT0.get >= lqHeadPtrT0.get && lqTailPtrT1.get >= lqHeadPtrT1.get
+  } else {
+    lqTailPtr >= lqHeadPtr
+  }) && state === State.idle
   val sqCanAccept = sqTailPtr >= sqHeadPtr && state === State.idle
   val redirectUpdate = io.lqRedirectPtr.valid || io.sqRedirectPtr.valid
   io.fromDispatch.canAccept := RegNext(lqCanAccept && sqCanAccept && !redirectUpdate)
+  if (EnableSMT2) {
+    io.fromDispatch.canAcceptByThread.get := RegNext(VecInit((0 until SMT2ThreadCount).map { tid =>
+      val reservationReady = if (tid == 0) lqTailPtrT0.get >= lqHeadPtrT0.get else lqTailPtrT1.get >= lqHeadPtrT1.get
+      reservationReady && io.lqCanAcceptByThread.get(tid) && sqCanAccept && !io.lqRedirectPtrByThread.get(tid).valid
+    }))
+  }
 
   // only for debug
   for ((resp, i) <- io.fromDispatch.resp.zipWithIndex) {
@@ -501,7 +604,9 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     XSError(do_enq && resp.sqIdx < sqHeadPtr && !sqHeadPtr.isRotateBy(resp.sqIdx), s"storeQueue overflow! index: ${i}\n")
   }
 
-  io.fromDispatch.recoverStall := RegNext(state =/= State.idle || redirectUpdate)
+  if (!EnableSMT2) {
+    io.fromDispatch.recoverStall := RegNext(state =/= State.idle || redirectUpdate)
+  }
 
   // for Topdown
   io.lqStall.foreach(_ := RegNext(!lqCanAccept))

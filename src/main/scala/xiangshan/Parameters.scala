@@ -84,6 +84,9 @@ case class XSCoreParameters
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
+  // Generate independent T0/T1 LoadQueue control structures in addition to the
+  // existing single-thread path.
+  EnableSMT2: Boolean = false,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
@@ -604,6 +607,9 @@ case class XSCoreParameters
     ItypeWidth     = 4,
     IlastsizeWidth = 1,
   )
+
+  require(!EnableSMT2 || VirtualLoadQueueSize == 120,
+    "SMT2 LoadQueue control requires the 120-entry physical queue")
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -735,6 +741,8 @@ trait HasXSParameter {
   def RobCommitWidth = coreParams.RobCommitWidth
   def RabCommitWidth = coreParams.RabCommitWidth
   def MaxUopSize = coreParams.MaxUopSize
+  def EnableSMT2 = coreParams.EnableSMT2
+  def SMT2ThreadCount = if (EnableSMT2) 2 else 1
   def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   def RenameSnapshotNum = coreParams.RenameSnapshotNum
   def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
@@ -782,6 +790,7 @@ trait HasXSParameter {
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
   def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
   def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
+  def VirtualLoadQueueBankSize = VirtualLoadQueueSize / 2
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
   def RollbackGroupSize = coreParams.RollbackGroupSize

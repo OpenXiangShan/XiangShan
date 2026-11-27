@@ -545,6 +545,14 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+class WithSMT2LoadQueue extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(EnableSMT2 = true))
+})
+
+class SMT2LoadQueueConfig(n: Int = 1) extends Config(
+  new WithSMT2LoadQueue ++ new DefaultConfig(n)
+)
+
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
     ++ new DefaultConfig(n)
