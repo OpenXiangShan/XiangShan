@@ -125,7 +125,7 @@ make emu CONFIG=DefaultConfig EMU_THREADS=2 -j10  # Verilator
 ./build/emu -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
-`src/test/scala/` 中的 ScalaTest/Chisel 单元测试是另一种测试方式。运行 `mill -i xiangshan.test.test` 执行测试，或运行 `mill -i xiangshan.test.testOnly xiangshan.frontend.bpu.SaturateCounterTest` 选择特定测试类。
+`src/test/scala/` 中的 ScalaTest/Chisel 单元测试是另一种测试方式。运行 `mill -i 'xiangshan[].test.test'` 执行测试，或运行 `mill -i 'xiangshan[].test.testOnly' xiangshan.frontend.bpu.SaturateCounterTest` 选择特定测试类。
 
 ### 运行 xspdb
 
