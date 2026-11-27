@@ -579,7 +579,8 @@ class DefaultConfig(n: Int = 1) extends Config(
         replacement = "lru",
         enablePrefetchFeedback = false,
         enableFdpInsertion = true,
-        enableFdpTaggedFilter = true
+        enableFdpTaggedFilter = true,
+        useFdpTaggedFeedback = false
       ))
     ))
   }) ++ OpenLLCConfig("32MB", ways = 16, banks = 4)

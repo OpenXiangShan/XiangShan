@@ -40,16 +40,17 @@ class FdpPollutionSamplerTest extends AnyFlatSpec with ChiselSim {
       step(miss = Some(same -> 1), fill = Some(complement -> 2), sampled = true)
       step(miss = Some(complement -> 2), sampled = true)
 
-      for (tag <- 1 to 6) step(victim = Some(same -> tag))
+      for (tag <- 1 to 8) step(victim = Some(same -> tag))
       step(victim = Some(same -> 1)) // Refresh the oldest record to MRU.
-      step(victim = Some(same -> 7)) // The full buffer now evicts tag 2.
+      step(victim = Some(same -> 9)) // The full buffer now evicts tag 2.
       step(miss = Some(same -> 2), sampled = true)
       step(miss = Some(same -> 1), sampled = true, polluted = true)
       step(victim = Some(same -> 1))
-      step(fill = Some(same -> 7), victim = Some(same -> 8)) // Reuse the way freed by this fill.
-      step(miss = Some(same -> 7), sampled = true)
+      step(fill = Some(same -> 9), victim = Some(same -> 10)) // Reuse the way freed by this fill.
+      step(miss = Some(same -> 9), sampled = true)
       step(miss = Some(same -> 3), sampled = true, polluted = true)
       step(miss = Some(same -> 8), sampled = true, polluted = true)
+      step(miss = Some(same -> 10), sampled = true, polluted = true)
     }
   }
 
