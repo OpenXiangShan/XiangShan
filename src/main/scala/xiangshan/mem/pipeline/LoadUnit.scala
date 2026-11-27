@@ -1628,7 +1628,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
   io.lsq.ldin.bits.missDbUpdated := GatedValidRegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
-  io.lsq.ldin.bits.updateAddrValid := !s3_mis_align && (!s3_frm_mabuf || s3_in.isFinalSplit) &&
+  // A final misalign split that needs replay has not read its data yet: the misalign buffer re-sends it, so the load
+  // must not complete in the virtual load queue. Completing it moves ldWbPtr past the load, which frees younger loads'
+  // RAR entries before the retried split reads its data and queries the RAR (the LSQ replay cause is zeroed for splits).
+  io.lsq.ldin.bits.updateAddrValid := !s3_mis_align && (!s3_frm_mabuf || s3_in.isFinalSplit && !s3_in.rep_info.need_rep) &&
     (!s3_in.nc || s3_nc_with_data) || s3_exception
   io.lsq.ldin.bits.hasException := false.B
 
