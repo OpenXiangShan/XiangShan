@@ -940,12 +940,23 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val referenceTargets = s3_mbtbResult.zip(s3_firstTakenBranchOH).map { case (entry, firstTaken) =>
       Mux(firstTaken, s3_prediction.target, entry.bits.target)
     }
+
+    def onStagePath(pred: Prediction, position: UInt, taken: Bool): Bool =
+      Mux(taken, pred.taken && position === pred.cfiPosition, !pred.taken || position < pred.cfiPosition)
+
+    val finalTarget = perf_finalPrediction.target
+    // S2 does not override on a target-only difference. A matching MBTB target is not enough
+    // if S2 left a different S1 target in effect, even when S3 later selects that MBTB target.
+    val s2TargetRetained = s3_s2Prediction.target === finalTarget &&
+      (s3_s2Override || s3_s1Prediction.target === finalTarget)
+    val s2FirstTakenUsesTage = s3_s2Prediction.attribute.isConditional &&
+      Mux1H(s3_s2FirstTakenBranchOH, s3S2Tage)
+
     val branchSources = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-      val taken      = s3_takenMask(i)
-      val firstTaken = s3_firstTakenBranchOH(i)
-      // Only the selected S3 branch receives a RAS or ITTAGE target.
-      val target         = referenceTargets(i)
-      val s1PositionHits = s3S1Branches.map(b => b.valid && b.bits.cfiPosition === entry.bits.cfiPosition)
+      val taken          = s3_takenMask(i)
+      val firstTaken     = s3_firstTakenBranchOH(i)
+      val position       = entry.bits.cfiPosition
+      val s1PositionHits = s3S1Branches.map(b => b.valid && b.bits.cfiPosition === position)
       val s1TakenHits    = s1PositionHits.zip(s3S1Branches).map { case (hit, b) => hit && b.bits.taken }
       val s1MatchesOH = PriorityEncoderOH(Mux(
         VecInit(s1TakenHits).asUInt.orR,
@@ -953,13 +964,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
         VecInit(s1PositionHits.reverse).asUInt
       )).asBools
       val s1Branch = Mux1H(s1MatchesOH, s3S1Branches.reverse)
-      val matchesS1 = s1Branch.valid && s1Branch.bits.attribute === entry.bits.attribute &&
-        s1Branch.bits.taken === taken && (!taken || s1Branch.bits.target === target)
-      val matchesS2 = s3S2Taken(i) === taken && (!taken || entry.bits.target === target)
+      val matchesS1 = onStagePath(s3_s1Prediction, position, taken) && s1Branch.valid &&
+        s1Branch.bits.attribute === entry.bits.attribute && s1Branch.bits.taken === taken &&
+        (!taken || s1Branch.bits.target === finalTarget)
+      val retainedS2 = onStagePath(s3_s2Prediction, position, taken) && Mux(
+        taken,
+        s3_s2Prediction.attribute === entry.bits.attribute && s2TargetRetained,
+        !s3S2Taken(i)
+      )
+      // An applied S2 override can cut off or change this branch before S3 restores it.
+      // Do not revoke S1 credit merely because another branch in the same block changed.
+      val retainedS1 = matchesS1 && (!s3_s2Override || retainedS2)
 
-      val s1Source = Mux1H(s1MatchesOH, s3S1Sources.reverse)
-      val s2Source =
-        Mux(s3_isCondVec(i) && s3S2Tage(i), BpuPredictionSource.Stage2.Tage, BpuPredictionSource.Stage2.Mbtb)
+      val s1Source   = Mux1H(s1MatchesOH, s3S1Sources.reverse)
+      val s2UsesTage = Mux(taken, s2FirstTakenUsesTage, s3_isCondVec(i) && s3S2Tage(i))
+      val s2Source   = Mux(s2UsesTage, BpuPredictionSource.Stage2.Tage, BpuPredictionSource.Stage2.Mbtb)
       val s3Source = MuxCase(
         BpuPredictionSource.Stage3.Mbtb,
         Seq(
@@ -971,21 +990,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
       val hit = hitBranches(i)
       (
-        (hit && matchesS1, s1Source),
-        (hit && !matchesS1 && matchesS2, s2Source),
-        (hit && !matchesS1 && !matchesS2, s3Source)
+        (hit && retainedS1, s1Source),
+        (hit && !retainedS1 && retainedS2, s2Source),
+        (hit && !retainedS1 && !retainedS2, s3Source)
       )
     }
 
     def countSources(stage: String, sources: EnumUInt, branches: Seq[(Bool, UInt)]): Unit = {
-      XSPerfAccumulate(s"mbtbHitBranch_first_$stage", Mux(s3Valid, PopCount(branches.map(_._1)), 0.U))
-      val bySource = branches.map { case (first, source) =>
+      val prefix = s"mbtbHitBranch_retained_$stage"
+      XSPerfAccumulate(prefix, Mux(s3Valid, PopCount(branches.map(_._1)), 0.U))
+      val bySource = branches.map { case (retained, source) =>
         sources.getValidSeq(source, exclude = Set("Fallthrough")).map { case (name, selected) =>
-          (name, first && selected)
+          (name, retained && selected)
         }
       }.transpose
       XSPerfSeqAccumulate(
-        s"mbtbHitBranch_first_$stage",
+        prefix,
         s3Valid,
         bySource.map(hits => (hits.head._1, true.B, PopCount(hits.map(_._2))))
       )
