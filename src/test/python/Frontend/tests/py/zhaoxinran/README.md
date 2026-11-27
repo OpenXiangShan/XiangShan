@@ -51,3 +51,16 @@ src/test/python/Frontend/scripts/run_random_regression_suite.sh nightly
 随机化时保留会改变异常类型、fault PC、请求顺序、跨 beat/跨页性质或恢复行为
 的各个语义场景。场景内的地址、载荷和延迟可由 seed 派生，修改前后逐项核对
 触发条件和可观察预期。
+
+## 合并后的场景入口
+
+共用同一激励流程和检查项的用例集中到以下入口；语义参数逐项执行，地址和
+延迟继续由已有 seed 派生。首拍 denied-only 的 resend 行为单独保留。
+
+| 场景 | 保留入口 | 合并的原入口 |
+| --- | --- | --- |
+| 跨 8B 正常 RVI | `mmio/test_mmio_fetch_boundary.py::test_mmio_cross_8b_second_beat_response_modes[None]` | `test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers` |
+| 跨 8B 首拍 fault | `mmio/test_mmio_fetch_boundary.py::test_mmio_cross_8b_first_beat_fault_reports_without_resend` | `test_uncache_resend_first_beat_corrupt_suppresses_resend`、`test_uncache_resend_first_beat_combined_fault_suppresses_resend` |
+| 页尾 RVI 拼接、半指令保持及 redirect 恢复 | `uncache/test_instr_uncache_port_boundaries.py::test_uncache_page_tail_rvi_need_resend_rechecks_next_page` | `test_mmio_page_tail_rvi_rechecks_next_page_before_delivery`、`test_mmio_page_tail_rvi_preserves_half_pc_data_and_state` |
+| 非 MMIO 的 PBMT.NC 取指 | `uncache/test_instr_uncache_port_boundaries.py::test_uncache_pbmt_nc_non_mmio_uses_uncache_path` | `test_pbmt_nc_non_mmio_enters_uncache_send_path` |
+| 后端取指异常重定向及恢复 | `test_redirect_flush_recovery_scenarios.py::test_rfr_s01_fault_redirect_recovery_three_fetches` | `test_backend_fault_redirect_recovery` |

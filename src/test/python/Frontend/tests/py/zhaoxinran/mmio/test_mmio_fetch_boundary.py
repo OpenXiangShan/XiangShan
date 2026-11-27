@@ -191,47 +191,14 @@ def test_mmio_adjacent_rvc_rvi_stream_preserves_pc_progress(env, first: str):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
-    scenario_key = "zhaoxinran/mmio/cross-8b-clean-rvi"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
-    latency = configure_random_mmio_latency(env, rng)
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "pc": pc,
-            "first_beat": first_beat,
-            "second_beat": second_beat,
-            "latency": latency,
-            "payload_sha256": _payload_sha256(payload),
-            "expected_path": "second_beat_normal",
-        },
-    )
-    uncache._initialize_mmio_fetch(env, reset_vector=pc)
-
-    assert uncache._wait_for_request_addr(env, first_beat)
-    assert uncache._wait_for_request_addr(env, second_beat)
-    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
-    observed = next(
-        item for item in env.monitor.observations if int(item.pc) == pc
-    )
-    assert int(observed.instr) == uncache._ADDI_X0_X0_0
-    assert not bool(observed.is_rvc)
-    stats = env.uncache_agent.get_stats()
-    assert stats.get("request_addrs", []).count(first_beat) == 1
-    assert stats.get("request_addrs", []).count(second_beat) == 1
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.parametrize(
     "fault",
     [
-        pytest.param({"corrupt": 1}, id="corrupt"),
-        pytest.param({"corrupt": 1, "denied": 1}, id="corrupt_and_denied"),
+        pytest.param({"corrupt": 1}, id="corrupt", marks=pytest.mark.funcov_bins("BIN-1108")),
+        pytest.param(
+            {"corrupt": 1, "denied": 1}, id="corrupt_and_denied",
+            marks=pytest.mark.funcov_bins("BIN-1109"),
+        ),
     ],
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -330,9 +297,6 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
     else:
         assert uncache._wait_for_monitor_exception(env)
         assert env.monitor.exception_mark_count > 0
-        stats = env.uncache_agent.get_stats()
-        assert stats.get("request_addrs", []).count(first_beat) == 1
-        assert stats.get("request_addrs", []).count(second_beat) == 1
         _assert_target_exception(
             cfvec_records,
             pc=pc,
@@ -342,6 +306,9 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
                 else _HARDWARE_ERROR_BIT
             ),
         )
+    stats = env.uncache_agent.get_stats()
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert stats.get("request_addrs", []).count(second_beat) == 1
     assert not env.monitor.get_errors()
     assert not env.get_errors()
 
@@ -579,41 +546,6 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
         target_pc=target_pc,
         latency=latency,
     )
-
-
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_mmio_page_tail_rvi_rechecks_next_page_before_delivery(env):
-    scenario_key = "zhaoxinran/mmio/page-tail/rvi-recheck"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    pc = prepare_mmio_page_tail_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    latency = configure_random_mmio_latency(env, rng)
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "pc": pc,
-            "latency": latency,
-            "expected_path": "rvi_rechecks_next_page_before_delivery",
-        },
-    )
-    uncache._initialize_mmio_fetch(env, reset_vector=pc)
-
-    first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
-    next_page = pc + 2
-    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
-    assert uncache._wait_for_request_addr(env, next_page, max_cycles=8000)
-    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
-    observed = next(
-        item for item in env.monitor.observations if int(item.pc) == pc
-    )
-    assert int(observed.instr) == uncache._ADDI_X0_X0_0
-    assert not bool(observed.is_rvc)
-    stats = env.uncache_agent.get_stats()
-    assert stats.get("request_addrs", []).count(first_beat) == 1
-    assert stats.get("request_addrs", []).count(next_page) == 1
-    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")

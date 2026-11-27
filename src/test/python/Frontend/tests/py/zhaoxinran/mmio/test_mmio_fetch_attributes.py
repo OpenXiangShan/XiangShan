@@ -7,41 +7,10 @@ import pytest
 from env.support import record_scenario, scenario_rng
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots, configure_random_mmio_latency
+from tests.py.zhaoxinran.support.mmio import capture_mmio_snapshots
 from tests.py.zhaoxinran.support.uncache import prepare_sv39_cfi_stream
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-
-
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_pbmt_nc_non_mmio_enters_uncache_send_path(env):
-    scenario_key = "zhaoxinran/mmio/attributes/pbmt-nc-non-mmio"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = configure_random_mmio_latency(env, rng)
-    expected_block, mapping = prepare_sv39_cfi_stream(env, rng)
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "va": mapping.vaddr,
-            "pa": mapping.paddr,
-            "latency": latency,
-            "expected_path": "pbmt_nc_uses_uncache",
-        },
-    )
-    uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
-    uncache._configure_exec_pmp_4k(env, base_addr=mapping.paddr)
-    uncache._configure_exec_cacheable_pma_4k(env, base_addr=mapping.paddr)
-    uncache._force_redirect_to(env, mapping.vaddr)
-
-    assert _wait_for_req_delta(env, env.uncache_agent, max_cycles=6000) > 0
-    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
-    assert mapping.paddr in env.uncache_agent.get_stats().get("request_addrs", [])
-    assert uncache._wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000)
-    assert any(int(obs.pc) == mapping.vaddr for obs in env.monitor.observations)
-    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")

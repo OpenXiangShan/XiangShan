@@ -18,11 +18,10 @@ from tests.py.support.backend_fault_recovery import (
     _PAGE_SIZE,
     _entry,
     _scenario,
-    _run_backend_fault_redirect_recovery,
 )
 from tests.py.support.translation_faults import assert_exact_oracle_fault
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
-from tests.py.zhaoxinran.support.translation import backend_fault_entry, randomize_permission_entry
+from tests.py.zhaoxinran.support.translation import randomize_permission_entry
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -433,32 +432,6 @@ def test_instruction_fetch_permission_boundary(
     else:
         assert_exact_oracle_fault(env, pc=scenario.va, expected_fault=expected_fault)
     assert not env.get_errors()
-
-
-@pytest.mark.parametrize(
-    ("fault_kind", "fault_bit", "redirect_faults"),
-    (
-        pytest.param("iaf", 1, {"backend_iaf": 1}, id="instruction-access-fault"),
-        pytest.param("ipf", 12, {"backend_ipf": 1}, id="instruction-page-fault"),
-        pytest.param("igpf", 20, {"backend_igpf": 1}, id="instruction-guest-page-fault"),
-    ),
-)
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_backend_fault_redirect_recovery(
-    env,
-    fault_kind: str,
-    fault_bit: int,
-    redirect_faults: dict[str, int],
-) -> None:
-    entry = backend_fault_entry(env, f"zhaoxinran/translation/backend-fault-recovery/{fault_kind}/pc")
-    return _run_backend_fault_redirect_recovery(
-        env,
-        fault_kind=fault_kind,
-        fault_bit=fault_bit,
-        redirect_faults=redirect_faults,
-        va=entry.va,
-        pa=entry.pa,
-    )
 
 
 _PMP_LOCK_MODE_CASES = (

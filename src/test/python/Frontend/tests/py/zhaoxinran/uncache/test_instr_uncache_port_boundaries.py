@@ -2202,43 +2202,6 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-1108")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
-    scenario_key = "zhaoxinran/uncache/resend/first-beat-corrupt"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    env.uncache_agent.inject_response_fault_at(
-        first_beat,
-        corrupt=1,
-    )
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "pc": pc,
-            "latency": latency,
-            "fault": "corrupt",
-            "expected_path": "first_beat_fault_suppresses_resend",
-        },
-    )
-    _initialize_mmio_fetch(env, reset_vector=pc)
-
-    assert _wait_for_request_addr(env, first_beat)
-    assert _wait_for_resp_delta(env, env.uncache_agent)
-    assert _wait_for_monitor_exception(env)
-    stats = env.uncache_agent.get_stats()
-
-    assert stats.get("request_addrs", []).count(first_beat) == 1
-    assert (first_beat + _UNCACHE_BEAT_BYTES) not in stats.get("request_addrs", [])
-    assert env.monitor.exception_mark_count > 0
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.funcov_bins("BIN-1106")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
@@ -2293,45 +2256,6 @@ def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
         ).run(env)
         assert _wait_for_observed_pc(env, pc)
 
-    assert not env.monitor.get_errors()
-
-
-@pytest.mark.funcov_bins("BIN-1109")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
-    scenario_key = "zhaoxinran/uncache/resend/first-beat-combined-fault"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 16)
-    pc, first_beat = prepare_mmio_cross_beat_stream(env, scenario_rng(f"{scenario_key}/pc")[2])
-    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
-    env.uncache_agent.inject_response_fault_at(
-        first_beat,
-        corrupt=1,
-        denied=1,
-    )
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "pc": pc,
-            "latency": latency,
-            "fault": "corrupt_and_denied",
-            "expected_path": "first_beat_fault_suppresses_resend",
-        },
-    )
-    _initialize_mmio_fetch(env, reset_vector=pc)
-
-    assert _wait_for_request_addr(env, first_beat)
-    assert _wait_for_resp_delta(env, env.uncache_agent)
-    assert _wait_for_monitor_exception(env)
-    stats = env.uncache_agent.get_stats()
-
-    assert stats.get("request_addrs", []).count(first_beat) == 1
-    assert (first_beat + _UNCACHE_BEAT_BYTES) not in stats.get("request_addrs", [])
-    assert int(stats.get("corrupt_resp_count", 0)) == 1
-    assert int(stats.get("denied_resp_count", 0)) == 1
     assert not env.monitor.get_errors()
 
 
