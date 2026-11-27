@@ -56,6 +56,14 @@ trait Helpers extends HasScParameters with PhrHelper {
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
+  def getPathBwWayFlip(cfiPosition: UInt): Bool = cfiPosition(log2Ceil(NumWays))
+
+  def getPathBwWayIdx(cfiPosition: UInt): UInt = {
+    // Omit the first folded bit so this hash does not depend on the result of getWayIdx.
+    val mask = ((BigInt(1) << cfiPosition.getWidth) - 1).clearBit(log2Ceil(NumWays))
+    getWayIdx(cfiPosition & mask.U(cfiPosition.getWidth.W))
+  }
+
   def aboveThreshold(scSum: SInt, threshold: UInt): Bool =
     ((scSum > threshold.zext) && pos(scSum)) || ((scSum < -threshold.zext) && neg(scSum))
 

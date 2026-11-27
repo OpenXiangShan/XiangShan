@@ -91,6 +91,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init))
 
+  require(!EnablePathBwWayFold || CfiPositionWidth > log2Ceil(NumWays))
+  private val NumWayVariants     = if (EnablePathBwWayFold) 2 else 1
+  private val NumWayCombinations = NumWays * NumWayVariants
+
+  // Each candidate is indexed by (Path/BW way, omitted bit). Restore that bit for the other tables.
+  private def baseWayForCombination(idx: Int): Int = (idx / NumWayVariants) ^ (idx % NumWayVariants)
+
   io.sramResetDone := (
     pathTable.map(_.io.sramResetDone) ++
       globalTable.map(_.io.sramResetDone) ++
@@ -230,8 +237,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(RegEnable(_, s1_fire)))
   private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire)))
 
-  private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
-  private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
+  private val s2_sumPercsum = if (EnablePathBwWayFold) {
+    val pathBw     = VecInit.tabulate(NumWays)(w => s2_pathPercsum(w) +& s2_bwPercsum(w))
+    val globalImli = VecInit.tabulate(NumWays)(w => s2_globalPercsum(w) +& s2_imliPercsum(w))
+    // Static wiring lets all candidates be computed in parallel with the CFI and TAGE lookup.
+    VecInit.tabulate(NumWayCombinations)(idx => pathBw(idx / NumWayVariants) +& globalImli(baseWayForCombination(idx)))
+  } else {
+    val percsums = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
+    VecInit.tabulate(NumWays)(w => ParallelSingedExpandingAdd(percsums.map(_(w))))
+  }
 
   private val s2_mbtbResult        = io.mbtbResult
   private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.bits.isPositive))
@@ -242,7 +256,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     mbtbResult.valid && mbtbResult.bits.attribute.isConditional
   })
 
-  private val s2_wayIdx = s2_mbtbResult.map(mbtbResult => getWayIdx(mbtbResult.bits.cfiPosition))
+  private val s2_cfiPosition  = s2_mbtbResult.map(_.bits.cfiPosition)
+  private val s2_wayIdx       = s2_cfiPosition.map(getWayIdx)
+  private val s2_pathBwWayIdx = if (EnablePathBwWayFold) s2_cfiPosition.map(getPathBwWayIdx) else s2_wayIdx
+  private val s2_wayCombinationOH = if (EnablePathBwWayFold) {
+    s2_cfiPosition.zip(s2_pathBwWayIdx).map { case (cfi, way) =>
+      UIntToOH(Cat(way, getPathBwWayFlip(cfi)), NumWayCombinations)
+    }
+  } else {
+    Seq.empty
+  }
   private val s2_biasIdxLowBits = VecInit(s2_providerTakenMask.zip(s2_providerValid).zip(s2_providerCtr).map {
     case ((taken, valid), ctr) => Cat(valid && ctr.isWeak, valid && taken)
   })
@@ -252,40 +275,39 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       biasIdx
   }
 
-  private val s2_pathPred   = s2_wayIdx.map(wayIdx => s2_pathPercsum(wayIdx) >= 0.S)       // for performance counter
+  private val s2_pathPred   = s2_pathBwWayIdx.map(wayIdx => s2_pathPercsum(wayIdx) >= 0.S) // for performance counter
   private val s2_globalPred = s2_wayIdx.map(wayIdx => s2_globalPercsum(wayIdx) >= 0.S)     // for performance counter
-  private val s2_bwPred     = s2_wayIdx.map(wayIdx => s2_bwPercsum(wayIdx) >= 0.S)         // for performance counter
+  private val s2_bwPred     = s2_pathBwWayIdx.map(wayIdx => s2_bwPercsum(wayIdx) >= 0.S)   // for performance counter
   private val s2_imliPred   = s2_wayIdx.map(wayIdx => s2_imliPercsum(wayIdx) >= 0.S)       // for performance counter
   private val s2_biasPred   = s2_biasWayIdx.map(biasIdx => s2_biasPercsum(biasIdx) >= 0.S) // for performance counter
 
-  private val s2_totalPercsumAll = VecInit(s2_biasPercsum.zipWithIndex.map {
-    case (biasPercsum, wayIdx) =>
-      val idx = wayIdx >> BiasUseTageBitWidth
-      biasPercsum +& s2_sumPercsum(idx)
-  }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
+  private val s2_totalPercsumAll = VecInit.tabulate(NumWayCombinations) { idx =>
+    val biasStart = baseWayForCombination(idx) << BiasUseTageBitWidth
+    VecInit.tabulate(BiasTableNumWays / NumWays) { lowBits =>
+      s2_biasPercsum(biasStart + lowBits) +& s2_sumPercsum(idx)
+    }
+  }
 
   private val Seq(s2_sumAboveThresholdShift1All, s2_sumAboveThresholdShift2All, s2_sumAboveThresholdShift3All) =
     Seq(4, 5, 6).map(shiftRight =>
       VecInit(s2_totalPercsumAll.zipWithIndex.map { case (vec, idx) =>
         VecInit(vec.map(percsum =>
-          aboveThreshold(percsum, scThreshold(idx).value >> shiftRight)
+          aboveThreshold(percsum, scThreshold(baseWayForCombination(idx)).value >> shiftRight)
         ))
       })
     )
 
-  private val s2_totalPercsum = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
-    s2_totalPercsumAll(wayIdx)(lowBits)
-  })
+  private def selectPercsumResult[T <: Data](candidates: Vec[Vec[T]]): Vec[T] =
+    VecInit.tabulate(NumBtbResultEntries) { i =>
+      val wayChoices =
+        if (EnablePathBwWayFold) Mux1H(s2_wayCombinationOH(i), candidates) else candidates(s2_wayIdx(i))
+      wayChoices(s2_biasIdxLowBits(i))
+    }
 
-  private val s2_sumAboveThresholdShift1 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
-    s2_sumAboveThresholdShift1All(wayIdx)(lowBits)
-  })
-  private val s2_sumAboveThresholdShift2 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
-    s2_sumAboveThresholdShift2All(wayIdx)(lowBits)
-  })
-  private val s2_sumAboveThresholdShift3 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
-    s2_sumAboveThresholdShift3All(wayIdx)(lowBits)
-  })
+  private val s2_totalPercsum           = selectPercsumResult(s2_totalPercsumAll)
+  private val s2_sumAboveThresholdShift1 = selectPercsumResult(s2_sumAboveThresholdShift1All)
+  private val s2_sumAboveThresholdShift2 = selectPercsumResult(s2_sumAboveThresholdShift2All)
+  private val s2_sumAboveThresholdShift3 = selectPercsumResult(s2_sumAboveThresholdShift3All)
 
   require(
     NumBtbResultEntries == s2_mbtbResult.length,
@@ -470,6 +492,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_oldBiasLowBits = RegEnable(t0_meta.scBiasLowerBits, t0_fire)
 
   private val t1_branchesWayIdxVec   = VecInit(t1_branches.map(b => getWayIdx(b.bits.cfiPosition)))
+  private val t1_branchesPathBwWayIdxVec =
+    if (EnablePathBwWayFold) VecInit(t1_branches.map(b => getPathBwWayIdx(b.bits.cfiPosition)))
+    else t1_branchesWayIdxVec
   private val t1_branchesScIdxHitVec = RegEnable(t0_branchesScIdxHitVec, t0_fire)
   private val t1_branchesScIdxVec    = RegEnable(t0_branchesScIdxVec, t0_fire)
 
@@ -528,7 +553,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         oldEntries,
         t1_writeValidVec,
         t1_writeTakenVec,
-        t1_branchesWayIdxVec,
+        t1_branchesPathBwWayIdxVec,
         t1_branchesScIdxVec,
         t1_meta
       )
@@ -560,7 +585,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         oldEntries,
         t1_writeValidVec,
         t1_writeTakenVec,
-        t1_branchesWayIdxVec,
+        t1_branchesPathBwWayIdxVec,
         t1_branchesScIdxVec,
         t1_meta
       )
@@ -876,7 +901,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
     trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
 
-    trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(tableWayIdx).asUInt))
+    trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(t1_branchesPathBwWayIdxVec(i)).asUInt))
     trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(tableWayIdx).asUInt))
     val biasWayIdx = Cat(tableWayIdx, t1_oldBiasLowBits(predWayIdx))
     trace.bits.biasResp := t1_oldBiasEntries(biasWayIdx).asUInt

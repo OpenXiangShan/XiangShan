@@ -47,7 +47,8 @@ case class ScParameters(
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
-    EnableScTrace:       Boolean = false
+    EnableScTrace:       Boolean = false,
+    EnablePathBwWayFold: Boolean = true
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
@@ -99,6 +100,8 @@ trait HasScParameters extends HasBpuParameters {
   def WriteBufferSize: Int = scParameters.WriteBufferSize
 
   def EnableScTrace: Boolean = scParameters.EnableScTrace
+
+  def EnablePathBwWayFold: Boolean = scParameters.EnablePathBwWayFold
 
   require(NumWays > 0 && isPow2(NumWays), s"SC NumWays($NumWays) must be a positive power of two")
 }
