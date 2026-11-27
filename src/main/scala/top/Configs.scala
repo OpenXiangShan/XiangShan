@@ -574,7 +574,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new DefaultConfig(1)
 ) with DeprecatedConfigWarning
 
-class DefaultConfig(n: Int = 1) extends Config(
+private class DefaultConfigBase(n: Int) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
@@ -582,8 +582,10 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+class DefaultConfig(n: Int = 1) extends Config(new L1LldpTemporalConfig(n))
+
 class L1TemporalConfig(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+  new DefaultConfigBase(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(core =>
       core.copy(prefetcher = core.prefetcher :+ L1TemporalParams())
     )
@@ -591,7 +593,7 @@ class L1TemporalConfig(n: Int = 1) extends Config(
 )
 
 class L1LldpConfig(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+  new DefaultConfigBase(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(core => core.copy(prefetcher = core.prefetcher :+ L1LldpParams()))
   })
 )
