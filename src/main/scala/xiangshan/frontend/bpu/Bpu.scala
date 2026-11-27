@@ -937,11 +937,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       entry.valid && inPredictedPrefix && !VecInit(preferredDuplicate).asUInt.orR
     }
 
+    val referenceTargets = s3_mbtbResult.zip(s3_firstTakenBranchOH).map { case (entry, firstTaken) =>
+      Mux(firstTaken, s3_prediction.target, entry.bits.target)
+    }
     val branchSources = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
       val taken      = s3_takenMask(i)
       val firstTaken = s3_firstTakenBranchOH(i)
       // Only the selected S3 branch receives a RAS or ITTAGE target.
-      val target         = Mux(firstTaken, s3_prediction.target, entry.bits.target)
+      val target         = referenceTargets(i)
       val s1PositionHits = s3S1Branches.map(b => b.valid && b.bits.cfiPosition === entry.bits.cfiPosition)
       val s1TakenHits    = s1PositionHits.zip(s3S1Branches).map { case (hit, b) => hit && b.bits.taken }
       val s1MatchesOH = PriorityEncoderOH(Mux(
@@ -1013,6 +1016,103 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     countSources("s1", BpuPredictionSource.Stage1, branchSources.map(_._1))
     countSources("s2", BpuPredictionSource.Stage2, branchSources.map(_._2))
     countSources("s3", BpuPredictionSource.Stage3, branchSources.map(_._3))
+
+    // Compare original subpredictor outputs even when the BPU selected another source.
+    def fromS1[T <: Data](result: T): T = RegEnable(RegEnable(result, s1_fire), s2_fire)
+
+    val s3UbtbRaw    = fromS1(ubtb.io.prediction)
+    val s3AbtbRaw    = fromS1(abtb.io.result.entries)
+    val s3UtageRaw   = fromS1(utage.io.prediction)
+    val s3UrasValid  = fromS1(uras.io.enable && uras.io.specOut.isCanUse)
+    val s3UrasTarget = fromS1(uras.io.specOut.retTarget)
+    // SC has a raw direction for a conditional MBTB hit with a TAGE provider, before its confidence test.
+    val s3ScProviderValid = RegEnable(
+      VecInit(tage.io.toSc.providerTakenCtrVec.map(p => p.valid && sc.io.enable)),
+      s2_fire
+    )
+
+    val comparisons = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+      val ref         = entry.bits
+      val refTaken    = s3_takenMask(i)
+      val refTarget   = referenceTargets(i)
+      val isCond      = s3_isCondVec(i)
+      val ubtbMatches = s3UbtbRaw.valid && s3UbtbRaw.bits.cfiPosition === ref.cfiPosition
+      val abtbMatches = s3AbtbRaw.map(p => p.valid && p.bits.cfiPosition === ref.cfiPosition)
+      // For duplicate S1 positions use the highest lane, separately for each predictor.
+      val abtbHitOH = PriorityEncoderOH(VecInit(abtbMatches.reverse).asUInt).asBools
+      val abtbPred  = Mux1H(abtbHitOH, s3AbtbRaw.reverse).bits
+      val abtbTaken = abtbPred.attribute.isDirect || abtbPred.attribute.isIndirect ||
+        (abtbPred.attribute.isConditional && abtbPred.taken)
+      val utageMatches = s3AbtbRaw.indices.map { j =>
+        abtbMatches(j) && s3AbtbRaw(j).bits.attribute.isConditional && s3UtageRaw.hitVec(j)
+      }
+      val utageHitOH = PriorityEncoderOH(VecInit(utageMatches.reverse).asUInt).asBools
+      val utageTaken = Mux1H(utageHitOH, s3UtageRaw.takenVec.reverse)
+      val s1HasReturn = (ubtbMatches && s3UbtbRaw.bits.attribute.isReturn) ||
+        s3AbtbRaw.indices.map(j => abtbMatches(j) && s3AbtbRaw(j).bits.attribute.isReturn).reduce(_ || _)
+      val fastTage = s3_tagePrediction.fastTakenVec(i)
+      val tage     = s3_tagePrediction.takenVec(i)
+      val mbtbTaken = s3_isJumpVec(i) || (isCond && ref.taken)
+
+      def branchAgrees(pred: Prediction, taken: Bool): Bool =
+        pred.attribute === ref.attribute && taken === refTaken && (!refTaken || pred.target === refTarget)
+
+      Seq(
+        ("s1_Ubtb", ubtbMatches, branchAgrees(s3UbtbRaw.bits, s3UbtbRaw.bits.taken)),
+        ("s1_Abtb", abtbHitOH.reduce(_ || _), branchAgrees(abtbPred, abtbTaken)),
+        ("s1_Utage", isCond && utageHitOH.reduce(_ || _), utageTaken === refTaken),
+        ("s1_Uras", refTaken && ref.attribute.isReturn && s1HasReturn && s3UrasValid, s3UrasTarget === refTarget),
+        ("s2_FastTage", isCond && fastTage.valid, fastTage.bits === refTaken),
+        ("s2_Mbtb", true.B, branchAgrees(ref, mbtbTaken)),
+        ("s3_Tage", isCond && tage.valid, tage.bits === refTaken),
+        ("s3_Sc", isCond && s3ScProviderValid(i), s3_scTakenMask(i) === refTaken),
+        ("s3_Ras", s3_firstTakenBranchOH(i) && s3_useRas, ras.io.topRetAddr === refTarget),
+        ("s3_ITTage", s3_firstTakenBranchOH(i) && s3_useIttage, ittage.io.prediction.target === refTarget)
+      ).map { case (source, valid, agrees) =>
+        (source, hitBranches(i) && valid, hitBranches(i) && valid && agrees)
+      }
+    }
+
+    // Classify by the S3 reference attribute, including when a candidate reports a different attribute.
+    val branchTypes = s3_mbtbResult.map { entry =>
+      val attr = entry.bits.attribute
+      Seq(
+        "conditional"      -> attr.isConditional,
+        "direct_call"      -> (attr.isDirect && attr.isCall),
+        "direct_jump"      -> (attr.isDirect && !attr.isCall),
+        "indirect_call"    -> (attr.isIndirect && attr.isCall),
+        "indirect_jump"    -> attr.isOtherIndirect,
+        "indirect_ret"     -> (attr.isIndirect && attr.isReturn),
+        "indirect_retcall" -> (attr.isIndirect && attr.isReturnAndCall),
+        "other"            -> attr.isNone
+      )
+    }.transpose.map(types => (types.head._1, types.map(_._2)))
+
+    def countSamples(name: String, samples: Seq[Bool]): Unit =
+      XSPerfAccumulate(name, Mux(s3Valid, PopCount(samples), 0.U))
+
+    branchTypes.foreach { case (kind, mask) =>
+      countSamples(s"mbtbHitBranch_type_${kind}_total", hitBranches.zip(mask).map { case (hit, inType) => hit && inType })
+    }
+    comparisons.transpose.foreach { samples =>
+      val predictor = samples.head._1
+      val prefix    = s"mbtbHitBranch_vsS3_$predictor"
+      val valid     = samples.map(_._2)
+      val matched   = samples.map(_._3)
+      countSamples(s"${prefix}_valid", valid)
+      countSamples(s"${prefix}_match", matched)
+
+      val applicableTypes = predictor match {
+        case "s1_Utage" | "s2_FastTage" | "s3_Tage" | "s3_Sc" => Set("conditional")
+        case "s1_Uras" | "s3_Ras"                            => Set("indirect_ret")
+        case "s3_ITTage"                                     => Set("indirect_call", "indirect_jump")
+        case _                                               => branchTypes.map(_._1).toSet
+      }
+      branchTypes.filter { case (kind, _) => applicableTypes(kind) }.foreach { case (kind, mask) =>
+        countSamples(s"${prefix}_${kind}_valid", valid.zip(mask).map { case (v, inType) => v && inType })
+        countSamples(s"${prefix}_${kind}_match", matched.zip(mask).map { case (m, inType) => m && inType })
+      }
+    }
   }
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
