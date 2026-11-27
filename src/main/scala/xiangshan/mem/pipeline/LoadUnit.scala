@@ -828,6 +828,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.misalignNeedWakeUp := s0_misalignNeedWakeUp
   s0_out.isFinalSplit := s0_finalSplit
 
+  when (s0_nc_select) {
+    s0_out.fullva            := io.lsq.nc_ldin.bits.fullva
+    s0_out.vaNeedExt         := io.lsq.nc_ldin.bits.vaNeedExt
+    s0_out.isHyper           := io.lsq.nc_ldin.bits.isHyper
+    s0_out.gpaddr            := io.lsq.nc_ldin.bits.gpaddr
+    s0_out.isForVSnonLeafPTE := io.lsq.nc_ldin.bits.isForVSnonLeafPTE
+  }
+
   // load fast replay
   io.fast_rep_in.ready := (s0_can_go && io.dcache.req.ready && s0_src_ready_vec(fast_rep_idx))
 
@@ -1028,8 +1036,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.mmio := Pbmt.isIO(s1_pbmt)
 
   when (s1_nc_with_data) {
-    // Preserve exceptions reported by the completed Uncache access.
+    // NC returns do not query the TLB; preserve the completed access's exception metadata.
     s1_out.uop.exceptionVec := s1_in.uop.exceptionVec
+    s1_out.fullva            := s1_in.fullva
+    s1_out.vaNeedExt         := s1_in.vaNeedExt
+    s1_out.isHyper           := s1_in.isHyper
+    s1_out.gpaddr            := s1_in.gpaddr
+    s1_out.isForVSnonLeafPTE := s1_in.isForVSnonLeafPTE
   } .elsewhen (!s1_dly_err) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
