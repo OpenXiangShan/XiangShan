@@ -127,7 +127,7 @@ After building `emu` with either simulator, a Linux smoke test uses the same pre
 ./build/emu -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
-ScalaTest/Chisel unit tests in `src/test/scala/` are another option. Run them with `mill -i xiangshan.test.test`, or select a suite with `mill -i xiangshan.test.testOnly xiangshan.frontend.bpu.SaturateCounterTest`.
+ScalaTest/Chisel unit tests in `src/test/scala/` are another option. Run them with `mill -i 'xiangshan[].test.test'`, or select a suite with `mill -i 'xiangshan[].test.testOnly' xiangshan.frontend.bpu.SaturateCounterTest`.
 
 ### Run with xspdb
 

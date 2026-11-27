@@ -16,8 +16,8 @@
 package build
 
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
-import $ivy.`org.chipsalliance::chisel:7.13.0`
-import $ivy.`org.chipsalliance::firtool-resolver:2.1.1`
+import $ivy.`cc.xiangshan::chisel:7.16.0-xiangshan-2`
+import $ivy.`cc.xiangshan::firtool-resolver:2.2.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -29,21 +29,39 @@ import mill.scalalib._
 import mill.scalalib.scalafmt.ScalafmtModule
 import os.Path
 
-val defaultScalaVersion = "2.13.17"
+val defaultScalaVersion = "2.13.18"
 
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
-trait ChiselModule extends SbtModule with ScalafmtModule {
-  def scalaVersion: T[String] = defaultScalaVersion
+object ivys {
+  val scala = defaultScalaVersion
+
+  // The first entry is the default variant used by the Makefile.
+  val chiselKeys = Seq("xiangshan", "upstream")
+
+  val chiselCrossVersions = Map(
+    "xiangshan" -> (
+      mvn"cc.xiangshan::chisel:7.16.0-xiangshan-2",
+      mvn"cc.xiangshan:::chisel-plugin:7.16.0-xiangshan-2"
+    ),
+    "upstream" -> (
+      mvn"org.chipsalliance::chisel:7.16.0",
+      mvn"org.chipsalliance:::chisel-plugin:7.16.0"
+    )
+  )
+}
+
+trait ChiselModule extends SbtModule with ScalafmtModule with Cross.Module[String] {
+  def scalaVersion: T[String] = ivys.scala
 
   def scalacOptions = Seq("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
   def ivyDeps: T[Agg[Dep]] = Agg(
-    mvn"org.chipsalliance::chisel:7.13.0",
+    ivys.chiselCrossVersions(crossValue)._1,
     mvn"com.lihaoyi::sourcecode:0.4.4",
   )
 
-  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(mvn"org.chipsalliance:::chisel-plugin:7.13.0")
+  def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(ivys.chiselCrossVersions(crossValue)._2)
 
   def resolveFirtoolDeps = T {
     firtoolresolver.Resolve(chisel3.BuildInfo.firtoolVersion.get, true) match {
@@ -53,33 +71,41 @@ trait ChiselModule extends SbtModule with ScalafmtModule {
   }
 }
 
-object `rocket-chip` extends ChiselModule {
+trait RocketChip extends ChiselModule {
+  override def millSourcePath: Path = pwd / "rocket-chip"
+
   object macros extends ScalaModule {
-    def scalaVersion: T[String] = defaultScalaVersion
+    def scalaVersion: T[String] = ivys.scala
 
-    def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:$defaultScalaVersion")
+    def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:${ivys.scala}")
   }
 
-  object hardfloat extends ChiselModule {
-    def millSourcePath: Path = pwd / "rocket-chip" / "hardfloat" / "hardfloat"
+  trait Hardfloat extends ChiselModule {
+    override def millSourcePath: Path = pwd / "rocket-chip" / "hardfloat" / "hardfloat"
   }
+
+  object hardfloat extends Cross[Hardfloat](ivys.chiselKeys)
 
   object cde extends ScalaModule {
-    def scalaVersion: T[String] = defaultScalaVersion
+    def scalaVersion: T[String] = ivys.scala
 
-    def millSourcePath: Path = pwd / "rocket-chip" / "cde" / "cde"
+    override def millSourcePath: Path = pwd / "rocket-chip" / "cde" / "cde"
   }
 
   def mainClass = Some("freechips.rocketchip.diplomacy.Main")
 
-  def moduleDeps = Seq(macros, hardfloat, cde)
+  def moduleDeps = Seq(macros, hardfloat(crossValue), cde)
 
   def ivyDeps: T[Agg[Dep]] =
     super.ivyDeps() ++ Agg(mvn"com.lihaoyi::mainargs:0.7.7", mvn"org.json4s::json4s-jackson:4.0.7")
 }
 
-object utility extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`)
+object `rocket-chip` extends Cross[RocketChip](ivys.chiselKeys)
+
+trait Utility extends ChiselModule {
+  override def millSourcePath: Path = pwd / "utility"
+
+  def moduleDeps = Seq(`rocket-chip`(crossValue))
 
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps()
 
@@ -88,14 +114,25 @@ object utility extends ChiselModule {
   }
 }
 
-object yunsuan extends ChiselModule {
+object utility extends Cross[Utility](ivys.chiselKeys)
+
+trait YunSuan extends ChiselModule {
+  override def millSourcePath: Path = pwd / "yunsuan"
+
   def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(mvn"com.lihaoyi::sourcecode:0.4.4")
 }
 
-object XSCache extends ChiselModule {
-  def millSourcePath = pwd / "XSCache"
+object yunsuan extends Cross[YunSuan](ivys.chiselKeys)
 
-  def moduleDeps = Seq(`rocket-chip`, utility, openNCB, zhujiangCompat)
+trait XSCache extends ChiselModule {
+  override def millSourcePath: Path = pwd / "XSCache"
+
+  def moduleDeps = Seq(
+    `rocket-chip`(crossValue),
+    utility(crossValue),
+    openNCB(crossValue),
+    zhujiangCompat(crossValue)
+  )
 
   override def sources: T[Seq[PathRef]] = Task.Sources {
     super.sources() ++ Seq(
@@ -104,16 +141,20 @@ object XSCache extends ChiselModule {
   }
 }
 
-object openNCB extends ChiselModule {
-  def millSourcePath = pwd / "XSCache" / "OpenNCB"
+object XSCache extends Cross[XSCache](ivys.chiselKeys)
 
-  def moduleDeps = Seq(`rocket-chip`)
+trait OpenNCB extends ChiselModule {
+  override def millSourcePath: Path = pwd / "XSCache" / "OpenNCB"
+
+  def moduleDeps = Seq(`rocket-chip`(crossValue))
 }
 
-object zhujiangCompat extends ChiselModule {
-  def millSourcePath = pwd / "XSCache" / "ZhuJiang"
+object openNCB extends Cross[OpenNCB](ivys.chiselKeys)
 
-  def moduleDeps = Seq(`rocket-chip`, utility, difftest)
+trait ZhujiangCompat extends ChiselModule {
+  override def millSourcePath: Path = pwd / "XSCache" / "ZhuJiang"
+
+  def moduleDeps = Seq(`rocket-chip`(crossValue), utility(crossValue), difftest(crossValue))
 
   override def sources: T[Seq[PathRef]] = Task.Sources {
     Seq(
@@ -123,7 +164,11 @@ object zhujiangCompat extends ChiselModule {
   }
 }
 
-object difftest extends ChiselModule {
+object zhujiangCompat extends Cross[ZhujiangCompat](ivys.chiselKeys)
+
+trait Difftest extends ChiselModule {
+  override def millSourcePath: Path = pwd / "difftest"
+
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources: T[Seq[PathRef]] = Task.Sources {
       super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
@@ -131,23 +176,33 @@ object difftest extends ChiselModule {
   }
 }
 
-object ChiselAIA extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility)
+object difftest extends Cross[Difftest](ivys.chiselKeys)
+
+trait ChiselAIA extends ChiselModule {
+  override def millSourcePath: Path = pwd / "ChiselAIA"
+
+  def moduleDeps = Seq(`rocket-chip`(crossValue), utility(crossValue))
 }
 
-object ChiselIOPMP extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility)
+object ChiselAIA extends Cross[ChiselAIA](ivys.chiselKeys)
+
+trait ChiselIOPMP extends ChiselModule {
+  override def millSourcePath: Path = pwd / "ChiselIOPMP"
+
+  def moduleDeps = Seq(`rocket-chip`(crossValue), utility(crossValue))
 }
+
+object ChiselIOPMP extends Cross[ChiselIOPMP](ivys.chiselKeys)
 
 object macros extends ScalaModule {
-  def scalaVersion: T[String] = defaultScalaVersion
+  def scalaVersion: T[String] = ivys.scala
 
-  def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:$defaultScalaVersion")
+  def ivyDeps: T[Agg[Dep]] = Agg(mvn"org.scala-lang:scala-reflect:${ivys.scala}")
 }
 
 // compile TopDownCounters.scala only, avoid full Chisel elaboration
 object topdownMeta extends ScalaModule {
-  def scalaVersion: T[String] = defaultScalaVersion
+  def scalaVersion: T[String] = ivys.scala
 
   def millSourcePath: Path = pwd
 
@@ -192,18 +247,18 @@ object topdownMeta extends ScalaModule {
   }
 }
 
-object xiangshan extends ChiselModule {
-  def millSourcePath = pwd
+trait XiangShan extends ChiselModule {
+  override def millSourcePath: Path = pwd
 
   def moduleDeps = Seq(
-    `rocket-chip`,
-    difftest,
-    XSCache,
-    zhujiangCompat,
-    yunsuan,
-    utility,
-    ChiselAIA,
-    ChiselIOPMP,
+    `rocket-chip`(crossValue),
+    difftest(crossValue),
+    XSCache(crossValue),
+    zhujiangCompat(crossValue),
+    yunsuan(crossValue),
+    utility(crossValue),
+    ChiselAIA(crossValue),
+    ChiselIOPMP(crossValue),
     macros
   )
 
@@ -287,9 +342,9 @@ object xiangshan extends ChiselModule {
   }
 
   object test extends SbtTests with TestModule.ScalaTest {
-    def moduleDeps: Seq[JavaModule] = super.moduleDeps ++ Seq(xiangshan, difftest.test)
+    def moduleDeps: Seq[JavaModule] = super.moduleDeps ++ Seq(xiangshan(crossValue), difftest(crossValue).test)
 
-    def forkArgs: T[Seq[String]] = xiangshan.forkArgs
+    def forkArgs: T[Seq[String]] = xiangshan(crossValue).forkArgs
 
     def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Seq("-deprecation", "-feature")
 
@@ -302,3 +357,5 @@ object xiangshan extends ChiselModule {
   def exportTopDownMetadata = topdownMeta.exportMetadata
   def checkTopDownMetadata = topdownMeta.checkMetadata
 }
+
+object xiangshan extends Cross[XiangShan](ivys.chiselKeys)

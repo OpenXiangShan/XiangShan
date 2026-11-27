@@ -44,6 +44,9 @@ TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
 JAR = $(BUILD_DIR)/xsgen.jar
 
+# Chisel Version: xiangshan (default if empty) or upstream
+CHISEL_VERSION ?=
+
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
@@ -298,29 +301,29 @@ endif
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i xiangshan.runMain $(FPGATOP) --help
+	mill -i 'xiangshan[$(CHISEL_VERSION)].runMain' $(FPGATOP) --help
 
 version:
-	mill -i xiangshan.runMain $(FPGATOP) --version
+	mill -i 'xiangshan[$(CHISEL_VERSION)].runMain' $(FPGATOP) --version
 
 jar:
-	mill -i xiangshan.assembly
+	mill -i 'xiangshan[$(CHISEL_VERSION)].assembly'
 
 $(JAR): FORCE
-	mill -i xiangshan.test.assembly
+	mill -i 'xiangshan[$(CHISEL_VERSION)].test.assembly'
 	@mkdir -p $(@D); \
-	JAR_REF=$(shell mill -i show xiangshan.test.assembly 2> /dev/null); \
+	JAR_REF=$(shell mill -i show 'xiangshan[$(CHISEL_VERSION)].test.assembly' 2> /dev/null); \
 	[ ! -z $${JAR_REF} ] && echo $${JAR_REF} | sed 's/"//g' | awk -F: '{print $$4}' \
 		| xargs -I{} cp {} $@
 test-jar: $(call docker-deps,$(JAR))
 
 comp:
-	mill -i xiangshan.compile
-	mill -i xiangshan.test.compile
+	mill -i 'xiangshan[$(CHISEL_VERSION)].compile'
+	mill -i 'xiangshan[$(CHISEL_VERSION)].test.compile'
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FPGATOP) \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) 'xiangshan[$(CHISEL_VERSION)].runMain' $(FPGATOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
 		--num-cores $(NUM_CORES) $(TOPMAIN_ARGS)
 ifeq ($(CHISEL_TARGET),systemverilog)
@@ -334,7 +337,7 @@ $(SIM_TOP_OUT): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating $(CHISEL_TARGET) files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) 'xiangshan[$(CHISEL_VERSION)].test.runMain' $(SIMTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(CHISEL_TARGET),systemverilog)
@@ -380,7 +383,7 @@ bump:
 
 deps:
 	mill -i __.prepareOffline
-	mill -i xiangshan.resolveFirtoolDeps
+	mill -i 'xiangshan[$(CHISEL_VERSION)].resolveFirtoolDeps'
 
 bsp:
 	mill -i mill.bsp.BSP/install
@@ -389,10 +392,10 @@ idea:
 	mill -i mill.idea.GenIdea/idea
 
 check-format:
-	mill xiangshan.checkFormat
+	mill 'xiangshan[$(CHISEL_VERSION)].checkFormat'
 
 reformat:
-	mill xiangshan.reformat
+	mill 'xiangshan[$(CHISEL_VERSION)].reformat'
 
 # verilator simulation
 emu-mk: sim-verilog

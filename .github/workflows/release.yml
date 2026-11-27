@@ -238,4 +238,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: xsgen
-          path: out/xiangshan/test/assembly.dest/out.jar
+          path: build/xsgen.jar

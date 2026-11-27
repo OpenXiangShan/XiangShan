@@ -114,19 +114,19 @@ disassemble-xv6:
 SUITE = cache.L2CacheTest
 
 unit-test:
-	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE)
+	cd .. && mill 'xiangshan[xiangshan].test.testOnly' -o -s $(SUITE)
 
 tlc-test:
-	cd .. && mill XiangShan.test.testOnly -o -s cache.TLCTest.TLCCacheTest
+	cd .. && mill 'xiangshan[xiangshan].test.testOnly' -o -s cache.TLCTest.TLCCacheTest
 
 l1-test:
-	cd .. && mill XiangShan.test.testOnly -o -s cache.L1DTest.L1DCacheTest
+	cd .. && mill 'xiangshan[xiangshan].test.testOnly' -o -s cache.L1DTest.L1DCacheTest
 
 int-divider-test:
-	cd .. && mill XiangShan.test.testOnly -o -s futest.IntDividerTest
+	cd .. && mill 'xiangshan[xiangshan].test.testOnly' -o -s futest.IntDividerTest
 
 unit-test-all:
-	cd .. && mill XiangShan.test.test -P$(P)
+	cd .. && mill 'xiangshan[xiangshan].test.test' -P$(P)
 
 # ------------------------------------------------------------------
 # chore

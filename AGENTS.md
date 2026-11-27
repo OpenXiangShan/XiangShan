@@ -33,7 +33,7 @@ Use two-space indentation, PascalCase classes, and camelCase methods/values. Pre
 
 ## Testing Guidelines
 
-Prefer focused regression workloads written with [nexus-am](https://github.com/OpenXiangShan/nexus-am) (`make ARCH=riscv64-xs`), or simulate `ready-to-run/coremark-2-iteration.bin` and `ready-to-run/linux.bin` with differential checking. ScalaTest/Chisel is another, less maintained method: `mill -i xiangshan.test.test`; suites follow `*Test.scala` under matching packages. No numeric coverage threshold is documented.
+Prefer focused regression workloads written with [nexus-am](https://github.com/OpenXiangShan/nexus-am) (`make ARCH=riscv64-xs`), or simulate `ready-to-run/coremark-2-iteration.bin` and `ready-to-run/linux.bin` with differential checking. ScalaTest/Chisel is another, less maintained method: `mill -i 'xiangshan[].test.test'`; suites follow `*Test.scala` under matching packages. No numeric coverage threshold is documented.
 
 ## Issue & Pull Request Guidelines
 
