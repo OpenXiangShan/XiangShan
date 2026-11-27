@@ -1225,7 +1225,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_actually_pbmt_nc = !s2_in.tlbMiss && !s2_un_access_exception && s2_in.nc
   val s2_actually_pbmt_mmio = !s2_in.tlbMiss && !s2_un_access_exception && s2_in.mmio
   val s2_uncache = !s2_prf && s2_actually_uncache
-  val s2_memBackTypeMM = !s2_pmp.mmio
+  // PMA C=0 on a PmemRanges (DRAM) address is non-cacheable main memory, not a device
+  val s2_inPmem = PmemRanges.map(_.cover(s2_out.paddr)).reduce(_ || _)
+  val s2_memBackTypeMM = !s2_pmp.mmio || s2_inPmem
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_vecActive && (
       s2_in.uop.exceptionVec(loadAccessFault) ||
