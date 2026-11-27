@@ -868,6 +868,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val renameFireCnt = PopCount(fromRename.map(_.fire))
 
   val stall_rob = hasValidInstr && !io.enqRob.canAccept
+  val stall_lsq = dispatchBlock && !lsqCanAccept
 
   XSPerfAccumulate("in_valid_count", PopCount(fromRename.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(fromRename.map(_.fire)))
@@ -877,7 +878,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_rob", stall_rob)
   XSPerfAccumulate("stall_cycle_iq", dispatchBlock && uopBlockByIQ.asUInt.orR)
   XSPerfAccumulate("stall_cycle_allowDispatch", dispatchBlock && !allowDispatch.asUInt.orR)
-  XSPerfAccumulate("stall_cycle_lsqFull", dispatchBlock && !lsqCanAccept)
+  XSPerfAccumulate("stall_cycle_lsqFull", stall_lsq)
 
 
 
@@ -1245,7 +1246,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     ("dispatch_empty",              !hasValidInstr                                                                 ),
     ("dispatch_utili",              PopCount(fromRename.map(_.valid))                                              ),
     ("dispatch_waitinstr",          PopCount(fromRename.map(!_.valid && canAccept))                                ),
-    ("dispatch_stall_cycle_lsq",    dispatchBlock && lsqCanAccept                                                  ),
+    ("dispatch_stall_cycle_lsq",    stall_lsq                                                                     ),
     ("dispatch_stall_cycle_rob",    stall_rob                                                                      ),
     ("dispatch_stall_cycle_iq",     dispatchBlock && uopBlockByIQ.asUInt.orR                                       ),
   )
