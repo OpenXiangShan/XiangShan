@@ -235,9 +235,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.rob.pendingPtr      := io.rob.pendingPtr
   loadQueue.io.rob.pendingPtrNext  := io.rob.pendingPtrNext
-  loadQueue.io.rob.lcommit         := io.rob.lcommit
-  loadQueue.io.rob.scommit         := io.rob.scommit
-  loadQueue.io.rob.commit          := io.rob.commit
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay

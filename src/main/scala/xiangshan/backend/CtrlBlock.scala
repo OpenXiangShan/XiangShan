@@ -24,7 +24,9 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{
+  DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator, WritebackWithRedirectDelayQueue
+}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
@@ -37,10 +39,8 @@ import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO,
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
 import xiangshan.backend.vector.{Decoder, VecIssueQueue}
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
@@ -154,77 +154,41 @@ class CtrlBlockImp(
 
   // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
-  val s3_s5_redirect = RegNextWithEnable(s2_s4_redirect)
+
+  private val writeBackRedirects = Seq(s1_s3_redirect, s2_s4_redirect)
+  private val redirectWriteBackDelay = coreParams.RedirectWriteBackDelay
+  require(redirectWriteBackDelay >= 0, "Redirect writeback delay must be nonnegative")
 
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
-    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
+    val killedByOlder = x.bits.robIdx.needFlush(writeBackRedirects)
     val delayed = Wire(Valid(new WriteBackRobBundle(x.bits.params, backendParams)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
-    delayed
-  }).toSeq
-  private val delayedWriteBack = Wire(chiselTypeOf(io.fromWB.wbData))
-  delayedWriteBack.zipWithIndex.map{ case (x,i) =>
-    x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
-    x.bits := delayedNotFlushedWriteBack(i).bits
-  }
-  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
-  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
-    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B)
-  }
 
-  val wbData = io.fromWB.wbData
+    if (redirectWriteBackDelay > 0 && delayed.bits.redirect.nonEmpty) {
+      // To prevent younger instructions from committing before the redirect takes effect,
+      // the redirecting instruction's writeback must reach the ROB in the same cycle as its redirect or later.
+      // TODO: Integrate with the ROB's slotNeedFlush mechanism to remove this delay logic.
+      val delayQueue = Module(new WritebackWithRedirectDelayQueue(x.bits.params, backendParams, redirectWriteBackDelay))
+      delayQueue.io.in := delayed
+      delayQueue.io.redirects := VecInit(writeBackRedirects)
+      delayQueue.io.out
+    } else {
+      delayed
+    }
+  }).toSeq
+
   val needPerfCounterExuName = Seq("ALU", "BJU", "LDU", "FEX", "STA", "STD")
+  private val delayedWriteBackValid = io.fromWB.wbData.map(wb => GatedValidRegNext(wb.valid))
   needPerfCounterExuName.map { name =>
-    val exuWBValid = params.allExuParams.zip(delayedWriteBack).filter(_._1.name.contains(name)).map(_._2).map(_.valid)
+    val exuWBValid = params.allExuParams.zip(delayedWriteBackValid).filter(_._1.name.contains(name)).map(_._2)
     val exuNum = exuWBValid.size
     for (i <- 0 to exuNum) {
       XSPerfAccumulate(s"${name}_SameWBNum_$i", PopCount(exuWBValid) === i.U)
     }
   }
-  val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
-  val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
-  val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VecScheduler])
-  val intScheNonStoreWbData = intScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val fpScheNonStoreWbData  = fpScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val vecScheNonStoreWbData = vfScheWbData.filterNot(_.bits.params.hasStoreFu)
-  val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
-  val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
-  private val delayedNotFlushedWriteBackNums = wbData.map(x => {
-    val valid = x.valid
-    val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
-    val killedByOlder = x.bits.robIdx.needFlush(oldestRedirect)
-    val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
-    // delayed.valid := GatedValidRegNext(valid)
-    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
-    val isIntSche = intScheWbData.contains(x)
-    val isFpSche = fpScheWbData.contains(x)
-    val isVfSche = vfScheWbData.contains(x)
-    val isi2v = i2vWbData.contains(x)
-    val isStore = storeWbData.contains(x)
-
-    val canSameRobidxWbData = if(isVfSche && !isStore) {
-      i2vWbData ++ vecScheNonStoreWbData
-    } else if(isi2v) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData ++ vecScheNonStoreWbData
-    } else if (isIntSche && !isStore) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData
-    } else if (isFpSche) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData
-    } else if (isStore) {
-      storeWbData
-    } else {
-      Seq(x)
-    }
-    val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
-      val killedByOlderThat = wb.bits.robIdx.needFlush(oldestRedirect)
-      wb.bits.robIdx.isSameEntry(x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
-    }).toSeq)
-    delayed.bits := RegEnable(PopCount(sameRobidxBools), x.valid)
-    delayed
-  }).toSeq
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
@@ -444,7 +408,7 @@ class CtrlBlockImp(
     s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s4_csrIsTrap = DelayN(rob.out.exception.valid, 3)
-  private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s4_trapTargetFromCsr = io.robio.csr.csr2rob.trapTarget
 
   val flushTarget = Mux(s4_csrIsTrap, s4_trapTargetFromCsr.pc, s2_robFlushPc)
   val s4_trapTargetIAF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIAF
@@ -804,8 +768,6 @@ class CtrlBlockImp(
   enqRob.canAccept := rob.in.enq.canAccept
   enqRob.canAcceptForDispatch := rob.in.enq.canAcceptForDispatch
   enqRob.isEmpty := rob.in.enq.isEmpty
-  enqRob.resp := rob.in.enq.resp
-  enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
     sink.valid := RegNext(source.valid && !rob.in.redirect.valid) && !s1_s3_redirect.valid
     sink.bits := RegEnable(source.bits, source.valid)
@@ -813,8 +775,6 @@ class CtrlBlockImp(
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
   dispatch.io.enqRob.canAcceptForDispatch := enqRob.canAcceptForDispatch
   dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
-  dispatch.io.enqRob.resp := enqRob.resp
-  rob.in.enq.needAlloc := enqRob.needAlloc
   rob.in.enq.req := enqRob.req
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
@@ -878,33 +838,20 @@ class CtrlBlockImp(
   rob.in.hartId := io.fromTop.hartId
   rob.in.redirect := s1_s3_redirect
   rob.in.writeback := delayedNotFlushedWriteBack
-  rob.in.exuWriteback := delayedWriteBack
-  rob.in.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
-  rob.in.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.out.readGPAMemData := gpaMem.io.exceptionReadData
   rob.in.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
   io.redirect := s1_s3_redirect
 
-  // rob to int block
-  rob.in.csr.intrBitSet := io.robio.csr.intrBitSet
-  rob.in.csr.trapTarget := io.robio.csr.trapTarget
-  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
-  io.robio.csr.fflags := rob.out.csr.fflags
-  io.robio.csr.vxsat := rob.out.csr.vxsat
-  io.robio.csr.vstart := rob.out.csr.vstart
-  io.robio.csr.dirtyFs := rob.out.csr.dirtyFs
-  io.robio.csr.dirtyVs := rob.out.csr.dirtyVs
-  io.robio.csr.perfinfo := rob.out.csr.perfinfo
+  rob.in.csr := io.robio.csr.csr2rob
+  io.robio.csr.rob2csr := rob.out.csr
+  io.robio.csr.rob2csr.perfinfo.retiredInstr := RegNext(rob.out.csr.perfinfo.retiredInstr)
   // When wfi is disabled, it will not block ROB commit.
-  rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
   rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
   rob.in.commitStuckCheckEnable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
-  io.toTop.cpuWfi := DelayN(rob.out.cpu_wfi, 5)
+  io.toTop.cpuWfi := DelayN(rob.out.cpuWfi, 5)
 
-  io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.out.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.out.exception
   io.robio.diffCommitForTrap.zip(rob.out.diffCommitForTrap).foreach { case (sink, source) => sink := source }
   rob.in.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
@@ -925,7 +872,6 @@ class CtrlBlockImp(
   rob.in.debug_ls := io.robio.debug_ls
   rob.in.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.in.lsTopdownInfo := io.robio.lsTopdownInfo
-  rob.in.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.in.debugEnqLsq := io.debugEnqLsq
   rob.in.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.in.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
@@ -952,11 +898,6 @@ class CtrlBlockImp(
   io.debugRolling := rob.out.debugRolling
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.out.debugTopDown.toDispatch.robTrueCommit)
   rename.io.debugRobHeadStall.foreach(_ := rob.out.debugRobHeadStall.get)
-
-  io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.out.robFull)
-  io.perfInfo.ctrlInfo.intdqFull := false.B
-  io.perfInfo.ctrlInfo.fpdqFull := false.B
-  io.perfInfo.ctrlInfo.lsdqFull := false.B
 
   val perfEvents = Seq(decode, rename, dispatch, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
@@ -1089,14 +1030,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val traceCoreInterface = new TraceCoreInterface(hasOffset = true)
 
-  val perfInfo = Output(new Bundle{
-    val ctrlInfo = new Bundle {
-      val robFull   = Bool()
-      val intdqFull = Bool()
-      val fpdqFull  = Bool()
-      val lsdqFull  = Bool()
-    }
-  })
   val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())

@@ -75,17 +75,17 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
   enqAllExcept.zip(in.enq) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
-    sink.bits.exceptionVec extendFrom source.bits.exceptionVec
-    sink.bits.flushPipe := source.bits.flushPipe && !source.bits.hasException
+    sink.bits.excpVec extendFrom source.bits.excpVec
+    sink.bits.flushPipe := source.bits.flushPipe && !source.bits.hasExcp
   }
   wbAllExcept.zip(in.wb) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
-    sink.bits.exceptionVec extendFrom source.bits.exceptionVec
+    sink.bits.excpVec extendFrom source.bits.excpVec
   }
 
-  // orR the exceptionVec
+  // orR the excpVec
   val lastCycleFlush = RegNext(in.flush)
-  val enq_s0_valid = VecInit(enqAllExcept.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val enq_s0_valid = VecInit(enqAllExcept.map(e => e.valid && e.bits.has_excp && !lastCycleFlush))
   val enq_s0_bits = WireInit(VecInit(enqAllExcept.map(_.bits)))
 
   // s0: compare wb in 6 groups
@@ -95,7 +95,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val varith_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
 
   val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb).filter(_.nonEmpty)
-  val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
+  val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_excp && !lastCycleFlush))
   val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
     valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(in.redirect) || in.flush) }.reduce(_ || _)
   }
@@ -131,9 +131,9 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         // s1 is older than current and caused by wb, set current.isEnqExcp to false
         current.isEnqExcp := false.B
       }.elsewhen (current.robIdx.isSameSlot(s1_out_bits.robIdx)) {
-        current.exceptionVec := ExceptSparseVec.mux2(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
-        current.hasException := Mux(isVecUpdate, s1_out_bits.hasException, current.hasException)
-        current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.orR
+        current.excpVec := ExceptSparseVec.mux2(isVecUpdate, s1_out_bits.excpVec, current.excpVec)
+        current.hasExcp := Mux(isVecUpdate, s1_out_bits.hasExcp, current.hasExcp)
+        current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.excpVec.orR
         current.satpFlush := s1_out_bits.satpFlush || current.satpFlush
         current.replayInst := s1_out_bits.replayInst || current.replayInst
         current.trigger   := Mux(isVecUpdate, s1_out_bits.trigger,    current.trigger)
@@ -162,8 +162,6 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     current.isEnqExcp := true.B
   }
 
-  out.exception.valid   := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback
-  out.exception.bits    := Mux(s1_out_valid, s1_out_bits, enq_s1_bits)
   out.state.valid := currentValid
   out.state.bits  := current
 
@@ -189,9 +187,6 @@ object ExceptionGen {
   }
 
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
-    // Exception updates.
-    val exception = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
-
     // Oldest retained exception.
     val state = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
   }

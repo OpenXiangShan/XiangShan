@@ -270,13 +270,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   })
   ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
   ctrlBlock.io.csrCtrl <> intRegion.io.csrio.get.customCtrl
-  ctrlBlock.io.robio.csr.intrBitSet := intRegion.io.csrio.get.interrupt
-  ctrlBlock.io.robio.csr.trapTarget := intRegion.io.csrio.get.trapTarget
-  ctrlBlock.io.robio.csr.wfiEvent := intRegion.io.csrio.get.wfiEvent
-  ctrlBlock.io.robio.csr.criticalErrorState := intRegion.io.csrio.get.criticalErrorState
-  ctrlBlock.io.icountResponse := intRegion.io.csrio.get.icountResponse
-  intRegion.io.csrio.get.icountEvent <> ctrlBlock.io.icountEvent
-  ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
+  private val csr2rob = ctrlBlock.io.robio.csr.csr2rob
+  csr2rob.intrBitSet := csrio.interrupt
+  csr2rob.trapTarget := csrio.trapTarget
+  csr2rob.wfiEvent := csrio.wfiEvent
+  csr2rob.criticalErrorState := csrio.criticalErrorState
+  ctrlBlock.io.icountResponse := csrio.icountResponse
+  csrio.icountEvent <> ctrlBlock.io.icountEvent
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
   ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
@@ -532,9 +532,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.criticalErrorState := backendCriticalError
 
   csrio.hartId := io.fromTop.hartId
-  csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
+  private val rob2csr = ctrlBlock.io.robio.csr.rob2csr
+  csrio.fpu.fflags := rob2csr.fflags
   csrio.fpu.isIllegal := false.B // Todo: remove it
-  csrio.fpu.dirtyFs := ctrlBlock.io.robio.csr.dirtyFs
+  csrio.fpu.dirtyFs := rob2csr.dirtyFs
   csrio.vpu <> WireDefault(0.U.asTypeOf(csrio.vpu)) // Todo
 
   val fromIntExuVsetVType = intRegion.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
@@ -546,9 +547,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
 
-  csrio.vpu.setVxsat := ctrlBlock.io.robio.csr.vxsat
-  csrio.vpu.setVstart.valid := ctrlBlock.io.robio.csr.vstart.valid
-  csrio.vpu.setVstart.bits := ctrlBlock.io.robio.csr.vstart.bits
+  csrio.vpu.setVxsat := rob2csr.vxsat
+  csrio.vpu.setVstart := rob2csr.vstart
   ctrlBlock.io.toDecode.vstart := csrio.vpu.vstart
   //Todo here need change design
   csrio.vpu.setVtype.valid := commitVType.valid
@@ -556,7 +556,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrio.vpu.diffVl.zip(vecRegion.out.diff).foreach { case (sink, source) =>
     sink := source.diffVl
   }
-  csrio.vpu.dirtyVs := ctrlBlock.io.robio.csr.dirtyVs
+  csrio.vpu.dirtyVs := rob2csr.dirtyVs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.diffCommitForTrap.zip(ctrlBlock.io.robio.diffCommitForTrap).foreach { case (sink, source) => sink := source }
   ctrlBlock.io.robio.diffArchEvent.zip(csrio.diffArchEvent).foreach { case (sink, source) => sink := source }
@@ -566,8 +566,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrio.memExceptionIsForVSnonLeafPTE := io.mem.exceptionAddr.isForVSnonLeafPTE
   csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
   csrio.perf <> io.perf
-  csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
-  csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
+  csrio.perf.retiredInstr := rob2csr.perfinfo.retiredInstr
   private val fenceio = intRegion.io.fenceio.get
   io.fenceio <> fenceio
 
@@ -605,7 +604,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
-  io.mem.isStoreException := ctrlBlock.io.robio.exception.bits.isStore
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
 
   val issueSta = io.mem.intIssue.flatten.filter(_.bits.params.hasStoreAddrFu)
@@ -806,7 +804,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val tlbCsr = Output(new TlbCsrBundle)
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
-  val isStoreException = Output(Bool())
   val isVlsException = Output(Bool())
 
   val wfi = new WfiReqBundle

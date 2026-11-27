@@ -30,11 +30,14 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
-  def NormalUopNumWidth(implicit p: Parameters): Int =
-    log2Up(2 * p(XSCoreParamsKey).MaxUopSize + 1)
+  def MaxFormerNumWb(implicit p: Parameters): Int =
+    math.max(p(XSCoreParamsKey).RenameWidth, NumWB.maxVectorNumWb)
 
-  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
-    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+  def MaxLatterNumWb(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).RenameWidth - 1
+
+  def FormerNumWbWidth(implicit p: Parameters): Int = log2Ceil(MaxFormerNumWb + 1)
+  def LatterNumWbWidth(implicit p: Parameters): Int = log2Up(MaxLatterNumWb + 1)
 
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
@@ -251,9 +254,8 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val entryPairType = CompressType()
     val complexSlotHasDest = UInt(1.W)
-    val entryHasStore = Bool()
     val noCompressReason = UInt(2.W)
-    val slotNeedFlushMask = UInt(2.W)
+    val slotNeedFlush = UInt(2.W)
     val interruptSafe = Bool()
     val commitType = CommitType()
 
@@ -286,10 +288,9 @@ object Bundles {
     val oldVType = VType()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = NumWB() // rob need this
     val latency = Latency()
-    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
-    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
+    val formerNumWb = UInt(FormerNumWbWidth.W) // rob need this
+    val latterNumWb = UInt(LatterNumWbWidth.W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
@@ -335,7 +336,6 @@ object Bundles {
   }
 
   class EnqRobUop(implicit p: Parameters) extends RenameOutUop {
-    val stdwriteNeed      = Bool()
     val isXSTrap          = Bool()
     val replayInst        = Bool()
 
@@ -348,9 +348,8 @@ object Bundles {
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
       this.hasException := this.exceptionVec.orR
-      this.formerNumWB  := source.formerNumWB
-      this.latterNumWB  := source.latterNumWB
-      this.stdwriteNeed := FuType.isStore(source.fuType)
+      this.formerNumWb  := source.formerNumWb
+      this.latterNumWb  := source.latterNumWb
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
     }
@@ -625,7 +624,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
-    val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
@@ -643,9 +641,8 @@ object Bundles {
     val canRobCompress  = Bool()
     val entryPairType    = CompressType()
     val complexSlotHasDest = UInt(1.W)
-    val entryHasStore = Bool()
     val noCompressReason = UInt(2.W)
-    val slotNeedFlushMask = UInt(2.W)
+    val slotNeedFlush = UInt(2.W)
     val interruptSafe = Bool()
     val fusionNum       = UInt(log2Ceil(RenameWidth / 2 + 1).W)
     val selImm          = SelImm()
@@ -661,10 +658,9 @@ object Bundles {
     val isVset          = Bool()
     val firstUop        = Bool()
     val lastUop         = Bool()
-    val numWB           = NumWB() // rob need this
     val latency         = Latency()
-    val formerNumWB     = UInt(NormalUopNumWidth.W) // rob need this
-    val latterNumWB     = UInt(CompressedSlotUopNumWidth.W) // rob need this
+    val formerNumWb     = UInt(FormerNumWbWidth.W) // rob need this
+    val latterNumWb     = UInt(LatterNumWbWidth.W) // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
@@ -733,8 +729,6 @@ object Bundles {
         case (t, s) => SrcType.isNotReg(t) || SrcState.isReady(s)
       })
     }
-
-    def needEnqRab: Bool = rfWen || fpWen || vecWen || v0Wen
 
     def connectRenameOutUop(source: RenameOutUop): Unit = {
       this := 0.U.asTypeOf(this)
@@ -1734,9 +1728,7 @@ object Bundles {
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
     val pc = UInt((VAddrData().dataWidth + 1).W)
-    val instr = UInt(32.W)
-    val commitType = CommitType()
-    val isStore = Bool()
+    val instr = Option.when(env.EnableDifftest || (env.AlwaysBasicDiff && env.FullBasicDiff))(UInt(32.W))
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
     val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
@@ -1758,9 +1750,10 @@ object Bundles {
       UInt(width.W)
     }
 
-    def width(implicit p: Parameters): Int = {
-      log2Up(2 * p(XSCoreParamsKey).MaxUopSize + 1)
-    }
+    // A vector store issues separate address and data uops for every split.
+    def maxVectorNumWb(implicit p: Parameters): Int = 2 * p(XSCoreParamsKey).MaxUopSize
+
+    def width(implicit p: Parameters): Int = log2Up(maxVectorNumWb + 1)
   }
 
   object FuLatency {

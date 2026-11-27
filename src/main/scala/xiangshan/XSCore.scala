@@ -172,13 +172,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
-  backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.io_perf
   backend.io.perf.perfEventsLsu := memBlock.io_perf
   backend.io.perf.perfEventsHc := memBlock.io.inner_hc_perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
-  backend.io.perf.ctrlInfo := DontCare
 
   backend.io.mem.storeDebugInfo <> memBlock.io.mem_to_ooo.storeDebugInfo
 
@@ -212,12 +210,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.redirect := backend.io.mem.redirect
   memBlock.io.ooo_to_mem.csrCtrl := backend.io.mem.csrCtrl
   memBlock.io.ooo_to_mem.tlbCsr := backend.io.mem.tlbCsr
-  memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
-  memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit
-  memBlock.io.ooo_to_mem.lsqio.commit           := backend.io.mem.robLsqIO.commit
   memBlock.io.ooo_to_mem.lsqio.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
   memBlock.io.ooo_to_mem.lsqio.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext
-  memBlock.io.ooo_to_mem.isStoreException       := backend.io.mem.isStoreException
   memBlock.io.ooo_to_mem.isVlsException         := backend.io.mem.isVlsException
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw

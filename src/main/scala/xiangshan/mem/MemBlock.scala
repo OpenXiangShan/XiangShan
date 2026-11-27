@@ -184,14 +184,10 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-    val lcommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
-    val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
   }
 
-  val isStoreException = Input(Bool())
   val isVlsException = Input(Bool())
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
@@ -388,11 +384,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // misc
     val dcacheError = Output(new L1BusErrorUnitInfo())
     val uncacheError = Output(new L1BusErrorUnitInfo())
-    val memInfo = new Bundle {
-      val sqFull = Output(Bool())
-      val lqFull = Output(Bool())
-      val dcacheMSHRFull = Output(Bool())
-    }
     val debug_ls = new DebugLSIO
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
@@ -1062,9 +1053,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // Lsq
   io.mem_to_ooo.lsqio.mmioBusy   := lsq.io.rob.mmioBusy
-  lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
-  lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 
@@ -1297,10 +1285,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
     x.reset_mtvec.foreach(_ := io.fromTopToBackend.reset_mtvec.get)
   }
-
-  io.memInfo.sqFull := RegNext(lsq.io.sqFull)
-  io.memInfo.lqFull := RegNext(lsq.io.lqFull)
-  io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)

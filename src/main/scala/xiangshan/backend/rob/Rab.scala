@@ -23,10 +23,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   // pointer
   private val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(idx => RenameBufferPtr(flag = false, idx)))
   private val enqPtr = enqPtrVec.head
-  private val enqPtrOH = RegInit(1.U(size.W))
-  private val enqPtrOHShift = CircularShift(enqPtrOH)
-  // may shift [0, RenameWidth] steps
-  private val enqPtrOHVec = VecInit.tabulate(RenameWidth + 1)(enqPtrOHShift.left)
   private val enqPtrVecNext = Wire(enqPtrVec.cloneType)
 
   private val deqPtrVec = RegInit(VecInit.tabulate(RabCommitWidth)(idx => RenameBufferPtr(flag = false, idx)))
@@ -63,7 +59,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val stateNext = WireInit(state) // otherwise keep state value
 
   private val robWalkEndReg = RegInit(false.B)
-  private val robWalkEnd = in.fromRob.walkEnd || robWalkEndReg
 
   when(in.redirect) {
     robWalkEndReg := false.B
@@ -127,13 +122,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     walkPtrNext,
     enqPtr + enqCount
   )
-  val enqPtrOHNext = Mux(
-    state === s_walk && stateNext === s_idle,
-    walkPtrNext.toOH,
-    enqPtrOHVec(enqCount)
-  )
   enqPtr := enqPtrNext
-  enqPtrOH := enqPtrOHNext
   enqPtrVecNext.zipWithIndex.map{ case(ptr, i) => ptr := enqPtrNext + i.U }
   enqPtrVec := enqPtrVecNext
 
@@ -214,7 +203,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   in.canEnq := allowEnqueue && state === s_idle
   in.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
-  in.enqPtrVec := enqPtrVec
 
   in.status.walkEnd := walkEndNext
   in.status.commitEnd := commitEndNext
@@ -262,7 +250,6 @@ object RenameBuffer {
     val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
     val canEnq = Output(Bool())
     val canEnqForDispatch = Output(Bool())
-    val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     // ROB quotas and completion responses.
     val fromRob = new RobToRabIO(size)

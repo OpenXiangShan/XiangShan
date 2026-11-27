@@ -140,7 +140,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val trap = ValidIO(new Bundle {
         val pc = UInt((VaddrMaxWidth+1).W)
         val pcGPA = UInt(PAddrBitsMax.W)
-        val instr = UInt(InstWidth.W)
+        val instr = Option.when(env.EnableDifftest || (env.AlwaysBasicDiff && env.FullBasicDiff))(UInt(InstWidth.W))
         val trapVec = UInt(64.W)
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
@@ -1786,8 +1786,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.virtualInterruptIsHvictlInject := RegEnable(virtualInterruptIsHvictlInject && interrupt, hasTrap)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
     diffArchEvent.irToVS := RegEnable(irToVS, hasTrap)
-    if (env.EnableDifftest || env.FullBasicDiff) {
-      diffArchEvent.exceptionInst := RegEnable(io.fromRob.trap.bits.instr, hasTrap)
+    io.fromRob.trap.bits.instr.foreach { instr =>
+      diffArchEvent.exceptionInst := RegEnable(instr, hasTrap)
     }
 
     val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent, delay = 4, dontCare = true)

@@ -20,7 +20,6 @@ package xiangshan.backend.rob
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.InstSeqNum
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -30,7 +29,169 @@ import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew}
 import xiangshan.backend.rename.CompressType
 import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.mem.{LqPtr, SqPtr}
+
+class RobEntryBundle(implicit p: Parameters) extends XSBundle {
+  val valid = Bool()
+
+  val entryPairType = CompressType()
+
+  // Remaining writeback uops per slot. Unpaired entries have no latter uops.
+  val formerNumWb = UInt(FormerNumWbWidth.W)
+  val latterNumWb = UInt(LatterNumWbWidth.W)
+  val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
+  val complexSlotHasDest = UInt(1.W)
+
+  val vls = Bool()
+  val interruptSafe = Bool()
+  val ftqIdx = new FtqPtr
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+  val slotHeadRvcMask = UInt(2.W)
+  val predTaken = Bool()
+  val needVTB = Bool()
+
+  val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+  // Preserve the former slot's exact trace metadata so a latter-slot squash
+  // can rebuild the surviving physical entry without stale metadata.
+  val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
+  val slotNeedFlush = UInt(2.W)
+
+  def isWritebacked: Bool = !formerNumWb.orR && !latterNumWb.orR
+
+  def connectEnq(robEnq: EnqRobUop): Unit = {
+    this.valid := true.B
+    this.entryPairType := robEnq.entryPairType
+    this.formerNumWb := robEnq.formerNumWb
+    this.latterNumWb := robEnq.latterNumWb
+    this.complexSlotHasDest := robEnq.complexSlotHasDest
+    this.vls := robEnq.isVectorMemory
+    this.interruptSafe := robEnq.interruptSafe
+    this.ftqIdx := robEnq.ftqPtr
+    this.ftqOffset := robEnq.ftqOffset
+    this.slotHeadRvcMask := robEnq.slotHeadRvcMask
+    this.predTaken := robEnq.predTaken
+    this.needVTB := robEnq.isVset
+    this.traceBlockInPipe := robEnq.traceBlockInPipe
+    this.slotNeedFlush := robEnq.slotNeedFlush
+  }
+}
+
+/**
+ * Functional per-slot information kept by the ROB for exception handling and
+ * performance accounting.  This used to live in a debug-named copy of the full
+ * enqueue uop; only these fields are actually required by the RTL.
+ */
+class RobSlotInfo(implicit p: Parameters) extends XSBundle {
+  val commitType = CommitType()
+  val fuType = FuType()
+  val fuOpType = FuOpType()
+
+  def isVectorMemory: Bool = FuType.isLoadStore(fuType) && LSUOpType.isVecMemOp(fuOpType)
+
+  def isHls: Bool = (fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType)) ||
+    (fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType))
+}
+
+class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
+  val valid = Bool()
+  val allWritebacked = Bool()
+  val entryPairType = CompressType()
+  val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
+  val interruptSafe = Bool()
+  val slotHeadRvcMask = UInt(2.W)
+  val predTaken = Bool()
+  val needVTB = Bool()
+  val isVls = Bool()
+  val vls = Bool()
+  val ftqIdx = new FtqPtr
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+
+  val slotNeedFlush = UInt(2.W)
+  // trace
+  val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+  val formerTraceIretire = UInt(IretireWidthEncoded.W)
+  // debug_begin
+  val noCompressReason = OptionWrapper(backendParams.debugEn, UInt(2.W))
+  val rfWen = OptionWrapper(backendParams.debugEn, Bool())
+  val commitType = OptionWrapper(backendParams.debugEn, CommitType())
+  val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
+  val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+  // debug_end
+
+  def connectCommitEntry(
+    robEntry: RobEntryBundle,
+    allWritebacked: Bool
+  ): Unit = {
+    this.valid := robEntry.valid
+    this.allWritebacked := allWritebacked
+    this.entryPairType := robEntry.entryPairType
+    this.realDestSize := robEntry.realDestSize
+    this.interruptSafe := robEntry.interruptSafe
+    this.needVTB := robEntry.needVTB
+    this.slotHeadRvcMask := robEntry.slotHeadRvcMask
+    this.predTaken := robEntry.predTaken
+    this.isVls := robEntry.vls
+    this.vls := robEntry.vls // TODO: it is Duplicate
+    this.ftqIdx := robEntry.ftqIdx
+    this.ftqOffset := robEntry.ftqOffset
+    this.slotNeedFlush := robEntry.slotNeedFlush
+    this.traceBlockInPipe := robEntry.traceBlockInPipe
+    this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
+  }
+
+  def connectCommitDebug(debug: RobCommitDebugBundle): Unit = {
+    this.noCompressReason.foreach(_ := debug.noCompressReason.get)
+    this.rfWen.foreach(_ := debug.rfWen.get)
+    this.commitType.foreach(_ := debug.commitType.get)
+    this.debug_pc.foreach(_ := debug.debug_pc.get)
+    this.basicDebug.foreach(_ := debug.basicDebug.get)
+    this.debug_fuType.foreach(_ := debug.debug_fuType.get)
+  }
+}
+
+class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Parameters) extends XSBundle {
+  // val valid = Bool()
+  val robIdx = new RobPtr
+  val ftqPtr = new FtqPtr
+  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+  val isRVC = Bool()
+  // set 1 if there is 1 exists in excpVec
+  val hasExcp = Bool()
+  // This signal is valid iff currentValid is true
+  // 0: is execute exception, 1: is fetch exception
+  val isEnqExcp = Bool()
+  val excpVec = ExceptSparseVec(exceptList)
+  val satpFlushFirstFetchFault = Bool()
+  val isFetchMalAddr = Bool()
+  val flushPipe = Bool()
+  val satpFlush = Bool()
+  val isVset = Bool()
+  val replayInst = Bool() // redirect to that inst itself
+  val crossPageIPFFix = Bool()
+  val trigger = TriggerAction()
+  // if vstart is udpated by vector unit
+  val vstartEn = Bool()
+  val vstart = UInt(XLEN.W)
+  val vuopIdx = UopIdx()
+  val isVecLoad = Bool()
+  val isVlm = Bool()
+  val isStrided = Bool()
+  val isIndexed = Bool()
+  val isWhole = Bool()
+  val nf = Nf()
+  val vsew = VSew()
+  val veew = VSew()
+  val vlmul = VLmul()
+
+  def has_excp = excpVec.orR || flushPipe || replayInst
+  def not_commit = excpVec.orR || replayInst
+}
+
+class RobFlushPcInfo(implicit p: Parameters) extends XSBundle {
+  val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
+  val flushIsRVC = Bool()
+}
 
 class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(LogicRegsWidth.W)
@@ -54,70 +215,26 @@ class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
-/**
- * Functional per-slot information kept by the ROB for exception handling and
- * performance accounting.  This used to live in a debug-named copy of the full
- * enqueue uop; only these fields are actually required by the RTL.
- */
-class RobSlotInfo(implicit p: Parameters) extends XSBundle {
-  val commitType = CommitType()
-  val fuType = FuType()
-  val fuOpType = FuOpType()
-
-  def isVectorMemory: Bool = FuType.isLoadStore(fuType) && LSUOpType.isVecMemOp(fuOpType)
-
-  def isHls: Bool = (fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType)) ||
-    (fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType))
+// Entry metadata sampled with the dequeue row for logs and simulation counters.
+class RobCommitDebugBundle(implicit p: Parameters) extends XSBundle {
+  // debug_begin
+  val noCompressReason = OptionWrapper(backendParams.debugEn, UInt(2.W))
+  val rfWen = OptionWrapper(backendParams.debugEn, Bool())
+  val commitType = OptionWrapper(backendParams.debugEn, CommitType())
+  val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
+  val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
+  val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+  // debug_end
 }
 
-class RobEntryBundle(implicit p: Parameters) extends XSBundle {
-  val valid = Bool()
-
-  val entryPairType = CompressType()
-  val noCompressReason = UInt(2.W) // used for Perf
-
-  val uopState = UInt(PackedUopStateWidth.W)
-  val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
-  val complexSlotHasDest = UInt(1.W)
-  val entryHasStore = Bool()
-
-  val vls = Bool()
-  val interruptSafe = Bool()
-  val rfWen = Bool()
-  val commitType = CommitType()
-  val ftqIdx = new FtqPtr
-  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-  val slotHeadRvcMask = UInt(2.W)
-  val predTaken = Bool()
-  val needVTB = Bool()
-
-  val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
-  // Preserve the former slot's exact trace metadata so a latter-slot squash
-  // can rebuild the surviving physical entry without stale metadata.
-  val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
-  val slotNeedFlushMask = UInt(2.W)
-
-  // Entry-level fields continue to describe the former slot. Rob.scala keeps
-  // a second current-API debug copy for exact latter-slot selection.
-  val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-  val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
-  val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
-  val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
-  val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
-  val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
-  val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr)
-  val debug_sqIdx      = OptionWrapper(backendParams.debugEn, new SqPtr)
-  val debug_rfWen      = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_seqNum     = OptionWrapper(backendParams.debugEn, InstSeqNum())
-  val debug_sim_trig   = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool())
-  val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType())
-  val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
-  val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
-  val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
-  val topdownIdealIssue  = OptionWrapper(backendParams.debugEn, Bool())
+class RobEntryDebugBundle(implicit p: Parameters) extends XSBundle {
+  val commit = new RobCommitDebugBundle
+  val debug_vecWen = OptionWrapper(backendParams.debugEn, Bool())
+  val debug_v0Wen = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownIssued = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownCanceled = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownRobHead = OptionWrapper(backendParams.debugEn, Bool())
+  val topdownIdealIssue = OptionWrapper(backendParams.debugEn, Bool())
   val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
   val topdownLastIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
   val topdownRobHeadTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
@@ -126,92 +243,16 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
   val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
 
-  def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
-  def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
-  def isWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
-  def isUopWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
-
-  def PackedUopStateWidth: Int = {
-    math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
-  }
-
-  private def fitUopStateWidth(value: UInt, width: Int): UInt = {
-    val valueWidth = value.getWidth
-    if (valueWidth == width) {
-      value
-    } else if (valueWidth > width) {
-      value(width - 1, 0)
-    } else {
-      Cat(0.U((width - valueWidth).W), value)
-    }
-  }
-
-  def encodeUopState(entryPairType: UInt, formerUopNum: UInt, latterUopNum: UInt): UInt = {
-    val normalState = fitUopStateWidth(formerUopNum, PackedUopStateWidth)
-    val compressedState = fitUopStateWidth(
-      Cat(
-        fitUopStateWidth(latterUopNum, CompressedSlotUopNumWidth),
-        fitUopStateWidth(formerUopNum, CompressedSlotUopNumWidth)
-      ),
-      PackedUopStateWidth
-    )
-    Mux(CompressType.isNORMAL(entryPairType), normalState, compressedState)
-  }
-
-  def decodeFormerUopNum(entryPairType: UInt, uopState: UInt): UInt = {
-    Mux(
-      CompressType.isNORMAL(entryPairType),
-      uopState(NormalUopNumWidth - 1, 0),
-      fitUopStateWidth(uopState(CompressedSlotUopNumWidth - 1, 0), NormalUopNumWidth)
-    )
-  }
-
-  def decodeLatterUopNum(entryPairType: UInt, uopState: UInt): UInt = {
-    Mux(
-      CompressType.isNORMAL(entryPairType),
-      0.U(NormalUopNumWidth.W),
-      fitUopStateWidth(
-        uopState(2 * CompressedSlotUopNumWidth - 1, CompressedSlotUopNumWidth),
-        NormalUopNumWidth
-      )
-    )
-  }
-
   def connectEnq(robEnq: EnqRobUop): Unit = {
-    this.entryPairType := robEnq.entryPairType
-    this.noCompressReason := robEnq.noCompressReason
-
-    this.uopState := encodeUopState(robEnq.entryPairType, robEnq.formerNumWB, robEnq.latterNumWB)
-    this.complexSlotHasDest := robEnq.complexSlotHasDest
-    this.entryHasStore := robEnq.entryHasStore
-
-    this.commitType := robEnq.commitType
-    this.ftqIdx := robEnq.ftqPtr
-    this.ftqOffset := robEnq.ftqOffset
-    this.slotHeadRvcMask := robEnq.slotHeadRvcMask
-    this.predTaken := robEnq.predTaken
-    this.needVTB := robEnq.isVset
-    this.vls := robEnq.isVectorMemory
-    this.rfWen := robEnq.rfWen
-    this.interruptSafe := robEnq.interruptSafe
-    this.slotNeedFlushMask := robEnq.slotNeedFlushMask
-    // trace
-    this.traceBlockInPipe := robEnq.traceBlockInPipe
-    this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
-    this.basicDebug.foreach(_.connectBasicDebug(robEnq))
-    this.debug_fuType.foreach(_ := robEnq.fuType)
-    this.debug_fuOpType.foreach(_ := robEnq.fuOpType)
-    this.debug_rfWen.foreach(_ := robEnq.rfWen)
+    this.commit.noCompressReason.foreach(_ := robEnq.noCompressReason)
+    this.commit.rfWen.foreach(_ := robEnq.rfWen)
+    this.commit.commitType.foreach(_ := robEnq.commitType)
+    this.commit.basicDebug.foreach(_.connectBasicDebug(robEnq))
+    this.commit.debug_fuType.foreach(_ := robEnq.fuType)
     this.debug_vecWen.foreach(_ := robEnq.vecWen)
     this.debug_v0Wen.foreach(_ := robEnq.v0Wen)
-    this.debug_commitType.foreach(_ := robEnq.commitType)
     robEnq.debug.foreach { debug =>
-      this.debug_pc.foreach(_ := debug.pc)
-      this.debug_seqNum.foreach(_ := debug.debug_seqNum)
-      this.debug_instr.foreach(_ := debug.instr)
-      this.debug_fusionNum.foreach(_ := debug.fusionNum)
-      this.perfDebugInfo.foreach(_ := debug.perfDebugInfo)
-      this.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
+      this.commit.debug_pc.foreach(_ := debug.pc)
     }
     this.topdownIssued.foreach(_ := false.B)
     this.topdownCanceled.foreach(_ := false.B)
@@ -225,120 +266,4 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
     this.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
   }
-}
-
-class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
-  val walk_v = Bool()
-  val commit_v = Bool()
-  val commit_w = Bool()
-  val entryPairType = CompressType()
-  val noCompressReason = UInt(2.W)
-  val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
-  val interruptSafe = Bool()
-  val slotHeadRvcMask = UInt(2.W)
-  val predTaken = Bool()
-  val needVTB = Bool()
-  val isVls = Bool()
-  val vls = Bool()
-  val commitType = CommitType()
-  val entryHasStore = Bool()
-  val ftqIdx = new FtqPtr
-  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-
-  val rfWen = Bool()
-  val slotNeedFlushMask = UInt(2.W)
-  // trace
-  val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
-  val formerTraceIretire = UInt(IretireWidthEncoded.W)
-  // debug_begin
-  val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-  val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-  val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
-  val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
-  val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
-  val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
-  // debug_end
-
-  def connectCommitEntry(
-    robEntry: RobEntryBundle,
-    commitW: Bool
-  ): Unit = {
-    this.walk_v := robEntry.valid
-    this.commit_v := robEntry.valid
-    this.commit_w := commitW
-    this.entryPairType := robEntry.entryPairType
-    this.noCompressReason := robEntry.noCompressReason
-    this.realDestSize := robEntry.realDestSize
-    this.interruptSafe := robEntry.interruptSafe
-    this.rfWen := robEntry.rfWen
-    this.needVTB := robEntry.needVTB
-    this.slotHeadRvcMask := robEntry.slotHeadRvcMask
-    this.predTaken := robEntry.predTaken
-    this.isVls := robEntry.vls
-    this.vls := robEntry.vls // TODO: it is Duplicate
-    this.ftqIdx := robEntry.ftqIdx
-    this.ftqOffset := robEntry.ftqOffset
-    this.commitType := robEntry.commitType
-    this.entryHasStore := robEntry.entryHasStore
-    this.slotNeedFlushMask := robEntry.slotNeedFlushMask
-    this.traceBlockInPipe := robEntry.traceBlockInPipe
-    this.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
-    this.debug_pc.foreach(_ := robEntry.debug_pc.get)
-    this.debug_instr.foreach(_ := robEntry.debug_instr.get)
-    this.basicDebug.foreach(_ := robEntry.basicDebug.get)
-    this.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
-    this.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
-  }
-}
-
-class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Parameters) extends XSBundle {
-  // val valid = Bool()
-  val robIdx = new RobPtr
-  val ftqPtr = new FtqPtr
-  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-  val isRVC = Bool()
-  // set 1 if there is 1 exists in exceptionVec
-  val hasException = Bool()
-  // This signal is valid iff currentValid is true
-  // 0: is execute exception, 1: is fetch exception
-  val isEnqExcp = Bool()
-  val exceptionVec = ExceptSparseVec(exceptList)
-  val satpFlushFirstFetchFault = Bool()
-  val isFetchMalAddr = Bool()
-  val flushPipe = Bool()
-  val satpFlush = Bool()
-  val isVset = Bool()
-  val replayInst = Bool() // redirect to that inst itself
-  val crossPageIPFFix = Bool()
-  val trigger = TriggerAction()
-  // if vstart is udpated by vector unit
-  val vstartEn = Bool()
-  val vstart = UInt(XLEN.W)
-  val vuopIdx = UopIdx()
-  val isVecLoad = Bool()
-  val isVlm = Bool()
-  val isStrided = Bool()
-  val isIndexed = Bool()
-  val isWhole = Bool()
-  val nf = Nf()
-  val vsew = VSew()
-  val veew = VSew()
-  val vlmul = VLmul()
-
-  def has_exception = exceptionVec.orR || flushPipe || replayInst
-  def not_commit = exceptionVec.orR || replayInst
-  // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.orR
-}
-
-class RobFlushInfo(implicit p: Parameters) extends XSBundle {
-  val ftqIdx = new FtqPtr
-  val robIdx = new RobPtr
-  val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-  val replayInst = Bool()
-}
-
-class RobFlushPcInfo(implicit p: Parameters) extends XSBundle {
-  val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
-  val flushIsRVC = Bool()
 }
