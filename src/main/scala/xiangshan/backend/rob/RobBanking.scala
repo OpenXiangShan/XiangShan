@@ -40,17 +40,6 @@ import chisel3.util._
  * once. [[bankWriteSelect]] uses this property to share one payload selector
  * among the entries in each bank.
  *
- * All banks share a one-hot row selector. Use [[firstRowSelect]] to
- * initialize it, [[rowSelect]] to derive it from a ROB entry index, and
- * [[nextRowSelect]] to advance to the next row.
- *
- * A retirement window can straddle a row boundary. [[readRows]] uses the
- * shared selector to read the current and next rows across all banks.
- * The next row wraps to row zero at the end of the ROB.
- *
- * TODO: Select a row independently for each bank to avoid reading two full rows
- * and improve timing.
- *
  * @param Size Total number of ROB entries.
  * @param accessWidth Maximum number of consecutive entries accessed at once.
  */
@@ -60,22 +49,11 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
   // Round the access width up to a power of two so the bank and row can be
   // decoded directly from the index bits.
   private val bankBits = log2Ceil(accessWidth)
-  val bankNum = 1 << bankBits
-  val rowCount = Size / bankNum
+  private val bankNum = 1 << bankBits
 
   require(Size % bankNum == 0, "ROB size must be divisible by the rounded banking width")
 
-  def bankIndex(index: UInt): UInt = if (bankBits == 0) 0.U else index(bankBits - 1, 0)
-  def rowIndex(index: UInt): UInt = index >> bankBits
-
-  // Initial one-hot selector for row zero.
-  def firstRowSelect: UInt = 1.U(rowCount.W)
-  // Decode the row bits of a ROB entry index into a one-hot selector.
-  def rowSelect(index: UInt): UInt = UIntToOH(rowIndex(index), rowCount)
-  // Rotate the one-hot selector to advance by one row, wrapping to row zero.
-  def nextRowSelect(select: UInt): UInt =
-    if (rowCount == 1) select else Cat(select(rowCount - 2, 0), select(rowCount - 1))
-
+  private def bankIndex(index: UInt): UInt = if (bankBits == 0) 0.U else index(bankBits - 1, 0)
   /**
    * Selects one enqueue payload per bank from the allocation pointers.
    * Enabled allocation indices must span at most `accessWidth` consecutive
@@ -98,49 +76,5 @@ private[rob] final class RobBanking(Size: Int, accessWidth: Int) {
 
     // Each entry references its bank's result without adding a hardware mux.
     (0 until Size).map(entry => selected(entry % bankNum))
-  }
-
-  // Match rowIndices: the current row followed by the next row, each in bank order.
-  def readRows[T <: Data](entries: Seq[T], select: UInt, keepDebug: Boolean): Vec[T] = {
-    require(entries.length == Size && select.getWidth == rowCount)
-    val banks = VecInit((0 until bankNum).map { bank =>
-      VecInit((0 until rowCount).map(row => entries(row * bankNum + bank)))
-    })
-    if (keepDebug) {
-      dontTouch(banks)
-    }
-    val current = banks.map(bank => Mux1H(select, bank))
-    val next = banks.map(bank => Mux1H(select, bank.drop(1) :+ bank(0)))
-    VecInit(current ++ next)
-  }
-
-  // Derive the indices from the same row selector used to read the entries.
-  def rowIndices(select: UInt): Vec[UInt] = {
-    require(select.getWidth == rowCount)
-    val rows = if (rowCount == 1) Seq(0.U, 0.U) else Seq(OHToUInt(select), OHToUInt(nextRowSelect(select)))
-    VecInit(rows.flatMap { row =>
-      (0 until bankNum).map { bank =>
-        if (bankBits == 0) row else Cat(row, bank.U(bankBits.W))
-      }
-    })
-  }
-
-  // Load one updated row into the shared dequeue registers, keeping each entry paired
-  // with its commit readiness in the order returned by readRows.
-  def updateDeqEntries(
-    deqEntries: Vec[RobCommitEntryBundle],
-    entries: Vec[RobEntryBundle],
-    allWritebacked: Vec[Bool],
-    selectNextRow: Bool
-  ): Unit = {
-    require(deqEntries.length == bankNum)
-    require(entries.length == 2 * bankNum && allWritebacked.length == entries.length)
-    for (bank <- 0 until bankNum) {
-      val nextRowIndex = bank + bankNum
-      deqEntries(bank).connectCommitEntry(entries(bank), allWritebacked(bank))
-      when(selectNextRow) {
-        deqEntries(bank).connectCommitEntry(entries(nextRowIndex), allWritebacked(nextRowIndex))
-      }
-    }
   }
 }

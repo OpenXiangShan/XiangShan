@@ -837,6 +837,8 @@ class CtrlBlockImp(
 
   rob.in.hartId := io.fromTop.hartId
   rob.in.redirect := s1_s3_redirect
+  // A ready load may be in the same retirement group as the store that detected the violation.
+  rob.in.loadReplayPending := memViolation.valid || loadReplay.valid
   rob.in.writeback := delayedNotFlushedWriteBack
   rob.out.readGPAMemData := gpaMem.io.exceptionReadData
   rob.in.fromVecExcpMod.busy := io.fromVecExcpMod.busy

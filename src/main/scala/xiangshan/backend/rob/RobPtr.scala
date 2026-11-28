@@ -98,15 +98,6 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
 
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
 
-  def lineHeadPtr(implicit p: Parameters): RobPtr = {
-    val CommitWidth = p(XSCoreParamsKey).CommitWidth
-    val out = Wire(new RobPtr)
-    out.flag := this.flag
-    out.value := Cat(this.value(this.PTR_WIDTH-1, log2Up(CommitWidth)), 0.U(log2Up(CommitWidth).W))
-    out.isFormer := true.B
-    out
-  }
-
   def isBeforeWithChannel(that: RobPtr, thisChannelIdx: UInt, thatChannelIdx: UInt): Bool = {
     isBeforeSlot(that) || isSameSlot(that) && (thisChannelIdx < thatChannelIdx)
   }
