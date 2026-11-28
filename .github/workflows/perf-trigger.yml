@@ -33,6 +33,7 @@ on:
           - KunminghuV2Config
           - SDBPConfig
           - SDBPDataPrefetchConfig
+          - SDBPDRRIPDataPrefetchConfig
           - SDBPLRUConfig
           - SDBPLRUDataPrefetchConfig
         default: DefaultConfig

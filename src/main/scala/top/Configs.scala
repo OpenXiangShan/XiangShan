@@ -659,6 +659,14 @@ class SDBPLRUDataPrefetchConfig(n: Int = 1) extends Config(
   }) ++ new SDBPDataPrefetchConfig(n)
 )
 
+class SDBPDRRIPDataPrefetchConfig(n: Int = 1) extends Config(
+  new Config((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(core => core.copy(
+      L2CacheParamsOpt = core.L2CacheParamsOpt.map(_.copy(replacement = "drrip"))
+    ))
+  }) ++ new SDBPDataPrefetchConfig(n)
+)
+
 class SDBPLRUConfig(n: Int = 1) extends Config(
   new Config((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(core => core.copy(
