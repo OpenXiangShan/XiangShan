@@ -361,6 +361,7 @@ class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val s3Prediction: Prediction          = new Prediction
   val mbtbMeta:     MainBtbMeta         = new MainBtbMeta
   val bpSource:     BpuPredictionSource = new BpuPredictionSource
+  val rasEnable:    Bool                = Bool()
 
   def bpPred: Prediction = MuxCase(
     s1Prediction,
