@@ -313,8 +313,15 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       } else {
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data })
       }
+    // The ROB reports DiffTrapEvent.code (a0 of the NEMU trap) from this data, but xstrap has rd = x0 and so no
+    // rfWen. In builds where the ROB drives the trap code (Rob.scala: EnableDifftest || FullBasicDiff) select
+    // the result regardless of rfWen; the write enables are unchanged.
+    val dataSel = if (env.EnableDifftest || env.FullBasicDiff) {
+      val fuOH = funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map(_._2)
+      if (exuParams.needDataFromF2I) fuOH.map(_ && !io.F2IDataIn.get.valid) :+ io.F2IDataIn.get.valid else fuOH
+    } else vld
     outIntDataValid.foreach(_ := Cat(vld).orR)
-    outIntData.foreach(_ := Mux1H(vld, data))
+    outIntData.foreach(_ := Mux1H(dataSel, data))
   }
   Option.when(funcUnits.exists(_.cfg.writeFpRf)) {
     val vld = if (exuParams.needDataFromI2F) {

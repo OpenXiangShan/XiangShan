@@ -406,6 +406,9 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val isRolw = ALUOpType.isRolw(func)
   val isRorw = ALUOpType.isRorw(func)
   val isZicond = ALUOpType.isZicond(func)
+  // NEMU trap (0x0005006b): the ROB reports this result to difftest as the trap code, i.e. rs1 (a0).
+  // Only needed where the ROB drives DiffTrapEvent.code (Rob.scala), so absent from other builds.
+  val isXSTrap = if (env.EnableDifftest || env.FullBasicDiff) func === ALUOpType.xstrap else false.B
 
   val aluRes = Mux1H(Seq(
     isAdd     -> add,
@@ -434,6 +437,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
     isRolw    -> SignExt(rolw, XLEN),
     isRorw    -> SignExt(rorw, XLEN),
     isZicond  -> condRes,
+    isXSTrap  -> src1,
   ))
 
   io.result := aluRes
