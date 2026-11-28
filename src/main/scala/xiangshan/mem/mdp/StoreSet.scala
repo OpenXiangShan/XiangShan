@@ -486,7 +486,9 @@ class LFST(implicit p: Parameters) extends XSModule {
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storesetWaitStore)
       ) && !io.csrCtrl.lvpredDisable || io.csrCtrl.noSpecLoad
     val respSsid = io.dispatch.req(i).bits.ssid
-    io.dispatch.resp(i).bits.sqIdx := sqIdxVec(respSsid)(allocPtr(respSsid) - 1.U)
+    // With no valid slot, sqIdxVec holds a store that has already issued (possibly SQ laps ago) or was never
+    // written, and noSpecLoad still makes the load wait for it. Wait for the youngest older store instead.
+    io.dispatch.resp(i).bits.sqIdx := io.dispatch.req(i).bits.sqIdx - 1.U
     // A younger store may issue before an older one. Select the newest slot that is still valid.
     (0 until LFSTWidth).reverse.foreach { j =>
       val candidate = (allocPtr(respSsid) - (j + 1).U)(log2Up(LFSTWidth) - 1, 0)
