@@ -147,7 +147,7 @@ class DecodeStageImp(
     val mopInfo = coUop.bits.ctrl
     val uopInfo = coUop.bits.info
 
-    uop.valid := coUop.valid && TraceRTLChoose(true.B, !in.redirect.valid)
+    uop.valid := coUop.valid
     uop.bits match {
       case bits =>
         bits.foldpc := mopInfo.foldpc
