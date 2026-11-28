@@ -91,8 +91,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_fire       = io.stageCtrl.s1_fire && io.enable
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
+  private val s1_setIdx     = RegEnable(s0_setIdx, s0_fire)
+  private val s1_bankMask   = RegEnable(s0_bankMask, s0_fire)
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_readResp = DataHoldBypass(MixedVecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
   private val s1_tags = VecInit(io.fromMainBtb.s1_positions.map { position =>
     VecInit(tables.zip(s1_foldedHist).map { case (table, hist) =>
@@ -117,6 +119,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_fire     = io.stageCtrl.s2_fire && io.enable
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
   private val s2_hits     = RegEnable(s1_hits, s1_fire)
+  private val s2_setIdx   = RegEnable(s1_setIdx, s1_fire)
+  private val s2_bankMask = RegEnable(s1_bankMask, s1_fire)
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.indices.foreach { branchIdx =>
@@ -133,7 +137,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val hitWayMask   = s2_hits(i)(tableIdx)
+      val hitWayMask   = s2_hits(i)(tableIdx)(TableInfos(tableIdx).NumWays - 1, 0)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
       val result = Wire(new PredictTagMatchResult)
@@ -190,12 +194,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.meta.entries(i).altTableIdx       := OHToUInt(altTableOH)
     io.meta.entries(i).altWayIdx         := OHToUInt(alt.hitWayMaskOH)
     io.meta.entries(i).altTakenCtr       := alt.takenCtr
-
-    XSPerfAccumulate(
-      s"s2_branch_${i}_multihit_on_same_table",
-      allTableTagMatchResults.map(e => (s2_fire && PopCount(e.hitWayMask) > 1.U).asUInt).reduce(_ +& _)
-    )
   }
+
+  private val s2_multiHits = TableInfos.indices.map { tableIdx =>
+    s2_branches.zipWithIndex.map { case (branch, branchIdx) =>
+      branch.valid && branch.bits.attribute.isConditional && PopCount(s2_hits(branchIdx)(tableIdx)) > 1.U
+    }
+  }
+  // Count each valid conditional branch multi-hit on each table before merging the flush masks.
+  XSPerfAccumulate("multi_hit", Mux(s2_fire, PopCount(s2_multiHits.flatten), 0.U))
+
+  // Multi-hit flush requests are generated directly from the prediction read. Keep the flush mask at each table's native
+  // way width, and merge duplicate losers from all conditional branches in the fetch block.
+  private val flushMultiHitWayMasks = MixedVecInit(TableInfos.zipWithIndex.map { case (tableInfo, tableIdx) =>
+    val branchFlushWayMasks = s2_multiHits(tableIdx).zipWithIndex.map { case (needFlush, branchIdx) =>
+      val hitWayMask   = s2_hits(branchIdx)(tableIdx)(tableInfo.NumWays - 1, 0)
+      val winnerWayOH  = PriorityEncoderOH(hitWayMask)
+      val flushWayMask = Mux(needFlush, hitWayMask & ~winnerWayOH, 0.U(tableInfo.NumWays.W))
+      flushWayMask
+    }
+    branchFlushWayMasks.reduce(_ | _)
+  })
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -324,7 +343,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
+  private val t1_readResp = MixedVecInit(tables.map(_.io.readResp(1)))
 
   /* --------------------------------------------------------------------------------------------------------------
     train pipeline stage 2
@@ -399,7 +418,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       alt.hitWayMaskOH := Mux(meta.hasAlt, UIntToOH(meta.altWayIdx, MaxNumWays), 0.U)
       alt.tag          := t2_rawTag(meta.altTableIdx) ^ position
       alt.takenCtr     := meta.altTakenCtr
-      // Alternate training never writes useful SRAM. Its useful counter is unavailable on the meta path.
+      // Alternate training never writes useful. Its trace value is unavailable when useMeta is true.
       alt.usefulCtr := UsefulCounter.Zero
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
@@ -445,7 +464,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // When the weak provider and alternate/base disagree, exactly one of them is correct.
     val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
     val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
-    val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
+    val decUseAltOnNa   = trainUseAltOnNa && altOrBasePred =/= actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
@@ -459,6 +478,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.providerEntry.takenCtr := providerNewTakenCtr
     trainInfo.providerOldUsefulCtr   := provider.usefulCtr
     trainInfo.providerNewUsefulCtr   := providerNewUsefulCtr
+    trainInfo.incProviderUsefulCtr   := incProviderUsefulCtr
 
     trainInfo.hasAlt            := hasAlt
     trainInfo.useAlt            := useAlt
@@ -530,13 +550,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val ctrWeakAndNotUsefulMask = tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
       entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
     }.asUInt
-    MuxCase(
+    // Cross-table selection needs a common mask width. Padding with zero excludes nonexistent ways.
+    val wayMask = Wire(UInt(MaxNumWays.W))
+    wayMask := MuxCase(
       notUsefulMask,
       Seq(
         notValidMask.orR            -> notValidMask,
         ctrWeakAndNotUsefulMask.orR -> ctrWeakAndNotUsefulMask
       )
     )
+    wayMask
   }
   private val t3_canAllocateTableMask = t3_longerHistoryTableMask & t3_allTableCanAllocateWayMask.map(_.orR).asUInt
   private val t3_canAllocate          = t3_canAllocateTableMask.orR
@@ -581,61 +604,102 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
-    val writeWayMask    = Wire(Vec(NumWays, Bool()))
-    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
-    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
-    val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
-    val actualTakenMask = Wire(Vec(NumWays, Bool()))
+    val flushMultiHitApplied = Wire(Vec(info.NumWays, Bool()))
 
-    (0 until NumWays).foreach { wayIdx =>
-      val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t3_trainInfoVec.map { info =>
-        val providerNeedUpdateCtr =
-          info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val providerNeedUpdateUseful =
-          info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val altNeedUpdateCtr = info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
-        (providerNeedUpdateCtr, providerNeedUpdateUseful, altNeedUpdateCtr)
-      }.unzip3
+    val perf_flushMultiHitWriteConflict = Wire(Vec(info.NumWays, Bool()))
 
-      val hitProvider = providerWriteCtr.reduce(_ || _) || providerWriteUseful.reduce(_ || _)
-      val hitProviderMask = (providerWriteCtr zip providerWriteUseful).map {
-        case (writeCtr, writeUseful) =>
-          writeCtr || writeUseful
-      }
-      val hitAlt = altWriteCtr.reduce(_ || _)
+    table.io.writeReq.zipWithIndex.foreach { case (writeReq, wayIdx) =>
+      // These masks select training branches and may be all zero when no update is needed.
+      val providerUpdateCtrBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+      }.asUInt
+      val providerUpdateUsefulBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+      }.asUInt
+      val altUpdateCtrBranchOH = t3_trainInfoVec.map { info =>
+        info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
+      }.asUInt
+
+      val providerUpdateBranchOH = providerUpdateCtrBranchOH | providerUpdateUsefulBranchOH
+      val altUpdateBranchOH      = altUpdateCtrBranchOH
+      val updateBranchOH         = providerUpdateBranchOH | altUpdateBranchOH
+
+      val updateCtrEn    = providerUpdateCtrBranchOH.orR || altUpdateCtrBranchOH.orR
+      val updateUsefulEn = providerUpdateUsefulBranchOH.orR
+
+      val updateProviderEn = providerUpdateBranchOH.orR
+      val updateAltEn      = altUpdateBranchOH.orR
+
       when(t3_fire) {
-        assert(PopCount(hitProviderMask) <= 1.U)
-        assert(PopCount(altWriteCtr) <= 1.U)
-        assert(!(hitProvider && hitAlt))
+        assert(PopCount(updateBranchOH) <= 1.U, "Each way must select at most one training branch!")
+        assert(!(updateProviderEn && updateAltEn), "A way can never be both the provider and the alt!")
       }
 
-      val providerInfo = Mux1H(hitProviderMask, t3_trainInfoVec)
-      val altInfo      = Mux1H(altWriteCtr, t3_trainInfoVec)
+      val updateInfo       = Mux1H(updateBranchOH, t3_trainInfoVec)
+      val updatedEntry     = Mux(updateProviderEn, updateInfo.providerEntry, updateInfo.altEntry)
+      val updatedUsefulCtr = updateInfo.providerNewUsefulCtr
 
-      val updateEn                = hitProvider || hitAlt
-      val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
-      val updateBranchActualTaken = Mux(hitProvider, providerInfo.actualTaken, altInfo.actualTaken)
+      val allocate = t3_fire && t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
+      val update   = t3_fire && (updateProviderEn || updateAltEn)
+      val train    = allocate || update
 
-      val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
+      val pendingFlush         = RegInit(false.B)
+      val pendingFlushSetIdx   = RegInit(0.U.asTypeOf(writeReq.bits.setIdx))
+      val pendingFlushBankMask = RegInit(0.U.asTypeOf(writeReq.bits.bankMask))
 
-      writeWayMask(wayIdx)    := updateEn || allocateEn
-      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
-      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
-      writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, providerInfo.providerNewUsefulCtr)
-      actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      val currentFlush = s2_fire && flushMultiHitWayMasks(tableIdx)(wayIdx)
+
+      flushMultiHitApplied(wayIdx) := pendingFlush && !train
+
+      // Capture a new request before clearing the old one, including when the old request is issued this cycle.
+      when(currentFlush) {
+        pendingFlush         := true.B
+        pendingFlushSetIdx   := s2_setIdx(tableIdx)
+        pendingFlushBankMask := s2_bankMask(tableIdx)
+      }.elsewhen(flushMultiHitApplied(wayIdx)) {
+        pendingFlush := false.B
+      }
+
+      // Training takes priority over flushing; allocation takes priority over counter updates.
+      writeReq.valid := train || pendingFlush
+      writeReq.bits  := 0.U.asTypeOf(writeReq.bits)
+      when(allocate) {
+        writeReq.bits.op            := TageWriteOp.Allocate
+        writeReq.bits.setIdx        := t3_setIdx(tableIdx)
+        writeReq.bits.bankMask      := t3_bankMask(tableIdx)
+        writeReq.bits.entry         := t3_allocateEntry
+        writeReq.bits.usefulCtr     := UsefulCounter.Init
+        writeReq.bits.writeEntryEn  := true.B
+        writeReq.bits.writeUsefulEn := true.B
+      }.elsewhen(update) {
+        writeReq.bits.op            := TageWriteOp.Update
+        writeReq.bits.setIdx        := t3_setIdx(tableIdx)
+        writeReq.bits.bankMask      := t3_bankMask(tableIdx)
+        writeReq.bits.entry         := updatedEntry
+        writeReq.bits.usefulCtr     := updatedUsefulCtr
+        writeReq.bits.writeEntryEn  := updateCtrEn
+        writeReq.bits.writeUsefulEn := updateUsefulEn
+        writeReq.bits.actualTaken   := updateInfo.actualTaken
+        writeReq.bits.incUseful     := updateProviderEn && updateInfo.incProviderUsefulCtr
+      }.elsewhen(pendingFlush) {
+        writeReq.bits.op            := TageWriteOp.Invalidate
+        writeReq.bits.setIdx        := pendingFlushSetIdx
+        writeReq.bits.bankMask      := pendingFlushBankMask
+        writeReq.bits.writeEntryEn  := true.B
+        writeReq.bits.writeUsefulEn := true.B
+      }
+
+      perf_flushMultiHitWriteConflict(wayIdx) := pendingFlush && train
     }
 
-    table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
-    table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
-    table.io.writeReq.bits.bankMask        := t3_bankMask(tableIdx)
-    table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
-    table.io.writeReq.bits.writeEntryEn    := writeEntryEn
-    table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
-    table.io.writeReq.bits.entries         := writeEntries
-    table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
-    table.io.writeReq.bits.actualTakenMask := actualTakenMask
+    XSPerfAccumulate(
+      s"tage_table_${tableIdx}_flush_multi_hit",
+      PopCount(flushMultiHitApplied)
+    )
+    XSPerfAccumulate(
+      s"tage_table_${tableIdx}_flush_multi_hit_write_conflict",
+      PopCount(perf_flushMultiHitWriteConflict)
+    )
 
     table.io.usefulResetStart := t3_usefulResetStart
   }
