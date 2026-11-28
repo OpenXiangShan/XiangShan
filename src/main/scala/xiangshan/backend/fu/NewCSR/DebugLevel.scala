@@ -70,7 +70,7 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tinfo)
   tinfo.icountSupported := tselect.rdata === 0.U
 
-  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
+  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with HasNmipBundle {
     regOut.NMIP := nmip
   })
     .setAddr(CSRs.dcsr)
