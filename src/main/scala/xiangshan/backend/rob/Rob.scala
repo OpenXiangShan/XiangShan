@@ -63,8 +63,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   private val LduCnt = params.LduCnt
   private val StaCnt = params.StaCnt
-  require(RenameWidth <= CommitWidth)
-
   val in = IO(new In(params))
   val out = IO(new Out(params))
 

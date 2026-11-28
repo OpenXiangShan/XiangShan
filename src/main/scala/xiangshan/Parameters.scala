@@ -80,7 +80,7 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   DecodeWidth: Int = 8,
   RenameWidth: Int = 8,
-  CommitWidth: Int = 8,
+  CommitWidth: Int = 4,
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
