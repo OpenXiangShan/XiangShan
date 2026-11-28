@@ -419,12 +419,6 @@ class CtrlBlockImp(
     frontendCommit
   )
 
-  val isEmptyDelay = !(RegNext(VecInit(decode.in.mop.map(_.valid))).asUInt.orR ||
-    RegNext(VecInit(rename.io.in.map(_.valid))).asUInt.orR ||
-    RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR) &&
-    RegNext(rob.in.enq.isEmpty)
-  io.frontend.backendEmpty := RegNext(isEmptyDelay)
-
   io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s5_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
 
@@ -816,6 +810,19 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.in.enq.needAlloc := enqRob.needAlloc
   rob.in.enq.req := enqRob.req
+
+  // Cover every holding stage from the IBuffer handoff through ROB enqueue.
+  // Check these wires after decodePipeRename and enqRob have been initialized.
+  val preRobBusy = VecInit(decode.in.mop.map(_.valid)).asUInt.orR ||
+    VecInit(decode.out.uop.map(_.valid)).asUInt.orR ||
+    VecInit(decodePipeRename.map(_.valid)).asUInt.orR ||
+    VecInit(dispatch.io.fromRename.map(_.valid)).asUInt.orR ||
+    VecInit(enqRob.req.map(_.valid)).asUInt.orR
+  val redirectPending = s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  val backendEmpty = RegNext(!preRobBusy && rob.in.enq.isEmpty && !redirectPending, false.B)
+  // Withdraw empty after one busy sample; assert it after two empty samples.
+  io.frontend.backendEmpty := RegNext(backendEmpty, false.B)
+
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpFp  := io.toDispatch.wakeUpFp
