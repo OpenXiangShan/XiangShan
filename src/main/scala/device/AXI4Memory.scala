@@ -368,9 +368,13 @@ object AXI4MemorySlave {
     slave: AXI4SlaveNode,
     memByte: Long,
     useBlackBox: Boolean = false,
-    dynamicLatency: Boolean = false
+    dynamicLatency: Boolean = false,
+    useYuQuan: Boolean = false
   )(implicit p: Parameters): AXI4MemorySlave = {
-    val memory = if (dynamicLatency) {
+    require(!(dynamicLatency && useYuQuan), "DRAMSim3/MCSim and YuQuan DDR memory backends are mutually exclusive")
+    val memory = if (useYuQuan) {
+      LazyModule(new AXI4MCDDRWrapper(slave, memByte, useBlackBox))
+    } else if (dynamicLatency) {
       LazyModule(new AXI4MemoryWrapper(slave, memByte, useBlackBox))
     } else {
       LazyModule(new AXI4RAMWrapper(slave, memByte, useBlackBox))
