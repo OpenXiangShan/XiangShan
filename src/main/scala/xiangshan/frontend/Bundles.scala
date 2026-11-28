@@ -46,6 +46,7 @@ import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.MainPipeToIfuReq
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
+import xiangshan.tracertl.TracertlInstrBundle
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
@@ -323,6 +324,9 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val debug_seqNum:   Vec[InstSeqNum] = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]     = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdown:        TopdownBundle   = new TopdownBundle
+
+  val tracertlInfo: Option[Vec[TracertlInstrBundle]] =
+    Option.when(env.TraceRTLMode)(Vec(IBufferEnqueueWidth, new TracertlInstrBundle))
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {

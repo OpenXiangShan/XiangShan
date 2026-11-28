@@ -295,6 +295,7 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val pc = UInt(VAddrBits.W)
     val debugInfo = new PerfDebugInfo
+    val tracertlInfo = xiangshan.tracertl.TracertlInfo()
   }
 
   class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {

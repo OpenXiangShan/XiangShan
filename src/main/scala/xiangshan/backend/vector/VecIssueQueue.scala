@@ -18,6 +18,7 @@ import xiangshan.backend.issue.{AgeDetector, NewAgeDetector}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue._
+import xiangshan.tracertl.TracertlInfo
 import xiangshan.mem.SqPtr
 
 
@@ -938,6 +939,7 @@ object VecIssueQueue {
     val srcLoadDependency = Option.when(!param.inVecRegion)(Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
+    val tracertlInfo = if (param.getFuCfgs.exists(_.isFdiv)) TracertlInfo() else None
 
     def fromDispatchOutUop(source: DispatchOutUop): Unit = {
       this.fuType := source.fuType
@@ -983,6 +985,7 @@ object VecIssueQueue {
       this.srcLoadDependency.foreach(_ := source.srcLoadDependency)
 
       this.debug.foreach(_ := source.debug.get)
+      this.tracertlInfo.foreach(_ := source.tracertlInfo.get)
     }
 
     def fromRegionInUop(source: RegionInUop): Unit = {
@@ -1029,6 +1032,7 @@ object VecIssueQueue {
       this.sqIdx := source.sqIdx.getOrElse(0.U.asTypeOf(this.sqIdx))
 
       this.debug.foreach(_ := source.debug.get)
+      this.tracertlInfo.foreach(_ := source.tracertlInfo.get)
     }
   }
 
@@ -1085,6 +1089,7 @@ object VecIssueQueue {
     val loadDependency = Option.when(!exuParam.isVecExeUnit)(Vec(exuParam.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
     val debug        = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
+    val tracertlInfo    = if (exuParam.fuConfigs.exists(_.isFdiv)) TracertlInfo() else None
 
     def fromEntry(entry: Entry): Unit = {
       this.fuType := entry.payload.fuType
@@ -1133,6 +1138,7 @@ object VecIssueQueue {
       this.vtype.foreach(_ := entry.payload.vtype.get)
       this.oldVType.foreach(_ := entry.payload.oldVType.get)
       this.loadDependency.foreach(_ := entry.status.srcStatus.map(_.loadDependency.get))
+      this.tracertlInfo.foreach(_ := entry.payload.tracertlInfo.get)
 
       this.debug.foreach { case debug =>
         debug.debug := 0.U.asTypeOf(debug.debug)
@@ -1276,6 +1282,8 @@ object VecIssueQueue {
 
     val flushPipe = Option.when(param.needFlushPipe)(Bool())
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
+    // TraceRTL replays the traced operands of the data-dependent-latency float divider
+    val tracertlInfo = if (param.getFuCfgs.exists(_.isFdiv)) TracertlInfo() else None
 
     def fromEnq(enq: Enq): Unit = {
       this.fuType := enq.fuType
@@ -1304,6 +1312,7 @@ object VecIssueQueue {
       this.sqIdx.foreach(_ := enq.sqIdx)
       this.flushPipe.foreach(_ := enq.flushPipe)
       this.debug.foreach(_ := enq.debug.get)
+      this.tracertlInfo.foreach(_ := enq.tracertlInfo.get)
     }
   }
 

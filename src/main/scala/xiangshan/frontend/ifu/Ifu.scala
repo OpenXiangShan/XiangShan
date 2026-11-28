@@ -46,6 +46,9 @@ import xiangshan.frontend.TopdownOverrideBundle
 import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
+import xiangshan.tracertl.TraceAlignedFetch
+import xiangshan.tracertl.TraceRTL
+import xiangshan.tracertl.TraceRTLChoose
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with PreDecodeHelper
@@ -93,11 +96,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val perfAnalyzer       = Module(new IfuPerfAnalysis)
   private val uncacheUnit        = Module(new IfuUncacheUnit)
   private val uncacheRvcExpander = Module(new RvcExpander)
+  private val traceRTL           = Option.when(env.TraceRTLMode)(Module(new TraceRTL))
 
   // alias
   private val (toFtq, fromFtq) = (io.toFtq, io.fromFtq)
+  // TraceRTL checks predictions against the trace instead of the fetched instructions.
+  private val checkerResp = TraceRTLChoose(predChecker.io.resp, traceRTL.get.io.checker.asTypeOf(predChecker.io.resp))
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
-    (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
+    (predChecker.io.req, checkerResp.stage1Out, checkerResp.stage2Out)
+
+  // TraceRTL holds s1 until the trace has the instructions of the s1 fetch block.
+  private val traceS1Stall = TraceRTLChoose(false.B, traceRTL.get.io.s2Block)
 
   private val s0_ready, s1_ready, s2_ready = WireInit(false.B)
   private val s0_fire, s1_fire, s2_fire    = WireInit(false.B)
@@ -187,7 +196,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s1_valid = ValidHold(s0_fire && !s0_flush, s1_fire, s1_flush)
 
-  s1_fire  := s1_valid && s2_ready
+  s1_fire  := s1_valid && s2_ready && !traceS1Stall
   s1_ready := s1_fire || !s1_valid
 
   private val s1_fetchBlock        = RegEnable(s0_fetchBlock, s0_fire)
@@ -367,7 +376,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheRedirect.valid) {
     s1_prevIBufEnqPtrDup := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s1_fire && !(s1_icacheMeta(0).isUncache && s1_icacheMeta(0).exception.isNone)) {
-    s1_prevIBufEnqPtrDup := s1_prevIBufEnqPtrDup.head + s1_instrCount
+    s1_prevIBufEnqPtrDup := s1_prevIBufEnqPtrDup.head + TraceRTLChoose(s1_instrCount, traceRTL.get.io.s2CandidateCount)
   }
 
   // useUncacheFetch controls whether the instruction fetch operation follows the uncache control logic.
@@ -406,16 +415,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_firstEndHalfRvi      = RegEnable(s1_firstEndHalfRvi, s1_fire)
   private val s2_totalEndHalfRvi      = RegEnable(s1_totalEndHalfRvi, s1_fire)
 
-  private val s2_instrCount           = RegEnable(s1_instrCount, s1_fire)
-  private val s2_alignedInstrValid    = RegEnable(s1_alignedInstrValid, s1_fire)
+  // TraceRTL replaces the aligned fetch packet with the one rebuilt from the trace.
+  private def s2AlignedReg[T <: Data](s1: T, fromTrace: TraceAlignedFetch => T): T =
+    TraceRTLChoose(RegEnable(s1, s1_fire), fromTrace(traceRTL.get.io.aligned))
+
+  private val s2_instrCount           = s2AlignedReg(s1_instrCount, _.instrCount)
+  private val s2_alignedInstrValid    = s2AlignedReg(s1_alignedInstrValid, _.instrValid)
   private val s2_icacheMeta           = RegEnable(s1_icacheMeta, s1_fire)
-  private val s2_alignedInstrVec      = RegEnable(s1_alignedInstrVec, s1_fire)
-  private val s2_alignedInstrPcVec    = RegEnable(s1_alignedInstrPcVec, s1_fire)
-  private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
-  private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
-  private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
+  private val s2_alignedInstrVec      = s2AlignedReg(s1_alignedInstrVec, _.instrVec)
+  private val s2_alignedInstrPcVec    = s2AlignedReg(s1_alignedInstrPcVec, _.instrPcVec)
+  private val s2_alignedFoldPc        = s2AlignedReg(s1_alignedFoldPc, _.foldPc)
+  private val s2_alignedPdInfoVec     = s2AlignedReg(s1_alignedPdInfoVec, _.pdInfoVec)
+  private val s2_alignedJumpOffsetVec = s2AlignedReg(s1_alignedJumpOffsetVec, _.jumpOffsetVec)
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
+
+  // TraceRTL holds s2 while its fetch packet does not match the trace.
+  private val traceS2Stall = TraceRTLChoose(false.B, traceRTL.get.io.block && s2_valid)
 
   s2_fire := io.toIBuffer.fire
   dontTouch(s2_fire)
@@ -423,9 +439,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignShiftNum = s2_prevIBufEnqPtr.value(1, 0)
   dontTouch(s2_alignShiftNum)
 
+  // TraceRTL expands compressed FP instructions regardless of mstatus.FS, decode still raises the FS Off exception.
   rvcExpanders.zipWithIndex.foreach { case (expander, i) =>
     expander.io.in      := s2_alignedInstrVec(i).data
-    expander.io.fsIsOff := io.csrFsIsOff
+    expander.io.fsIsOff := TraceRTLChoose(io.csrFsIsOff, false.B)
   }
 
   private val s2_expandedInstrDataVec = VecInit(rvcExpanders.map { expander =>
@@ -507,7 +524,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_flush
   )
 
-  s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_useUncacheFetch)) || !s2_valid
+  s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_useUncacheFetch) && !traceS2Stall) || !s2_valid
 
   /* ** prediction result check ** */
   checkerIn.valid              := s2_valid
@@ -529,7 +546,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignTriggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
-  io.toIBuffer.valid          := s2_toIBufferValid
+  io.toIBuffer.valid          := s2_toIBufferValid && !traceS2Stall
   io.toIBuffer.bits.instrs    := s2_expandedInstrDataVec
   io.toIBuffer.bits.valid     := s2_alignedInstrValid
   io.toIBuffer.bits.enqEnable := s2_fixedInstrValid
@@ -541,6 +558,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
     ftqPtr := Mux(s2_blockSel(i) || s2_isCrossBlockInstr(i), s2_fetchBlock(1).ftqIdx, s2_fetchBlock(0).ftqIdx)
   }
+  io.toIBuffer.bits.tracertlInfo.foreach(_ := traceRTL.get.io.aligned.tracertlInfo)
 
   /* in s2, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s1,
    * when s1 fire (s1_valid && s2_ready), use s1_specInstrCount,
@@ -553,7 +571,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
     s1_fire,
-    Mux(s1_useUncacheFetch, 1.U, s1_specInstrCount),
+    Mux(s1_useUncacheFetch, 1.U, TraceRTLChoose(s1_specInstrCount, traceRTL.get.io.s2CandidateCount)),
     Mux(s2_useUncacheFetch, 1.U, s2_instrCount)
   )
 
@@ -789,6 +807,28 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.topdownOverride.valid -> io.topdownOverride.bits.reason
   ))
   io.toIBuffer.bits.topdown := topdownPipe.io.out
+
+  /* ** TraceRTL: replays the trace against the IFU pipeline ** */
+  traceRTL.foreach { trace =>
+    val fromIfu = trace.io.fromIFU
+    fromIfu.s1Valid      := s1_valid
+    fromIfu.s1Fire       := s1_fire
+    fromIfu.s1Flush      := s1_flush
+    fromIfu.s1AlignShift := s1_alignShiftInstrNum
+    fromIfu.s2Valid      := s2_valid
+    fromIfu.s2Fire       := s2_fire
+    fromIfu.s2Flush      := s2_flush
+    fromIfu.wbEnable     := wbEnable
+    fromIfu.s1PredInfo.block.zip(s1_fetchBlock).foreach { case (predBlock, fetchBlock) =>
+      predBlock.valid     := fetchBlock.valid
+      predBlock.startAddr := fetchBlock.startVAddr.toUInt
+      predBlock.instRange := Fill(FetchBlockInstNum, 1.U(1.W)) >> (~fetchBlock.takenCfiOffset.bits).asUInt
+      predBlock.size      := fetchBlock.size
+      predBlock.ftqOffset := fetchBlock.takenCfiOffset
+    }
+    trace.io.redirect.fromBackend := fromFtq.redirect
+    trace.io.redirect.fromIFUBPU  := wbRedirect.valid
+  }
 
   private val s1_icachePerfInfo = RegEnable(io.fromICache.perf, s0_fire)
   private val s2_icachePerfInfo = RegEnable(s1_icachePerfInfo, s1_fire)

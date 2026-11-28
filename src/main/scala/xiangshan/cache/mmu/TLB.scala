@@ -33,6 +33,8 @@ import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
+import xiangshan.tracertl.TraceFakeMMU
+import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
   * Accepts a virtual address request and returns its translated physical address in the next cycle;
@@ -208,6 +210,33 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   (0 until Width).foreach(handle_nonblock)
   io.ptw.resp.ready := true.B
+
+  // TraceRTL translates with the trace's address map and never raises translation faults.
+  if (env.TraceRTLMode) {
+    (0 until Width).foreach { idx =>
+      val fakeMMU = Module(new TraceFakeMMU)
+      fakeMMU.io.valid := req(idx).valid
+      fakeMMU.io.vaddr := req(idx).bits.vaddr
+
+      val fakePaddr = fakeMMU.io.paddr
+
+      // Only replace translated addresses. Bare (e.g. M-mode) accesses keep the
+      // native vaddr-as-paddr so the trace's vpn-keyed map cannot alias them
+      // (and their PMA check) onto a user page with the same vpn.
+      when (accessInfo(idx).translateEnable) {
+        resp(idx).bits.paddr.foreach(_ := fakePaddr(PAddrBits - 1, 0))
+        resp(idx).bits.gpaddr.foreach(_ := fakePaddr)
+      }
+
+      resp(idx).bits.excp.foreach { excp =>
+        excp.pf := 0.U.asTypeOf(excp.pf)
+        excp.af := 0.U.asTypeOf(excp.af)
+        excp.gpf := 0.U.asTypeOf(excp.gpf)
+        excp.vaNeedExt := false.B
+        excp.isHyper := false.B
+      }
+    }
+  }
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {

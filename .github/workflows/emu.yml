@@ -300,6 +300,119 @@ jobs:
           echo "| -------- | --- |" >> $GITHUB_STEP_SUMMARY
           echo "| coremark | ${{ steps.coremark.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
 
+  # TraceRTL functional test
+  # The TraceRTL emu replays traces recorded by NEMU instead of running an image,
+  # see /nfs/home/share/ci-workloads/tracertl/README.txt for where they come from.
+  # CoreMark also runs on an exec emu with the same flags, and TraceRTL must
+  # stay within MAX_IPC_DIFF of its IPC.
+  # Both emus are built in this workspace one after the other, each one is saved
+  # to PERF_HOME before the next build replaces build/.
+  emu-tracertl:
+    name: EMU - TraceRTL
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on:
+      - builder
+      - node # same as EMU - GSIM, as gsim is having performance issue on open servers
+    timeout-minutes: 900
+    continue-on-error: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          PERF_HOME=${PERF_HOME}/tracertl
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      # exec first: XiangShan's make reuses build/rtl as long as the Scala sources are unchanged,
+      # while the TraceRTL make removes RTL that it did not elaborate itself
+      - name: Build exec EMU
+        run: |
+          if [ -f ${PERF_HOME}/emu-exec ]; then
+            echo "EMU already built, skip build"
+          else
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --emulator gsim \
+              --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3
+            cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu-exec
+          fi
+      - name: Build TraceRTL EMU
+        run: |
+          if [ -f ${PERF_HOME}/emu-tracertl ]; then
+            echo "EMU already built, skip build"
+          else
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --tracertl --emulator gsim \
+              --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3
+            cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu-tracertl
+          fi
+      - name: TraceRTL Test - Corner cases
+        shell: bash
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/build
+          cp --remove-destination ${PERF_HOME}/emu-tracertl ${GITHUB_WORKSPACE}/build/emu
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --tracertl \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 1 \
+            --ci tracertl-tests \
+            2> stderr.log
+          cat stderr.log | sort | tee ${PERF_HOME}/tracertl_tests.log
+      - name: TraceRTL Test - CoreMark
+        id: tracertl_coremark
+        shell: bash
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --tracertl \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 1 \
+            --ci tracertl-coremark \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/tracertl_coremark.log
+          echo "IPC=$(grep -aoP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
+      - name: Exec Test - CoreMark
+        id: exec_coremark
+        shell: bash
+        run: |
+          cp --remove-destination ${PERF_HOME}/emu-exec ${GITHUB_WORKSPACE}/build/emu
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 1 \
+            --ci coremark \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/exec_coremark.log
+          echo "IPC=$(grep -aoP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
+      - name: Compare CoreMark IPC
+        id: compare
+        shell: bash
+        env:
+          MAX_IPC_DIFF: 5 # percent
+        run: |
+          TRACERTL=${{ steps.tracertl_coremark.outputs.IPC }}
+          EXEC=${{ steps.exec_coremark.outputs.IPC }}
+          if [ -z "${TRACERTL}" ] || [ -z "${EXEC}" ]; then
+            echo "CoreMark IPC missing: TraceRTL '${TRACERTL}', exec '${EXEC}'"
+            exit 1
+          fi
+          DIFF=$(awk -v t=${TRACERTL} -v e=${EXEC} 'BEGIN { printf "%+.2f", (t - e) / e * 100 }')
+          echo "DIFF=${DIFF}%" >> $GITHUB_OUTPUT
+          echo "CoreMark IPC: TraceRTL ${TRACERTL}, exec ${EXEC}, diff ${DIFF}% (max ${MAX_IPC_DIFF}%)"
+          awk -v d=${DIFF} -v m=${MAX_IPC_DIFF} 'BEGIN { exit (d > m || d < -m) }'
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## EMU - TraceRTL summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Testcase | TraceRTL IPC | Exec IPC | Diff |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | ------------ | -------- | ---- |" >> $GITHUB_STEP_SUMMARY
+          echo "| coremark | ${{ steps.tracertl_coremark.outputs.IPC }} | ${{ steps.exec_coremark.outputs.IPC }} | ${{ steps.compare.outputs.DIFF }} |" >> $GITHUB_STEP_SUMMARY
+
   # SIMV basics test
   simv-basics:
     name: SIMV - Basics
