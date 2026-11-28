@@ -25,7 +25,6 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
-import xiangshan.frontend.bpu.WriteReqBundle
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 object TakenCounter extends SaturateCounterFactory {
@@ -88,27 +87,55 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
 
-class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
-  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
-  val entry:        TageEntry               = new TageEntry
-  override def tag: Option[UInt]            = Some(entry.tag)
-  override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
-}
-
-class UsefulCtrSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+class WriteBufferEntry(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
   val setIdx:    UInt            = UInt(SetIdxWidth.W)
+  val tageEntry: TageEntry       = new TageEntry
   val usefulCtr: SaturateCounter = UsefulCounter()
 }
 
-class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val setIdx:          UInt                 = UInt(SetIdxWidth.W)
-  val bankMask:        UInt                 = UInt(NumBanks.W)
-  val wayMask:         UInt                 = UInt(NumWays.W)
-  val writeEntryEn:    Vec[Bool]            = Vec(NumWays, Bool())
-  val writeUsefulEn:   Vec[Bool]            = Vec(NumWays, Bool())
-  val actualTakenMask: Vec[Bool]            = Vec(NumWays, Bool())
-  val entries:         Vec[TageEntry]       = Vec(NumWays, new TageEntry)
-  val usefulCtrs:      Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
+class WriteBufferLookupResp(implicit p: Parameters, info: TageTableInfo) extends WriteBufferEntry {
+  val entryValid:  Bool = Bool()
+  val usefulValid: Bool = Bool()
+}
+
+object TageWriteOp extends ChiselEnum {
+  val Update, Allocate, Invalidate = Value
+}
+
+class WriteBufferWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteBufferEntry {
+  val op:            TageWriteOp.Type = TageWriteOp()
+  val writeEntryEn:  Bool             = Bool()
+  val writeUsefulEn: Bool             = Bool()
+  val actualTaken:   Bool             = Bool()
+  val incUseful:     Bool             = Bool()
+
+  def fromWayWriteReq(req: WayWriteReq): Unit = {
+    setIdx        := req.setIdx
+    tageEntry     := req.entry
+    usefulCtr     := req.usefulCtr
+    op            := req.op
+    writeEntryEn  := req.writeEntryEn
+    writeUsefulEn := req.writeUsefulEn
+    actualTaken   := req.actualTaken
+    incUseful     := req.incUseful
+  }
+}
+
+class TageWriteBufferDrain(implicit p: Parameters, info: TageTableInfo) extends WriteBufferEntry {
+  val entryDirty:  Bool = Bool()
+  val usefulDirty: Bool = Bool()
+}
+
+class WayWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:        UInt             = UInt(SetIdxWidth.W)
+  val bankMask:      UInt             = UInt(NumBanks.W)
+  val entry:         TageEntry        = new TageEntry
+  val usefulCtr:     SaturateCounter  = UsefulCounter()
+  val op:            TageWriteOp.Type = TageWriteOp()
+  val writeEntryEn:  Bool             = Bool()
+  val writeUsefulEn: Bool             = Bool()
+  val actualTaken:   Bool             = Bool()
+  val incUseful:     Bool             = Bool()
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
@@ -161,6 +188,7 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val providerEntry:        TageEntry       = new TageEntry
   val providerOldUsefulCtr: SaturateCounter = UsefulCounter()
   val providerNewUsefulCtr: SaturateCounter = UsefulCounter()
+  val incProviderUsefulCtr: Bool            = Bool()
 
   val hasAlt:          Bool            = Bool()
   val useAlt:          Bool            = Bool()
@@ -179,7 +207,7 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val useAltOnNaIdx: UInt = UInt(UseAltOnNaIdxWidth.W)
 
   val finalPred:   Bool = Bool()
-  val actualTaken: Bool = Bool() // used for writeBuffer
+  val actualTaken: Bool = Bool() // direction of taken-counter training
 
   // perf analysis only
   val hitTableMask:     UInt = UInt(NumTables.W) // all the hit tables
