@@ -67,12 +67,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val fromUncache: InstrUncacheToIfuIO = Flipped(new InstrUncacheToIfuIO)
 
     // IBuffer: enqueue
-    val toIBuffer:    DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
-    val ibufferEmpty: Bool                        = Input(Bool())
+    val toIBuffer: DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
 
     // Backend: gpaMem
-    val toBackend:    IfuToBackendIO = new IfuToBackendIO
-    val backendEmpty: Bool           = Input(Bool())
+    val toBackend: IfuToBackendIO = new IfuToBackendIO
+
+    val pipelineEmpty: Bool = Input(Bool())
 
     // debug extension: frontend trigger
     val frontendTrigger: FrontendTdataDistributeIO = Flipped(new FrontendTdataDistributeIO)
@@ -483,7 +483,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheUnit.io.flush           := s2_flush
   uncacheUnit.io.isFirstInstr    := isFirstInstr
   uncacheUnit.io.ifuStall        := !io.toIBuffer.ready
-  uncacheUnit.io.emptyAfter      := io.backendEmpty && io.ibufferEmpty
+  uncacheUnit.io.pipelineEmpty   := io.pipelineEmpty
   io.toUncache <> uncacheUnit.io.toUncache
   uncacheUnit.io.fromUncache <> io.fromUncache
 

@@ -245,13 +245,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in
-  ifu.io.ibufferEmpty := ibuffer.io.empty
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend
 
-  ifu.io.backendEmpty := io.backend.backendEmpty
-  io.backend.fromIfu  := ifu.io.toBackend
+  io.backend.fromIfu := ifu.io.toBackend
+  // backendEmpty is delayed for exact one cycle, so ibufferEmpty is also delayed for one cycle to align with
+  // backendEmpty.
+  ifu.io.pipelineEmpty := ibuffer.io.empty && RegNext(ibuffer.io.empty) && io.backend.backendEmpty
 
   ibuffer.io.flush       := needFlush
   ibuffer.io.fromBackend := io.backend.toIBuf
