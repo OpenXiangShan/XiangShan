@@ -503,7 +503,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     }
 
     // Older stores in the same dispatch bundle become LFST entries in this cycle.
-    val notIssuedStoreCount = PopCount(validVec(io.dispatch.req(i).bits.ssid)) + PopCount(hitInDispatchBundleVec)
+    val notIssuedStoreCount = PopCount(validVec(io.dispatch.req(i).bits.ssid)) +& PopCount(hitInDispatchBundleVec)
     val notIssuedStoreGt1 = notIssuedStoreCount > 1.U
     io.dispatch.resp(i).bits.perfNotIssuedStoreGt1 := notIssuedStoreGt1
     io.dispatch.resp(i).bits.strictShouldWait := io.dispatch.req(i).valid &&
