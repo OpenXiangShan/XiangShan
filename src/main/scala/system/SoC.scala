@@ -490,7 +490,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     debugModule.debug.node := device_xbar.get
   }
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
-    error_xbar.get := sb2tl.node
+    error_xbar.get := TLWidthWidget(1) := sb2tl.node
   }
   if(hasSeperateBus){
     timer.node := SepTLXbarOpt.get
