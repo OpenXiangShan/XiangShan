@@ -184,6 +184,8 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
+  val stale = RegInit(VecInit(Seq.fill(Size)(false.B)))
+  val stale_cnt = RegInit(VecInit(Seq.fill(Size)(0.U(8.W))))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
   val mptOnly = Option.when(HasMptCheck) (RegInit(Vec(Size, Bool()), 0.U.asTypeOf(Vec(Size, Bool()))))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
@@ -200,9 +202,10 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
   val ptwResp_EntryMatchVec = vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlatei) => vi && s2xlatei === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)}
   val ptwResp_EntryMatchFirst = firstValidIndex(ptwResp_EntryMatchVec, true.B)
+  val ptwResp_ValidMatchVec = ptwResp_EntryMatchVec.zip(stale).map{ case (m, st) => m && !st }
   val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && a.bits.s2xlate === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(a.bits.vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true))
 
-  io.refill := Cat(ptwResp_EntryMatchVec).orR && io.ptw.resp.fire
+  io.refill := Cat(ptwResp_ValidMatchVec).orR && io.ptw.resp.fire
   io.ptw.resp.ready := true.B
   // DontCare
   io.tlb.req.map(_.ready := true.B)
@@ -229,7 +232,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       enqidx(i) := entryMatchIndexVec(i)
     }
 
-    val entryIsMatch = vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlatei) => vi && s2xlatei === io.tlb.req(i).bits.s2xlate && pi === io.tlb.req(i).bits.vpn}
+    val entryIsMatch = vpn.zip(v).zip(s2xlate).zip(stale).map{ case (((pi, vi), s2xlatei), st) => vi && !st && s2xlatei === io.tlb.req(i).bits.s2xlate && pi === io.tlb.req(i).bits.vpn}
     entryIsMatchVec(i) := Cat(entryIsMatch).orR
     entryMatchIndexVec(i) := firstValidIndex(entryIsMatch, true.B)
 
@@ -247,6 +250,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     when (enqvalid(i)) {
       v(enqidx(i)) := true.B
       sent(enqidx(i)) := false.B
+      stale(enqidx(i)) := false.B
       vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
       if (HasMptCheck) {
         mptOnly.get(enqidx(i)) := io.tlb.req(i).bits.mptOnly.get
@@ -257,7 +261,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     }
   }
 
-  val issuevec = v.zip(sent).map{ case (v, s) => v && !s}
+  val issuevec = v.zip(sent).zip(stale).map{ case ((v, s), st) => v && !s && !st}
   val issueindex = firstValidIndex(issuevec, true.B)
   val canissue = Cat(issuevec).orR
   for (i <- 0 until Size) {
@@ -274,12 +278,34 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   when (io.ptw.resp.fire) {
     v.zip(ptwResp_EntryMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
+    sent.zip(ptwResp_EntryMatchVec).map{ case (si, mi) => when (mi) { si := false.B }}
+    stale.zip(ptwResp_EntryMatchVec).map{ case (st, mi) => when (mi) { st := false.B }}
     io.memidx := memidx(ptwResp_EntryMatchFirst)
     io.getGpa := getGpa(ptwResp_EntryMatchFirst)
   }
 
   when (io.flush) {
-    v.map(_ := false.B)
+    for (i <- 0 until Size) {
+      when (v(i) && sent(i)) {
+        stale(i) := true.B
+        stale_cnt(i) := 0.U
+      } .otherwise {
+        v(i) := false.B
+        sent(i) := false.B
+        stale(i) := false.B
+      }
+    }
+  }
+
+  for (i <- 0 until Size) {
+    when (stale(i)) {
+      stale_cnt(i) := stale_cnt(i) + 1.U
+      when (stale_cnt(i).andR) {
+        v(i) := false.B
+        sent(i) := false.B
+        stale(i) := false.B
+      }
+    }
   }
 
   if (hasHint) {
@@ -301,8 +327,8 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       fastResp.bits.s2.entry.tag(vpnLen - 1, 0),
       Cat(fastResp.bits.s1.entry.tag, fastResp.bits.s1.addr_low)
     )
-    val fastMatchVec = VecInit(vpn.zip(v).zip(s2xlate).map { case ((entryVpn, entryValid), entryS2xlate) =>
-      entryValid && entryS2xlate === fastResp.bits.s2xlate && entryVpn === fastRespVpn
+    val fastMatchVec = VecInit(vpn.zip(v).zip(s2xlate).zip(stale).map { case (((entryVpn, entryValid), entryS2xlate), entryStale) =>
+      entryValid && !entryStale && entryS2xlate === fastResp.bits.s2xlate && entryVpn === fastRespVpn
     }).asUInt
     val fastMatchReg = RegEnable(fastMatchVec, 0.U(Size.W), fastResp.valid)
     val fastRespValidReg = RegNext(fastResp.valid && !io.flush, init = false.B)
