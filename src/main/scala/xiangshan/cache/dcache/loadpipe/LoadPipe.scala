@@ -86,6 +86,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
     val pseudo_tag_error_inj_done = Output(Bool())
     val pseudo_data_error_inj_done = Output(Bool())
+    // address range for error injection (from CtrlUnit)
+    val error_inj_addr_range = Input(new Bundle {
+      val start = UInt(PAddrBits.W)
+      val end   = UInt(PAddrBits.W)
+    })
+    // address match signal for error injection (output to CtrlUnit)
+    val addrMatch = Output(Bool())  // true when current access address is within configured range
 
     val prefetch_info = new Bundle {
       val naive = new Bundle {
@@ -429,6 +436,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
   io.pseudo_data_error_inj_done := s2_fire && s2_hit && !io.bank_conflict_slow
   io.pseudo_error.ready := false.B
+
+  // Address range check for error injection
+  def addrInRange(addr: UInt): Bool = {
+    val rangeBypass = io.error_inj_addr_range.start === 0.U && io.error_inj_addr_range.end === 0.U
+    val inRange = addr >= io.error_inj_addr_range.start && addr <= io.error_inj_addr_range.end
+    rangeBypass || inRange
+  }
+  // Generate addrMatch signal: true when current access address is within configured range
+  io.addrMatch := s2_valid && addrInRange(s2_paddr)  // No RegNext! Real-time address match
+
 
   // send load miss to miss queue
   io.miss_req.valid := s2_miss_req_valid
