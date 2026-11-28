@@ -255,7 +255,9 @@ class BypassShadowBuffer(
   }
 
   when(t1_hasWrite && t1_hasHit) {
-    statusEntries(t1_cleanId).dirty := false.B
+    when(t1_cleanId =/= enqPtr.value) {
+      statusEntries(t1_cleanId).dirty := false.B
+    }
   }
 
   private val forceWrite = RegInit(false.B)
