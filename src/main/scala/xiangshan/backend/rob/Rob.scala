@@ -439,8 +439,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   when(isEmpty) {
     hasBlockBackward := false.B
   }
-  // When any instruction commits, hasNoSpecExec should be set to false.B
-  when(out.commits.hasWalkInstr || out.commits.hasCommitInstr) {
+  // When any instruction commits or ROB flushes/empties, hasNoSpecExec should be set to false.B
+  when(out.commits.hasWalkInstr || out.commits.hasCommitInstr || in.redirect.valid || isEmpty) {
     hasWaitForward := false.B
   }
 
@@ -688,7 +688,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtrEntryValid = deqPtrEntry.commit_v
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(in.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interruptSafe && !deqHasFlushed
+  val hasRetiredInst = RegInit(false.B)
+  when(out.commits.hasCommitInstr) {
+    hasRetiredInst := true.B
+  }
+  val intrSafeAtHead = deqPtrEntry.interruptSafe || !hasRetiredInst
+  val waitForwardAtHead = hasWaitForward && hasRetiredInst
+  val intrEnable = intrBitSetReg && !waitForwardAtHead && intrSafeAtHead && !deqHasFlushed
   val deqPtrFormer = Wire(new RobPtr)
   val deqPtrLatter = Wire(new RobPtr)
   deqPtrFormer := deqPtr
@@ -1029,9 +1035,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(deqNeedFlush && out.flushOut.valid && !out.flushOut.bits.flushItself()){
     deqHasFlushed := true.B
   }
+  val resetCommitHold = RegInit(31.U(5.W))
+  when(resetCommitHold =/= 0.U) {
+    resetCommitHold := resetCommitHold - 1.U
+  }
   val traceBlock = out.trace.blockCommit
   val blockCommit = misPredBlock || lastCycleFlush || hasWFI || in.redirect.valid ||
-    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
+    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock ||
+    (resetCommitHold =/= 0.U)
 
   out.commits.isWalk := state === s_walk
   out.commits.isCommit := state === s_idle && !blockCommit
@@ -1215,9 +1226,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.in.deq_w := commit_wDeqGroup
   deqPtrGenModule.in.exception_state := exceptionDataRead
   deqPtrGenModule.in.intrBitSetReg := intrBitSetReg
-  deqPtrGenModule.in.hasNoSpecExec := hasWaitForward
+  deqPtrGenModule.in.hasNoSpecExec := waitForwardAtHead
   deqPtrGenModule.in.allowOnlyOneCommit := allowOnlyOneCommit
-  deqPtrGenModule.in.interruptSafe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interruptSafe
+  deqPtrGenModule.in.interruptSafe := intrSafeAtHead
   deqPtrGenModule.in.blockCommit := blockCommit
   deqPtrGenModule.in.hasCommitted := hasCommitted
   deqPtrGenModule.in.allCommitted := allCommitted
