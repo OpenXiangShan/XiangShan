@@ -87,7 +87,22 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
     when(io.time.valid)(time := io.time.bits)
 
 //    val nTiles = intnode.out.size
-    val NumsHart = 1 << p(MaxHartIdBits)
+    // One msip and one mtimecmp register is generated per possible hart ID.
+    // Make sure both register arrays fit in the fixed CLINT layout:
+    // msip in [0x0, 0x4000) and mtimecmp in [0x4000, mtime = 0xbff8).
+    val numHartsBig = BigInt(1) << p(MaxHartIdBits)
+    require(
+      numHartsBig * msipBytes <= BigInt(timecmpOffset(0)),
+      s"TIMER: MaxHartIdBits = ${p(MaxHartIdBits)} generates $numHartsBig msip registers, " +
+        s"which overlap mtimecmp at 0x${timecmpOffset(0).toHexString}"
+    )
+    require(
+      BigInt(timecmpOffset(0)) + numHartsBig * timecmpBytes <= BigInt(timeOffset),
+      s"TIMER: MaxHartIdBits = ${p(MaxHartIdBits)} generates $numHartsBig mtimecmp registers, " +
+        s"which overlap mtime at 0x${timeOffset.toHexString} " +
+        s"(at most ${(timeOffset - timecmpOffset(0)) / timecmpBytes} harts fit)"
+    )
+    val NumsHart = numHartsBig.toInt
     val nTiles   = NumsHart // def the max hart satisfing kmhv2 spec
     val timecmp  = Seq.fill(nTiles)(RegInit((BigInt(2).pow(timeWidth) - 1).asUInt(timeWidth.W)))
     val ipi      = Seq.fill(nTiles)(RegInit(0.U(1.W)))
