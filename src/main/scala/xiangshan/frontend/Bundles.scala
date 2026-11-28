@@ -393,11 +393,12 @@ object BlameBpuSource {
           blame := BTB
         }
         when(branch.cfiPosition === pred.cfiPosition) {
-          // if branch type is return, prediction use ras directly
+          // if branch type is return, prediction use ras directly when ras is enabled
           // so blame to ras only when source is ras
-          // and trigger assertion when source is mbtb
+          // and trigger assertion when source is mbtb while ras is enabled
+          // (with ras disabled by sbpctl, the return target comes from mbtb)
           blame    := Mux(src.s3Ras, RAS, BTB)
-          retError := src.s3Mbtb
+          retError := src.s3Mbtb && perf.rasEnable
         }.otherwise {
           posError := true.B
         }
